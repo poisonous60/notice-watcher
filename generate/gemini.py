@@ -1,7 +1,10 @@
 """Gemini REST 클라이언트 (httpx). 별도 SDK 의존성 없이.
 
 - 모델: 기본 `gemini-2.5-flash`. `GEMINI_MODEL` env 로 override (예: `gemini-3-flash-preview`, `gemini-flash-latest`).
-- API 키: 여러 개 지원 + quota(429) 나면 다음 키로 자동 전환. 키 소스(우선순위):
+- API 키: 여러 개 지원. **호출마다 시작 키를 한 칸씩 굴려(라운드로빈)** 부하를 분산하고, quota(429) 나면
+  그 키를 "소진" 표시 후 다음 키로 자동 전환(한 호출 안에서 링을 한 바퀴까지 시도). 순환 커서는
+  `<repo>/output/state/gemini_key_cursor` 에 영구 저장 → 프로세스 재시작/매일 폴링마다 1번 키로 되돌아가지 않고 이어서 굴림.
+  키 소스(우선순위):
     1. env `GEMINI_API_KEYS` — 쉼표/줄바꿈 구분 여러 개
     2. env `GEMINI_API_KEY` 또는 `GOOGLE_API_KEY` — 한 개
     3. 파일 — env `GEMINI_API_KEY_FILE` 경로, 없으면 `<repo>/GEMINI_API_KEY.md` (한 줄에 키 하나, 빈 줄/`#` 무시)
@@ -25,6 +28,7 @@ API_BASE = "https://generativelanguage.googleapis.com/v1beta"
 _DEFAULT_MODEL = "gemini-2.5-flash"
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_KEY_FILE = _REPO_ROOT / "GEMINI_API_KEY.md"
+_CURSOR_FILE = _REPO_ROOT / "output" / "state" / "gemini_key_cursor"
 
 
 class GeminiError(RuntimeError):
@@ -62,12 +66,33 @@ def _load_keys() -> list[str]:
     return out
 
 
+def _read_cursor() -> int:
+    try:
+        return int((_CURSOR_FILE.read_text(encoding="utf-8").strip() or "0"))
+    except (OSError, ValueError):
+        return 0
+
+
+def _write_cursor(n: int) -> None:
+    try:
+        _CURSOR_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _CURSOR_FILE.write_text(str(n % 1_000_000_000), encoding="utf-8")
+    except OSError:
+        pass  # 커서 저장 실패가 Gemini 호출을 막으면 안 됨
+
+
 class _KeyRing:
-    """프로세스 전역 키 링 — 429 받은 키는 소진 표시 후 건너뜀."""
+    """프로세스 전역 키 링.
+
+    - 호출 단위로 시작 키를 한 칸 굴림(`rotate_start`) — 영구 커서(`_CURSOR_FILE`)라
+      프로세스 재시작/매일 폴링마다 1번 키로 되돌아가지 않음.
+    - 429 받은 키는 (이 프로세스 한정) 소진 표시 후 건너뜀.
+    """
 
     def __init__(self) -> None:
         self._keys: Optional[list[str]] = None
         self._exhausted: set[int] = set()
+        self._start: int = 0  # rotate_start 가 갱신하는 라운드로빈 시작 오프셋
 
     def _ensure(self) -> list[str]:
         if self._keys is None:
@@ -85,12 +110,24 @@ class _KeyRing:
     def count(self) -> int:
         return len(self._ensure())
 
+    def rotate_start(self) -> None:
+        """호출 단위로 시작 키를 한 칸 굴린다(영구 커서). 키가 1개면 no-op."""
+        n = self.count()
+        if n <= 1:
+            self._start = 0
+            return
+        c = _read_cursor()
+        self._start = c % n
+        _write_cursor(c + 1)
+
     def current_index(self) -> int:
         keys = self._ensure()
-        for i in range(len(keys)):
+        n = len(keys)
+        for off in range(n):
+            i = (self._start + off) % n
             if i not in self._exhausted:
                 return i
-        raise GeminiError(f"모든 Gemini API 키({len(keys)}개) quota 소진. 잠시 후 재시도하거나 키를 추가하세요.")
+        raise GeminiError(f"모든 Gemini API 키({n}개) quota 소진. 잠시 후 재시도하거나 키를 추가하세요.")
 
     def current(self) -> tuple[int, str]:
         i = self.current_index()
@@ -131,6 +168,7 @@ class GeminiClient:
 
     def generate_text(self, *, system_instruction: str, user_text: str,
                       temperature: float = 0.2, json_mode: bool = True) -> str:
+        self._keyring.rotate_start()  # 이번 호출은 다음 키부터 (라운드로빈)
         n_keys = self._keyring.count()
         with_tb0 = True
         attempts_left = n_keys + 1  # 각 키 1회 + thinkingConfig 거부 시 한 번 더
