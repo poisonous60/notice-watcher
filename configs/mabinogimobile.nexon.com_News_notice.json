@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "site": "mabinogimobile.nexon.com",
+  "board": "News/notice",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept-Language": "ko-KR,ko;q=0.9",
+    "Referer": "https://mabinogimobile.nexon.com/"
+  },
+  "timeout": 15.0,
+  "list": {
+    "url_template": "https://mabinogimobile.nexon.com/News/notice",
+    "pagination": { "kind": "query_param", "page_param": "page" },
+    "row_selector": "ul.list > li.item",
+    "row_required_selector": "a.title",
+    "include_notices": true,
+    "fields": {
+      "post_id": [ { "from": "attr", "selector": ":self", "attr": "data-threadid" } ],
+      "title": [ { "from": "css", "selector": "a.title span", "text": true, "transform": [["collapse_ws"]] } ],
+      "url": [ { "from": "template", "value": "https://mabinogimobile.nexon.com/News/Notice/{post_id}" } ],
+      "published_at": [ { "from": "css", "selector": "div.sub_info div.date span", "text": true, "transform": [["iso8601", ["%Y.%m.%d"], "+09:00"]] } ],
+      "author": [ { "from": "css", "selector": "div.user_info span.name", "text": true } ],
+      "category": [ { "from": "css", "selector": "div.type span", "text": true } ]
+    }
+  },
+  "article": {
+    "url_template": "https://mabinogimobile.nexon.com/News/Notice/{post_id}",
+    "fetch_kind": "html",
+    "content": [
+      { "from": "css", "selector": "div.content_area", "html": true },
+      { "from": "css", "selector": "section.view_body_wrap", "html": true }
+    ]
+  }
+}
