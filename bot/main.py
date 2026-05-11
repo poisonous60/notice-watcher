@@ -1,7 +1,8 @@
 """Discord 봇 — 게시판 등록(/watch) · 미리보기(/preview) · 목록(/list) · 해제(/unwatch) · 상태(/status).
 
 - 게이트웨이 연결(아웃바운드만 — 포트포워딩 불필요). 슬래시 명령 *수신* 용.
-- `/watch` 는 register.py 를 subprocess 로 실행(chromium 락 안에서, 워커 스레드). >3s 걸리므로 즉시 defer 응답 후 수정.
+- `/watch`·`/preview`(처음 보는 사이트) 는 register.py 를 subprocess 로 실행(chromium 락 안에서, 워커 스레드). >3s 걸리므로 즉시 defer 응답 후 수정.
+  register.py 의 stdout/stderr 는 `[register] …` 로 봇 로그에 실시간 흘러나감 → `journalctl --user-unit notice-bot.service -f` 로 config 생성 과정 관전 가능.
 - 구독 정보(필터·스케줄·발송대상)는 SQLite(output/bot.sqlite3, bot/db.py)에만 — configs/·poll_state/ 엔 안 씀.
 - 실제 알림 발송은 polling 쪽(scripts/notify.py)이 봇 토큰으로 REST 직접 — 이 봇 프로세스가 떠 있을 필요 없음.
 - 미처리 예외는 로그 + OWNER_USER_ID 에게 DM(쿨다운).
@@ -11,11 +12,13 @@
 from __future__ import annotations
 
 import asyncio
+import collections
 import json
 import logging
 import re
 import subprocess
 import sys
+import threading
 import time
 import traceback
 from datetime import datetime, timezone
@@ -114,15 +117,40 @@ def _parse_schedule(raw: Optional[str]) -> Optional[str]:
 # register.py subprocess (chromium 락 안에서, 워커 스레드)
 # --------------------------------------------------------------------------- #
 def _blocking_register(url: str) -> tuple[int, str]:
+    """register.py 를 chromium 락 안에서 실행.
+    stdout/stderr 를 줄 단위로 봇 로그(`[register] …`)에 흘려보냄 → N100 콘솔에서
+    `journalctl --user-unit notice-bot.service -f` 로 config 생성 과정 실시간 확인 가능.
+    실패 시 Discord 에 보여줄 마지막 ~4000자는 따로 모아 반환. (-u: 자식 출력 버퍼링 끔)"""
     try:
         with chromium_lock(timeout=900.0):
-            p = subprocess.run([PY, str(REGISTER_PY), url], cwd=str(ROOT),
-                               capture_output=True, text=True, timeout=600)
-        return p.returncode, ((p.stdout or "") + (p.stderr or ""))[-4000:]
-    except TimeoutError as e:  # 락 못 잡음
+            proc = subprocess.Popen([PY, "-u", str(REGISTER_PY), url], cwd=str(ROOT),
+                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                    text=True, errors="replace", bufsize=1)
+            timed_out = threading.Event()
+
+            def _kill_on_timeout() -> None:
+                if proc.poll() is None:
+                    timed_out.set()
+                    proc.kill()
+
+            killer = threading.Timer(600.0, _kill_on_timeout)
+            killer.start()
+            tail: "collections.deque[str]" = collections.deque(maxlen=400)
+            log.info("register.py 시작: %s", url)
+            try:
+                for line in (proc.stdout or []):
+                    s = line.rstrip("\n")
+                    tail.append(s)
+                    log.info("[register] %s", s)
+                rc = proc.wait()
+            finally:
+                killer.cancel()
+            log.info("register.py 종료: rc=%s%s (%s)", rc, " (타임아웃 kill)" if timed_out.is_set() else "", url)
+        if timed_out.is_set():
+            return -2, "register.py 실행 시간 초과 (10분)"
+        return rc, "\n".join(tail)[-4000:]
+    except TimeoutError as e:  # chromium 락 못 잡음
         return -1, f"chromium 락 대기 초과: {e}"
-    except subprocess.TimeoutExpired:
-        return -2, "register.py 실행 시간 초과 (10분)"
     except Exception as e:  # noqa: BLE001
         return -3, f"register.py 실행 중 예외: {e!r}"
 
