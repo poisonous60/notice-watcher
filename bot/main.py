@@ -351,7 +351,8 @@ async def on_error(event_method: str, *args, **kwargs):
 
 @client.event
 async def on_ready():
-    log.info("logged in as %s (id=%s)", client.user, client.user.id if client.user else "?")
+    log.info("logged in as %s (id=%s); guilds=%s", client.user,
+             client.user.id if client.user else "?", [g.id for g in client.guilds])
     gid = guild_id()
     try:
         if gid:
@@ -360,8 +361,16 @@ async def on_ready():
             synced = await tree.sync(guild=g)
             log.info("synced %d commands to guild %s", len(synced), gid)
         else:
+            # GUILD_ID 미설정 — 봇이 들어가 있는 길드들에 즉시 동기화 + 글로벌(DM/추후 길드용, 전파 ~1h)
+            for g in client.guilds:
+                try:
+                    tree.copy_global_to(guild=g)
+                    synced = await tree.sync(guild=g)
+                    log.info("synced %d commands to guild %s", len(synced), g.id)
+                except Exception as e:  # noqa: BLE001
+                    log.warning("guild %s sync 실패: %r", g.id, e)
             synced = await tree.sync()
-            log.info("synced %d global commands (전파에 ~1시간)", len(synced))
+            log.info("synced %d global commands (DM/추후 길드용, 전파 ~1h)", len(synced))
     except Exception as e:  # noqa: BLE001
         _record_error("tree.sync", e)
 
