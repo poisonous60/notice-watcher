@@ -302,11 +302,22 @@ def _reprobe_article(slug: str, article_url: str) -> int:
     return len(cands)
 
 
+def _has_json_api_candidates(digest: dict) -> bool:
+    return bool(((digest.get("list_candidates") or {}).get("traffic_json_api_candidates")))
+
+
 def _generate_with_escalation(slug: str, url: Optional[str], digest: dict, *,
                               max_attempts: int, model, no_escalate: bool, started_full: bool):
-    """generate → 실패 시 escalate: (1) lite probe 였으면 full probe 로 재시도, (2) 본문 추출 실패였으면
-    글페이지를 render+HAR 로 re-probe(본문 JSON API 후보/렌더 DOM 확보) 후 강한 hint 와 함께 재시도.
-    성공 (cfg, rep) 반환. 전부 실패 시 GenerationError(.last_config/.last_feedback) raise."""
+    """generate → 실패 시 escalate. 성공 (cfg, rep) 반환. 전부 실패 시 GenerationError(.last_config/.last_feedback) raise.
+
+    escalation 단계:
+      (1) lite→full probe — *목록 추출 실패가 아닐 때만*. lite 도 headless+HAR+list_candidates+replay+글페이지 probe 는
+          이미 다 돈다. full 이 추가로 주는 건 외부(Jina/Crawl4AI)·유료프록시 결과뿐이라 목록 selector/목록 JSON API 발견엔
+          도움이 안 된다 → `[FAIL] posts_nonempty`/`[FAIL] fetch_list` 면 full probe 재시도는 시간 낭비라 건너뛰고 (2)로.
+      (2) 목록 추출 실패(`posts_nonempty`/`fetch_list`) — 추가 probe 없이 hint 만 강하게 줘서 재시도:
+          json API 후보가 있으면 httpx_json 으로, 없으면 playwright_html(+wait_selector) 로 전환 유도.
+      (3) 본문 추출 실패(`article_body_len`) — 글페이지를 render+HAR 로 re-probe(본문 JSON API 후보/렌더 DOM 확보) 후 hint 로 재시도.
+    """
     used_full = started_full
     last_cfg = None
     last_fb = ""
@@ -315,18 +326,50 @@ def _generate_with_escalation(slug: str, url: Optional[str], digest: dict, *,
     except GenerationError as e:
         last_cfg, last_fb = getattr(e, "last_config", None), getattr(e, "last_feedback", str(e))
 
-    # (1) lite → full probe
+    def _list_failed(fb: str) -> bool:
+        return ("[FAIL] posts_nonempty" in (fb or "")) or ("[FAIL] fetch_list" in (fb or ""))
+
+    # (1) lite → full probe — 목록 추출 실패면 건너뜀(full 은 목록 관련 정보를 더 안 줌)
     if (not no_escalate) and url and (not used_full):
-        print("[register] lite digest 로 실패 → full probe 로 escalate 재시도 ...")
-        _run_probe(url, lite=False)
-        digest = build_digest(slug=slug, url=url)
-        used_full = True
+        if _list_failed(last_fb):
+            print("[register] 목록 추출 실패 → lite→full probe 는 건너뜀(full 이 목록 관련 정보를 추가로 안 줌) → (2) hint 재시도로.")
+        else:
+            print("[register] lite digest 로 실패 → full probe 로 escalate 재시도 ...")
+            _run_probe(url, lite=False)
+            digest = build_digest(slug=slug, url=url)
+            used_full = True
+            try:
+                return _gen(digest, max_attempts=max_attempts, model=model)
+            except GenerationError as e2:
+                last_cfg, last_fb = getattr(e2, "last_config", last_cfg), getattr(e2, "last_feedback", str(e2))
+
+    # (2) 목록 추출 실패 → 추가 probe 없이 강한 hint 로 재시도 (httpx_json 또는 playwright_html 로 전환 유도)
+    if (not no_escalate) and _list_failed(last_fb):
+        if _has_json_api_candidates(digest):
+            print("[register] 목록 추출 실패 + JSON API 후보 있음 → httpx_json 전환 hint 로 재시도 ...")
+            digest["escalation_hint"] = (
+                "이전 시도들이 목록을 0건으로 추출했다 — 정적 HTML 에 글 목록 행이 없다(JS 렌더). "
+                "digest 의 list_candidates.traffic_json_api_candidates 에 목록 JSON API 후보가 있다. "
+                "strategy 를 \"httpx_json\" 으로 바꿔라: list.url_template = 그 후보의 url, "
+                "list.list_path = 그 후보 list_hits[].path 를 키 리스트로(예 \"content.feeds\" → [\"content\",\"feeds\"]), "
+                "success_when = 응답 최상위 code/result 류 필드로(예 {path:[\"code\"],equals:200}), "
+                "fields 의 from:\"json\" path 는 *배열 원소* 기준으로 잡아라(원소가 {feed:{title,feedId,…}, user:{nickname}, feedLink:{pc}, board:{boardName}, …} 처럼 엔벨로프면 [\"feed\",\"title\"]·[\"user\",\"nickname\"]·[\"feedLink\",\"pc\"] 처럼 형제 객체를 가로질러 — list_hits[].item_subpath 가 있어도 item_path 로 쓰지 말고 path 를 길게 잡는 게 안전). "
+                "pagination 은 그 후보 url 의 page/offset/limit 쿼리 파라미터로. "
+                "본문(article)은 article_sample.api_candidates 가 있으면 그걸로(fetch_kind:\"json\"), 없으면 글 상세 URL 을 그대로 fetch_kind:\"html\" 로.")
+        else:
+            print("[register] 목록 추출 실패 + JSON API 후보 없음 → playwright_html 전환 hint 로 재시도 ...")
+            digest["escalation_hint"] = (
+                "이전 시도들이 목록을 0건으로 추출했다 — 정적 HTML 에 글 목록 행이 없고(JS 렌더) 목록 JSON API 후보도 없다. "
+                "strategy 를 \"playwright_html\" 로 바꿔라: list.row_selector 와 list.wait_selector 에 "
+                "list_candidates.html_repeating_patterns 중 *글 목록처럼 보이는 것*(child_count 가 크고 href_pattern_guess 가 글 상세 URL 패턴인 항목)의 selector 를 넣어 목록이 그려질 때까지 기다리게 하고, "
+                "fields 는 그 렌더된 행 기준으로 잡아라. article.content 는 글 상세 페이지 HTML 에서 본문 컨테이너 selector 로(필요하면 article.wait_selector 도).")
         try:
             return _gen(digest, max_attempts=max_attempts, model=model)
-        except GenerationError as e2:
-            last_cfg, last_fb = getattr(e2, "last_config", last_cfg), getattr(e2, "last_feedback", str(e2))
+        except GenerationError as e2b:
+            last_cfg, last_fb = getattr(e2b, "last_config", last_cfg), getattr(e2b, "last_feedback", str(e2b))
+        digest.pop("escalation_hint", None)
 
-    # (2) 본문 추출 실패 → 글페이지 render+HAR re-probe → 강한 hint 로 재시도
+    # (3) 본문 추출 실패 → 글페이지 render+HAR re-probe → 강한 hint 로 재시도
     # feedback_text() 가 하드 실패를 "  [FAIL] <check>: ..." 로 찍으므로 그 정확한 마커로만 매칭(LLM 텍스트 오탐 방지)
     article_url = _best_article_url(digest, last_fb or "")
     list_was_ok = ("[FAIL] posts_nonempty" not in (last_fb or "")) and ("[FAIL] fetch_list" not in (last_fb or ""))

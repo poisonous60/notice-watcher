@@ -45,14 +45,29 @@ def extract_hydration(html: str) -> dict[str, Any]:
 
 
 _TITLE_KEYS = ("title", "name", "subject", "headline")
-_ID_KEYS = ("id", "articleId", "noticeId", "no", "slug", "uid", "uuid", "code")
+_ID_KEYS = ("id", "articleId", "noticeId", "no", "slug", "uid", "uuid", "code",
+            "feedId", "postId", "articleNo", "contentId", "seq")
 _DATE_KEYS = ("publishedAt", "createdAt", "date", "regDate", "pubDate", "datetime", "updatedAt", "displayAt")
+
+
+def _looks_like_row(first: dict) -> Optional[str]:
+    """dict 가 글 한 건처럼 보이면 그 '항목 dict' 까지의 하위 경로를 반환(없으면 None).
+    "" = first 자체가 항목. "feed" = first["feed"] 가 항목(엔벨로프형: {feed:{title,feedId,...}, user:{...}, ...}).
+    엔벨로프는 *딱 한 단계* 만 본다(과탐 방지)."""
+    if any(k in first for k in _TITLE_KEYS) and any(k in first for k in _ID_KEYS):
+        return ""
+    for k, v in first.items():
+        if isinstance(v, dict) and any(kk in v for kk in _TITLE_KEYS) and any(kk in v for kk in _ID_KEYS):
+            return str(k)
+    return None
 
 
 def find_list_in_json(blob: Any, *, min_items: int = 5) -> list[dict]:
     """블롭 안에서 글 목록일 가능성 있는 배열을 찾는다.
 
-    리턴: [{path: "props.pageProps.news", count: N, sample: <첫 항목>}, ...]
+    리턴: [{path, count, sample_keys, sample_first, item_subpath}, ...]
+      item_subpath: 각 배열 원소 안에서 '항목 dict' 가 한 단계 더 들어가 있으면 그 키(엔진 config 의 item_path 1단계).
+                    "" 면 원소 자체가 항목.
     """
     found: list[dict] = []
 
@@ -60,12 +75,14 @@ def find_list_in_json(blob: Any, *, min_items: int = 5) -> list[dict]:
         if isinstance(node, list):
             if len(node) >= min_items and node and isinstance(node[0], dict):
                 first = node[0]
-                if any(k in first for k in _TITLE_KEYS) and any(k in first for k in _ID_KEYS):
+                sub = _looks_like_row(first)
+                if sub is not None:
                     found.append({
                         "path": path,
                         "count": len(node),
+                        "item_subpath": sub,  # "" = 원소 자체가 항목; "feed" = 원소.feed 가 항목(엔벨로프). 필드 path 는 원소 기준으로 잡으면 됨.
                         "sample_keys": list(first.keys())[:20],
-                        "sample_first": {k: _shorten(first.get(k)) for k in list(first.keys())[:8]},
+                        "sample_first": _sample_node(first),  # 원소 구조 2단계 — 엔벨로프면 형제 dict(user/feedLink/board…)들도 보임
                     })
             for i, item in enumerate(node[:50]):  # 너무 깊게 안 봄
                 walk(item, f"{path}[{i}]")
@@ -75,6 +92,20 @@ def find_list_in_json(blob: Any, *, min_items: int = 5) -> list[dict]:
 
     walk(blob, "")
     return found
+
+
+def _sample_node(d: dict, *, max_keys: int = 14) -> dict:
+    """배열 원소 dict 의 샘플 — 값이 dict 면 그 키 목록을, 그 외엔 짧게. (엔벨로프형에서 형제 객체 구조까지 한눈에)"""
+    out: dict[str, Any] = {}
+    for k in list(d.keys())[:max_keys]:
+        v = d[k]
+        if isinstance(v, dict):
+            out[k] = {"_keys": list(v.keys())[:12]}
+        elif isinstance(v, list):
+            out[k] = f"[list len {len(v)}]"
+        else:
+            out[k] = _shorten(v)
+    return out
 
 
 def _shorten(v: Any) -> Any:

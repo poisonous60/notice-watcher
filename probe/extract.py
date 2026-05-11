@@ -114,7 +114,12 @@ def _href_pattern(hrefs: list[str]) -> Optional[str]:
 
 
 def traffic_api_candidates(har_path: Path) -> list[dict]:
-    """HAR 파일에서 JSON 응답 + 5개 이상 항목 배열을 가진 응답을 후보로."""
+    """HAR 파일에서 JSON 응답 + 5개 이상 항목 배열을 가진 응답을 후보로.
+
+    응답 본문은 인라인 text / base64 / `record_har_content:"attach"` 의 외부 파일(`_file`) 셋 다 처리한다
+    — headless 캡처는 attach 모드라 본문이 별도 .json 파일에 있어서, 안 그러면 큰 JSON API 가 전부 누락된다
+    (네이버 게임 라운지 feed API 등이 이래서 안 잡혔다).
+    """
     if not har_path.exists():
         return []
     try:
@@ -132,16 +137,14 @@ def traffic_api_candidates(har_path: Path) -> list[dict]:
             if h.get("name", "").lower() == "content-type":
                 ct = h.get("value", "")
                 break
-        if "json" not in ct.lower():
-            continue
         content = resp.get("content", {}) or {}
-        text = content.get("text") or ""
-        encoding = content.get("encoding")
-        if encoding == "base64" and text:
-            try:
-                text = base64.b64decode(text).decode("utf-8", errors="replace")
-            except Exception:
-                continue
+        # content-type 헤더가 없거나 octet-stream 이어도 mimeType / _file 확장자가 json 이면 JSON 으로 본다.
+        looks_json = ("json" in ct.lower()
+                      or "json" in str(content.get("mimeType", "")).lower()
+                      or str(content.get("_file") or "").endswith(".json"))
+        if not looks_json:
+            continue
+        text = _har_entry_response_text(entry, har_path)
         if not text:
             continue
         try:
