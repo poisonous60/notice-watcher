@@ -182,6 +182,26 @@ def _ids_in_url(url: str) -> set[str]:
     return set(re.findall(r"\d{4,}", (sp.path or "") + "?" + (sp.query or "")))
 
 
+_MULTI_TLD = ("co.kr", "co.jp", "co.uk", "com.cn", "or.kr", "ne.jp", "go.kr", "ac.kr")
+
+
+def _registrable(host: str) -> str:
+    """host → 등록가능도메인 근사치 (PSL 없이): co.kr/co.jp 등은 3라벨, 그 외 2라벨."""
+    parts = (host or "").lower().split(".")
+    if len(parts) >= 3 and ".".join(parts[-2:]) in _MULTI_TLD:
+        return ".".join(parts[-3:])
+    return ".".join(parts[-2:]) if len(parts) >= 2 else (host or "").lower()
+
+
+def _same_site(url_a: str, url_b: str) -> bool:
+    """두 URL 이 같은 사이트(등록가능도메인)인가 — 광고/트래커(onetag.co.kr, criteo.com 등) 후보를 거르는 용도."""
+    from urllib.parse import urlsplit
+    ha, hb = urlsplit(url_a or "").netloc, urlsplit(url_b or "").netloc
+    if not ha or not hb:
+        return False
+    return _registrable(ha) == _registrable(hb)
+
+
 def _dig(obj: Any, path: list) -> Any:
     for k in path:
         obj = obj[k]
@@ -258,6 +278,10 @@ def traffic_article_body_candidates(har_path: Path, article_url: str = "", *, ma
                     break
             if "json" not in ct.lower():
                 continue
+            url = req.get("url") or ""
+            # 광고/트래커 등 제3자 도메인 응답은 글 본문 API 가 아님 — 같은 사이트(또는 article_url 미지정 시 통과)만
+            if article_url and url and not _same_site(url, article_url):
+                continue
             text = _har_entry_response_text(entry, har_path)
             if not text or len(text) < 60:
                 continue
@@ -268,7 +292,6 @@ def traffic_article_body_candidates(har_path: Path, article_url: str = "", *, ma
                 continue
             hits.sort(key=lambda h: (h["html"], h["key_hit"], h["len"]), reverse=True)
             best = hits[0]
-            url = req.get("url") or ""
             rbt = (req.get("postData") or {}).get("text")
             url_id_match = bool(want_ids and any(i in url for i in want_ids))
             body_id_match = bool(want_ids and rbt and any(i in rbt for i in want_ids))
