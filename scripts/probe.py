@@ -98,7 +98,7 @@ def main(argv: list[str]) -> int:
     print(f"\n[Phase 1] static GET ({'/'.join(presets)}) ...")
     static_results: list[Result] = []
     for preset_name, headers in presets.items():
-        polite_sleep(5.0, 7.0)
+        polite_sleep(1.0, 2.0)
         # extra header 주입은 매 시도에 동일하게 (추가 행 H_user는 별도)
         r = fetch_static(
             strategy=f"S1.{preset_name}",
@@ -114,7 +114,7 @@ def main(argv: list[str]) -> int:
 
     # H_user (--extra-header)
     if args.extra_header:
-        polite_sleep(5.0, 7.0)
+        polite_sleep(1.0, 2.0)
         h = dict(presets["H3"])
         for kv in args.extra_header:
             if "=" in kv:
@@ -157,7 +157,7 @@ def main(argv: list[str]) -> int:
     captured = load_captured_headers(out_dir, target="list") if headless is not None else {}
     if captured:
         print("\n[Phase 3] static retry with captured headers (S1.Hcap) ...")
-        polite_sleep(5.0, 7.0)
+        polite_sleep(1.0, 2.0)
         captured_retry = fetch_static(
             strategy="S1.Hcap",
             target="list",
@@ -195,7 +195,7 @@ def main(argv: list[str]) -> int:
             # S1L: 로그인 후 쿠키만 주입해 정적 재시도 (어댑터가 가벼운 httpx로 가능한지)
             cookies = cookies_from_state(state_p, url)
             if cookies:
-                polite_sleep(5.0, 7.0)
+                polite_sleep(1.0, 2.0)
                 s1l = fetch_static(
                     strategy="S1L",
                     target="list",
@@ -218,19 +218,19 @@ def main(argv: list[str]) -> int:
         print("\n[Phase 5] skipped (lite) — Jina/Firecrawl/Crawl4AI/유료 스킵")
     else:
         print("\n[Phase 5] external & paid services ...")
-        polite_sleep(2.0, 3.0)
+        polite_sleep(0.5, 1.0)
         jina = try_jina(url=url, out_dir=out_dir, baseline_blocked=blocked)
         external_results.append(jina)
         print(f"  Jina       {jina.status} {jina.classification.value}")
 
         if args.firecrawl:
-            polite_sleep(2.0, 3.0)
+            polite_sleep(0.5, 1.0)
             fc = try_firecrawl(url=url, out_dir=out_dir, project_root=PROJECT_ROOT, baseline_blocked=blocked)
             external_results.append(fc)
             print(f"  Firecrawl  {fc.status} {fc.classification.value}  {' '.join(fc.notable[:2])}")
 
         if not args.no_crawl4ai:
-            polite_sleep(2.0, 3.0)
+            polite_sleep(0.5, 1.0)
             c4 = try_crawl4ai(url=url, out_dir=out_dir, baseline_blocked=blocked)
             external_results.append(c4)
             print(f"  Crawl4AI   {c4.status} {c4.classification.value}  {' '.join(c4.notable[:2])}")
@@ -319,7 +319,7 @@ def main(argv: list[str]) -> int:
         # 목록이 정적 OK였다면 정적으로, 아니면 headless로
         static_ok = next((r for r in static_results if r.classification == Classification.OK), None)
         if static_ok is not None:
-            polite_sleep(3.0, 5.0)
+            polite_sleep(1.0, 2.0)
             article_result = fetch_static(
                 strategy=f"S1.{static_ok.strategy.split('.')[-1]}.article",
                 target="article",
