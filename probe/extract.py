@@ -293,6 +293,24 @@ def traffic_article_body_candidates(har_path: Path, article_url: str = "", *, ma
     return cands[:max_candidates]
 
 
+def _article_url_score(u: Optional[str], base_host: str) -> int:
+    """'진짜 글 페이지 URL' 같은 정도. (헤더의 myinfo/login 링크 같은 잡 후보를 거르기 위해)"""
+    if not u:
+        return -1
+    from urllib.parse import urlsplit
+    sp = urlsplit(u)
+    s = 0
+    if base_host and sp.netloc == base_host:
+        s += 4                                    # 같은 호스트 (목록과 다른 호스트면 거의 글이 아님)
+    if sp.path and sp.path not in ("", "/"):
+        s += 1
+    if re.search(r"\d{3,}", (sp.path or "") + "?" + (sp.query or "")):
+        s += 2                                    # 글 ID 같은 숫자
+    if re.search(r"(view|detail|article|notice|read|thread|post|bbs|board)", (sp.path or "").lower()):
+        s += 1
+    return s
+
+
 def pick_first_article_url(
     *,
     html_candidates: list[dict],
@@ -301,20 +319,23 @@ def pick_first_article_url(
     base_url: str,
     page_html: str,
 ) -> Optional[str]:
-    """가장 큰 후보에서 첫 글 URL을 뽑는다."""
-    # 1) HTML 반복 패턴: sample_url 있으면 우선
-    for c in html_candidates:
-        if c.get("sample_url"):
-            return c["sample_url"]
-    # 2) hydration: 첫 항목의 slug/id로 URL 추측 (사이트마다 패턴 다름 → 리스크)
-    # 일단 base_url의 호스트 + /<slug> 추측
+    """첫 글 URL 후보를 뽑는다. (HTML 반복 패턴의 sample_url 중 '글 페이지스러운' 걸 점수로 고른다 —
+    예전엔 그냥 첫 번째를 썼는데, 헤더의 myinfo/login 같은 반복 링크가 첫 후보로 잡히면 엉뚱한 URL 이 됐음.)"""
+    from urllib.parse import urlsplit
+    base_host = urlsplit(base_url or "").netloc
+    cand_urls = [c["sample_url"] for c in html_candidates if c.get("sample_url")]
+    if cand_urls:
+        best = max(cand_urls, key=lambda u: _article_url_score(u, base_host))
+        if _article_url_score(best, base_host) >= 4:   # 최소 same-host 는 만족
+            return best
+        return cand_urls[0]                            # same-host 후보가 없으면 옛 동작(첫 후보)
+    # hydration: 첫 항목의 slug/id로 URL 추측 (사이트마다 패턴 다름 → 리스크)
     if hydration_candidates and page_html:
         item = hydration_candidates[0].get("sample_first") or {}
         slug = item.get("slug") or item.get("id")
         if slug:
-            # base_url의 path를 참고해 형제 경로 추측
             return urljoin(base_url, str(slug))
-    # 3) JSON API 후보의 첫 항목 — 어댑터에서 정해야 하므로 None 반환
+    # JSON API 후보의 첫 항목 — 어댑터에서 정해야 하므로 None 반환
     return None
 
 

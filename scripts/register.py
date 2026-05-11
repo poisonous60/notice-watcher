@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -149,6 +150,42 @@ def _gen(digest: dict, *, max_attempts: int, model):
     return asyncio.run(_generate(digest, max_attempts=max_attempts, model=model))
 
 
+def _article_url_score(u: Optional[str], host: str) -> int:
+    if not u or not u.startswith("http"):
+        return -1
+    sp = urlsplit(u)
+    s = 0
+    if host and sp.netloc == host:
+        s += 4
+    if re.search(r"\d{3,}", (sp.path or "") + "?" + (sp.query or "")):
+        s += 2
+    if re.search(r"(view|detail|article|notice|read|thread|post|bbs|board)", (sp.path or "").lower()):
+        s += 1
+    return s
+
+
+def _best_article_url(digest: dict, last_fb: str) -> Optional[str]:
+    """글페이지 re-probe 에 쓸 *진짜 글* URL 을 고른다. 후보:
+    (1) 직전 attempt 가 실제로 추출한 글 URL (검증 피드백 텍스트의 url='...'), (2) digest 의 article_sample.url /
+    list_candidates.first_article_url / html_repeating_patterns[].sample_url. — 목록과 같은 호스트 + 글ID 같은 숫자 있는 걸 우선
+    (probe 가 헤더의 myinfo/login 링크를 first_article_url 로 잘못 집는 경우를 회피)."""
+    host = urlsplit(digest.get("url") or "").netloc
+    cands: list[str] = list(re.findall(r"url=['\"](https?://[^'\"]+)['\"]", last_fb or ""))
+    lc = digest.get("list_candidates") or {}
+    a = (digest.get("article_sample") or {}).get("url")
+    if a:
+        cands.append(a)
+    if lc.get("first_article_url"):
+        cands.append(lc["first_article_url"])
+    for c in (lc.get("html_repeating_patterns") or []):
+        if c.get("sample_url"):
+            cands.append(c["sample_url"])
+    cands = [u for u in cands if u and u.startswith("http")]
+    if not cands:
+        return None
+    return max(cands, key=lambda u: _article_url_score(u, host))
+
+
 def _reprobe_article(slug: str, article_url: str) -> int:
     """글 본문 페이지를 Playwright(+HAR)로 다시 받아 → article.html(렌더 DOM, digest 가 자동으로 더 큰 걸 씀) +
     article_candidates.json(본문 JSON API 후보) 갱신. 발견한 본문 API 후보 개수 반환."""
@@ -203,27 +240,30 @@ def _generate_with_escalation(slug: str, url: Optional[str], digest: dict, *,
             last_cfg, last_fb = getattr(e2, "last_config", last_cfg), getattr(e2, "last_feedback", str(e2))
 
     # (2) 본문 추출 실패 → 글페이지 render+HAR re-probe → 강한 hint 로 재시도
-    article_url = ((digest.get("article_sample") or {}).get("url")
-                   or (digest.get("list_candidates") or {}).get("first_article_url"))
     # feedback_text() 가 하드 실패를 "  [FAIL] <check>: ..." 로 찍으므로 그 정확한 마커로만 매칭(LLM 텍스트 오탐 방지)
+    article_url = _best_article_url(digest, last_fb or "")
+    list_was_ok = ("[FAIL] posts_nonempty" not in (last_fb or "")) and ("[FAIL] fetch_list" not in (last_fb or ""))
     if (not no_escalate) and article_url and ("[FAIL] article_body_len" in (last_fb or "")):
         print(f"[register] 글 본문 추출 실패 — 글페이지를 렌더링+트래픽 캡처로 re-probe 후 재시도: {article_url}")
         n_api = _reprobe_article(slug, article_url)
         digest = build_digest(slug=slug, url=url)
+        keep_list = ("**중요: 목록(list.row_selector / list.fields / list.pagination)은 이미 검증을 통과했다(글 추출 성공) — 절대 바꾸지 마라. article 부분만 고쳐라.**\n"
+                     if list_was_ok else "")
         if n_api:
             digest["escalation_hint"] = (
-                "이전 시도들이 글 본문을 못 얻었다(정적 HTML 의 본문이 비었거나 100자 미만 — SPA 추정). "
+                "이전 시도들이 글 본문을 못 얻었다(정적 HTML 의 본문이 비었거나 100자 미만 — SPA 추정).\n" + keep_list +
                 f"digest 의 article_sample.api_candidates 에 본문 JSON API 후보 {n_api}건이 있다. "
-                "그중 url_id_match=true·body_looks_html=true 인 걸 골라서: list/strategy 는 그대로 두고, "
+                "그중 url_id_match=true·body_looks_html=true 인 걸 골라서: list / strategy 는 그대로 두고, "
                 "article.url_template = 그 후보의 url(거기 박힌 글 ID 숫자를 {post_id} 로 치환), article.fetch_kind = \"json\", "
-                "article.content = [{from:\"json\", path:<그 후보의 body_field_path 그대로>}]. "
-                "필요하면 그 후보의 request_headers 중 X-Requested-With / Referer 를 config 최상위 headers 에 추가하라.")
+                "article.content = [{from:\"json\", path:<그 후보의 body_field_path 그대로>}], 필요하면 그 후보의 "
+                "request_headers 중 X-Requested-With / Referer 를 config 최상위 headers 에 추가하라.")
         else:
             digest["escalation_hint"] = (
-                "이전 시도들이 글 본문을 못 얻었다(정적 HTML 의 본문이 비었거나 100자 미만 — SPA 추정). 본문을 주는 JSON API 후보도 못 찾았다. "
-                "strategy 를 \"playwright_html\" 로 바꿔라(목록·본문 둘 다 브라우저로 렌더). "
-                "위 '글(본문) 페이지 HTML 샘플' 은 이제 렌더된 DOM 이니 거기서 본문 컨테이너 CSS selector 를 찾아 article.content 에 쓰고, "
-                "article.wait_selector(없으면 list.wait_selector)에 그 컨테이너(또는 목록 행) selector 를 넣어 렌더 완료를 기다리게 하라.")
+                "이전 시도들이 글 본문을 못 얻었다(정적 HTML 의 본문이 비었거나 100자 미만 — SPA 추정). 본문을 주는 JSON API 후보도 못 찾았다.\n" + keep_list +
+                "strategy 를 \"playwright_html\" 로 바꿔라. " + ("list.row_selector / list.fields 는 그대로 두고, " if list_was_ok else "") +
+                "list.wait_selector 에 row_selector 가 가리키는 목록 행 요소의 selector 를 넣어 목록 렌더를 기다리게 하고, "
+                "article.content 는 위 '글(본문) 페이지 HTML 샘플'(이제 렌더된 DOM)에서 본문 컨테이너 selector 를 찾아 새로 잡고, "
+                "article.wait_selector 에 그 본문 컨테이너 selector 를 넣어 본문 렌더를 기다리게 하라.")
         try:
             return _gen(digest, max_attempts=max_attempts, model=model)
         except GenerationError as e3:
