@@ -83,9 +83,11 @@ Gemini 가 `max_attempts`(기본 4)회 만들어도 검증을 못 통과 → `re
 
 **진짜 `handwritten` adapter(`adapters/<site>.py`) 가 필요한 경우** — config 스키마로 표현이 안 될 때:
 - Cloudflare 챌린지가 강해서 playwright-stealth + 특수 처리가 필요 (arca.live → `ArcaLiveAdapter`).
-- 데이터가 클릭/스크롤/탭전환 후에야 로드 (networkidle 만으론 못 잡음).
+- 데이터가 클릭/스크롤/탭전환 후에야 로드 (networkidle 만으론 못 잡음). 페이지 인라인 JS 블롭(`var x=[]; x.push({...})` 류)에만 목록이 있음 (다음카페 → `DaumCafeAdapter`).
 - 본문이 여러 API 호출을 조합해야 나오거나, 인증/서명이 필요한 경우.
 → 절차는 `사이트 어댑터 추가 가이드.md`. `adapters/<site>.py` + `configs/<x>.json`(`strategy:"handwritten"`, `adapter`+`kwargs`) → `register.py --config`.
+
+> **플랫폼이면 인식기를 추가하라.** 손어댑터든 손config(JSON 패턴)든, 그게 *특정 사이트 하나*가 아니라 *플랫폼*(네이버 카페, 다음 카페, 넥슨 포럼, … — 같은 패턴의 게시판이 여럿)이면 `engine/known_platforms.py` 의 `_RECOGNIZERS` 에 URL 인식기 한 줄을 추가한다 → 같은 플랫폼의 다음 게시판은 `/watch`·`/preview` 만 해도 probe/Gemini 없이 즉시 등록된다(`config 기반 엔진 가이드.md` §1 "register.py 의 처리 순서"). 인식기가 잘못 매칭해도 `fetch_list` 0건이면 일반 파이프라인으로 폴백하니 낙관적으로 적어도 된다.
 
 ---
 

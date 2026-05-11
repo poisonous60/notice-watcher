@@ -38,6 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from probe.paths import output_dir, url_to_slug  # noqa: E402
 from engine.digest import build_digest  # noqa: E402
+from engine.known_platforms import recognize as recognize_platform  # noqa: E402
 from generate import generate_config_validated, GenerationError, default_model  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -452,6 +453,50 @@ def _generate_with_escalation(slug: str, url: Optional[str], digest: dict, *,
     raise err
 
 
+def _try_known_platform(url: str, slug: str, *, out: Optional[str], force: bool) -> Optional[int]:
+    """url 이 알려진 플랫폼(engine.known_platforms)이면 probe/Gemini 없이 바로 config 작성·등록.
+    반환: 0=등록 성공 / 2=정책상 등록 거부 / None=인식 안 됨 or 잘못 인식(fetch_list 0건) → 일반 파이프라인으로 폴백.
+    slug 는 register.py 가 호출된 URL 기준(봇 _is_registered 가 그 slug 로 찾으므로) — config 의 _source_url 도 그 url 로 맞춤."""
+    cfg = recognize_platform(url)
+    if cfg is None:
+        return None
+    name = cfg.get("_recognized_platform", "?")
+    out_path = Path(out) if out else (CONFIGS_DIR / f"{slug}.json")
+    if out_path.exists() and not force:
+        print(f"[register] 알려진 플랫폼({name})으로 보이지만 {out_path} 이미 존재 — 인식 경로 건너뜀(덮어쓰려면 --force, 또는 일반 파이프라인으로 진행).")
+        return None
+    cfg["_source_url"] = url  # 호출된 URL 로 통일 (slug 와 일치)
+    from engine import validate_config, make_adapter
+    try:
+        validate_config(cfg)
+    except Exception as e:  # noqa: BLE001
+        print(f"[register] 알려진 플랫폼({name}) config 스키마 검증 실패 — 일반 파이프라인으로 폴백: {e}")
+        return None
+    print(f"[register] 🔎 알려진 플랫폼 인식: {name} — probe/gemini 생략, 바로 등록 시도 "
+          f"(strategy={cfg.get('strategy')}{', adapter=' + cfg['adapter'] if cfg.get('adapter') else ''})")
+
+    async def _baseline():
+        async with make_adapter(cfg) as a:
+            return await a.fetch_list(page=1, page_size=30)
+    try:
+        posts = asyncio.run(_baseline())
+    except Exception as e:  # noqa: BLE001
+        print(f"[register] 알려진 플랫폼({name}) fetch_list 실패 — 잘못 인식한 듯, 일반 파이프라인으로 폴백: {e!r}")
+        return None
+    if not posts:
+        print(f"[register] 알려진 플랫폼({name})으로 인식했지만 글 0건 — 잘못 인식한 듯, 일반 파이프라인으로 폴백.")
+        return None
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    post_ids = [str(pp.post_id) for pp in posts]
+    sp = _save_state(slug, url, out_path, post_ids)
+    print(f"[register] ✅ 등록 완료 (알려진 플랫폼: {name}) — baseline {len(post_ids)}건  config={out_path}  state={sp}")
+    for pp in posts[:3]:
+        print(f"    {pp.post_id}  {pp.published_at}  {(pp.title or '')[:60]}")
+    return 0
+
+
 def main(argv) -> int:
     p = argparse.ArgumentParser(description="사이트 등록 (URL → config + baseline). --list 로 등록 현황 조회.")
     p.add_argument("url", nargs="?", help="목록 URL")
@@ -465,6 +510,8 @@ def main(argv) -> int:
     p.add_argument("--reuse-probe", action="store_true", help="probe 산출물 있으면 재사용")
     p.add_argument("--full-probe", action="store_true", help="처음부터 full probe (lite 대신)")
     p.add_argument("--no-escalate", action="store_true", help="lite 로 실패해도 full probe 로 escalate 안 함")
+    p.add_argument("--no-recognize", action="store_true",
+                   help="알려진 플랫폼(engine.known_platforms) 자동 인식을 끄고 probe→gemini 일반 파이프라인을 강제 (디버깅/검증용)")
     p.add_argument("--article-url", metavar="URL",
                    help="실제 글 본문 페이지 URL 힌트 (probe 의 '첫 글' 자동 탐지가 메뉴/사이드바 링크를 잘못 집는 사이트용). "
                         "이 URL 을 render+HAR 로 미리 re-probe 해서 본문 JSON API 후보·렌더 DOM 을 확보하고 digest 의 article_sample 을 그걸로 맞춘 뒤 생성한다.")
@@ -506,6 +553,11 @@ def main(argv) -> int:
     else:
         url = args.url
         slug = url_to_slug(url)
+        # 알려진 플랫폼이면 probe/gemini 건너뛰고 바로 등록 (실패하면 일반 파이프라인으로 폴백)
+        if not args.no_recognize:
+            rc = _try_known_platform(url, slug, out=args.out, force=args.force)
+            if rc is not None:
+                return rc
         out_dir = output_dir(slug)
         if not (args.reuse_probe and out_dir.exists() and (out_dir / "diagnosis.json").exists()):
             _run_probe(url, lite=not args.full_probe)
