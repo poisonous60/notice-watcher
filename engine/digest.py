@@ -157,13 +157,22 @@ def _list_body_path(out_dir: Path, results: list[dict]) -> Optional[Path]:
 
 
 def _article_body_path(out_dir: Path, results: list[dict]) -> Optional[Path]:
+    """글 본문 HTML 샘플 경로. 정적 fetch 결과 / headless 렌더(article.html) / register 의 re-probe(article.html 덮어씀)
+    중 *가장 큰* 파일을 고른다 — SPA 껍데기보다 렌더된 DOM 이 크므로 그게 본문 selector 잡기에 낫다."""
+    cands: list[Path] = []
     ar = _pick_article_result(results)
     if ar and ar.get("body_path"):
         p = Path(ar["body_path"])
         if p.exists():
-            return p
-    p = out_dir / "article.html"
-    return p if p.exists() else None
+            cands.append(p)
+    for name in ("article.html", "article.captured.html", "article"):
+        p = out_dir / name
+        if p.is_file() and p not in cands:
+            cands.append(p)
+    cands = [p for p in cands if p.is_file()]
+    if not cands:
+        return None
+    return max(cands, key=lambda p: p.stat().st_size)
 
 
 def _hydration_digest(raw_list_html: str) -> dict:
@@ -212,6 +221,7 @@ def build_digest(
     list_cands = _read_json(out_dir / "list_candidates.json") or {}
     feeds = _read_json(out_dir / "feed_candidates.json") or {}
     captured_headers = _read_json(out_dir / "list.captured_headers.json") or {}
+    article_body_apis = _read_json(out_dir / "article_candidates.json")  # register.py 의 글페이지 re-probe 가 씀 (없으면 None)
     results = diag.get("results") or []
 
     # 통과한 정적 프리셋의 request 헤더
@@ -262,6 +272,8 @@ def build_digest(
             "source": str(article_path) if article_path else None,
             "truncated": article_trunc,
             "html": article_html_clean,
+            # 글 페이지가 SPA 라서 정적 HTML 본문이 비어있을 때 register.py 의 re-probe 가 채우는 본문 JSON API 후보 (없으면 None)
+            "api_candidates": (article_body_apis if isinstance(article_body_apis, list) and article_body_apis else None),
         },
         # NOTE: 글 샘플은 현재 1개(probe 가 first_article_url 만 fetch). 2~3개 확장은 추후 probe 보강 때.
     }

@@ -157,10 +157,140 @@ def traffic_api_candidates(har_path: Path) -> list[dict]:
             "status": resp.get("status"),
             "content_type": ct,
             "list_hits": list_hits,
-            "request_headers": {h["name"]: h["value"] for h in req.get("headers", [])},
+            "request_headers": {str(h.get("name", "")): str(h.get("value", "")) for h in (req.get("headers") or [])},
             "request_body_text": (req.get("postData") or {}).get("text"),
         })
     return candidates
+
+
+# --------------------------------------------------------------------------- #
+# 글 *본문* JSON API 후보 (목록이 아니라 단일 글 본문 — SPA 글 페이지가 XHR 로 본문을 받아올 때)
+# --------------------------------------------------------------------------- #
+_BODY_KEY_HINTS = re.compile(
+    r"^(content|contents?|contenthtml|contentbody|contentstext|body|bodyhtml|bodytext|html|"
+    r"article|articlecontents?|articlebody|text|desc|description|detail|details|message|"
+    r"boardcontents?|noticecontents?|view|viewdata|writedata|maincontents?)$",
+    re.IGNORECASE,
+)
+_HTMLISH_RE = re.compile(r"</[a-z][\w-]*>|<(?:p|div|br|img|span|h[1-6]|ul|li|table|strong)\b|&nbsp;|&lt;", re.IGNORECASE)
+
+
+def _ids_in_url(url: str) -> set[str]:
+    """URL(경로+쿼리)에서 4자리 이상 숫자 런 — post_id 추정용."""
+    from urllib.parse import urlsplit
+    sp = urlsplit(url or "")
+    return set(re.findall(r"\d{4,}", (sp.path or "") + "?" + (sp.query or "")))
+
+
+def _dig(obj: Any, path: list) -> Any:
+    for k in path:
+        obj = obj[k]
+    return obj
+
+
+def _walk_long_strings(node: Any, path: list, out: list, *, depth: int = 0, max_depth: int = 7, budget: Optional[list] = None) -> None:
+    """JSON 안에서 '본문스러운' 긴 문자열들을 모은다. path = 키(str)/인덱스(int) 리스트(엔진의 from:json path 형식)."""
+    if budget is None:
+        budget = [5000]
+    if budget[0] <= 0 or depth > max_depth:
+        return
+    budget[0] -= 1
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if isinstance(v, str):
+                vlen = len(v)
+                htmlish = bool(_HTMLISH_RE.search(v))
+                key_hit = bool(_BODY_KEY_HINTS.match(str(k)))
+                if vlen >= 200 or (vlen >= 60 and (htmlish or key_hit)):
+                    out.append({"path": path + [k], "key": str(k), "len": vlen, "html": htmlish, "key_hit": key_hit})
+            else:
+                _walk_long_strings(v, path + [k], out, depth=depth + 1, max_depth=max_depth, budget=budget)
+    elif isinstance(node, list):
+        for i, item in enumerate(node[:30]):
+            _walk_long_strings(item, path + [i], out, depth=depth + 1, max_depth=max_depth, budget=budget)
+
+
+def _har_entry_response_text(entry: dict, har_path: Path) -> str:
+    """HAR 엔트리 응답 본문 텍스트 — text 인라인 / base64 / attach 외부파일 모두 처리."""
+    content = (entry.get("response") or {}).get("content") or {}
+    text = content.get("text") or ""
+    if text and content.get("encoding") == "base64":
+        try:
+            text = base64.b64decode(text).decode("utf-8", errors="replace")
+        except Exception:
+            return ""
+    if not text:
+        fref = content.get("_file") or content.get("file")
+        if fref:
+            for cand in (har_path.parent / fref,
+                         (har_path.parent / (har_path.stem + ".har_data")) / fref,
+                         har_path.parent / "traffic.har_data" / fref):
+                try:
+                    if cand.exists():
+                        return cand.read_text(encoding="utf-8", errors="replace")
+                except Exception:
+                    pass
+    return text
+
+
+def traffic_article_body_candidates(har_path: Path, article_url: str = "", *, max_candidates: int = 6) -> list[dict]:
+    """HAR 에서 '단일 글 본문' 을 담은 JSON 응답 후보를 점수순으로. (= traffic_api_candidates 의 본문판)
+
+    각 후보: {method, url, status, content_type, request_headers, request_body_text,
+              body_field_path(엔진 from:json path), body_len, body_looks_html, body_key, url_id_match, sample}
+    """
+    if not har_path.exists():
+        return []
+    try:
+        har = json.loads(har_path.read_text(encoding="utf-8", errors="replace"))
+    except Exception:
+        return []
+    want_ids = _ids_in_url(article_url)
+    cands: list[dict] = []
+    for entry in ((har.get("log") or {}).get("entries") or []):
+        try:
+            resp = entry.get("response") or {}
+            req = entry.get("request") or {}
+            ct = ""
+            for h in resp.get("headers") or []:
+                if str(h.get("name", "")).lower() == "content-type":
+                    ct = h.get("value", "") or ""
+                    break
+            if "json" not in ct.lower():
+                continue
+            text = _har_entry_response_text(entry, har_path)
+            if not text or len(text) < 60:
+                continue
+            data = json.loads(text)
+            hits: list[dict] = []
+            _walk_long_strings(data, [], hits)
+            if not hits:
+                continue
+            hits.sort(key=lambda h: (h["html"], h["key_hit"], h["len"]), reverse=True)
+            best = hits[0]
+            url = req.get("url") or ""
+            rbt = (req.get("postData") or {}).get("text")
+            url_id_match = bool(want_ids and any(i in url for i in want_ids))
+            body_id_match = bool(want_ids and rbt and any(i in rbt for i in want_ids))
+            score = ((3 if url_id_match else 0) + (2 if body_id_match else 0)
+                     + (2 if best["html"] else 0) + (1 if best["key_hit"] else 0) + min(2, best["len"] // 1000))
+            try:
+                sample = str(_dig(data, best["path"]))[:300]
+            except Exception:  # noqa: BLE001
+                sample = ""
+            cands.append({
+                "method": req.get("method"), "url": url, "status": resp.get("status"), "content_type": ct,
+                "request_headers": {str(h.get("name", "")): str(h.get("value", "")) for h in (req.get("headers") or [])},
+                "request_body_text": rbt,
+                "body_field_path": best["path"], "body_len": best["len"], "body_looks_html": best["html"],
+                "body_key": best["key"], "url_id_match": url_id_match, "sample": sample, "_score": score,
+            })
+        except Exception:  # noqa: BLE001  — 한 엔트리가 깨져도 나머지는 본다
+            continue
+    cands.sort(key=lambda c: c["_score"], reverse=True)
+    for c in cands:
+        c.pop("_score", None)
+    return cands[:max_candidates]
 
 
 def pick_first_article_url(

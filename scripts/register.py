@@ -1,16 +1,22 @@
 """사이트 등록: URL → 경량 probe → digest → gemini(재시도 루프) → config 저장 + baseline state.
 
+escalation (config 생성 실패 시, --no-escalate 면 전부 생략):
+  1) lite probe 였으면 → full probe 로 다시 probe 후 재시도.
+  2) 글 *본문* 추출 실패(article_body_len)였으면 → 글페이지를 Playwright+HAR 로 re-probe 해서
+     본문 JSON API 후보(article_candidates.json)·렌더된 DOM 을 확보하고, 그걸 쓰라는 강한 hint 와 함께 재시도
+     (→ httpx 본문 대신 본문 API 를 쓰는 config, 또는 strategy=playwright_html 로 자동 전환을 유도).
+
 사용:
     python scripts/register.py "https://cse.skku.edu/cse/notice.do?mode=list&srCategoryId1=1582&srSearchKey=&srSearchVal="
     python scripts/register.py "<URL>" --out configs/my_board.json --max-attempts 4
     python scripts/register.py "<URL>" --reuse-probe          # probe 산출물 있으면 재사용
     python scripts/register.py "<URL>" --full-probe            # 처음부터 full probe
-    python scripts/register.py "<URL>" --no-escalate           # lite 실패해도 full probe 로 escalate 안 함
+    python scripts/register.py "<URL>" --no-escalate           # 어떤 escalation 도 안 함(lite→full, 글페이지 re-probe 둘 다)
 
 성공: configs/<slug>.json 저장 + output/poll_state/<slug>.json (baseline = 현재 글 post_id 집합).
-실패: output/poll_state/<slug>.FAILED.json + "자동 처리 불가 — 손으로 어댑터 작성 필요" 안내.
+실패: output/poll_state/<slug>.FAILED.json + "자동 처리 불가 — 손으로 config/어댑터 작성 필요" 안내.
 정책: LOGIN_REQUIRED / 접근 차단 사이트는 등록 거부. robots Disallow 면 경고만 띄우고 진행.
-필요: Gemini API 키 (GEMINI_API_KEYS / GEMINI_API_KEY env 또는 GEMINI_API_KEY.md 파일).
+필요: Gemini API 키 (GEMINI_API_KEYS / GEMINI_API_KEY env 또는 GEMINI_API_KEY.md 파일). 글페이지 re-probe 엔 playwright 필요.
 """
 from __future__ import annotations
 
@@ -21,6 +27,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -137,6 +144,97 @@ async def _generate(digest: dict, *, max_attempts: int, model):
     )
 
 
+def _gen(digest: dict, *, max_attempts: int, model):
+    """동기 래퍼 (asyncio.run)."""
+    return asyncio.run(_generate(digest, max_attempts=max_attempts, model=model))
+
+
+def _reprobe_article(slug: str, article_url: str) -> int:
+    """글 본문 페이지를 Playwright(+HAR)로 다시 받아 → article.html(렌더 DOM, digest 가 자동으로 더 큰 걸 씀) +
+    article_candidates.json(본문 JSON API 후보) 갱신. 발견한 본문 API 후보 개수 반환."""
+    out_dir = output_dir(slug)
+    try:
+        from probe.fetch_headless import fetch_with_capture, is_available
+        from probe.extract import traffic_article_body_candidates
+    except Exception as e:  # noqa: BLE001
+        print(f"[register]   글페이지 re-probe 모듈 import 실패: {e!r}")
+        (out_dir / "article_candidates.json").write_text("[]", encoding="utf-8")
+        return 0
+    if not is_available():
+        print("[register]   playwright 미설치 — 글페이지 render+HAR re-probe 불가 (FAILED 로 떨어질 수 있음)")
+        (out_dir / "article_candidates.json").write_text("[]", encoding="utf-8")
+        return 0
+    r = fetch_with_capture(url=article_url, out_dir=out_dir, target="article", headless=True)
+    print(f"[register]   article re-probe: status={r.status} {r.classification.value}  body={r.body_path}")
+    har = out_dir / "traffic.article.har"
+    if not har.exists():
+        har = out_dir / "traffic.har"
+    cands = traffic_article_body_candidates(har, article_url) if har.exists() else []
+    (out_dir / "article_candidates.json").write_text(json.dumps(cands, ensure_ascii=False, indent=2), encoding="utf-8")
+    for c in cands[:3]:
+        print(f"[register]     본문 API 후보: {c.get('method')} {c.get('url')}  body_field_path={c.get('body_field_path')} "
+              f"len={c.get('body_len')} html={c.get('body_looks_html')} url_id_match={c.get('url_id_match')}")
+    print(f"[register]   본문 JSON API 후보 {len(cands)}건")
+    return len(cands)
+
+
+def _generate_with_escalation(slug: str, url: Optional[str], digest: dict, *,
+                              max_attempts: int, model, no_escalate: bool, started_full: bool):
+    """generate → 실패 시 escalate: (1) lite probe 였으면 full probe 로 재시도, (2) 본문 추출 실패였으면
+    글페이지를 render+HAR 로 re-probe(본문 JSON API 후보/렌더 DOM 확보) 후 강한 hint 와 함께 재시도.
+    성공 (cfg, rep) 반환. 전부 실패 시 GenerationError(.last_config/.last_feedback) raise."""
+    used_full = started_full
+    last_cfg = None
+    last_fb = ""
+    try:
+        return _gen(digest, max_attempts=max_attempts, model=model)
+    except GenerationError as e:
+        last_cfg, last_fb = getattr(e, "last_config", None), getattr(e, "last_feedback", str(e))
+
+    # (1) lite → full probe
+    if (not no_escalate) and url and (not used_full):
+        print("[register] lite digest 로 실패 → full probe 로 escalate 재시도 ...")
+        _run_probe(url, lite=False)
+        digest = build_digest(slug=slug, url=url)
+        used_full = True
+        try:
+            return _gen(digest, max_attempts=max_attempts, model=model)
+        except GenerationError as e2:
+            last_cfg, last_fb = getattr(e2, "last_config", last_cfg), getattr(e2, "last_feedback", str(e2))
+
+    # (2) 본문 추출 실패 → 글페이지 render+HAR re-probe → 강한 hint 로 재시도
+    article_url = ((digest.get("article_sample") or {}).get("url")
+                   or (digest.get("list_candidates") or {}).get("first_article_url"))
+    # feedback_text() 가 하드 실패를 "  [FAIL] <check>: ..." 로 찍으므로 그 정확한 마커로만 매칭(LLM 텍스트 오탐 방지)
+    if (not no_escalate) and article_url and ("[FAIL] article_body_len" in (last_fb or "")):
+        print(f"[register] 글 본문 추출 실패 — 글페이지를 렌더링+트래픽 캡처로 re-probe 후 재시도: {article_url}")
+        n_api = _reprobe_article(slug, article_url)
+        digest = build_digest(slug=slug, url=url)
+        if n_api:
+            digest["escalation_hint"] = (
+                "이전 시도들이 글 본문을 못 얻었다(정적 HTML 의 본문이 비었거나 100자 미만 — SPA 추정). "
+                f"digest 의 article_sample.api_candidates 에 본문 JSON API 후보 {n_api}건이 있다. "
+                "그중 url_id_match=true·body_looks_html=true 인 걸 골라서: list/strategy 는 그대로 두고, "
+                "article.url_template = 그 후보의 url(거기 박힌 글 ID 숫자를 {post_id} 로 치환), article.fetch_kind = \"json\", "
+                "article.content = [{from:\"json\", path:<그 후보의 body_field_path 그대로>}]. "
+                "필요하면 그 후보의 request_headers 중 X-Requested-With / Referer 를 config 최상위 headers 에 추가하라.")
+        else:
+            digest["escalation_hint"] = (
+                "이전 시도들이 글 본문을 못 얻었다(정적 HTML 의 본문이 비었거나 100자 미만 — SPA 추정). 본문을 주는 JSON API 후보도 못 찾았다. "
+                "strategy 를 \"playwright_html\" 로 바꿔라(목록·본문 둘 다 브라우저로 렌더). "
+                "위 '글(본문) 페이지 HTML 샘플' 은 이제 렌더된 DOM 이니 거기서 본문 컨테이너 CSS selector 를 찾아 article.content 에 쓰고, "
+                "article.wait_selector(없으면 list.wait_selector)에 그 컨테이너(또는 목록 행) selector 를 넣어 렌더 완료를 기다리게 하라.")
+        try:
+            return _gen(digest, max_attempts=max_attempts, model=model)
+        except GenerationError as e3:
+            last_cfg, last_fb = getattr(e3, "last_config", last_cfg), getattr(e3, "last_feedback", str(e3))
+
+    err = GenerationError(f"자동 config 생성 실패 (escalation 포함). 마지막 피드백:\n{last_fb}")
+    err.last_config = last_cfg  # type: ignore[attr-defined]
+    err.last_feedback = last_fb  # type: ignore[attr-defined]
+    raise err
+
+
 def main(argv) -> int:
     p = argparse.ArgumentParser(description="사이트 등록 (URL → config + baseline)")
     p.add_argument("url", nargs="?", help="목록 URL")
@@ -207,32 +305,19 @@ def main(argv) -> int:
         out_path = out_path.with_suffix(out_path.suffix + ".new")
 
     print(f"[register] gemini 생성+검증 (모델={args.model or default_model()}, 최대 {args.max_attempts}회):")
-    used_full = args.full_probe
     try:
-        cfg, rep = asyncio.run(_generate(digest, max_attempts=args.max_attempts, model=args.model))
+        cfg, rep = _generate_with_escalation(
+            slug, url, digest,
+            max_attempts=args.max_attempts, model=args.model,
+            no_escalate=args.no_escalate, started_full=args.full_probe,
+        )
     except GenerationError as e:
-        last_cfg = getattr(e, "last_config", None)
-        last_fb = getattr(e, "last_feedback", str(e))
-        if (not args.no_escalate) and url and (not used_full):
-            print(f"[register] lite digest 로 실패 → full probe 로 escalate 재시도 ...")
-            _run_probe(url, lite=False)
-            digest = build_digest(slug=slug, url=url)
-            used_full = True
-            try:
-                cfg, rep = asyncio.run(_generate(digest, max_attempts=args.max_attempts, model=args.model))
-            except GenerationError as e2:
-                last_cfg = getattr(e2, "last_config", last_cfg)
-                last_fb = getattr(e2, "last_feedback", str(e2))
-                fp = _save_failed(slug, url, "gemini 생성+검증 실패 (lite+full 모두)", last_cfg, last_fb)
-                print(f"\n[register] ❌ 자동 처리 불가. → {fp}")
-                print("  손으로 어댑터를 작성해야 함. 가이드: docs/사이트 어댑터 추가 가이드.md")
-                print(f"  마지막 실패 사유:\n{last_fb}")
-                return 1
-        else:
-            fp = _save_failed(slug, url, "gemini 생성+검증 실패", last_cfg, last_fb)
-            print(f"\n[register] ❌ 자동 처리 불가. → {fp}")
-            print("  손으로 어댑터를 작성해야 함. 가이드: docs/사이트 어댑터 추가 가이드.md")
-            return 1
+        fp = _save_failed(slug, url, "gemini 생성+검증 실패 (lite→full→글페이지 re-probe 등 escalation 모두 소진)",
+                          getattr(e, "last_config", None), getattr(e, "last_feedback", str(e)))
+        print(f"\n[register] ❌ 자동 처리 불가. → {fp}")
+        print("  손으로 config/어댑터를 작성해야 함. 가이드: docs/사이트 어댑터 추가 가이드.md")
+        print(f"  마지막 실패 사유:\n{getattr(e, 'last_feedback', e)}")
+        return 1
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

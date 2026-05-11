@@ -33,7 +33,8 @@ config 는 "무엇을 어떻게 긁을지"만 정한다. polite delay / robots /
 ## strategy (택1)
 - "httpx_html"  : 정적 HTML 게시판. httpx GET → bs4 CSS select 로 행 추출. (digest 의 verdict 가 "정적 HTTP로 충분" 류이고 html_repeating_patterns 가 있으면 보통 이것.)
 - "httpx_json"  : JSON API 게시판. httpx GET → JSON 경로로 목록 배열 추출. (digest 의 list_candidates.traffic_json_api_candidates 가 있으면.)
-- "playwright_html" : JS 렌더 필요(Cloudflare 등). httpx_html 과 같은 필드 + wait_selector. (verdict 가 "JS 실행 필요" 류.)
+- "playwright_html" : JS 렌더 필요(Cloudflare 등 / SPA). httpx_html 과 같은 필드 + wait_selector. (verdict 가 "JS 실행 필요" 류, 또는 escalation_hint 가 시키면.)
+- ⚠ **목록은 정적 HTML 인데 *글 본문 페이지* 만 SPA(정적 HTML 에 본문이 비어있음)** 인 경우: strategy 는 "httpx_html" 그대로 두고, article.fetch_kind:"json" + article.url_template(글 본문 JSON API URL, 글 ID 자리는 {{post_id}}) + article.content:[{{from:"json", path:[...]}}] 로 *본문만* API 에서 받아라. 그런 API 후보(digest 의 article_sample.api_candidates)가 없으면 strategy 를 "playwright_html" 로 (목록·본문 둘 다 렌더, article.wait_selector 로 본문 컨테이너 대기).
 ※ 로그인 필요(LOGIN_REQUIRED)거나 차단(BLOCKED_*)이면 config 생성하지 말고 그렇게 알 수 있는 최소 config(예: 빈 fields)라도 만들지 말 것 — 대신 strategy 를 정해도 무방하나 본 시스템은 그런 사이트를 자동 등록하지 않는다.
 
 ## config 최상위 키
@@ -100,15 +101,18 @@ fetch_kind   : "html" | "json" (기본: list 의 strategy 계열)
 success_when : (json) payload 성공 체크
 data_path    : (json, 선택) 본문 객체까지의 경로. content/enrich/re_extract 는 이 객체 기준.
 content      : source dict 리스트. **반드시 위 "글(본문) 페이지 HTML 샘플" 에서 글 본문이 들어있는 *가장 작은* 컨테이너를 직접 찾아** 그 CSS selector 를 쓴다(사이트 헤더/푸터/사이드바/댓글 영역은 제외). 확신 없으면 후보 2~3개를 fallback chain 으로. HTML 이면 [{{from:"css", selector:"div.write_div", html:true}}, {{from:"css", selector:".article-body", html:true}}, ...]. JSON 이면 [{{from:"json", path:["contentHtml"]}}]. (본문이 100자 미만으로 나오면 selector 가 틀린 것 — 샘플 HTML 을 다시 봐라.)
+               ※ digest 에 "글 본문 JSON API 후보"(article_sample.api_candidates)가 있으면 그걸 써라: article.url_template = 후보의 url(거기 박힌 글 ID 숫자를 {{post_id}} 로 치환), article.fetch_kind = "json", article.content = [{{from:"json", path: <후보의 body_field_path 그대로>}}]. 필요하면 후보의 request_headers 중 X-Requested-With / Referer 를 config 최상위 headers 에 추가. 후보가 여러 개면 url_id_match=true · body_looks_html=true 인 걸 우선.
 skip_status  : (선택) [401,403] 처럼, 이 상태코드면 본문 비워서 반환(차단 우회 안 함).
 enrich       : (선택) {{title:[...], published_at:[...], ...}} — 현재 None/빈 값인 필드만 본문 페이지에서 보강.
 re_extract   : (선택, json) true 면 본문 payload(data)에서 list.fields 를 재추출해 None 아닌 값으로 덮어씀(엔드필드처럼 본문 API 가 목록 item 과 같은 형태일 때).
 
 ## digest 읽는 법
+- escalation_hint (있으면) → **이전 시도가 실패해서 주는 강한 지침. 반드시 따른다** (보통 strategy/article 을 바꾸라는 것).
 - verdict / recommended_strategy → strategy 선택의 1차 힌트.
 - list_candidates.html_repeating_patterns → row_selector 후보(글 목록인 걸 고른다). href_pattern_guess / sample_url 로 글 URL 형태 파악.
 - list_candidates.traffic_json_api_candidates → httpx_json 이면 그 URL 과 응답 구조 참고.
 - list_candidates.first_article_url → 본문 URL 패턴 + article.content selector 결정에 참고(article_sample.html 도 보고).
+- article_sample.api_candidates (있으면) → 글 본문이 SPA 라서 정적 HTML 에 없을 때 본문을 주는 JSON API 후보. article.url_template/fetch_kind/content 를 이걸로 채운다(위 article 키 설명 참고).
 - static_ok_request_headers / captured_headers → headers 에 User-Agent / Referer / Origin 등 채움.
 - robots.crawl_delay → 있으면 polite_sleep.min 을 그 값 이상으로.
 - hydration (있으면) → SPA. __NEXT_DATA__ 등에 글 목록이 들어 있으면 httpx_html 로 그 페이지를 받아 파싱하는 것보다, 거기 데이터를 쓰는 경로를 찾는 게 나을 수 있음(이 경우는 보통 손으로 짜야 하니 자신 없으면 평범하게 row_selector 로).
@@ -136,14 +140,29 @@ def build_user_prompt(digest: dict, *, max_html_chars: int = 120_000) -> str:
     d = dict(digest)
     list_html = ((d.pop("list_html", {}) or {}))
     article = ((d.pop("article_sample", {}) or {}))
+    api_cands = article.get("api_candidates") or []
+    eh = d.pop("escalation_hint", None)  # 위 ⚠ 블록으로만 보여줌(meta JSON 중복 X)
+    if eh:
+        d["escalation_hint"] = "(위 '⚠ 재시도 지침' 블록 참고)"
     lh = (list_html.get("html") or "")[:max_html_chars]
     ah = (article.get("html") or "")[:max_html_chars]
 
     meta = json.dumps(d, ensure_ascii=False, indent=2)
     examples = _load_examples()
 
-    return f"""아래는 사용자가 모니터링하고 싶은 게시판의 probe digest 다.
+    eh_block = f"\n## ⚠ 재시도 지침 (이전 시도가 실패함 — 반드시 따를 것)\n{eh}\n" if eh else ""
+    api_block = ""
+    if api_cands:
+        api_block = (
+            "\n## ⚡ 글 본문 JSON API 후보 (글 페이지가 SPA 라서 정적 HTML 본문이 비어있음 — 이 API 로 본문을 받아라)\n"
+            "```json\n" + json.dumps(api_cands, ensure_ascii=False, indent=2) + "\n```\n"
+            "→ article.url_template = 후보 url 의 글 ID 숫자를 {{post_id}} 로 치환한 것, article.fetch_kind=\"json\", "
+            "article.content=[{{from:\"json\", path:<후보의 body_field_path 그대로>}}]. 필요하면 후보의 request_headers 중 "
+            "X-Requested-With/Referer 를 config 최상위 headers 에 추가. 여러 개면 url_id_match=true·body_looks_html=true 우선.\n"
+        )
 
+    return f"""아래는 사용자가 모니터링하고 싶은 게시판의 probe digest 다.
+{eh_block}
 ## digest 메타데이터 (verdict / 후보 / 헤더 / robots / hydration 등)
 ```json
 {meta}
@@ -158,7 +177,7 @@ def build_user_prompt(digest: dict, *, max_html_chars: int = 120_000) -> str:
 ```html
 {ah}
 ```
-
+{api_block}
 ## 참고용 예제 config (다른 사이트들 — 형식만 참고)
 {examples}
 
@@ -187,7 +206,7 @@ def build_retry_prompt(digest: dict, prev_config: dict, feedback_text: str, *, m
 ### 수정 힌트
 - post_id 가 안정적 ID 모양이 아니면(공백 등) — title 을 post_id 로 쓴 게 아닌지 확인. post_id 는 URL/href 안의 숫자 ID 같은 걸 써라.
 - published_at ISO8601 파싱 실패 — 날짜 문자열 형식을 먼저 맞춰라. "2026.04.17" 면 `["replace",".","-"]` 후 `["date_only_to_iso","+09:00"]`, 또는 `["iso8601",["%Y.%m.%d"],"+09:00"]`.
-- 본문 0자 / <100자 — article.content 의 selector 가 틀린 것. 위 "글 페이지 HTML 샘플" 에서 본문 컨테이너를 다시 찾아라.
-- 0건 — row_selector(httpx_html) 또는 list_path(httpx_json) 가 잘못됐다. 위 HTML / list_candidates 를 다시 봐라. SPA 라서 정적 HTML 에 글이 없으면, 이 사이트는 자동 config 로 안 될 수 있다(그래도 최선을 다해 시도).
+- 본문 0자 / <100자 — article.content 의 selector 가 틀린 것. 위 "글 페이지 HTML 샘플" 에서 본문 컨테이너를 다시 찾아라. **글 본문이 정적 HTML 에 통째로 없으면(SPA): (a) digest 의 "글 본문 JSON API 후보"(article_sample.api_candidates)가 있으면 article 을 그 API 로 — fetch_kind:"json" + url_template + content:[{{from:"json", path:<body_field_path>}}]. (b) 없으면 strategy 를 "playwright_html" 로 바꾸고 article.wait_selector(없으면 list.wait_selector)에 본문/목록 컨테이너 CSS selector 를 넣어 렌더 완료를 기다려라.**
+- 0건 — row_selector(httpx_html) 또는 list_path(httpx_json) 가 잘못됐다. 위 HTML / list_candidates 를 다시 봐라. SPA 라서 정적 HTML 에 글 목록이 없으면 strategy 를 "playwright_html" 로 바꾸고 list.wait_selector 로 목록이 그려질 때까지 기다려라.
 
 수정된 config JSON 하나만 출력하라. 다른 텍스트 없이."""

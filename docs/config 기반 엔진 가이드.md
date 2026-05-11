@@ -10,8 +10,10 @@
   → digest 구성 (engine/digest.py — 정제 HTML + probe 후보 + 통과 헤더 + hydration)
   → Gemini 가 config JSON 작성 (generate/) — structured(JSON) 출력
   → 엔진이 config 실행 + 자동 검증 (3층위) — 실패하면 피드백 주고 재생성 (≤4회, 2라운드부터 사실상 partial regen)
+     → 그래도 실패면 escalate: ① lite probe 였으면 full probe 로 다시 → 재시도. ② 글 *본문* 추출 실패였으면
+        글페이지를 Playwright+HAR 로 re-probe(본문 JSON API 후보 / 렌더된 DOM 확보) → "본문 API 를 써라 / 안 되면 strategy=playwright_html" hint 와 함께 재시도.
   → 통과: configs/<name>.json 저장 + output/poll_state/<slug>.json (baseline = 현재 글 집합)
-     실패: <slug>.FAILED.json + "손으로 어댑터 작성 필요" 안내 (→ docs/사이트 어댑터 추가 가이드.md)
+     실패: <slug>.FAILED.json + "손으로 config/어댑터 작성 필요" 안내 (→ docs/사이트 어댑터 추가 가이드.md)
   → 매 폴링(scripts/poll.py): config 실행 → post_id diff 로 새 글 감지 → output/collected/<ts>/ 에 기록
      → 깨짐 신호(에러 / 0건인데 페이지엔 글 있음 / post_id·title 급변) 연속 2회 → 자동 재-probe + 재생성
 ```
@@ -177,7 +179,12 @@ python scripts/demo_config.py --check-all
 - **층위 1 (하드 — 실패하면 재생성)**: `fetch_list` 동작 / ≥1건 / `post_id` 유니크·비어있지않음·안정적 모양(공백 없는 짧은 ID) / `title` 비어있지않음 / `published_at`(있으면) ISO8601 파싱 / 첫 글 `fetch_article` 본문 ≥100자 (또는 첫 글들이 전부 `skip_status` 면 보류)
 - **층위 2 (소프트 — 경고만)**: 생성 목록의 글 URL 이 probe 의 `first_article_url` 과 관련 있나 / 건수가 probe 후보 child_count 와 같은 ballpark 인가
 
-`generate/generator.py:generate_config_validated` 가 이걸 ≤`max_attempts`(기본 4) 회 돌린다. 1라운드는 새 프롬프트, 2라운드부터는 "이전 config + 무엇이 FAIL 했나 + 실제 추출된 글들 + 수정 힌트" 를 주고 *수정* 요청(=사실상 partial regen). 전부 실패하면 `register.py` 가 lite→full probe escalate 후 다시 시도, 그래도 실패면 `<slug>.FAILED.json` + "손으로 어댑터 작성" 안내.
+`generate/generator.py:generate_config_validated` 가 이걸 ≤`max_attempts`(기본 4) 회 돌린다. 1라운드는 새 프롬프트, 2라운드부터는 "이전 config + 무엇이 FAIL 했나 + 실제 추출된 글들 + 수정 힌트" 를 주고 *수정* 요청(=사실상 partial regen).
+
+전부 실패하면 `register.py:_generate_with_escalation` 가 단계별로 escalate:
+1. **lite→full probe**: lite probe 로 시작했으면 full probe 로 다시 정찰하고(HAR·렌더 DOM 더 확보) 재시도.
+2. **글페이지 render+HAR re-probe** (`article_body_len` 실패였을 때만): `first_article_url` 을 Playwright 로 다시 열어 `article.html`(렌더된 DOM, digest 가 자동으로 더 큰 쪽을 글 샘플로 씀) + `output/probe/<slug>/article_candidates.json`(본문을 담은 JSON XHR 후보 — `probe/extract.py:traffic_article_body_candidates`)를 만들고, digest 에 `escalation_hint`(본문 API 후보가 있으면 "article.url_template+fetch_kind:json+content from:json 로 그 API 를 써라", 없으면 "strategy 를 playwright_html 로 바꿔라")를 넣어 한 라운드 더 재시도.
+3. 그래도 실패면 `<slug>.FAILED.json` + "손으로 config/어댑터 작성" 안내. (`--no-escalate` 면 1·2 다 생략. 2 엔 playwright 필요.)
 
 ---
 
@@ -196,7 +203,7 @@ python scripts/demo_config.py --check-all
 - **로그인 필요(LOGIN_REQUIRED)** — 이번 단계 범위 밖. `register.py` 가 거부. (로그인은 사용자가 한 번 수동으로; `playwright_html` 의 `storage_state_path` 로 재사용은 가능하나 자동 생성은 안 함.)
 - **차단(BLOCKED_BOT/IP/GEO)으로 정적·headless 둘 다 실패** — `register.py` 가 거부. 차단 우회는 자동 경로에서 일절 안 함.
 - **Cloudflare 챌린지가 강한 사이트(arca.live 등)** — `playwright_html` 의 기본 렌더로는 부족할 수 있음. `handwritten` strategy(`ArcaLiveAdapter` 처럼 playwright-stealth 쓰는 손어댑터)로 감싸서 `register.py --config` 로 등록.
-- **데이터가 클릭/스크롤 후에야 로드되는 SPA** — lite probe 의 HAR 에 안 잡히면 digest 가 부족. full probe escalate 로도 안 되면 손어댑터.
+- **데이터가 JS 로딩되는 SPA (목록 또는 글 본문)** — register.py 가 자동으로 시도함: 글 본문이 SPA 면 글페이지를 render+HAR 로 re-probe 해서 (a) 본문을 주는 JSON XHR 이 있으면 `article.fetch_kind:"json"` config, (b) 없으면 `strategy:"playwright_html"` 로 전환. 클릭/스크롤 후에야 뜨는(networkidle 만으론 안 잡히는) 데이터거나 Cloudflare 챌린지가 강하면(arca 등) 손어댑터(`handwritten`).
 
 ---
 
