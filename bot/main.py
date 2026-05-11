@@ -350,6 +350,19 @@ async def on_error(event_method: str, *args, **kwargs):
 
 
 @client.event
+async def on_guild_join(guild: "discord.Guild"):
+    log.info("joined guild %s (%s)", guild.id, getattr(guild, "name", "?"))
+    if guild_id():
+        return  # GUILD_ID 고정 모드면 거기만 씀
+    try:
+        tree.copy_global_to(guild=guild)
+        synced = await tree.sync(guild=guild)
+        log.info("synced %d commands to new guild %s", len(synced), guild.id)
+    except Exception as e:  # noqa: BLE001
+        log.warning("new guild %s sync 실패: %r", guild.id, e)
+
+
+@client.event
 async def on_ready():
     log.info("logged in as %s (id=%s); guilds=%s", client.user,
              client.user.id if client.user else "?", [g.id for g in client.guilds])
