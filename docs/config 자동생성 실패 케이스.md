@@ -3,7 +3,7 @@
 `register.py` (URL → probe → digest → Gemini → config + 검증, 실패 시 escalate)가 **자동으로 config 를 못 만드는** 경우들 정리.
 새 사이트를 `/watch` 했는데 안 됐거나 `output/poll_state/<slug>.FAILED.json` 이 생겼을 때, *어떤 종류의 실패인지 알아보고 → 무엇을 해야 하는지* 찾는 용도.
 
-관련 문서: 코드 구조·검증 3층위 = `config 기반 엔진 가이드.md` / 손어댑터 작성 = `사이트 어댑터 추가 가이드.md` / 차단 우회 = `차단 우회 기술 조사 (TLS fingerprint, DPI).md` / 배포·운영 = `운영 메모.md`.
+관련 문서: **각 사이트별로 실제 실패했던 원인·해결 기록** = `사이트별 등록 시도 기록.md` (이 문서는 *분류*, 그건 *사례 로그*) / 코드 구조·검증 3층위 = `config 기반 엔진 가이드.md` / 손어댑터 작성 = `사이트 어댑터 추가 가이드.md` / 차단 우회 = `차단 우회 기술 조사 (TLS fingerprint, DPI).md` / 배포·운영 = `운영 메모.md`.
 
 ---
 
