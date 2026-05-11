@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "site": "m.cafe.daum.net",
+  "board": "Z4os",
+  "strategy": "handwritten",
+  "adapter": "DaumCafeAdapter",
+  "kwargs": { "cafe_name": "umamusume-kor", "board_id": "Z4os" },
+  "_source_url": "https://m.cafe.daum.net/umamusume-kor/Z4os?boardType=",
+  "_note": "다음카페 모바일(우마무스메 공지). 글 목록이 페이지 인라인 JS(var articles=[]; articles.push({dataid,title,...}))로만 옴 — 정적 HTML 의 <li> 는 href='javascript:' 라 자동 파이프라인이 post_id/url 추출 불가. 본문은 div#article 정적 HTML. 손어댑터 DaumCafeAdapter 가 그 JS 블록 regex 파싱 + 본문 fetch."
+}
