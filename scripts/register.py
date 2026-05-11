@@ -139,6 +139,66 @@ def _attempt_logger(i, cfg, rep, ok, msg):
     print(f"  시도 {i}: {'PASS' if ok else 'FAIL'} — {msg}")
 
 
+def _list_sites(csv_path: Optional[str]) -> int:
+    """등록 사이트 현황 = output/poll_state/<slug>.json (사이트당 1파일) + 구독 수(bot.sqlite3).
+    레지스트리는 여기지 문서가 아님. --csv 면 그 경로(기본 output/registered_sites.csv)에도 씀."""
+    sub_count: dict[str, int] = {}
+    try:
+        from bot import db as _db  # noqa: PLC0415
+        conn = _db.connect()
+        for r in conn.execute("SELECT slug, COUNT(*) FROM subscriptions GROUP BY slug").fetchall():
+            sub_count[r[0]] = r[1]
+        conn.close()
+    except Exception:  # noqa: BLE001  bot.sqlite3 없으면 그냥 구독 0
+        pass
+    rows: list[dict] = []
+    if STATE_DIR.exists():
+        for p in sorted(STATE_DIR.glob("*.json")):
+            failed = p.name.endswith(".FAILED.json")
+            try:
+                st = json.loads(p.read_text(encoding="utf-8"))
+            except Exception:  # noqa: BLE001
+                continue
+            slug = st.get("slug") or (p.name[:-len(".FAILED.json")] if failed else p.stem)
+            cfgp = st.get("config_path") or ""
+            strategy = ""
+            if cfgp and Path(cfgp).exists():
+                try:
+                    strategy = json.loads(Path(cfgp).read_text(encoding="utf-8")).get("strategy", "")
+                except Exception:  # noqa: BLE001
+                    pass
+            rows.append({
+                "slug": slug, "url": st.get("url", ""), "strategy": strategy,
+                "baseline": st.get("n_baseline", ""), "last_poll": st.get("last_poll_at") or "",
+                "status": ("FAILED" if failed else (st.get("last_status") or "")),
+                "breakage": st.get("consecutive_breakage", 0),
+                "subscribers": sub_count.get(slug, 0), "config": cfgp,
+            })
+    if not rows:
+        print("(등록된 사이트 없음 — output/poll_state/ 비어있음)")
+        return 0
+    rows.sort(key=lambda r: (r["status"] == "FAILED", r["slug"]))
+    w_slug = max(len("slug"), max(len(r["slug"]) for r in rows))
+    w_strat = max(len("strategy"), max(len(str(r["strategy"])) for r in rows))
+    print(f"{'slug':<{w_slug}}  {'strategy':<{w_strat}}  {'base':>5}  {'subs':>4}  {'status':<10}  url")
+    for r in rows:
+        print(f"{r['slug']:<{w_slug}}  {str(r['strategy']):<{w_strat}}  {str(r['baseline']):>5}  "
+              f"{str(r['subscribers']):>4}  {str(r['status']):<10}  {r['url']}")
+    print(f"\n총 {len(rows)}건 (FAILED 포함). 레지스트리: {STATE_DIR}/  ·  구독: output/bot.sqlite3")
+    if csv_path:
+        import csv as _csv  # noqa: PLC0415
+        cp = Path(csv_path)
+        cp.parent.mkdir(parents=True, exist_ok=True)
+        with cp.open("w", newline="", encoding="utf-8") as f:
+            wr = _csv.DictWriter(f, fieldnames=["slug", "url", "strategy", "baseline", "last_poll",
+                                                "status", "breakage", "subscribers", "config"])
+            wr.writeheader()
+            for r in rows:
+                wr.writerow(r)
+        print(f"→ CSV: {cp}")
+    return 0
+
+
 async def _generate(digest: dict, *, max_attempts: int, model):
     return await generate_config_validated(
         digest, model=model, max_attempts=max_attempts, fetch_articles=1, on_attempt=_attempt_logger,
@@ -276,10 +336,13 @@ def _generate_with_escalation(slug: str, url: Optional[str], digest: dict, *,
 
 
 def main(argv) -> int:
-    p = argparse.ArgumentParser(description="사이트 등록 (URL → config + baseline)")
+    p = argparse.ArgumentParser(description="사이트 등록 (URL → config + baseline). --list 로 등록 현황 조회.")
     p.add_argument("url", nargs="?", help="목록 URL")
     p.add_argument("--slug", help="이미 probe 한 slug (url 대신; 그땐 probe 안 돌림)")
     p.add_argument("--config", help="이미 작성된 config 파일을 그대로 등록(probe/gemini 생략 — 손으로 짠 config / handwritten strategy 용). fetch_list 로 baseline 만 잡음.")
+    p.add_argument("--list", action="store_true", help="등록된 사이트 현황을 표로 출력하고 종료 (output/poll_state/ + bot.sqlite3 기준)")
+    p.add_argument("--csv", nargs="?", const=str(ROOT / "output" / "registered_sites.csv"),
+                   help="--list 와 함께: 사이트 목록을 CSV 로도 저장 (값 생략 시 output/registered_sites.csv)")
     p.add_argument("--out", help="config 저장 경로 (기본: configs/<slug>.json)")
     p.add_argument("--max-attempts", type=int, default=4, help="gemini 재시도 횟수")
     p.add_argument("--reuse-probe", action="store_true", help="probe 산출물 있으면 재사용")
@@ -288,8 +351,12 @@ def main(argv) -> int:
     p.add_argument("--model", help="Gemini 모델 (기본 GEMINI_MODEL env 또는 gemini-2.5-flash)")
     p.add_argument("--force", action="store_true", help="기존 config 가 있어도 덮어씀")
     args = p.parse_args(argv)
+
+    if args.list:
+        return _list_sites(args.csv)
+
     if not args.url and not args.slug and not args.config:
-        p.error("url / --slug / --config 중 하나 필요")
+        p.error("url / --slug / --config / --list 중 하나 필요")
 
     # --- --config 모드: 이미 작성된 config 를 그대로 등록 (probe/gemini 생략) ---
     if args.config:
