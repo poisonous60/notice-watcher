@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "site": "cafe.naver.com",
+  "board": "cafe30291108/menu6",
+  "strategy": "handwritten",
+  "adapter": "NaverCafeAdapter",
+  "kwargs": {"cafe_id": 30291108, "menu_id": 6, "include_notices": true, "timeout": 15.0},
+  "_source_url": "https://cafe.naver.com/f-e/cafes/30291108/menus/6?viewType=L",
+  "_note": "네이버 카페 목록은 정적 HTML 에 글 행이 없고 내부 JSON API(apis.naver.com/cafe-web/...)로 렌더됨 → 자동 config(httpx_html)는 posts_nonempty 0건으로 실패. 손으로 짠 NaverCafeAdapter(목록/공지/본문 JSON API 직접 호출)를 handwritten strategy 로 감쌈. cafe_id/menu_id 는 URL 의 cafes/{id}/menus/{id} 에서. 비공개·등급제한 게시판이면 본문 API 가 401/403 → 어댑터가 본문 비워서 반환(우회 안 함). 그런 경우 storage_state 로그인 필요."
+}

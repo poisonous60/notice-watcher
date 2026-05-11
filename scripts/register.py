@@ -373,13 +373,8 @@ def main(argv) -> int:
         posts = asyncio.run(_baseline())
         post_ids = [str(p.post_id) for p in posts]
         url0 = cfg.get("_source_url") or ((cfg.get("list") or {}).get("url_template") or "").format(board=cfg.get("board", ""))
-        STATE_DIR.mkdir(parents=True, exist_ok=True)
-        sp = STATE_DIR / f"{stem}.json"
-        sp.write_text(json.dumps({
-            "slug": stem, "url": url0, "config_path": str(cfg_path),
-            "registered_at": _now_iso(), "last_poll_at": None, "last_status": "registered",
-            "consecutive_breakage": 0, "n_baseline": len(post_ids), "seen_post_ids": post_ids,
-        }, ensure_ascii=False, indent=2), encoding="utf-8")
+        # _save_state 가 같은 slug 의 .FAILED.json 마커도 치워 줌 (안 그러면 봇 _is_registered 가 계속 False).
+        sp = _save_state(stem, url0, cfg_path, post_ids)
         print(f"[register --config] ✅ 등록 완료 — baseline {len(post_ids)}건, state={sp}")
         for p in posts[:3]:
             print(f"    {p.post_id}  {p.published_at}  {(p.title or '')[:60]}")
