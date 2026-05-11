@@ -41,6 +41,7 @@ from generate import GeminiClient, GeminiError  # noqa: E402
 
 CONFIGS_DIR = ROOT / "configs"
 STATE_DIR = ROOT / "output" / "poll_state"
+TRIAGE_QUEUE = ROOT / "output" / "triage_queue.jsonl"  # 자동 등록 실패한 /preview·/watch 기록 (scripts/triage.py 가 읽음)
 REGISTER_PY = ROOT / "scripts" / "register.py"
 PY = sys.executable
 
@@ -155,8 +156,23 @@ def _blocking_register(url: str) -> tuple[int, str]:
         return -3, f"register.py 실행 중 예외: {e!r}"
 
 
-async def _ensure_registered(url: str) -> tuple[bool, str, str]:
-    """등록돼 있으면 그대로, 아니면 register.py 실행. 반환 (ok, slug, msg)."""
+def _append_triage_queue(url: str, slug: str, via: str, requested_by: Optional[dict], note: str) -> None:
+    """자동 등록 실패를 output/triage_queue.jsonl 에 한 줄 append.
+    나중에 dev박스에서 `python scripts/triage.py pull/list` 로 보고 hand-config 스킬로 처리한다.
+    (register.py 가 쓰는 <slug>.FAILED.json 에 [FAIL] 사유·last_config 가 있고, 이쪽은 누가/어떤 명령으로 실패했는지.)"""
+    try:
+        TRIAGE_QUEUE.parent.mkdir(parents=True, exist_ok=True)
+        rec = {"ts": _now_iso(), "url": url, "slug": slug, "via": via,
+               "requested_by": requested_by or {}, "register_tail": (note or "")[-2000:]}
+        with TRIAGE_QUEUE.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except Exception as e:  # noqa: BLE001
+        log.warning("triage_queue 기록 실패 (%s): %r", slug, e)
+
+
+async def _ensure_registered(url: str, *, via: str = "?", requested_by: Optional[dict] = None) -> tuple[bool, str, str]:
+    """등록돼 있으면 그대로, 아니면 register.py 실행. 반환 (ok, slug, msg).
+    via/requested_by 는 실패 시 triage_queue.jsonl 에 남길 맥락(어떤 명령/누가)."""
     slug = url_to_slug(url)
     if _is_registered(slug):
         return True, slug, "이미 등록됨"
@@ -166,9 +182,11 @@ async def _ensure_registered(url: str) -> tuple[bool, str, str]:
     if rc == -1:
         return False, slug, "다른 작업이 크롤러를 쓰는 중입니다. 잠시 후 다시 시도해 주세요."
     if rc == -2:
+        _append_triage_queue(url, slug, via, requested_by, "TIMEOUT — register.py 10분 초과")
         return False, slug, "사이트 분석 시간 초과(10분) — 너무 느리거나 막힌 사이트일 수 있습니다."
     # 그 외: 자동 등록 실패
     tail = "\n".join((out or "").strip().splitlines()[-6:])
+    _append_triage_queue(url, slug, via, requested_by, tail)
     return False, slug, ("이 사이트는 자동 등록이 안 됩니다 — 손어댑터가 필요합니다 "
                          "(docs/사이트 어댑터 추가 가이드.md).\n```\n" + tail + "\n```")
 
@@ -252,7 +270,9 @@ async def watch(interaction: discord.Interaction, url: str, filter: Optional[str
         return
 
     await interaction.edit_original_response(content="⏳ 사이트 분석 중… (처음 보는 사이트면 수 분 걸릴 수 있어요)")
-    ok, slug, msg = await _ensure_registered(url.strip())
+    ok, slug, msg = await _ensure_registered(
+        url.strip(), via="watch",
+        requested_by={"id": str(interaction.user.id), "name": str(interaction.user)})
     if not ok:
         await interaction.edit_original_response(content=f"⚠️ {msg}")
         return
@@ -289,7 +309,9 @@ async def preview(interaction: discord.Interaction, url: str):
     slug = url_to_slug(url.strip())
     if not _is_registered(slug):
         await interaction.edit_original_response(content="⏳ config 생성 중… (이 사이트는 처음이라 수 분 걸려요)")
-        ok, slug, msg = await _ensure_registered(url.strip())
+        ok, slug, msg = await _ensure_registered(
+            url.strip(), via="preview",
+            requested_by={"id": str(interaction.user.id), "name": str(interaction.user)})
         if not ok:
             await interaction.edit_original_response(content=f"⚠️ {msg}")
             return

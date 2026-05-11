@@ -52,6 +52,7 @@ crwalingTest/
 ├── scripts/                    # CLI 진입점
 │   ├── probe.py                # python scripts/probe.py "<URL>" [--lite]
 │   ├── register.py             # URL → probe → digest → gemini → config + baseline   (또는 --config <path> 로 손작성 config 등록)
+│   ├── triage.py               # 봇(N100)에서 자동 등록 실패한 사이트 모아오기: pull|list|show <slug> → 손 config 처리 (skill: hand-config)
 │   ├── poll.py                 # 등록된 사이트 폴링 + 새 글 감지 + 깨짐 시 재-probe
 │   ├── notify.py               # collected/<ts>/<slug>.new.json → Gemini 요약 → Discord 발송 (Phase1: webhook + delivered.json)
 │   ├── poll_and_notify.py      # poll.py → notify.py 한 번에 (systemd 가 실행) — chromium 락 안에서
@@ -61,11 +62,13 @@ crwalingTest/
 │   ├── demo_config.py          # config 검증/실행/원본 산출물 비교
 │   ├── gate_check.py / verify_m1.py / demo_*.py   # (개발용)
 │
+├── .claude/skills/hand-config/ # ← 스킬: 링크 → 손 config 작성·등록·N100 배포 / 실패한 preview triage 워크플로우
 ├── experiments/ · reference/
 ├── output/                     # 모든 산출물 (gitignore)
 │   ├── probe/<slug>/           # probe 결과 (HAR/HTML/summary/list_candidates...)
 │   ├── adapter/<site>/         # 어댑터 데모 결과
 │   ├── poll_state/<slug>.json  # 등록 상태 + 본 글 post_id 집합 + 깨짐 카운터 (.FAILED.json = 자동등록 실패)
+│   ├── triage_queue.jsonl      # 봇이 자동등록 실패한 /preview·/watch 한 줄씩 기록 (scripts/triage.py 가 읽음)
 │   ├── collected/<ts>/         # 폴링 결과 (summary.txt + <slug>.new.json)
 │   └── state/<slug>.json       # 로그인 storage_state
 │

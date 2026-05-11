@@ -118,11 +118,38 @@ def _save_state(slug: str, url: str, config_path: Path, post_ids: list[str]) -> 
         "n_baseline": len(post_ids),
         "seen_post_ids": post_ids,
     }, ensure_ascii=False, indent=2), encoding="utf-8")
-    # 등록과 동시에 FAILED 마커가 남아있으면 제거
+    # 등록과 동시에 FAILED 마커 / triage 큐 항목이 남아있으면 제거
     fp = STATE_DIR / f"{slug}.FAILED.json"
     if fp.exists():
         fp.unlink()
+    _prune_triage_queue(slug)
     return p
+
+
+def _prune_triage_queue(slug: str) -> None:
+    """봇이 쌓는 output/triage_queue.jsonl 에서 이 slug 항목 제거 (등록되면 더 이상 triage 대상 아님)."""
+    q = ROOT / "output" / "triage_queue.jsonl"
+    if not q.exists():
+        return
+    try:
+        kept: list[str] = []
+        for line in q.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                kept.append(line)
+                continue
+            if rec.get("slug") != slug:
+                kept.append(line)
+        if kept:
+            q.write_text("\n".join(kept) + "\n", encoding="utf-8")
+        else:
+            q.unlink()
+    except OSError:
+        pass
 
 
 def _save_failed(slug: str, url: str, reason: str, last_config, last_feedback: str) -> Path:

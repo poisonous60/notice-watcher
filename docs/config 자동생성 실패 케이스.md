@@ -9,7 +9,10 @@
 
 ## 0. 어디서 실패 정보를 보나
 
+> 봇에서 사용자가 `/preview`·`/watch` 했다 실패한 건들을 **한 번에 모아 처리**하려면: dev박스에서 `python scripts/triage.py pull` (N100 의 `*.FAILED.json` + `output/triage_queue.jsonl` + 각 실패 slug 의 probe 산출물을 가져옴) → `triage.py list` → `triage.py show <slug>` → `hand-config` 스킬 절차로 사이트별 처리(probe 수정 or 손 config/손어댑터 → `register.py --config` → N100 배포). 등록되면 그 흔적은 `register.py` 의 `_save_state` 가 자동 정리.
+
 - **`output/poll_state/<slug>.FAILED.json`** — 자동 등록 실패 마커. `{slug, url, failed_at, reason, last_config, last_feedback}`. `last_feedback` 에 *마지막 검증 결과*(어떤 체크가 FAIL 했나 + 실제 추출된 글들 + 본문 길이)가 들어있음 — **여기를 먼저 봐라**.
+- **`output/triage_queue.jsonl`** — 봇이 `/preview`·`/watch` 자동 등록 실패 때마다 append: `{ts, url, slug, via, requested_by, register_tail}` — *누가 어떤 명령으로* 실패시켰는지(요청자에게 다시 알릴 때 쓸 맥락).
 - **봇 로그** (`/watch`·`/preview` 로 등록 시도한 경우): `journalctl --user-unit notice-bot.service -f | grep --line-buffered '\[register\]'` — probe 단계·gemini 시도별 PASS/FAIL·escalation 진행이 다 흐름.
 - **`register.py --list`** — 등록 현황(`status` 컬럼에 `FAILED` 면 그 사이트).
 - **probe 산출물** `output/probe/<slug>/` — `diagnosis.json`(verdict), `list_candidates.json`(row 후보·JSON API 후보·first_article_url), `list.html`/`article.html`(정제 전 HTML), `traffic*.har`(네트워크), `article_candidates.json`(escalation 의 글 본문 API 후보).
