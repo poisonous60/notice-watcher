@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "site": "arca.live",
+  "board": "akendfield",
+  "strategy": "handwritten",
+  "adapter": "ArcaLiveAdapter",
+  "kwargs": {"channel": "akendfield", "include_notices": true, "category": "공식"},
+  "_source_url": "https://arca.live/b/akendfield",
+  "_note": "Cloudflare 보호 + JS 렌더 → 자동 config(playwright_html)로는 CF 챌린지 처리 부족. 손으로 짠 ArcaLiveAdapter(playwright-stealth) 사용. handwritten strategy 라 엔진/poll.py 는 다른 config 와 동일하게 취급."
+}

@@ -1,0 +1,151 @@
+{
+  "version": 1,
+  "site": "gall.dcinside.com",
+  "board": "endfield",
+  "strategy": "httpx_html",
+  "headers": {
+    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "referer": "https://gall.dcinside.com/mgallery/board/lists/?id=endfield",
+    "accept-language": "ko-KR,ko;q=0.9"
+  },
+  "timeout": 15.0,
+  "polite_sleep": {
+    "min": 30.0,
+    "max": 35.0
+  },
+  "list": {
+    "url_template": "https://gall.dcinside.com/mgallery/board/lists/?id={board}",
+    "pagination": {
+      "kind": "query_param",
+      "page_param": "page"
+    },
+    "row_selector": "tbody.listwrap2 > tr.ub-content",
+    "row_required_selector": "td.gall_num",
+    "include_notices": true,
+    "notice_class_absent": "us-post",
+    "fields": {
+      "post_id": [
+        {
+          "from": "css",
+          "selector": "td.gall_num",
+          "text": true,
+          "match": "^\\d+$"
+        },
+        {
+          "from": "attr",
+          "selector": "td.gall_tit a",
+          "attr": "href",
+          "transform": [
+            [
+              "regex_extract",
+              "no=(\\d+)"
+            ]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "css",
+          "selector": "td.gall_subject",
+          "text": true
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "td.gall_tit a",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "td.gall_tit a",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://gall.dcinside.com"
+            ]
+          ]
+        }
+      ],
+      "author": [
+        {
+          "from": "css",
+          "selector": "td.gall_writer",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "td.gall_date",
+          "attr": "title",
+          "match": "^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$",
+          "transform": [
+            [
+              "replace",
+              " ",
+              "T"
+            ],
+            [
+              "append",
+              "+09:00"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "div.write_div",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "div.writing_view_box",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "span.title_subject",
+          "text": true
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "span.gall_date",
+          "text": true,
+          "transform": [
+            [
+              "iso8601",
+              [
+                "%Y.%m.%d %H:%M:%S"
+              ],
+              "+09:00"
+            ]
+          ]
+        }
+      ]
+    }
+  }
+}

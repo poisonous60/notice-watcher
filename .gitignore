@@ -1,0 +1,9 @@
+output/
+__pycache__/
+*.pyc
+.venv/
+.env
+GEMINI_API_KEY.md
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm

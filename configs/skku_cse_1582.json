@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "site": "cse.skku.edu",
+  "board": "1582",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8"
+  },
+  "timeout": 15.0,
+  "list": {
+    "url_template": "https://cse.skku.edu/cse/notice.do?mode=list&srCategoryId1={board}&srSearchKey=&srSearchVal=",
+    "pagination": {"kind": "offset", "offset_param": "article.offset", "page_unit": 10, "extra_params_when_paged": {"articleLimit": "10"}},
+    "row_selector": "ul.board-list-wrap > li",
+    "row_required_selector": "dt.board-list-content-title",
+    "include_notices": true,
+    "fields": {
+      "post_id": [{"from": "attr", "selector": "dt.board-list-content-title a", "attr": "href", "transform": [["regex_extract", "[?&]articleNo=(\\d+)"]]}],
+      "category": [{"from": "css", "selector": "dt.board-list-content-title span.c-board-list-category", "text": true, "transform": [["collapse_ws"], ["strip_brackets"]]}],
+      "title": [
+        {"from": "concat", "parts": [
+          {"const": "["},
+          {"field": "category"},
+          {"const": "] "},
+          {"from": "css", "selector": "dt.board-list-content-title a", "text": true, "transform": [["collapse_ws"]]}
+        ]},
+        {"from": "css", "selector": "dt.board-list-content-title a", "text": true, "transform": [["collapse_ws"]]}
+      ],
+      "url": [{"from": "attr", "selector": "dt.board-list-content-title a", "attr": "href", "transform": [["urljoin", "https://cse.skku.edu/cse/notice.do"]]}],
+      "published_at": [{"from": "css", "selector": "dd.board-list-content-info ul > li", "pick": "first_matching", "match": "^\\d{4}-\\d{2}-\\d{2}$", "text": true, "transform": [["date_only_to_iso", "+09:00"]]}],
+      "author": [{"from": "css", "selector": "dd.board-list-content-info ul > li", "pick": "first_matching", "match": "^(?!No\\.)(?!\\d{4}-\\d{2}-\\d{2}$)(?!조회수).+$", "text": true}]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [{"from": "css", "selector": "div.fr-view", "html": true}],
+    "enrich": {
+      "title": [{"from": "css", "selector": "div.board-view-title-wrap h4", "text": true, "transform": [["collapse_ws"]]}],
+      "published_at": [{"from": "css", "selector": "div.board-view-title-wrap ul.board-etc-wrap li", "pick": "first_matching", "match": "^\\d{4}-\\d{2}-\\d{2}$", "text": true, "transform": [["date_only_to_iso", "+09:00"]]}]
+    }
+  }
+}

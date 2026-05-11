@@ -1,0 +1,15 @@
+# 폴링 + 알림 1회 (notice-poll.timer 가 매시 호출). chromium 락 안에서 poll.py → notify.py.
+# 설치: sudo cp deploy/notice-poll.service deploy/notice-poll.timer /etc/systemd/system/
+#       sudo systemctl daemon-reload && sudo systemctl enable --now notice-poll.timer
+# 즉시 1회 실행: sudo systemctl start notice-poll.service   |   로그: journalctl -u notice-poll
+[Unit]
+Description=Notice poll + notify (one shot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=poiso
+WorkingDirectory=/home/<user>/notice-watcher
+EnvironmentFile=/home/<user>/notice-watcher/.env
+ExecStart=/home/<user>/notice-watcher/.venv/bin/python scripts/poll_and_notify.py

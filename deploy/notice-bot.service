@@ -1,0 +1,22 @@
+# Discord 봇 (게이트웨이 상주, 슬래시 명령 수신). 아웃바운드만 — 인바운드 포트 없음.
+# 설치: sudo cp deploy/notice-bot.service /etc/systemd/system/  (경로/User 를 본인 환경에 맞게 수정)
+#       sudo systemctl daemon-reload && sudo systemctl enable --now notice-bot.service
+# 로그: journalctl -u notice-bot -f
+[Unit]
+Description=Notice Discord bot (gateway, slash commands)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=poiso
+WorkingDirectory=/home/<user>/notice-watcher
+EnvironmentFile=/home/<user>/notice-watcher/.env
+ExecStart=/home/<user>/notice-watcher/.venv/bin/python -m bot.main
+Restart=on-failure
+RestartSec=5
+# 메모리 폭주 방지 (필요 시 조정 / 제거)
+# MemoryMax=2G
+
+[Install]
+WantedBy=multi-user.target

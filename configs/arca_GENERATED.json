@@ -1,0 +1,150 @@
+{
+  "version": 1,
+  "site": "arca.live",
+  "board": "akendfield",
+  "strategy": "playwright_html",
+  "headers": {
+    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "accept-language": "ko-KR",
+    "upgrade-insecure-requests": "1",
+    "sec-ch-ua": "\"HeadlessChrome\";v=\"147\", \"Not.A/Brand\";v=\"8\", \"Chromium\";v=\"147\"",
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": "\"Windows\""
+  },
+  "timeout": 20.0,
+  "list": {
+    "url_template": "https://arca.live/b/{board}",
+    "pagination": {
+      "kind": "query_param",
+      "page_param": "p"
+    },
+    "wait_selector": "div.article-list",
+    "row_selector": "div.list-table.table > a.vrow.column",
+    "row_required_selector": "span.vcol.col-id",
+    "exclude_selector": "a.notice-service",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "css",
+          "selector": ":self",
+          "attr": "href",
+          "transform": [
+            [
+              "regex_extract",
+              "/b/[^/]+/(\\d+)"
+            ]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "css",
+          "selector": "span.badge",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "span.title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        },
+        {
+          "from": "css",
+          "selector": "b",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "css",
+          "selector": ":self",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://arca.live"
+            ],
+            [
+              "strip_query_fragment"
+            ]
+          ]
+        }
+      ],
+      "author": [
+        {
+          "from": "css",
+          "selector": "span.col-author",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "time",
+          "attr": "datetime",
+          "transform": [
+            [
+              "iso8601"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "div.article-content",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "div.fr-view",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "div.article-body",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "span.article-head-info time",
+          "attr": "datetime",
+          "transform": [
+            [
+              "iso8601"
+            ]
+          ]
+        }
+      ]
+    }
+  }
+}

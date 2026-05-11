@@ -1,0 +1,12 @@
+# 매시 13분(±2분)에 폴링 — 정시는 피하고, 시간당 1회면 구독별 다이제스트 시각(HH:MM)도 시 단위로 잡힘.
+# 부담되면 OnCalendar 를 *-*-* 00,06,12,18:13:00 등으로 늘려도 됨(단 다이제스트가 그 시각대에만 나감).
+[Unit]
+Description=Run notice poll a few times a day
+
+[Timer]
+OnCalendar=*-*-* *:13:00 Asia/Seoul
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target
