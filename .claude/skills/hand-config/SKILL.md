@@ -69,7 +69,8 @@ description: >-
 1. **가져오기** — `python scripts/triage.py pull` (N100 의 `*.FAILED.json` + `triage_queue.jsonl` + 각 실패 slug 의 `output/probe/<slug>/` 를 로컬로). IP 바뀌었으면 `DEPLOY_HOST=aaaa@<새IP>` 환경변수.
 2. **목록** — `python scripts/triage.py list` → slug · 실패시각 · via · 요청자 · `[FAIL] <체크>` · URL.
 3. **하나 골라 진단** — `python scripts/triage.py show <slug>` → `.FAILED.json` 전문(reason/last_feedback/**last_config**) + 요청자 + `output/probe/<slug>/` 목록. `docs/config 자동생성 실패 케이스.md` 의 §번호에 매칭해 원인 분류:
-   - **probe 가 잘못 잡았거나 부족** (글페이지 URL 추측 실패, 잘못된 페이지 render 등) → `probe/`·`scripts/probe.py` 를 고칠 수 있나 본다. 고치면 재-probe 후 자동 생성 재시도(`python scripts/register.py "<URL>" --reuse-probe` 또는 그냥 `"<URL>"`). 안 되면 ↓.
+   - **probe 가 "첫 글"을 잘못 집음** (`list_candidates.json` 의 `first_article_url` 이 사이드바/메뉴 링크. 보통 `[FAIL] posts_nonempty` 나 `[FAIL] article_body_len` + `[warn] matches_probe_first_article` 동반) → **먼저 `--article-url` 자동 재시도를 시도**: 그 게시판의 진짜 글 하나 URL 을 찾아서 `python scripts/register.py "<목록URL>" --article-url "<글URL>"` (probe 산출물 재사용하고 싶으면 `--reuse-probe` 도). first_article_url 교정 + 그 글페이지 render+HAR re-probe + 강한 hint 로 처음부터 재생성한다. 성공하면 손작성 없이 끝 — `docs/사이트별 등록 시도 기록.md` 갱신하고 N100 배포(모드 A 9~10). 실패하면 ↓.
+   - **probe 가 부족/오작동** (글페이지 render 가 잘못된 페이지를 열었다, HAR 가 비었다 등) → `probe/`·`scripts/probe.py` 를 고칠 수 있나 본다. 고치면 재-probe 후 자동 생성 재시도(`python scripts/register.py "<URL>" --reuse-probe` 또는 그냥 `"<URL>"`). 안 되면 ↓.
    - **자동 파이프라인 한계** (JS/iframe 목록, Cloudflare, 비공개판 로그인 필요, 본문이 클라이언트 라우트 등) → **모드 A 의 3~10단계**로 손 config 또는 손어댑터 작성. `last_config` 에서 selector/path 한두 개만 바꾸면 되는 경우도 많다.
 4. 처리 끝나면 (모드 A 9단계에서 N100 에서 `register.py --config` 실행하면) 그 slug 의 `.FAILED.json` 과 `triage_queue.jsonl` 항목은 자동으로 사라진다. 큐가 빌 때까지 2~4 반복.
 5. (선택) 요청자에게 "올린 사이트 이제 됨" 알림 — 봇에 그런 명령은 없으니, owner DM 으로 알리거나 사용자에게 다시 `/watch` 권유.

@@ -35,8 +35,8 @@
 Gemini 가 `max_attempts`(기본 4)회 만들어도 검증을 못 통과 → `register.py` 가 ① lite→full probe 재정찰 ② (본문 추출 실패였으면) 글페이지 render+HAR re-probe 후 강한 hint 로 재시도 → 그래도 안 되면 `.FAILED.json`. `last_feedback` 의 `[FAIL] <체크명>` 으로 어떤 케이스인지 판별.
 
 ### 2a. `[FAIL] posts_nonempty: 0건` / `[FAIL] fetch_list: ...` — 목록 추출 실패
-- **원인**: ① `row_selector`(httpx_html) 또는 `list_path`(httpx_json) 가 틀림. ② **목록 자체가 JS 렌더** — 정적 HTML 에 글이 없음(SPA). ③ 목록 URL/파라미터가 잘못(엉뚱한 페이지를 받음).
-- **대응**: probe 의 `list_candidates.json` 의 `html_repeating_patterns` / `traffic_json_api_candidates` 를 보고 진짜 글 목록인 후보를 골라 손으로 `row_selector`/`list_path` 지정 → `register.py --config`. SPA 면 `strategy: "playwright_html"` + `list.wait_selector`(목록 행이 그려질 때까지 대기). 클릭/스크롤 후에야 목록이 로드되면(networkidle 만으론 안 잡힘) → 손어댑터.
+- **원인**: ① `row_selector`(httpx_html) 또는 `list_path`(httpx_json) 가 틀림. ② **목록 자체가 JS 렌더** — 정적 HTML 에 글이 없음(SPA). ③ 목록 URL/파라미터가 잘못(엉뚱한 페이지를 받음). ④ 목록 HTML 은 정적으로 멀쩡한데 probe 가 "첫 글"을 사이드바/메뉴 링크로 잘못 집어서(`pick_first_article_url`) LLM 이 엉뚱한 글 URL 패턴을 보고 selector·검증이 다 어긋남 *(넥슨 포럼 케이스 — `board_list?board=1018` 에서 서브게시판 링크 `board_list?board=1618` 를 첫 글로 집음)*.
+- **대응**: probe 의 `list_candidates.json` 의 `html_repeating_patterns` / `traffic_json_api_candidates` 를 보고 진짜 글 목록인 후보를 골라 손으로 `row_selector`/`list_path` 지정 → `register.py --config`. SPA 면 `strategy: "playwright_html"` + `list.wait_selector`(목록 행이 그려질 때까지 대기). 클릭/스크롤 후에야 목록이 로드되면(networkidle 만으론 안 잡힘) → 손어댑터. **④(probe 가 첫 글을 잘못 집음)면 자동 재시도가 효과 있을 수 있다**: `register.py "<목록URL>" --article-url "<실제 글 하나 URL>"`(또는 봇 `/preview`·`/watch` 의 `article_url` 인자) — first_article_url 을 교정하고 그 글페이지를 render+HAR 로 re-probe 한 뒤 강한 hint 와 함께 처음부터 재생성. (`config 기반 엔진 가이드.md` §4.)
 
 ### 2b. `[FAIL] article_body_len: post_id=... 0자 (<100 — content selector 의심)` — 목록은 OK, 본문 추출 실패
 가장 흔함. `register.py` 가 자동으로 ②(글페이지 render+HAR re-probe → 본문 JSON API 후보가 있으면 `article.fetch_kind:"json"` config, 없으면 `playwright_html`)까지 시도했는데도 실패한 것. 원인 분류:
@@ -89,8 +89,9 @@ Gemini 가 `max_attempts`(기본 4)회 만들어도 검증을 못 통과 → `re
 
 ---
 
-## 5. 미래 개선 아이디어 (아직 없음)
+## 5. 미래 개선 아이디어
 
-- `register.py --hint "글 URL 은 /News/Notice/{post_id} 형으로"` 같은 사람-힌트 주입 — 마비노기 같은 "추측 불가" 케이스를 손작성 없이 넘기게.
+- ~~`register.py --article-url "<글URL>"` (+ 봇 `/preview`·`/watch` 의 `article_url` 인자) — probe 가 "첫 글"을 잘못 집는 사이트에서 사람이 진짜 글 URL 을 주면 first_article_url 교정 + 그 글페이지 render+HAR re-probe + 강한 hint.~~ → 구현됨(2026-05-12). `config 기반 엔진 가이드.md` §4. (그래도 추측 불가형 — 목록 링크와 직접접근 URL 이 아예 다른 마비노기류 §2b(iii) — 는 여전히 손작성 config.)
+- `register.py --hint "<자유 텍스트>"` 같은 더 일반적인 사람-힌트 주입 — escalation_hint 로 직접 주입.
 - 대화형 글페이지 probe (목록 띄움 → 글 링크 클릭 → 본문 렌더 대기 → HAR 캡처) — SPA 본문 API 자동 발견.
 - `list-only` 등록 모드 — 본문을 못 얻는 사이트도 제목·날짜·링크만으로 등록(요약 없이). 현재는 `article.content` 가 빈 config 를 손작성해서 `--config` 로 우회 가능(검증을 안 거치므로).

@@ -8,10 +8,13 @@ escalation (config 생성 실패 시, --no-escalate 면 전부 생략):
 
 사용:
     python scripts/register.py "https://cse.skku.edu/cse/notice.do?mode=list&srCategoryId1=1582&srSearchKey=&srSearchVal="
-    python scripts/register.py "<URL>" --out configs/my_board.json --max-attempts 4
-    python scripts/register.py "<URL>" --reuse-probe          # probe 산출물 있으면 재사용
-    python scripts/register.py "<URL>" --full-probe            # 처음부터 full probe
-    python scripts/register.py "<URL>" --no-escalate           # 어떤 escalation 도 안 함(lite→full, 글페이지 re-probe 둘 다)
+    python scripts/register.py "<목록URL>" --out configs/my_board.json --max-attempts 4
+    python scripts/register.py "<목록URL>" --reuse-probe       # probe 산출물 있으면 재사용
+    python scripts/register.py "<목록URL>" --full-probe        # 처음부터 full probe
+    python scripts/register.py "<목록URL>" --no-escalate       # 어떤 escalation 도 안 함(lite→full, 글페이지 re-probe 둘 다)
+    python scripts/register.py "<목록URL>" --article-url "<글페이지URL>"
+        # probe 가 '첫 글'을 잘못 잡는 사이트용: 실제 글 본문 페이지 URL 을 직접 지정.
+        # 그 글페이지를 render+HAR 로 미리 re-probe(본문 JSON API 후보·렌더 DOM 확보)하고 digest 의 article_sample 을 그걸로 맞춘 뒤 생성한다.
 
 성공: configs/<slug>.json 저장 + output/poll_state/<slug>.json (baseline = 현재 글 post_id 집합).
 실패: output/poll_state/<slug>.FAILED.json + "자동 처리 불가 — 손으로 config/어댑터 작성 필요" 안내.
@@ -273,6 +276,45 @@ def _best_article_url(digest: dict, last_fb: str) -> Optional[str]:
     return max(cands, key=lambda u: _article_url_score(u, host))
 
 
+def _set_first_article_url(slug: str, article_url: str) -> None:
+    """list_candidates.json 의 first_article_url 을 덮어쓴다 (digest 의 article_sample.url 이 여기서 옴).
+    probe 가 사이드바 메뉴 링크 등을 '첫 글'로 잘못 집은 걸 사용자가 준 진짜 글 URL 로 교정할 때."""
+    p = output_dir(slug) / "list_candidates.json"
+    try:
+        data = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+    except (json.JSONDecodeError, OSError):
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    data["first_article_url"] = article_url
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _count_article_api_candidates(slug: str) -> int:
+    p = output_dir(slug) / "article_candidates.json"
+    try:
+        v = json.loads(p.read_text(encoding="utf-8"))
+        return len(v) if isinstance(v, list) else 0
+    except (json.JSONDecodeError, OSError):
+        return 0
+
+
+_ARTICLE_HINT_PREFIX = "사용자가 실제 글(본문) 페이지 URL 을 직접 지정했다"
+
+
+def _article_hint_text(article_url: str, n_api: int) -> str:
+    """--article-url 로 글페이지를 미리 re-probe 한 뒤 생성기에 주는 강한 지침(첫 시도부터)."""
+    api_line = (f"이 글페이지는 이미 render+HAR 로 re-probe 됐다 — article_sample.api_candidates 에 본문 JSON API 후보 {n_api}건이 있다. "
+                "그중 url_id_match=true·body_looks_html=true 인 걸 골라 article.url_template=그 후보 url(글 ID 숫자를 {post_id} 로 치환), "
+                "article.fetch_kind=\"json\", article.content=[{from:\"json\", path:<그 후보의 body_field_path 그대로>}], 필요하면 그 후보 request_headers 의 X-Requested-With/Referer 를 config 최상위 headers 에 추가하라. "
+                if n_api else
+                "본문 JSON API 후보는 못 찾았다 — article.url_template 은 이 글 URL 의 패턴(글 ID 숫자→{post_id})으로 잡고, article.content 는 article_sample.html(이미 렌더된 DOM)에서 본문 컨테이너 selector 를 찾아 잡아라(필요하면 strategy=\"playwright_html\" + article.wait_selector). ")
+    return (f"{_ARTICLE_HINT_PREFIX}: {article_url} — probe 가 자동으로 집은 '첫 글'은 무시하라(메뉴/사이드바 링크였을 수 있음). "
+            f"{api_line}"
+            "또한 list 쪽: 이 글 URL 에 박힌 글 ID 가 목록 행의 어디(href/data-* 속성/JSON 필드)에 나오는지 보고 list.fields.post_id 와 list.fields.url 을 그에 맞춰 잡아라.")
+
+
 def _reprobe_article(slug: str, article_url: str) -> int:
     """글 본문 페이지를 Playwright(+HAR)로 다시 받아 → article.html(렌더 DOM, digest 가 자동으로 더 큰 걸 씀) +
     article_candidates.json(본문 JSON API 후보) 갱신. 발견한 본문 API 후보 개수 반환."""
@@ -307,7 +349,8 @@ def _has_json_api_candidates(digest: dict) -> bool:
 
 
 def _generate_with_escalation(slug: str, url: Optional[str], digest: dict, *,
-                              max_attempts: int, model, no_escalate: bool, started_full: bool):
+                              max_attempts: int, model, no_escalate: bool, started_full: bool,
+                              article_url_hint: Optional[str] = None):
     """generate → 실패 시 escalate. 성공 (cfg, rep) 반환. 전부 실패 시 GenerationError(.last_config/.last_feedback) raise.
 
     escalation 단계:
@@ -371,11 +414,15 @@ def _generate_with_escalation(slug: str, url: Optional[str], digest: dict, *,
 
     # (3) 본문 추출 실패 → 글페이지 render+HAR re-probe → 강한 hint 로 재시도
     # feedback_text() 가 하드 실패를 "  [FAIL] <check>: ..." 로 찍으므로 그 정확한 마커로만 매칭(LLM 텍스트 오탐 방지)
-    article_url = _best_article_url(digest, last_fb or "")
+    article_url = article_url_hint or _best_article_url(digest, last_fb or "")
     list_was_ok = ("[FAIL] posts_nonempty" not in (last_fb or "")) and ("[FAIL] fetch_list" not in (last_fb or ""))
     if (not no_escalate) and article_url and ("[FAIL] article_body_len" in (last_fb or "")):
-        print(f"[register] 글 본문 추출 실패 — 글페이지를 렌더링+트래픽 캡처로 re-probe 후 재시도: {article_url}")
-        n_api = _reprobe_article(slug, article_url)
+        if article_url_hint:
+            print(f"[register] 글 본문 추출 실패 — 사용자 지정 글페이지({article_url})는 앞서 이미 re-probe 됨 → hint 만 강화해 재시도")
+            n_api = _count_article_api_candidates(slug)
+        else:
+            print(f"[register] 글 본문 추출 실패 — 글페이지를 렌더링+트래픽 캡처로 re-probe 후 재시도: {article_url}")
+            n_api = _reprobe_article(slug, article_url)
         digest = build_digest(slug=slug, url=url)
         keep_list = ("**중요: 목록(list.row_selector / list.fields / list.pagination)은 이미 검증을 통과했다(글 추출 성공) — 절대 바꾸지 마라. article 부분만 고쳐라.**\n"
                      if list_was_ok else "")
@@ -418,6 +465,9 @@ def main(argv) -> int:
     p.add_argument("--reuse-probe", action="store_true", help="probe 산출물 있으면 재사용")
     p.add_argument("--full-probe", action="store_true", help="처음부터 full probe (lite 대신)")
     p.add_argument("--no-escalate", action="store_true", help="lite 로 실패해도 full probe 로 escalate 안 함")
+    p.add_argument("--article-url", metavar="URL",
+                   help="실제 글 본문 페이지 URL 힌트 (probe 의 '첫 글' 자동 탐지가 메뉴/사이드바 링크를 잘못 집는 사이트용). "
+                        "이 URL 을 render+HAR 로 미리 re-probe 해서 본문 JSON API 후보·렌더 DOM 을 확보하고 digest 의 article_sample 을 그걸로 맞춘 뒤 생성한다.")
     p.add_argument("--model", help="Gemini 모델 (기본 GEMINI_MODEL env 또는 gemini-2.5-flash)")
     p.add_argument("--force", action="store_true", help="기존 config 가 있어도 덮어씀")
     args = p.parse_args(argv)
@@ -471,6 +521,20 @@ def main(argv) -> int:
         print("[register] ❌ 등록 거부 (위 사유).")
         return 2
 
+    # --article-url: 사용자가 진짜 글페이지를 지정 → first_article_url 교정 + 그 페이지 render+HAR re-probe → digest 갱신.
+    # (probe 의 '첫 글' 휴리스틱이 메뉴/사이드바 링크를 잘못 집는 사이트에서, 첫 시도부터 article_sample 이 올바르게 잡히도록.)
+    article_url_hint = (args.article_url or "").strip() or None
+    if article_url_hint:
+        if not article_url_hint.startswith(("http://", "https://")):
+            print(f"[register] ⚠ --article-url 은 http(s):// URL 이어야 함 — 무시: {article_url_hint!r}")
+            article_url_hint = None
+        else:
+            print(f"[register] --article-url 힌트: {article_url_hint} — first_article_url 교정 + 그 글페이지 render+HAR re-probe")
+            _set_first_article_url(slug, article_url_hint)
+            n_api = _reprobe_article(slug, article_url_hint)
+            digest = build_digest(slug=slug, url=url)
+            digest["escalation_hint"] = _article_hint_text(article_url_hint, n_api)
+
     out_path = Path(args.out) if args.out else (CONFIGS_DIR / f"{slug}.json")
     if out_path.exists() and not args.force:
         print(f"[register] 주의: {out_path} 이미 존재 — 덮어쓰려면 --force. 새 결과는 {out_path}.new 로 저장.")
@@ -481,7 +545,11 @@ def main(argv) -> int:
         cfg, rep = _generate_with_escalation(
             slug, url, digest,
             max_attempts=args.max_attempts, model=args.model,
-            no_escalate=args.no_escalate, started_full=args.full_probe,
+            no_escalate=args.no_escalate,
+            # --article-url 을 줬으면 lite→full re-probe escalation 은 건너뛴다 — full probe 가 list_candidates.json 을
+            # 다시 쓰면서 방금 교정한 first_article_url 패치를 날려버리고, 어차피 full 은 외부/유료 결과만 추가라 도움 안 됨.
+            started_full=args.full_probe or bool(article_url_hint),
+            article_url_hint=article_url_hint,
         )
     except GenerationError as e:
         fp = _save_failed(slug, url, "gemini 생성+검증 실패 (lite→full→글페이지 re-probe 등 escalation 모두 소진)",

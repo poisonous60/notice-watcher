@@ -117,14 +117,18 @@ def _parse_schedule(raw: Optional[str]) -> Optional[str]:
 # --------------------------------------------------------------------------- #
 # register.py subprocess (chromium 락 안에서, 워커 스레드)
 # --------------------------------------------------------------------------- #
-def _blocking_register(url: str) -> tuple[int, str]:
+def _blocking_register(url: str, article_url: Optional[str] = None) -> tuple[int, str]:
     """register.py 를 chromium 락 안에서 실행.
     stdout/stderr 를 줄 단위로 봇 로그(`[register] …`)에 흘려보냄 → N100 콘솔에서
     `journalctl --user-unit notice-bot.service -f` 로 config 생성 과정 실시간 확인 가능.
-    실패 시 Discord 에 보여줄 마지막 ~4000자는 따로 모아 반환. (-u: 자식 출력 버퍼링 끔)"""
+    실패 시 Discord 에 보여줄 마지막 ~4000자는 따로 모아 반환. (-u: 자식 출력 버퍼링 끔)
+    article_url 이 주어지면 register.py 에 --article-url 로 전달(probe 의 '첫 글' 자동탐지가 잘못 잡는 사이트용)."""
+    cmd = [PY, "-u", str(REGISTER_PY), url]
+    if article_url:
+        cmd += ["--article-url", article_url]
     try:
         with chromium_lock(timeout=900.0):
-            proc = subprocess.Popen([PY, "-u", str(REGISTER_PY), url], cwd=str(ROOT),
+            proc = subprocess.Popen(cmd, cwd=str(ROOT),
                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                     text=True, errors="replace", bufsize=1)
             timed_out = threading.Event()
@@ -170,13 +174,15 @@ def _append_triage_queue(url: str, slug: str, via: str, requested_by: Optional[d
         log.warning("triage_queue 기록 실패 (%s): %r", slug, e)
 
 
-async def _ensure_registered(url: str, *, via: str = "?", requested_by: Optional[dict] = None) -> tuple[bool, str, str]:
+async def _ensure_registered(url: str, *, via: str = "?", requested_by: Optional[dict] = None,
+                             article_url: Optional[str] = None) -> tuple[bool, str, str]:
     """등록돼 있으면 그대로, 아니면 register.py 실행. 반환 (ok, slug, msg).
-    via/requested_by 는 실패 시 triage_queue.jsonl 에 남길 맥락(어떤 명령/누가)."""
+    via/requested_by 는 실패 시 triage_queue.jsonl 에 남길 맥락(어떤 명령/누가).
+    article_url: 실제 글페이지 URL 힌트 — register.py 의 --article-url 로 넘어감(처음 등록할 때만 의미 있음)."""
     slug = url_to_slug(url)
     if _is_registered(slug):
         return True, slug, "이미 등록됨"
-    rc, out = await asyncio.to_thread(_blocking_register, url)
+    rc, out = await asyncio.to_thread(_blocking_register, url, article_url)
     if rc == 0 and _is_registered(slug):
         return True, slug, "등록 완료"
     if rc == -1:
@@ -252,9 +258,11 @@ def _record_error(where: str, exc: BaseException) -> str:
     schedule="(선택) 'realtime'(기본, 폴링 때마다 바로) 또는 'HH:MM'/'HH'(매일 그 시각에 하루치 모아서, KST)",
     here="(선택) 켜면 이 채널에 발송. 끄면(기본) 내 DM 으로.",
     notify_empty="(선택) 켜면 폴링했는데 새 글이 없을 때도 '새 공지 없음' 한 줄을 보냄. 끄면(기본) 새 글 있을 때만. realtime 일 때만 동작.",
+    article_url="(선택) 처음 등록하는 사이트가 자동 분석에 실패할 때, 그 게시판의 실제 글 하나 URL 을 같이 주면 분석 성공률이 올라갑니다.",
 )
 async def watch(interaction: discord.Interaction, url: str, filter: Optional[str] = None,
-                schedule: Optional[str] = "realtime", here: bool = False, notify_empty: bool = False):
+                schedule: Optional[str] = "realtime", here: bool = False, notify_empty: bool = False,
+                article_url: Optional[str] = None):
     await interaction.response.defer(thinking=True)
     sched = _parse_schedule(schedule)
     if sched is None:
@@ -268,11 +276,16 @@ async def watch(interaction: discord.Interaction, url: str, filter: Optional[str
     if not re.match(r"^https?://", url.strip()):
         await interaction.edit_original_response(content="❌ http(s):// 로 시작하는 URL 을 주세요.")
         return
+    art = (article_url or "").strip() or None
+    if art and not re.match(r"^https?://", art):
+        await interaction.edit_original_response(content="❌ article_url 은 http(s):// 로 시작하는 글 URL 이어야 해요.")
+        return
 
     await interaction.edit_original_response(content="⏳ 사이트 분석 중… (처음 보는 사이트면 수 분 걸릴 수 있어요)")
     ok, slug, msg = await _ensure_registered(
         url.strip(), via="watch",
-        requested_by={"id": str(interaction.user.id), "name": str(interaction.user)})
+        requested_by={"id": str(interaction.user.id), "name": str(interaction.user)},
+        article_url=art)
     if not ok:
         await interaction.edit_original_response(content=f"⚠️ {msg}")
         return
@@ -300,18 +313,26 @@ async def watch(interaction: discord.Interaction, url: str, filter: Optional[str
 
 
 @tree.command(name="preview", description="등록 없이 그 게시판의 최신 글 하나를 요약해 알림 예시를 보여줍니다.")
-@app_commands.describe(url="공지/게시판 목록 페이지 URL")
-async def preview(interaction: discord.Interaction, url: str):
+@app_commands.describe(
+    url="공지/게시판 목록 페이지 URL",
+    article_url="(선택) 이 사이트가 처음이고 자동 분석에 실패할 때, 그 게시판의 실제 글 하나 URL 을 같이 주면 분석 성공률이 올라갑니다.",
+)
+async def preview(interaction: discord.Interaction, url: str, article_url: Optional[str] = None):
     await interaction.response.defer(thinking=True, ephemeral=True)
     if not re.match(r"^https?://", url.strip()):
         await interaction.edit_original_response(content="❌ http(s):// 로 시작하는 URL 을 주세요.")
+        return
+    art = (article_url or "").strip() or None
+    if art and not re.match(r"^https?://", art):
+        await interaction.edit_original_response(content="❌ article_url 은 http(s):// 로 시작하는 글 URL 이어야 해요.")
         return
     slug = url_to_slug(url.strip())
     if not _is_registered(slug):
         await interaction.edit_original_response(content="⏳ config 생성 중… (이 사이트는 처음이라 수 분 걸려요)")
         ok, slug, msg = await _ensure_registered(
             url.strip(), via="preview",
-            requested_by={"id": str(interaction.user.id), "name": str(interaction.user)})
+            requested_by={"id": str(interaction.user.id), "name": str(interaction.user)},
+            article_url=art)
         if not ok:
             await interaction.edit_original_response(content=f"⚠️ {msg}")
             return

@@ -35,7 +35,8 @@ playwright install chromium
 
 # 사이트 등록 (URL → config + baseline)
 python scripts/register.py "https://cse.skku.edu/cse/notice.do?mode=list&srCategoryId1=1582&srSearchKey=&srSearchVal="
-python scripts/register.py "<URL>" --out configs/my_board.json --max-attempts 4
+python scripts/register.py "<목록URL>" --out configs/my_board.json --max-attempts 4
+python scripts/register.py "<목록URL>" --article-url "<실제 글 하나 URL>"   # probe 가 '첫 글'을 잘못 잡는 사이트용 힌트(↓ §4)
 
 # 손으로 짠 config(handwritten strategy 등)를 그대로 등록 (probe/gemini 생략)
 python scripts/register.py --config configs/arca_akendfield.json
@@ -185,6 +186,8 @@ python scripts/demo_config.py --check-all
 1. **lite→full probe**: lite probe 로 시작했으면 full probe 로 다시 정찰하고(HAR·렌더 DOM 더 확보) 재시도.
 2. **글페이지 render+HAR re-probe** (`article_body_len` 실패였을 때만): `first_article_url` 을 Playwright 로 다시 열어 `article.html`(렌더된 DOM, digest 가 자동으로 더 큰 쪽을 글 샘플로 씀) + `output/probe/<slug>/article_candidates.json`(본문을 담은 JSON XHR 후보 — `probe/extract.py:traffic_article_body_candidates`)를 만들고, digest 에 `escalation_hint`(본문 API 후보가 있으면 "article.url_template+fetch_kind:json+content from:json 로 그 API 를 써라", 없으면 "strategy 를 playwright_html 로 바꿔라")를 넣어 한 라운드 더 재시도.
 3. 그래도 실패면 `<slug>.FAILED.json` + "손으로 config/어댑터 작성" 안내. (`--no-escalate` 면 1·2 다 생략. 2 엔 playwright 필요.)
+
+**`--article-url <글URL>` 힌트** (`register.py`, 그리고 봇 `/preview`·`/watch` 의 선택 인자 `article_url`): probe 의 "첫 글" 자동 탐지(`pick_first_article_url`)가 사이드바/메뉴 링크를 글로 잘못 집는 사이트가 있다(예: 넥슨 포럼 — `board_list?board=1018` 에서 서브게시판 링크 `board_list?board=1618` 를 첫 글로 집음). 그러면 위 2번 re-probe 도 엉뚱한 페이지를 열고, LLM 이 받은 글 샘플·`article.url_template` 추측이 다 어긋난다. `--article-url` 을 주면 *생성 전에* `list_candidates.json` 의 `first_article_url` 을 그 URL 로 교정하고 그 글페이지를 render+HAR 로 re-probe 해서 digest 의 `article_sample`(html/api_candidates/url)을 그걸로 맞춘 뒤, "이 글페이지 기준으로 article 을 잡고 list 의 post_id/url 필드도 이 글 ID 에 맞춰라"는 강한 `escalation_hint` 와 함께 1회차부터 생성한다. (이 힌트를 줬을 땐 1번 lite→full re-probe escalation 은 건너뛴다 — full probe 가 `list_candidates.json` 을 다시 쓰면서 교정을 날리고, 어차피 도움 안 되므로.)
 
 ---
 
