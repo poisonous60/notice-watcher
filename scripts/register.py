@@ -422,7 +422,7 @@ def main(argv) -> int:
         fp = _save_failed(slug, url, "gemini 생성+검증 실패 (lite→full→글페이지 re-probe 등 escalation 모두 소진)",
                           getattr(e, "last_config", None), getattr(e, "last_feedback", str(e)))
         print(f"\n[register] ❌ 자동 처리 불가. → {fp}")
-        print("  손으로 config/어댑터를 작성해야 함. 가이드: docs/사이트 어댑터 추가 가이드.md")
+        print("  → docs/config 자동생성 실패 케이스.md 에서 .FAILED.json 의 last_feedback([FAIL] <체크명>) 로 케이스 판별 → 보통 손작성 config(register.py --config)로 해결, 안 되면 손어댑터(docs/사이트 어댑터 추가 가이드.md).")
         print(f"  마지막 실패 사유:\n{getattr(e, 'last_feedback', e)}")
         return 1
 
