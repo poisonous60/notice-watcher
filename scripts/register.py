@@ -455,7 +455,8 @@ def _generate_with_escalation(slug: str, url: Optional[str], digest: dict, *,
 
 def _try_known_platform(url: str, slug: str, *, out: Optional[str], force: bool) -> Optional[int]:
     """url 이 알려진 플랫폼(engine.known_platforms)이면 probe/Gemini 없이 바로 config 작성·등록.
-    반환: 0=등록 성공 / 2=정책상 등록 거부 / None=인식 안 됨 or 잘못 인식(fetch_list 0건) → 일반 파이프라인으로 폴백.
+    반환: 0=등록 성공 / None=인식 안 됨 · 잘못 인식(fetch_list 0건/예외) · 기존 config 존재(--force 없이) → 호출 측이 일반 파이프라인으로 폴백.
+    (정책 검사 -- 로그인/차단 -- 는 안 함: 알려진 플랫폼은 공개 게시판이고, 비공개·등급제한이면 어댑터가 본문만 비워 반환하니 목록 등록은 그대로 됨.)
     slug 는 register.py 가 호출된 URL 기준(봇 _is_registered 가 그 slug 로 찾으므로) — config 의 _source_url 도 그 url 로 맞춤."""
     cfg = recognize_platform(url)
     if cfg is None:
@@ -555,6 +556,8 @@ def main(argv) -> int:
         slug = url_to_slug(url)
         # 알려진 플랫폼이면 probe/gemini 건너뛰고 바로 등록 (실패하면 일반 파이프라인으로 폴백)
         if not args.no_recognize:
+            if (args.article_url or "").strip():
+                print("[register] 알림: --article-url 은 알려진 플랫폼으로 인식되면 무시됩니다(probe 를 건너뛰므로). 인식 안 되면 아래 probe 경로에서 그대로 적용됨.")
             rc = _try_known_platform(url, slug, out=args.out, force=args.force)
             if rc is not None:
                 return rc

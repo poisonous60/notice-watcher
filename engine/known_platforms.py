@@ -11,9 +11,12 @@ probe + Gemini 없이 config 를 바로 만들어 등록한다. `register.py` �
 """
 from __future__ import annotations
 
+import logging
 import re
 from typing import Callable, Optional
 from urllib.parse import parse_qs, urlsplit
+
+log = logging.getLogger(__name__)
 
 _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
@@ -47,6 +50,7 @@ def _b_naver_cafe_menu(m: "re.Match", url: str) -> Optional[dict]:
 
 # https://cafe.naver.com/f-e/cafes/30291108/articles/12345?menuid=6&...  (신 UI 글 URL — menuid 가 쿼리에)
 def _b_naver_cafe_article(m: "re.Match", url: str) -> Optional[dict]:
+    # menuid 쿼리가 잘려서 없으면 어느 메뉴인지 알 수 없으니 None → 일반 파이프라인으로 폴백(그쪽도 네이버 카페면 실패하지만 안전).
     menu_id = _qs(url).get("menuid") or _qs(url).get("menuId")
     if not (menu_id and str(menu_id).isdigit()):
         return None
@@ -73,7 +77,7 @@ def _b_daum_cafe(m: "re.Match", url: str) -> Optional[dict]:
     cafe_name = m.group(1)
     board = m.group(2)
     if board in _DAUM_RESERVED:
-        # 레거시 PC URL: cafe.daum.net/<cafe>/_c21_/bbs_list?grpid=...&fldid=Z4os
+        # 레거시 PC URL: cafe.daum.net/<cafe>/_c21_/bbs_list?grpid=...&fldid=Z4os 면 fldid 를 board 로.
         if board == "_c21_":
             fldid = _qs(url).get("fldid")
             if not fldid:
@@ -81,6 +85,9 @@ def _b_daum_cafe(m: "re.Match", url: str) -> Optional[dict]:
             board = fldid
         else:
             return None
+    # 의도: PC URL(cafe.daum.net/...)이든 모바일 URL(m.cafe.daum.net/...)이든 모두 모바일 어댑터(DaumCafeAdapter,
+    # 내부적으로 m.cafe.daum.net 만 fetch)로 정규화한다 → config 의 site 도 항상 "m.cafe.daum.net". slug 만 사용자가 준
+    # URL 기준(register.py 가 _source_url 을 그 url 로 덮어씀) — 봇 _is_registered 가 그 slug 로 찾으므로 일관됨.
     return {
         "version": 1, "site": "m.cafe.daum.net", "board": board,
         "strategy": "handwritten", "adapter": "DaumCafeAdapter",
@@ -180,7 +187,7 @@ def _b_naver_game_lounge(m: "re.Match", url: str) -> Optional[dict]:
         "timeout": 15.0,
         "list": {
             "url_template": f"{base}/feed?boardId={board_id}&buffFilteringYN=N&limit=25&offset=0&order=NEW",
-            "pagination": {"kind": "offset", "offset_param": "offset", "page_unit": 25},
+            "pagination": {"kind": "offset", "offset_param": "offset", "size_param": "limit", "page_unit": 25},
             "success_when": {"path": ["code"], "equals": 200},
             "list_path": ["content", "feeds"],
             "fields": {
@@ -231,7 +238,8 @@ def recognize(url: str) -> Optional[dict]:
             continue
         try:
             cfg = builder(m, url)
-        except Exception:  # noqa: BLE001  builder 가 터지면 그 인식기는 건너뜀
+        except Exception:  # noqa: BLE001  builder 가 터지면 그 인식기는 건너뜀(폴백) — 단 단서는 남긴다
+            log.debug("known_platforms: builder %r 예외 (url=%r)", name, url, exc_info=True)
             cfg = None
         if not cfg:
             continue
@@ -241,8 +249,4 @@ def recognize(url: str) -> Optional[dict]:
 
 
 def platform_names() -> list[str]:
-    seen: list[str] = []
-    for name, _, _ in _RECOGNIZERS:
-        if name not in seen:
-            seen.append(name)
-    return seen
+    return list(dict.fromkeys(name for name, _, _ in _RECOGNIZERS))

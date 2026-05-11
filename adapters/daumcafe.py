@@ -62,17 +62,24 @@ def _js_int(block: str, key: str) -> Optional[int]:
 
 
 def _elapsed_to_iso(s: Optional[str]) -> Optional[str]:
-    """다음 카페 목록의 작성시간 표기 → ISO8601(KST). `26.05.08` → date, `12:34` → 오늘+시각. 그 외 None."""
+    """다음 카페 목록의 작성시간 표기 → ISO8601(KST). `26.05.08` → date, `12:34` → 오늘+시각. 파싱 안 되거나 비정상 값이면 None."""
     if not s:
         return None
     s = s.strip()
     m = re.match(r"^(\d{2})\.(\d{2})\.(\d{2})$", s)
     if m:
-        return f"20{m.group(1)}-{m.group(2)}-{m.group(3)}T00:00:00+09:00"
+        try:
+            d = datetime.strptime(s, "%y.%m.%d").date()  # 자릿수만 맞고 13월/32일 같은 값은 여기서 걸러짐
+        except ValueError:
+            return None
+        return f"{d.isoformat()}T00:00:00+09:00"
     m = re.match(r"^(\d{1,2}):(\d{2})$", s)
     if m:
+        hh, mm = int(m.group(1)), int(m.group(2))
+        if hh > 23 or mm > 59:
+            return None
         today = datetime.now(_KST).date()
-        return f"{today.isoformat()}T{int(m.group(1)):02d}:{m.group(2)}:00+09:00"
+        return f"{today.isoformat()}T{hh:02d}:{mm:02d}:00+09:00"
     return None
 
 
@@ -87,6 +94,8 @@ class DaumCafeAdapter(BaseAdapter):
     site = "m.cafe.daum.net"
     host = "m.cafe.daum.net"
     BASE = "https://m.cafe.daum.net"
+    # m.cafe.daum.net/robots.txt 에 Crawl-Delay 없음(Disallow 도 /_* 류만 — 우리가 치는 /<cafe>/<board>·/<cafe>/<board>/<id> 와 무관)
+    # → BaseAdapter 기본값(polite_sleep 2~5s) 그대로. 게다가 목록은 page 1 만 받고(무한스크롤) 폴링 빈도도 낮음.
 
     USER_AGENT = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -186,6 +195,8 @@ class DaumCafeAdapter(BaseAdapter):
     # ---------- 본문 ----------
 
     async def fetch_article(self, post: NoticePost) -> NoticePost:
+        # fetch_list 가 만든 post 면 post.url 이 항상 채워져 있다. 외부에서 url 없이 넘긴 post 를 대비한 폴백
+        # (raw["fldid"] 도 fetch_list 가 항상 넣지만, 그것도 없으면 board_id).
         url = post.url or f"{self.BASE}/{self.cafe_name}/{post.raw.get('fldid', self.board_id)}/{post.post_id}"
         r = await self._get(url)
         if r.status_code in _SKIP_ARTICLE_STATUS:
