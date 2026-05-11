@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "site": "game.naver.com",
+  "board": "lounge/Trickcal/3",
+  "strategy": "httpx_json",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "ko-KR,ko;q=0.9",
+    "Origin": "https://game.naver.com",
+    "Referer": "https://game.naver.com/lounge/Trickcal/board/3",
+    "front-client-platform-type": "PC",
+    "front-client-product-type": "web"
+  },
+  "timeout": 15.0,
+  "list": {
+    "url_template": "https://comm-api.game.naver.com/nng_main/v1/community/lounge/Trickcal/feed?boardId=3&buffFilteringYN=N&limit=25&offset=0&order=NEW",
+    "pagination": {"kind": "offset", "offset_param": "offset", "page_unit": 25},
+    "success_when": {"path": ["code"], "equals": 200},
+    "list_path": ["content", "feeds"],
+    "fields": {
+      "post_id": [{"from": "json", "path": ["feed", "feedId"]}],
+      "title": [{"from": "json", "path": ["feed", "title"]}],
+      "url": [
+        {"from": "json", "path": ["feedLink", "pc"]},
+        {"from": "template", "value": "https://game.naver.com/lounge/Trickcal/board/detail/{post_id}"}
+      ],
+      "published_at": [{"from": "json", "path": ["feed", "createdDate"], "transform": [["iso8601", ["%Y%m%d%H%M%S"], "+09:00"]]}],
+      "author": [{"from": "json", "path": ["user", "nickname"]}],
+      "category": [{"from": "json", "path": ["board", "boardName"]}],
+      "cover_image": [{"from": "json", "path": ["feed", "repImageUrl"]}]
+    }
+  },
+  "article": {
+    "url_template": "https://comm-api.game.naver.com/nng_main/v1/community/lounge/Trickcal/feed/{post_id}",
+    "fetch_kind": "json",
+    "success_when": {"path": ["code"], "equals": 200},
+    "data_path": ["content"],
+    "content": [{"from": "json", "path": ["feed", "contents"]}]
+  },
+  "_source_url": "https://game.naver.com/lounge/Trickcal/board/3",
+  "_note": "네이버 게임 라운지(트릭컬 공지 board 3). 목록·본문 모두 React/CSS-modules 해시 클래스라 정적 HTML 추출 0건 → 자동 config(httpx_html) posts_nonempty 0. 내부 JSON API 사용: 목록 comm-api.game.naver.com/nng_main/v1/community/lounge/Trickcal/feed?boardId=3&order=NEW (offset 페이징, limit 25, success code==200, list_path content.feeds, 엔트리 안에 feed/user/feedLink/board 서브객체), 본문 .../feed/{feedId} → content.feed.contents (SmartEditor 렌더 HTML). 헤더는 UA + front-client-platform-type:PC + front-client-product-type:web + Referer/Origin 이면 200 (deviceid/cookie 불필요). 같은 라운지 다른 게시판은 boardId·Referer 만 교체. sticky pin(.../feed/pins?boardId=3)은 라운지 전역 홍보글이라 제외 — board 3 자체 글만 수집."
+}
