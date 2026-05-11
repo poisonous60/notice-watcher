@@ -4,9 +4,10 @@ DB 파일: output/bot.sqlite3 (이미 .gitignore 됨).
 필터 프롬프트·발송 대상·스케줄은 *여기에만* 산다 (configs/ · poll_state/ 엔 절대 안 씀).
 
 테이블:
-  subscriptions(user_id, slug, url, filter_prompt, schedule, target_kind, target_id, created_at)
+  subscriptions(user_id, slug, url, filter_prompt, schedule, target_kind, target_id, notify_empty, created_at)
       schedule = 'realtime' (폴링 때마다 바로) | 'HH:MM' (KST, 그 시각에 하루치 다이제스트)
       target_kind = 'dm' (target_id = user_id) | 'channel' (target_id = channel_id)
+      notify_empty = 1 이면 폴링 결과 새 글이 없어도 "새 공지 없음" 한 줄을 보냄 (realtime 구독만; 기본 0)
       UNIQUE(user_id, slug, target_id) → /watch 멱등
   pending(slug, post_id, target_id, summary, found_at)   다이제스트 구독자용 outbox (필터 통과+요약 완료, 아직 미발송)
       UNIQUE(slug, post_id, target_id)
@@ -33,6 +34,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     schedule     TEXT NOT NULL DEFAULT 'realtime',
     target_kind  TEXT NOT NULL CHECK (target_kind IN ('dm','channel')),
     target_id    TEXT NOT NULL,
+    notify_empty INTEGER NOT NULL DEFAULT 0,
     created_at   TEXT NOT NULL,
     UNIQUE(user_id, slug, target_id)
 );
@@ -67,6 +69,14 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _migrate(conn: sqlite3.Connection) -> None:
+    """이미 존재하는 옛 DB 에 빠진 컬럼 추가 (SQLite 는 ADD COLUMN IF NOT EXISTS 가 없음)."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(subscriptions)").fetchall()}
+    if "notify_empty" not in cols:
+        conn.execute("ALTER TABLE subscriptions ADD COLUMN notify_empty INTEGER NOT NULL DEFAULT 0")
+    conn.commit()
+
+
 def connect(db_path: Optional[Path] = None) -> sqlite3.Connection:
     p = Path(db_path) if db_path else DB_PATH
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -76,6 +86,7 @@ def connect(db_path: Optional[Path] = None) -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys=ON")
     conn.executescript(_SCHEMA)
     conn.commit()
+    _migrate(conn)
     return conn
 
 
@@ -95,14 +106,15 @@ def _retry(fn, *args, attempts: int = 5, **kw):
 # --------------------------------------------------------------------------- #
 def add_subscription(conn: sqlite3.Connection, *, user_id: str, slug: str, url: str,
                      filter_prompt: Optional[str], schedule: str,
-                     target_kind: str, target_id: str) -> bool:
-    """추가(또는 이미 있으면 필터/스케줄 갱신). 새로 생겼으면 True."""
+                     target_kind: str, target_id: str, notify_empty: bool = False) -> bool:
+    """추가(또는 이미 있으면 필터/스케줄/notify_empty 갱신). 새로 생겼으면 True."""
     def _do():
         cur = conn.execute(
-            "INSERT INTO subscriptions(user_id,slug,url,filter_prompt,schedule,target_kind,target_id,created_at) "
-            "VALUES(?,?,?,?,?,?,?,?) "
-            "ON CONFLICT(user_id,slug,target_id) DO UPDATE SET filter_prompt=excluded.filter_prompt, schedule=excluded.schedule, url=excluded.url",
-            (user_id, slug, url, filter_prompt, schedule, target_kind, target_id, _now_iso()),
+            "INSERT INTO subscriptions(user_id,slug,url,filter_prompt,schedule,target_kind,target_id,notify_empty,created_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(user_id,slug,target_id) DO UPDATE SET "
+            "filter_prompt=excluded.filter_prompt, schedule=excluded.schedule, url=excluded.url, notify_empty=excluded.notify_empty",
+            (user_id, slug, url, filter_prompt, schedule, target_kind, target_id, 1 if notify_empty else 0, _now_iso()),
         )
         conn.commit()
         return cur.rowcount == 1 and conn.total_changes  # rowcount is unreliable for upsert; treat as ok
@@ -127,6 +139,13 @@ def list_subscriptions(conn: sqlite3.Connection, *, user_id: str) -> list[sqlite
 
 def subscriptions_for_slug(conn: sqlite3.Connection, slug: str) -> list[sqlite3.Row]:
     return conn.execute("SELECT * FROM subscriptions WHERE slug=?", (slug,)).fetchall()
+
+
+def realtime_notify_empty_subs(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """notify_empty=1 인 realtime 구독들 (폴링 후 '새 공지 없음' 한 줄 받을 대상)."""
+    return conn.execute(
+        "SELECT * FROM subscriptions WHERE notify_empty=1 AND schedule='realtime'"
+    ).fetchall()
 
 
 def all_slugs(conn: sqlite3.Connection) -> list[str]:

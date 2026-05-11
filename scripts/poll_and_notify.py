@@ -55,7 +55,8 @@ def main(argv: list[str]) -> int:
         return rc
 
     print("[poll_and_notify] notify.py ...")
-    rc = subprocess.call([PY, str(ROOT / "scripts" / "notify.py")], cwd=str(ROOT))
+    # --heartbeat: 방금 폴링했으므로, notify_empty=1 인 realtime 구독에 새 글 없으면 '새 공지 없음' 1줄
+    rc = subprocess.call([PY, str(ROOT / "scripts" / "notify.py"), "--heartbeat"], cwd=str(ROOT))
     if rc != 0:
         print(f"[poll_and_notify] notify.py 실패 rc={rc}", file=sys.stderr)
         _ping(hc, "/fail")

@@ -14,6 +14,8 @@
     python scripts/notify.py --dry-run       # 발송/DB 변경 없이 메시지만 출력
     python scripts/notify.py --collected-dir output/collected/20260511_210242
     python scripts/notify.py --no-digest     # 다이제스트 flush 생략 (이번 collected 분만)
+    python scripts/notify.py --heartbeat     # 추가로, notify_empty=1 인 realtime 구독에 새 글 없으면 "새 공지 없음" 발송
+                                             #   (poll_and_notify.py 가 폴링 직후 이걸 켜서 호출 — 폴링 1회 = heartbeat 1회)
 """
 from __future__ import annotations
 
@@ -48,11 +50,13 @@ KST = timezone(timedelta(hours=9))
 # collected 디렉터리 / 새 글
 # --------------------------------------------------------------------------- #
 def latest_collected_dir() -> Optional[Path]:
+    """가장 최근 '완료된 폴링 run' 디렉터리. poll.py 가 매 run 마다 poll_result.json 을 쓰므로 그게 앵커.
+    (옛날엔 *.new.json 이 있는 dir 만 골랐는데, 새 글이 0건이면 *.new.json 이 안 생겨서 오래된 dir 을 잘못 집었음 → heartbeat 가 stale 데이터를 봄.)"""
     if not COLLECTED_DIR.exists():
         return None
-    dirs = sorted(d for d in COLLECTED_DIR.iterdir() if d.is_dir())
+    dirs = sorted(d for d in COLLECTED_DIR.iterdir() if d.is_dir())  # 이름 = 타임스탬프 → 정렬 = 시간순
     for d in reversed(dirs):
-        if any(d.glob("*.new.json")):
+        if (d / "poll_result.json").exists() or any(d.glob("*.new.json")):
             return d
     return dirs[-1] if dirs else None
 
@@ -258,6 +262,52 @@ def flush_digests(conn, tok: Optional[str], *, dry_run: bool) -> int:
 
 
 # --------------------------------------------------------------------------- #
+# heartbeat — "새 공지 없음" 알림 (notify_empty=1 인 realtime 구독)
+# --------------------------------------------------------------------------- #
+def send_heartbeats(conn, tok: Optional[str], collected_dir: Optional[Path],
+                    delivered_pairs: set[tuple[str, str]], *, dry_run: bool) -> int:
+    """이번 폴링에서 그 slug 로 새로 알릴 글이 없었으면 notify_empty 구독에게 '새 공지 없음' 한 줄.
+
+    delivered_pairs = 이번 run 에 realtime 발송이 일어난 (slug, target_id) 집합.
+    poll_result.json(=poll.py 가 collected_dir 에 쓴 것) 의 status=='ok' 인 slug 만 대상 — 깨졌으면 '없음'이라 안 함.
+    """
+    if not collected_dir:
+        return 0
+    pr_path = collected_dir / "poll_result.json"
+    if not pr_path.exists():
+        return 0
+    try:
+        pr = json.loads(pr_path.read_text(encoding="utf-8"))
+    except Exception as e:  # noqa: BLE001
+        print(f"  [warn] poll_result.json 읽기 실패: {e}", file=sys.stderr)
+        return 0
+    by_slug = {s["slug"]: s for s in pr.get("sites", []) if isinstance(s, dict) and s.get("slug")}
+    when = datetime.now(KST).strftime("%Y-%m-%d %H:%M")
+    sent = 0
+    for r in db.realtime_notify_empty_subs(conn):
+        slug = r["slug"]
+        site = by_slug.get(slug)
+        if not site or site.get("status") != "ok":
+            continue  # 폴링 안 됐거나 깨짐 — '없음'이라고 말하면 오해를 줌
+        if (slug, r["target_id"]) in delivered_pairs:
+            continue  # 이번에 새 글을 이미 보냈음
+        content = f"🔇 `{slug}` — 새 공지 없음 (확인: {when} KST)"
+        if dry_run or not tok:
+            print(f"\n--- [HEARTBEAT → {r['target_kind']}:{r['target_id']}] ---\n{content}\n")
+            if not tok and not dry_run:
+                print(f"  [warn] BOT_TOKEN 없음 — heartbeat 발송 불가: {slug}", file=sys.stderr)
+            continue
+        try:
+            deliver(tok, target_kind=r["target_kind"], target_id=r["target_id"], content=content)
+            sent += 1
+            print(f"  🔇 heartbeat: {r['target_kind']}:{r['target_id']}  {slug}")
+            time.sleep(0.5)
+        except (CannotDeliver, DiscordRestError) as e:
+            print(f"  [warn] heartbeat 발송 실패({slug} → {r['target_id']}): {e}", file=sys.stderr)
+    return sent
+
+
+# --------------------------------------------------------------------------- #
 # main
 # --------------------------------------------------------------------------- #
 def main(argv: Optional[list[str]] = None) -> int:
@@ -268,6 +318,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     p.add_argument("--model", help="Gemini 모델 (기본 GEMINI_MODEL env 또는 gemini-2.5-flash)")
     p.add_argument("--max-notify", type=int, default=12, help="한 slug 당 한 번에 처리할 최대 글 수 (초과분은 스킵)")
     p.add_argument("--no-digest", action="store_true", help="다이제스트 flush 생략")
+    p.add_argument("--heartbeat", action="store_true",
+                   help="notify_empty=1 인 realtime 구독에 새 글 없으면 '새 공지 없음' 발송 (poll_and_notify 가 폴링 직후 켬)")
     p.add_argument("--dry-run", action="store_true", help="발송/DB 변경 없이 메시지만 출력")
     args = p.parse_args(argv)
 
@@ -292,6 +344,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         return _client[0]
 
     realtime_sent = 0
+    digest_sent = 0
+    hb_sent = 0
+    realtime_delivered: set[tuple[str, str]] = set()  # 이번 run 에 realtime 발송을 시도한 (slug, target_id) — 성공/실패 무관(새 글이 있었다는 뜻)
     try:
         for slug, posts in new_posts.items():
             subs = db.subscriptions_for_slug(conn, slug)
@@ -353,10 +408,12 @@ def main(argv: Optional[list[str]] = None) -> int:
                     if sched == "realtime":
                         if dry_run:
                             print(f"\n--- [{target_kind}:{target_id} {slug}] {pid} ---\n{content}\n")
+                            realtime_delivered.add((slug, target_id))
                             continue
                         if not tok:
                             print(f"    ✗ {pid}: BOT_TOKEN 없음 — 발송 불가", file=sys.stderr)
                             continue
+                        realtime_delivered.add((slug, target_id))  # 새 글이 있었음 → heartbeat('새 공지 없음') 안 보냄 (발송 성공/실패 무관)
                         try:
                             deliver(tok, target_kind=target_kind, target_id=target_id, content=content)
                             db.mark_delivered(conn, slug, pid, target_id)
@@ -374,15 +431,18 @@ def main(argv: Optional[list[str]] = None) -> int:
                             db.add_pending(conn, slug=slug, post_id=pid, target_id=target_id,
                                            summary=summary, title=post.get("title"),
                                            url=post.get("url"), published_at=post.get("published_at"))
-        # --- 다이제스트 flush ---
-        digest_sent = 0
+        # --- 다이제스트 flush --- (digest_sent/hb_sent 는 try 밖에서 0 초기화됨)
         if not args.no_digest:
             digest_sent = flush_digests(conn, tok, dry_run=dry_run)
+        # --- heartbeat ('새 공지 없음') ---
+        if args.heartbeat:
+            hb_sent = send_heartbeats(conn, tok, collected, realtime_delivered, dry_run=dry_run)
     finally:
         save_delivered(delivered_path, delivered_file)
         conn.close()
     print(f"[notify] 완료 — realtime {realtime_sent}건"
           + (f", digest {digest_sent}건" if not args.no_digest else "")
+          + (f", heartbeat {hb_sent}건" if args.heartbeat else "")
           + f" (dry_run={dry_run})")
     return 0
 

@@ -205,14 +205,19 @@ def _record_error(where: str, exc: BaseException) -> str:
     filter="(선택) 어떤 글만 받을지 자연어로. 예: '점검 공지는 빼고 신규 콘텐츠/이벤트만'. 비우면 새 글 전부.",
     schedule="(선택) 'realtime'(기본, 폴링 때마다 바로) 또는 'HH:MM'/'HH'(매일 그 시각에 하루치 모아서, KST)",
     here="(선택) 켜면 이 채널에 발송. 끄면(기본) 내 DM 으로.",
+    notify_empty="(선택) 켜면 폴링했는데 새 글이 없을 때도 '새 공지 없음' 한 줄을 보냄. 끄면(기본) 새 글 있을 때만. realtime 일 때만 동작.",
 )
 async def watch(interaction: discord.Interaction, url: str, filter: Optional[str] = None,
-                schedule: Optional[str] = "realtime", here: bool = False):
+                schedule: Optional[str] = "realtime", here: bool = False, notify_empty: bool = False):
     await interaction.response.defer(thinking=True)
     sched = _parse_schedule(schedule)
     if sched is None:
         await interaction.edit_original_response(
             content="❌ schedule 형식 오류 — 'realtime' 또는 'HH:MM'(예: 09:00) / 'HH'(예: 9) 로 적어주세요.")
+        return
+    if notify_empty and sched != "realtime":
+        await interaction.edit_original_response(
+            content="❌ notify_empty(새 공지 없음 알림)는 schedule='realtime' 일 때만 돼요. 다이제스트 모드에선 못 켭니다.")
         return
     if not re.match(r"^https?://", url.strip()):
         await interaction.edit_original_response(content="❌ http(s):// 로 시작하는 URL 을 주세요.")
@@ -228,14 +233,16 @@ async def watch(interaction: discord.Interaction, url: str, filter: Optional[str
     target_id = str(interaction.channel_id) if here else str(interaction.user.id)
     db.add_subscription(_conn, user_id=str(interaction.user.id), slug=slug, url=url.strip(),
                         filter_prompt=(filter.strip() if filter and filter.strip() else None),
-                        schedule=sched, target_kind=target_kind, target_id=target_id)
+                        schedule=sched, target_kind=target_kind, target_id=target_id,
+                        notify_empty=notify_empty)
     n = _baseline_count(slug)
     where = "이 채널" if here else "내 DM"
     head = (f"✅ 등록 완료 — `{slug}`\n"
             f"• baseline {n if n is not None else '?'}건(이 글들은 '새 글' 아님)\n"
             f"• 필터: {filter.strip() if filter and filter.strip() else '없음(새 글 전부)'}\n"
             f"• 스케줄: {sched}\n"
-            f"• 알림: {where}")
+            f"• 알림: {where}\n"
+            f"• 새 글 없을 때도 알림: {'예' if notify_empty else '아니오'}")
     await interaction.edit_original_response(content=head + "\n\n📋 예시 알림 만드는 중…")
     example = await _make_example(slug)
     if example:
@@ -287,7 +294,8 @@ async def list_cmd(interaction: discord.Interaction):
     lines = ["**내 구독:**"]
     for r in rows:
         where = "DM" if r["target_kind"] == "dm" else f"<#{r['target_id']}>"
-        lines.append(f"• `{r['slug']}` — 필터: {r['filter_prompt'] or '없음'} — 스케줄: {r['schedule']} — {where} — 등록 {r['created_at'][:10]}")
+        ne = " — 새글없음알림:on" if r["notify_empty"] else ""  # connect() 가 항상 _migrate 하므로 컬럼은 늘 있음
+        lines.append(f"• `{r['slug']}` — 필터: {r['filter_prompt'] or '없음'} — 스케줄: {r['schedule']} — {where}{ne} — 등록 {r['created_at'][:10]}")
     await interaction.response.send_message("\n".join(lines)[:1900], ephemeral=True)
 
 

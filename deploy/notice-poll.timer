@@ -1,10 +1,12 @@
-# 매시 13분(±2분)에 폴링 — 정시는 피하고, 시간당 1회면 구독별 다이제스트 시각(HH:MM)도 시 단위로 잡힘.
-# 부담되면 OnCalendar 를 *-*-* 00,06,12,18:13:00 등으로 늘려도 됨(단 다이제스트가 그 시각대에만 나감).
+# 매일 08:20(±2분) KST 에 폴링 (2026-05-11 변경: 전엔 매시 13분 = 하루 24회).
+# ⚠️ 다이제스트(구독 schedule=HH:MM)와 notify_empty('새 공지 없음') 는 폴링이 돌 때만 발송됨 →
+#   하루 1회면 다이제스트 시각은 사실상 폴링 시각(08시)에만 비워짐. 다이제스트를 제대로 쓰려면 OnCalendar 를 매시(*:13:00) 등으로 되돌리거나
+#   notify.py 의 flush_digests 를 "지난 시각도 비우기"로 고칠 것. (자세한 건 docs/배포 가이드.md §4)
 [Unit]
-Description=Run notice poll a few times a day
+Description=Run notice poll once a day (08:20 KST)
 
 [Timer]
-OnCalendar=*-*-* *:13:00 Asia/Seoul
+OnCalendar=*-*-* 08:20:00 Asia/Seoul
 Persistent=true
 RandomizedDelaySec=120
 

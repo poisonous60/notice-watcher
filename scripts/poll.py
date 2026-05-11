@@ -231,12 +231,18 @@ async def run(args) -> int:
         st_path.write_text(json.dumps({k: v for k, v in st.items()}, ensure_ascii=False, indent=2), encoding="utf-8")
         rows.append((slug, st["last_status"], res["n_posts"], res["n_new"], res["note"]))
 
-    # 요약
+    # 요약 (사람용 summary.txt + 기계용 poll_result.json — notify.py 의 heartbeat 가 읽음)
     lines = [f"[poll {ts}]", ""]
     for slug, status, npos, nnew, note in rows:
         lines.append(f"  {slug}\n      status={status}  posts={npos}  new={nnew}  {note}")
     text = "\n".join(lines) + "\n"
     (run_dir / "summary.txt").write_text(text, encoding="utf-8")
+    (run_dir / "poll_result.json").write_text(
+        json.dumps({"ts": ts, "polled_at": _now_iso(),
+                    "sites": [{"slug": s, "status": st, "n_posts": np, "n_new": nn}
+                              for s, st, np, nn, _ in rows]},
+                   ensure_ascii=False, indent=2),
+        encoding="utf-8")
     print("\n" + text)
     print(f"→ {run_dir}")
     return 0
