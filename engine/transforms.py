@@ -12,6 +12,7 @@ transform 이 예외를 던지면 그 chain 은 실패(None)로 본다 — 호�
 """
 from __future__ import annotations
 
+import html as _html
 import re
 from datetime import datetime, timezone, timedelta
 from typing import Any, Callable, Optional
@@ -41,6 +42,11 @@ def _regex_extract(value: str, pattern: str, group: int = 1) -> Optional[str]:
 
 def _collapse_ws(value: str) -> str:
     return " ".join(value.split())
+
+
+def _html_unescape(value: str) -> str:
+    """'&amp;' → '&', '&lt;' → '<', '&#39;' → \"'\" 등. JSON API 가 제목/요약을 HTML 이스케이프해 줄 때."""
+    return _html.unescape(value)
 
 
 def _remove_prefix(value: str, prefix: str) -> str:
@@ -147,6 +153,7 @@ TRANSFORMS: dict[str, Callable[..., Any]] = {
     "strip_query_fragment": _strip_query_fragment,
     "regex_extract": _regex_extract,
     "collapse_ws": _collapse_ws,
+    "html_unescape": _html_unescape,
     "remove_prefix": _remove_prefix,
     "strip_brackets": _strip_brackets,
     "replace": _replace,

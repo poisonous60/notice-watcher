@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "site": "forum.nexon.com",
+  "board": "1018",
+  "strategy": "httpx_json",
+  "_source_url": "https://forum.nexon.com/bluearchive/board_list?board=1018",
+  "_note": "넥슨 포럼(블루아카이브 공지). board_list HTML 은 정적이지만 LLM 자동생성이 0건/잘못된 본문 API 로 실패. 목록·본문 모두 공개 JSON API 사용: 목록=/api/v1/board/{board}/threads, 본문=/api/v1/thread/{threadId}. createDate 는 unix epoch(초), title/summary 는 HTML 이스케이프돼 옴 → html_unescape transform.",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/javascript, */*; q=0.01",
+    "Accept-Language": "ko-KR,ko;q=0.9",
+    "X-Requested-With": "XMLHttpRequest",
+    "Referer": "https://forum.nexon.com/bluearchive/board_list?board=1018"
+  },
+  "timeout": 15.0,
+  "list": {
+    "url_template": "https://forum.nexon.com/api/v1/board/{board}/threads?alias=bluearchive&paginationType=PAGING&pageSize=30&blockSize=5&hideType=WEB",
+    "pagination": { "kind": "query_param", "page_param": "pageNo" },
+    "list_path": ["threads"],
+    "fields": {
+      "post_id": [ { "from": "json", "path": ["threadId"] } ],
+      "title": [ { "from": "json", "path": ["title"], "transform": [["html_unescape"], ["collapse_ws"]] } ],
+      "url": [ { "from": "template", "value": "https://forum.nexon.com/bluearchive/board_view?board={board}&thread={post_id}" } ],
+      "published_at": [ { "from": "json", "path": ["createDate"], "transform": [["unixtime_to_iso", "+09:00", "s"]] } ],
+      "author": [ { "from": "json", "path": ["user", "nickname"] } ],
+      "summary": [ { "from": "json", "path": ["summary"], "transform": [["html_unescape"], ["collapse_ws"]] } ],
+      "cover_image": [ { "from": "json", "path": ["thumbnailImageUrl"] } ]
+    }
+  },
+  "article": {
+    "url_template": "https://forum.nexon.com/api/v1/thread/{post_id}?alias=bluearchive",
+    "fetch_kind": "json",
+    "content": [ { "from": "json", "path": ["content"] } ],
+    "re_extract": true
+  }
+}
