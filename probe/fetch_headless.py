@@ -30,6 +30,7 @@ def fetch_with_capture(
     headless: bool = True,
     baseline_blocked: bool = False,
     timeout_ms: int = 30000,
+    idle_timeout_ms: int = 10000,
 ) -> Result:
     """Chromium 띄워 URL 로드, HAR 표준 포맷으로 트래픽 자동 기록.
 
@@ -38,6 +39,11 @@ def fetch_with_capture(
       - {target}.screenshot.png
       - traffic.har (+ traffic.har_data/)
       - captured_headers.json : 메인 문서 요청 헤더만
+
+    timeout_ms: page.goto(domcontentloaded) 타임아웃 — 페이지 자체가 떠야 하므로 넉넉히(30s).
+    idle_timeout_ms: 그 뒤 networkidle(XHR 다 잠잠해질 때까지) 추가 대기 상한(기본 10s) —
+      광고/트래커가 계속 떠드는 사이트는 networkidle 이 영영 안 와서 이 상한까지 꽉 기다린다(그게 정찰 시간의 큰 몫).
+      데이터 XHR 은 보통 10s 안에 다 뜨므로 이 정도면 충분. 더 짧게 잡으면 느린 SPA 의 목록 JSON 을 놓칠 수 있음.
     """
     if not is_available():
         return Result(
@@ -127,9 +133,9 @@ def fetch_with_capture(
                     status = response.status
                     response_headers = dict(response.headers)
                     final_url = response.url
-                # networkidle까지 추가 대기 (XHR 캡처용)
+                # networkidle까지 추가 대기 (XHR 캡처용) — 안 오면 idle_timeout_ms 에서 끊고 진행
                 try:
-                    page.wait_for_load_state("networkidle", timeout=timeout_ms)
+                    page.wait_for_load_state("networkidle", timeout=idle_timeout_ms)
                 except Exception:
                     pass
 
