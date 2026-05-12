@@ -1,0 +1,22 @@
+아래는 사용자가 모니터링하고 싶은 게시판의 probe digest 다.
+{{eh_block}}
+## digest 메타데이터 (verdict / 후보 / 헤더 / robots / hydration 등)
+```json
+{{meta}}
+```
+
+## 목록 페이지 HTML (정제됨{{list_truncated_note}}; source={{list_source}})
+```html
+{{list_html_text}}
+```
+
+## 글(본문) 페이지 HTML 샘플 (정제됨{{article_truncated_note}}; url={{article_url}})
+```html
+{{article_html_text}}
+```
+{{api_block}}
+## 참고용 예제 config (다른 사이트들 — 형식만 참고)
+{{examples}}
+
+---
+위 게시판에 대한 config JSON 을 출력하라. **JSON 객체 하나만, 다른 텍스트 없이.**

@@ -1,0 +1,7 @@
+[받고 싶은 글의 조건]
+{{filter_prompt}}
+
+[글]
+제목: {{title}}
+분류: {{category}}
+요약: {{summary}}

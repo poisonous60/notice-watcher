@@ -34,6 +34,7 @@ from bs4 import BeautifulSoup
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from generate import GeminiClient, GeminiError  # noqa: E402
+from generate.prompts import load_prompt, render_prompt  # noqa: E402
 from bot import db  # noqa: E402
 from bot.config import bot_token  # noqa: E402
 from bot.discord_rest import deliver, post_webhook, CannotDeliver, DiscordRestError  # noqa: E402
@@ -122,16 +123,9 @@ def body_text_from_html(html: Optional[str], limit: int = 6000) -> str:
     return BeautifulSoup(html, "lxml").get_text("\n", strip=True)[:limit]
 
 
-SUMMARY_SYSTEM = (
-    "너는 게시판 글 요약기다. 주어진 글의 제목과 본문을 한국어로 3~4줄 이내로 요약한다.\n"
-    "핵심 정보(일정/기간/대상/조건/제출방법/주요 변경점) 위주로. 인사말·사이트 안내·서식은 무시.\n"
-    "마크다운·머리글머리표 없이 평문 문장으로만. 본문이 거의 없으면 제목을 한 줄로 풀어 쓴다."
-)
-FILTER_SYSTEM = (
-    "너는 알림 필터다. 사용자가 준 '받고 싶은 글의 조건'과 게시판 글 정보를 보고,\n"
-    "이 글을 사용자에게 알릴지 판단한다. 출력은 JSON 하나만: {\"include\": true|false, \"reason\": \"한 줄 이유\"}.\n"
-    "조건에 명백히 해당하면 include=true, 명백히 아니면 false. 애매하면 include=true(놓치는 것보다 낫다)."
-)
+# 프롬프트 본문은 repo 루트 prompts/notify_*.txt 에 산다 (generate/prompts.py 가 로드/치환).
+SUMMARY_SYSTEM = load_prompt("notify_summary.system")
+FILTER_SYSTEM = load_prompt("notify_filter.system")
 
 
 def summarize_post(client: GeminiClient, post: dict) -> str:
@@ -139,7 +133,7 @@ def summarize_post(client: GeminiClient, post: dict) -> str:
     body = body_text_from_html(post.get("content_html"))
     if len(body) < 30:
         return body or title or "(내용 없음)"
-    user_text = f"제목: {title}\n\n--- 본문 ---\n{body}\n--- 끝 ---"
+    user_text = render_prompt("notify_summary.user", title=title, body=body)
     try:
         s = client.generate_text(system_instruction=SUMMARY_SYSTEM, user_text=user_text,
                                  temperature=0.3, json_mode=False).strip()
@@ -152,8 +146,8 @@ def summarize_post(client: GeminiClient, post: dict) -> str:
 def filter_pass(client: GeminiClient, filter_prompt: str, post: dict, summary: str) -> bool:
     title = (post.get("title") or "").strip()
     cat = post.get("category") or ""
-    user_text = (f"[받고 싶은 글의 조건]\n{filter_prompt}\n\n"
-                 f"[글]\n제목: {title}\n분류: {cat}\n요약: {summary}")
+    user_text = render_prompt("notify_filter.user", filter_prompt=filter_prompt,
+                              title=title, category=cat, summary=summary)
     try:
         res = client.generate_json(system_instruction=FILTER_SYSTEM, user_text=user_text, temperature=0.0)
         return bool(res.get("include", True)) if isinstance(res, dict) else True

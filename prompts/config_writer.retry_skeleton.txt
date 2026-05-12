@@ -1,0 +1,21 @@
+{{base}}
+
+---
+## ⚠ 이전 시도가 검증에 실패했다 — 아래를 보고 *수정된* config 를 출력하라
+잘 동작한 부분은 그대로 둬도 된다. **FAIL 로 표시된 것은 반드시 고쳐야 한다.**
+
+### 이전 config
+```json
+{{prev_config}}
+```
+
+### 검증 결과 (FAIL=하드 실패=필수 수정, warn=가능하면 수정)
+{{feedback}}
+
+### 수정 힌트
+- post_id 가 안정적 ID 모양이 아니면(공백 등) — title 을 post_id 로 쓴 게 아닌지 확인. post_id 는 URL/href 안의 숫자 ID 같은 걸 써라.
+- published_at ISO8601 파싱 실패 — 날짜 문자열 형식을 먼저 맞춰라. "2026.04.17" 면 `["replace",".","-"]` 후 `["date_only_to_iso","+09:00"]`, 또는 `["iso8601",["%Y.%m.%d"],"+09:00"]`.
+- 본문 0자 / <100자 — article.content 의 selector 가 틀린 것. 위 "글 페이지 HTML 샘플" 에서 본문 컨테이너를 다시 찾아라. **글 본문이 정적 HTML 에 통째로 없으면(SPA): (a) digest 의 "글 본문 JSON API 후보"(article_sample.api_candidates)가 있으면 article 을 그 API 로 — fetch_kind:"json" + url_template + content:[{from:"json", path:<body_field_path>}]. (b) 없으면 strategy 를 "playwright_html" 로 바꾸고 article.wait_selector(없으면 list.wait_selector)에 본문/목록 컨테이너 CSS selector 를 넣어 렌더 완료를 기다려라.**
+- 0건 — row_selector(httpx_html) 또는 list_path(httpx_json) 가 잘못됐다. 위 HTML / list_candidates 를 다시 봐라. SPA 라서 정적 HTML 에 글 목록이 없으면 strategy 를 "playwright_html" 로 바꾸고 list.wait_selector 로 목록이 그려질 때까지 기다려라.
+
+수정된 config JSON 하나만 출력하라. 다른 텍스트 없이.
