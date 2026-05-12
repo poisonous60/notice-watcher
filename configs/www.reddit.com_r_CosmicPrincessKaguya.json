@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "site": "reddit.com",
+  "board": "CosmicPrincessKaguya/flair=Fan Art",
+  "strategy": "handwritten",
+  "adapter": "RedditAdapter",
+  "kwargs": {
+    "subreddit": "CosmicPrincessKaguya",
+    "sort": "new",
+    "flair": "Fan Art",
+    "include_stickied": true,
+    "timeout": 15.0
+  },
+  "_source_url": "https://www.reddit.com/r/CosmicPrincessKaguya/",
+  "_note": "Reddit r/CosmicPrincessKaguya — 손 config(known-platform reddit 인식기와 동형). 사용자 선택: link flair 가 'Fan Art' 인 글만(=서브의 창작/팬아트 탭). 손어댑터 RedditAdapter 가 공개 .json 엔드포인트(목록 /r/CosmicPrincessKaguya/new.json?raw_json=1, 본문 permalink+/.json → 배열 [postListing, commentListing] 의 [0].data.children[0].data; 이미지/링크 글이면 selftext 대신 그 미디어/링크를 HTML 로 합성)를 호출. ~10글/일 중 절반 가량이 Fan Art. flair/sort 바꾸려면 kwargs 수정 후 register.py --config 로 재등록. robots.txt 는 Disallow:/ — 저빈도 개인용·UA+polite_sleep·우회 없음."
+}
