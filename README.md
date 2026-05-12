@@ -21,7 +21,8 @@ crwalingTest/
 │
 ├── bot/                        # Discord 봇 (discord.py): /watch /preview /list /unwatch /status
 │   ├── main.py                 # 게이트웨이 봇 + 슬래시 명령 (register.py 를 subprocess 로)
-│   ├── url_gate.py             # /watch·/preview(처음 보는 사이트) probe 전단 URL 게이트 — 구조검증/SSRF/SNS·축약·파일 블랙리스트/Safe Browsing(v4). 단독 실행: python -m bot.url_gate "<url>"
+│   ├── url_gate.py             # /watch·/preview(처음 보는 사이트) probe 전단 URL 게이트 — 구조검증/SSRF/정책 블랙리스트/Safe Browsing(v4). 단독 실행: python -m bot.url_gate "<url>"
+│   ├── url_blacklist.json      # 위 게이트 2단계 블랙리스트 — groups[] {name, message, host_suffix[], path_ext[]}. 편집하면 자동 반영(재시작 불필요). 없거나 깨지면 url_gate.py 내장 기본값
 │   ├── db.py                   # SQLite — 구독(필터·스케줄·대상) / 다이제스트 대기열 / 발송 기록
 │   ├── discord_rest.py         # 봇 토큰으로 Discord REST 직접 (notify.py 가 발송에 사용)
 │   └── config.py               # .env 로드 + BOT_TOKEN/OWNER_USER_ID/GUILD_ID/SAFE_BROWSING_API_KEY

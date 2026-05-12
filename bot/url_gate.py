@@ -4,7 +4,9 @@
 스테이지 (순서대로, 하나라도 막히면 UrlRejected):
   1) 구조 검증   — stdlib urllib.parse 만. http/https / hostname 존재 / user:pass@ 없음 /
                    공백·제어문자 없음 / host 가 IP 리터럴(공인·사설·IPv6) 이면 거부.
-  2) 정책 블랙리스트 (네트워크 X) — SNS/동영상 호스트, 축약 링크 호스트, 파일 직링(.pdf·.zip…) 거부.
+  2) 정책 블랙리스트 (네트워크 X) — bot/url_blacklist.json 의 그룹별 host_suffix / path_ext 에 걸리면
+                   그 그룹의 message 로 거부(기본 그룹: SNS·동영상 호스트 / 축약 링크 호스트 / 파일 직링 .pdf·.zip…).
+                   파일이 없거나 깨지면 내장 기본값(_DEFAULT_BLACKLIST) 사용 — blacklist_status() 로 확인.
   3) SSRF       — host 를 IDNA 인코딩해 DNS 해석, 해석된 *모든* IP 가 사설/loopback/link-local/
                    reserved/multicast/unspecified 중 하나면 거부. (gaierror → dns_failed)
   4) Safe Browsing — Google Safe Browsing v4 threatMatches:find 한 번 호출(POST, 4s, 재시도 X). **fail-closed**:
@@ -22,6 +24,11 @@
     봇 on_ready 에서 경고 로그를 띄운다. 발급: GCP 콘솔 → Safe Browsing API 사용 설정 → API 키 생성 →
     그 키를 Safe Browsing API 로만 제한(권장).
 
+블랙리스트 설정: bot/url_blacklist.json — {"groups": [{"name", "message", "host_suffix": [], "path_ext": []}, ...]}.
+    위에서부터 검사, 첫 매치의 message 로 거부, name 은 /status 거부 카운터 키. host_suffix 는 'youtube.com'(점 없이),
+    path_ext 는 '.pdf' 형태(점은 있어도 없어도 됨). 둘 다 선택이지만 그룹당 적어도 하나. 편집하면 다음 검사 때 자동 반영
+    (mtime 감지, 재시작 불필요). 파일이 없거나 JSON/스키마가 깨지면 url_gate.py 의 _DEFAULT_BLACKLIST 로 폴백(봇은 안 죽음).
+
 알려진 한계: 게이트는 제출된 URL 문자열 그대로만 본다 — 301 리다이렉트(→SNS / →사설 IP)나 DNS rebinding
     (TOCTOU) 은 완전히 막지 못한다(probe 의 baseline 이 최종 URL 을 다시 classify 하긴 함). DNS 가 hang
     하면 getaddrinfo 가 asyncio 기본 executor 스레드를 OS 리졸버 타임아웃만큼 점유할 수 있다(여기선 5s 로 await 만 끊음).
@@ -32,6 +39,8 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import json
+import logging
 import re
 import socket
 import sys
@@ -48,6 +57,8 @@ if str(ROOT) not in sys.path:
 import httpx  # noqa: E402
 
 from bot.config import safe_browsing_api_key  # noqa: E402
+
+log = logging.getLogger("bot.url_gate")
 
 
 # --------------------------------------------------------------------------- #
@@ -74,29 +85,111 @@ class SafeBrowsingUnavailable(Exception):
         self.config_error = config_error
 
 
-# --------------------------------------------------------------------------- #
-# 정책 블랙리스트 (네트워크 호출 없음) — 커지면 별도 파일/설정으로 외부화
-# --------------------------------------------------------------------------- #
-_SNS_HOSTS = (
-    "youtube.com", "youtu.be", "x.com", "twitter.com",
-    "instagram.com", "facebook.com", "fb.com", "fb.watch",
-    "tiktok.com", "threads.net", "linkedin.com", "lnkd.in", "pinterest.com",
-)
-_SHORTENER_HOSTS = (
-    "bit.ly", "bit.do", "bitly.com", "tinyurl.com", "t.co", "goo.gl",
-    "ow.ly", "is.gd", "buff.ly", "rebrand.ly", "cutt.ly", "shorturl.at",
-    "han.gl", "me2.do", "url.kr", "vo.la", "abr.ge",
-)
-_BINARY_EXT = (
-    ".pdf", ".zip", ".rar", ".7z", ".tar", ".gz", ".tgz", ".bz2",
-    ".exe", ".dmg", ".msi", ".apk", ".iso", ".bin",
-    ".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm",
-    ".mp3", ".wav", ".flac", ".m4a", ".ogg",
-    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".ico", ".tiff", ".heic",
-    ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".hwp", ".hwpx",
-)
-
 _CONTROL_RE = re.compile(r"[\x00-\x20\x7f-\x9f]")  # ASCII 제어문자·공백 + C1
+
+
+# --------------------------------------------------------------------------- #
+# 스테이지 2 정책 블랙리스트 — bot/url_blacklist.json (없거나 깨지면 _DEFAULT_BLACKLIST 폴백)
+# --------------------------------------------------------------------------- #
+_BLACKLIST_PATH = Path(__file__).resolve().parent / "url_blacklist.json"
+
+# url_blacklist.json 이 없거나 깨졌을 때 쓰는 내장 기본값. 배포 시 같은 내용의 url_blacklist.json 도 함께 둔다 — 그게 진실의 원천.
+_DEFAULT_BLACKLIST: list[dict] = [
+    {
+        "name": "blocked_platform",
+        "message": "유튜브·SNS 같은 데는 게시판이 아니라서 등록할 수 없어요.",
+        "host_suffix": ["youtube.com", "youtu.be", "x.com", "twitter.com",
+                        "instagram.com", "facebook.com", "fb.com", "fb.watch",
+                        "tiktok.com", "threads.net", "linkedin.com", "lnkd.in", "pinterest.com"],
+        "path_ext": [],
+    },
+    {
+        "name": "blocked_shortener",
+        "message": "축약 링크(bit.ly 등)는 등록할 수 없어요 — 펼친 원래 URL 을 주세요.",
+        "host_suffix": ["bit.ly", "bit.do", "bitly.com", "tinyurl.com", "t.co", "goo.gl",
+                        "ow.ly", "is.gd", "buff.ly", "rebrand.ly", "cutt.ly", "shorturl.at",
+                        "han.gl", "me2.do", "url.kr", "vo.la", "abr.ge"],
+        "path_ext": [],
+    },
+    {
+        "name": "binary_file",
+        "message": "파일 직링(.pdf·.zip 등)은 받을 수 없어요 — 게시판 목록 페이지 URL 을 주세요.",
+        "host_suffix": [],
+        "path_ext": [".pdf", ".zip", ".rar", ".7z", ".tar", ".gz", ".tgz", ".bz2",
+                     ".exe", ".dmg", ".msi", ".apk", ".iso", ".bin",
+                     ".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm",
+                     ".mp3", ".wav", ".flac", ".m4a", ".ogg",
+                     ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".ico", ".tiff", ".heic",
+                     ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".hwp", ".hwpx"],
+    },
+]
+
+# (mtime, 정규화된 그룹들, 상태문자열) — mtime 바뀌면 재로드. 이벤트 루프 스레드에서만 접근(락 불필요).
+_blacklist_cache: Optional[tuple[float, list[dict], str]] = None
+_blacklist_last_error: Optional[str] = None  # 같은 에러를 매 검사마다 다시 로깅하지 않으려고
+
+
+def _normalize_groups(raw: object, source: str) -> list[dict]:
+    """raw('groups' 리스트)를 검증·정규화 → [{name, message, host_suffix:tuple, path_ext:tuple}, ...]. 잘못되면 ValueError."""
+    if not isinstance(raw, list) or not raw:
+        raise ValueError(f"{source}: 'groups' 가 비어있지 않은 리스트여야 함")
+    out: list[dict] = []
+    for i, g in enumerate(raw):
+        if not isinstance(g, dict):
+            raise ValueError(f"{source}: groups[{i}] 가 객체가 아님")
+        name, message = g.get("name"), g.get("message")
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError(f"{source}: groups[{i}].name 누락/빈 문자열")
+        if not isinstance(message, str) or not message.strip():
+            raise ValueError(f"{source}: groups[{i}].message 누락/빈 문자열")
+        host_suffix, path_ext = g.get("host_suffix") or [], g.get("path_ext") or []
+        if not isinstance(host_suffix, list) or not isinstance(path_ext, list):
+            raise ValueError(f"{source}: groups[{i}].host_suffix/path_ext 는 리스트여야 함")
+        for fld, items in (("host_suffix", host_suffix), ("path_ext", path_ext)):
+            for j, s in enumerate(items):
+                if not isinstance(s, str):
+                    raise ValueError(f"{source}: groups[{i}].{fld}[{j}] 가 문자열이 아님 ({type(s).__name__})")
+        hs = tuple(s.strip().lower().lstrip(".") for s in host_suffix if s.strip())
+        pe = tuple("." + s.strip().lower().lstrip(".") for s in path_ext if s.strip())
+        if not hs and not pe:
+            raise ValueError(f"{source}: groups[{i}]({name}) 에 host_suffix 도 path_ext 도 없음")
+        out.append({"name": name.strip(), "message": message.strip(), "host_suffix": hs, "path_ext": pe})
+    return out
+
+
+_DEFAULT_BLACKLIST_NORM = _normalize_groups(_DEFAULT_BLACKLIST, "_DEFAULT_BLACKLIST")  # 모듈 import 시 한 번 — 여기서 깨지면 코드 버그
+
+
+def _load_blacklist() -> tuple[list[dict], str]:
+    """(정규화된 그룹 리스트, 상태문자열). 파일 없음/JSON·스키마 깨짐 → 내장 기본값."""
+    global _blacklist_cache, _blacklist_last_error
+    try:
+        mtime = _BLACKLIST_PATH.stat().st_mtime
+    except OSError:
+        return _DEFAULT_BLACKLIST_NORM, "내장 기본값 (url_blacklist.json 없음)"
+    if _blacklist_cache is not None and _blacklist_cache[0] == mtime:
+        return _blacklist_cache[1], _blacklist_cache[2]
+    try:
+        data = json.loads(_BLACKLIST_PATH.read_text(encoding="utf-8"))
+        if not isinstance(data, dict) or "groups" not in data:
+            raise ValueError('최상위가 {"groups": [...]} 객체여야 함')
+        groups = _normalize_groups(data["groups"], "url_blacklist.json")
+        status = f"url_blacklist.json ({len(groups)} groups)"
+        _blacklist_last_error = None
+    except Exception as e:  # noqa: BLE001
+        emsg = f"{type(e).__name__}: {e}"
+        if emsg != _blacklist_last_error:
+            log.warning("url_blacklist.json 로드/검증 실패 — 내장 기본값 사용: %s", emsg)
+            _blacklist_last_error = emsg
+        groups = _DEFAULT_BLACKLIST_NORM
+        status = f"⚠ url_blacklist.json 로드 실패({type(e).__name__}) — 내장 기본값"
+    _blacklist_cache = (mtime, groups, status)
+    return groups, status
+
+
+def blacklist_status() -> str:
+    """현재 블랙리스트 출처 ('url_blacklist.json (3 groups)' / '내장 기본값 ...' / '⚠ ... 로드 실패 ...')."""
+    return _load_blacklist()[1]
 
 
 # --------------------------------------------------------------------------- #
@@ -167,7 +260,7 @@ def _check_structural(u: str, label: str) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# 스테이지 2: 정책 블랙리스트
+# 스테이지 2: 정책 블랙리스트 — _load_blacklist() 의 그룹들을 위에서부터, 첫 매치로 거부
 # --------------------------------------------------------------------------- #
 def _host_matches(host: str, suffixes: tuple[str, ...]) -> bool:
     return any(host == s or host.endswith("." + s) for s in suffixes)
@@ -175,15 +268,13 @@ def _host_matches(host: str, suffixes: tuple[str, ...]) -> bool:
 
 def _check_policy(u: str, label: str) -> None:
     p = urlsplit(u)
-    host = (p.hostname or "").lower()
-    if _host_matches(host, _SNS_HOSTS):
-        _reject("blocked_platform", f"{_lbl(label)}유튜브·SNS 같은 데는 게시판이 아니라서 등록할 수 없어요.")
-    if _host_matches(host, _SHORTENER_HOSTS):
-        _reject("blocked_shortener",
-                f"{_lbl(label)}축약 링크(bit.ly 등)는 등록할 수 없어요 — 펼친 원래 URL 을 주세요.")
-    if (p.path or "").lower().endswith(_BINARY_EXT):
-        _reject("binary_file",
-                f"{_lbl(label)}파일 직링(.pdf·.zip 등)은 받을 수 없어요 — 게시판 목록 페이지 URL 을 주세요.")
+    host = (p.hostname or "").lower().rstrip(".")  # 끝의 FQDN 점 제거
+    path = (p.path or "").lower()
+    for g in _load_blacklist()[0]:
+        if g["host_suffix"] and _host_matches(host, g["host_suffix"]):
+            _reject(g["name"], f"{_lbl(label)}{g['message']}")
+        if g["path_ext"] and path.endswith(g["path_ext"]):
+            _reject(g["name"], f"{_lbl(label)}{g['message']}")
 
 
 # --------------------------------------------------------------------------- #
@@ -326,7 +417,7 @@ async def check(url: str, *, article_url: Optional[str] = None,
     for label, u in targets:
         _check_policy(u, label)
     if progress:
-        progress("2) 정책 블랙리스트 OK (SNS/축약/파일 아님)")
+        progress(f"2) 정책 블랙리스트 OK — {blacklist_status()}")
 
     # 3) SSRF (DNS) — 호스트 단위로 1회씩
     if skip_dns:

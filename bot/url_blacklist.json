@@ -1,0 +1,38 @@
+{
+  "_comment": "URL 게이트(bot/url_gate.py) 2단계 정책 블랙리스트. 위에서부터 검사, 첫 매치 그룹의 message 로 거부. name=/status 거부 카운터 키(겹치면 합산). host_suffix=호스트 접미사 — 'youtube.com' 이면 m.youtube.com 도 매치(점 없이 적기; 앞에 점 붙여도 떼 줌). path_ext=URL path 끝 확장자(소문자, '.pdf' 또는 'pdf' 둘 다 OK). 둘 다 선택이지만 그룹당 적어도 하나는 비어있지 않아야 함. 이 파일이 없거나 JSON/스키마가 깨지면 url_gate.py 의 _DEFAULT_BLACKLIST 로 폴백(봇은 안 죽음). 편집하면 다음 게이트 검사 때 자동 반영(재시작 불필요). 새 차단을 추가하려면 groups 끝에 {\"name\": \"...\", \"message\": \"...\", \"host_suffix\": [\"...\"], \"path_ext\": []} 한 줄 더. 구조검증/SSRF/Safe Browsing 은 이 파일과 무관(코드 고정).",
+  "groups": [
+    {
+      "name": "blocked_platform",
+      "message": "유튜브·SNS 같은 데는 게시판이 아니라서 등록할 수 없어요.",
+      "host_suffix": [
+        "youtube.com", "youtu.be", "x.com", "twitter.com",
+        "instagram.com", "facebook.com", "fb.com", "fb.watch",
+        "tiktok.com", "threads.net", "linkedin.com", "lnkd.in", "pinterest.com"
+      ],
+      "path_ext": []
+    },
+    {
+      "name": "blocked_shortener",
+      "message": "축약 링크(bit.ly 등)는 등록할 수 없어요 — 펼친 원래 URL 을 주세요.",
+      "host_suffix": [
+        "bit.ly", "bit.do", "bitly.com", "tinyurl.com", "t.co", "goo.gl",
+        "ow.ly", "is.gd", "buff.ly", "rebrand.ly", "cutt.ly", "shorturl.at",
+        "han.gl", "me2.do", "url.kr", "vo.la", "abr.ge"
+      ],
+      "path_ext": []
+    },
+    {
+      "name": "binary_file",
+      "message": "파일 직링(.pdf·.zip 등)은 받을 수 없어요 — 게시판 목록 페이지 URL 을 주세요.",
+      "host_suffix": [],
+      "path_ext": [
+        ".pdf", ".zip", ".rar", ".7z", ".tar", ".gz", ".tgz", ".bz2",
+        ".exe", ".dmg", ".msi", ".apk", ".iso", ".bin",
+        ".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm",
+        ".mp3", ".wav", ".flac", ".m4a", ".ogg",
+        ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".ico", ".tiff", ".heic",
+        ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".hwp", ".hwpx"
+      ]
+    }
+  ]
+}

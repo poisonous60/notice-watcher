@@ -407,7 +407,8 @@ async def status(interaction: discord.Interaction):
     gate = url_gate.rejection_summary_24h()
     gate_line = ("• URL 게이트 거부(24h, 재시작 시 리셋): "
                  + (", ".join(f"{k} {v}" for k, v in sorted(gate.items())) if gate else "없음")
-                 + ("" if safe_browsing_api_key() else "  ⚠SAFE_BROWSING_API_KEY 미설정 — 신규 등록 전부 거부됨"))
+                 + f"  · blacklist: {url_gate.blacklist_status()}"
+                 + ("" if safe_browsing_api_key() else "  · ⚠SAFE_BROWSING_API_KEY 미설정 — 신규 등록 전부 거부됨"))
     lines = [
         "**봇 상태**",
         f"• uptime: {up // 3600}h {(up % 3600) // 60}m",
