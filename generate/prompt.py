@@ -55,24 +55,25 @@ def build_user_prompt(digest: dict, *, max_html_chars: int = 120_000) -> str:
     api_cands = article.get("api_candidates") or []
     eh = d.pop("escalation_hint", None)  # 위 ⚠ 블록으로만 보여줌(meta JSON 중복 X)
     if eh:
-        d["escalation_hint"] = "(위 '⚠ 중요 지침' 블록 참고)"
+        d["escalation_hint"] = "(위 '⚠ probe 분석 힌트' 블록 참고)"
     lh = (list_html.get("html") or "")[:max_html_chars]
     ah = (article.get("html") or "")[:max_html_chars]
 
     meta = json.dumps(d, ensure_ascii=False, indent=2)
     examples = _load_examples()
 
-    # probe 분석으로 미리 준 전략 hint(register.py preflight / --article-url). 재시도 시(build_retry_prompt)에도
-    # 같은 hint 가 유지되고, "직전 시도가 무엇을 FAIL 했나" 는 build_retry_prompt 가 별도 블록(feedback)으로 붙인다.
-    eh_block = f"\n## ⚠ 중요 지침 (probe 분석 — 반드시 따를 것)\n{eh}\n" if eh else ""
+    # register.py preflight / --article-url 가 넣은 힌트. probe 휴리스틱(목록 전략 추정·후보 relevance 순위·"첫 글" 자동 픽)은
+    # 자주 틀리므로 — 아래 list_html / article_sample.html / traffic_json_api_candidates / HAR 후보와 대조해 *확인한 뒤* 반영할 것.
+    # 사용자가 직접 준 정보(--article-url 의 글 URL)는 신뢰. (재시도 시 build_retry_prompt 도 이 블록을 그대로 쓰고, "직전 시도가 뭘 FAIL 했나" 는 별도 feedback 블록.)
+    eh_block = f"\n## ⚠ probe 분석 힌트 (휴리스틱이라 틀릴 수 있음 — HTML/HAR 와 대조해 확인 후 반영. 어긋나면 실제 데이터를 따라 네가 골라라)\n{eh}\n" if eh else ""
     api_block = ""
     if api_cands:
         api_block = (
-            "\n## ⚡ 글 본문 JSON API 후보 (글 페이지가 SPA 라서 정적 HTML 본문이 비어있음 — 이 API 로 본문을 받아라)\n"
+            "\n## ⚡ 글 본문 JSON API 후보 (글 페이지가 SPA 면 정적 HTML 에 본문이 없으니 이걸로 — 단 *진짜 본문을 주는 후보인지 확인*하고 써라)\n"
             "```json\n" + json.dumps(api_cands, ensure_ascii=False, indent=2) + "\n```\n"
-            "→ article.url_template = 후보 url 의 글 ID 숫자를 {{post_id}} 로 치환한 것, article.fetch_kind=\"json\", "
-            "article.content=[{{from:\"json\", path:<후보의 body_field_path 그대로>}}]. 필요하면 후보의 request_headers 중 "
-            "X-Requested-With/Referer 를 config 최상위 headers 에 추가. 여러 개면 url_id_match=true·body_looks_html=true 우선.\n"
+            "→ 진짜 본문 후보(url_id_match=true·body_looks_html=true)를 골라: article.url_template = 그 후보 url 의 글 ID 숫자를 {{post_id}} 로 치환한 것, article.fetch_kind=\"json\", "
+            "article.content=[{{from:\"json\", path:<후보의 body_field_path 그대로>}}]. 필요하면 후보의 request_headers 중 X-Requested-With/Referer 를 config 최상위 headers 에 추가. "
+            "**body_field_path 가 ['ads',...] 류이거나 url 이 ad/banner/sdk/collect/gtm 류면 광고 SDK** — 무시하고, 그러면 아래 '글 본문 페이지 HTML 샘플' 의 본문 컨테이너 selector 로 article.content 를 잡아라(fetch_kind 도 html 로).\n"
         )
 
     return render_prompt(

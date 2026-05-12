@@ -297,15 +297,17 @@ _ARTICLE_HINT_PREFIX = "사용자가 실제 글(본문) 페이지 URL 을 직접
 
 
 def _article_hint_text(article_url: str, n_api: int) -> str:
-    """--article-url 로 글페이지를 미리 re-probe 한 뒤 생성기에 주는 강한 지침(첫 시도부터)."""
+    """--article-url 로 글페이지를 미리 re-probe 한 뒤 생성기에 주는 지침(첫 시도부터). 사용자가 *직접 지정한* URL 이라
+    "이게 글 페이지다" 는 신뢰하되, 본문 API 후보가 진짜 본문인지는 확인하라고 한다(광고 SDK 가 후보로 새는 수 있음)."""
     api_line = (f"이 글페이지는 이미 render+HAR 로 re-probe 됐다 — article_sample.api_candidates 에 본문 JSON API 후보 {n_api}건이 있다. "
-                "그중 url_id_match=true·body_looks_html=true 인 걸 골라 article.url_template=그 후보 url(글 ID 숫자를 {post_id} 로 치환), "
+                "그중 *진짜 본문을 주는* 후보(url_id_match=true·body_looks_html=true)를 골라 article.url_template=그 후보 url(글 ID 숫자를 {post_id} 로 치환), "
                 "article.fetch_kind=\"json\", article.content=[{from:\"json\", path:<그 후보의 body_field_path 그대로>}], 필요하면 그 후보 request_headers 의 X-Requested-With/Referer 를 config 최상위 headers 에 추가하라. "
+                "(body_field_path 가 ['ads',...] 류이거나 url 이 ad/banner/sdk/collect/gtm 류면 광고 — 무시하고, 그러면 아래 article_sample.html 의 본문 컨테이너 selector 로.) "
                 if n_api else
                 "본문 JSON API 후보는 못 찾았다 — article.url_template 은 이 글 URL 의 패턴(글 ID 숫자→{post_id})으로 잡고, article.content 는 article_sample.html(이미 렌더된 DOM)에서 본문 컨테이너 selector 를 찾아 잡아라(필요하면 strategy=\"playwright_html\" + article.wait_selector). ")
-    return (f"{_ARTICLE_HINT_PREFIX}: {article_url} — probe 가 자동으로 집은 '첫 글'은 무시하라(메뉴/사이드바 링크였을 수 있음). "
+    return (f"{_ARTICLE_HINT_PREFIX}: {article_url} — probe 가 자동으로 집은 '첫 글'은 무시하라(메뉴/사이드바 링크였을 수 있음). 이 URL 이 글 본문 페이지다(article_sample.html 이 그 페이지). "
             f"{api_line}"
-            "또한 list 쪽: 이 글 URL 에 박힌 글 ID 가 목록 행의 어디(href/data-* 속성/JSON 필드)에 나오는지 보고 list.fields.post_id 와 list.fields.url 을 그에 맞춰 잡아라.")
+            "또한 list 쪽: 이 글 URL 에 박힌 글 ID 가 목록 행의 어디(href/data-* 속성/JSON 필드)에 나오는지 list_html 에서 보고 list.fields.post_id 와 list.fields.url 을 그에 맞춰 잡아라.")
 
 
 def _reprobe_article(slug: str, article_url: str) -> int:
@@ -364,27 +366,23 @@ def _has_json_api_candidates(digest: dict) -> bool:
 def _list_strategy_hint(digest: dict) -> Optional[str]:
     """probe 신호로 목록 전략 hint 를 만든다 (1회차부터 digest.escalation_hint 에 들어감).
 
-    목록 페이지가 정적 GET(httpx)으론 안 열리는데(static_ok_preset 없음 = headless 로만 됨 = JS 렌더) 목록 JSON API 후보가 있으면
-    → httpx_json 우선 검토, 후보가 글 목록이 아니면 playwright_html. JSON API 후보도 없으면 → playwright_html.
-    정적 GET 이 되면 None — 굳이 강제하지 않고 gemini 가 list_html / 후보들 보고 판단하게 둔다(시스템 프롬프트가 전략 선택을 안내함)."""
+    목록 페이지가 정적 GET(httpx) 으론 200 OK 가 안 나왔으면(static_ok_preset 없음 = headless 로만 됨 — JS 렌더거나 일시 차단)
+    → JSON API 후보가 있으면 "httpx_json 검토하되 그 후보가 진짜 글 목록인지 확인" hint, 없으면 "playwright_html 검토" hint.
+    정적 GET 이 되면 None — gemini 가 list_html / 후보들 보고 판단하게 둔다. *어느 경우든 "후보는 휴리스틱이라 광고/위젯이 섞일 수 있으니 list_html·HAR 와 대조해 확인" 을 강조한다.*"""
     if digest.get("static_ok_preset"):
         return None
     if _has_json_api_candidates(digest):
         return (
-            "목록 페이지가 정적 GET(httpx)으론 안 열린다(headless 로만 200 OK — JS 렌더) — digest 의 "
-            "list_candidates.traffic_json_api_candidates 에 목록 JSON API 후보가 있다. strategy=\"httpx_json\" 을 우선 검토하라: "
-            "list.url_template = 그 후보 url, list.list_path = 그 후보 list_hits[].path 를 키 리스트로(예 \"content.feeds\" → [\"content\",\"feeds\"]), "
-            "success_when = 응답 최상위 code/result 류 필드(예 {path:[\"code\"],equals:200}), fields 의 from:\"json\" path 는 *배열 원소* 기준으로 "
-            "(원소가 {feed:{title,feedId,…}, user:{nickname}, …} 처럼 엔벨로프면 [\"feed\",\"title\"]·[\"user\",\"nickname\"] 처럼 형제 객체를 가로질러 — "
-            "list_hits[].item_subpath 가 있어도 item_path 로 쓰지 말고 path 를 길게), pagination 은 그 후보 url 의 page/offset/limit 쿼리 파라미터로. "
-            "후보가 진짜 글 목록이 아니면 strategy=\"playwright_html\"(list.row_selector / list.wait_selector 로 목록 렌더 대기)로."
+            "목록 페이지가 정적 GET(httpx)으론 200 OK 가 안 나왔다(headless 로만 됨 — JS 렌더 가능성). list_candidates.traffic_json_api_candidates 에 목록 JSON API 후보가 있으니: "
+            "**먼저 그 후보(들)가 *진짜 글 목록*을 주는지 list_html·HAR 와 대조해 확인하라** — relevance 점수 순일 뿐이라 광고 SDK·트래커·다른 위젯이 섞이는 수 있다(응답이 {ads:[...]} 류거나 url 이 ad/banner/sdk/collect/gtm 류면 무시). "
+            "진짜 글 목록 API 면 strategy=\"httpx_json\" 으로 (list.url_template / list_path / success_when / fields / pagination 은 그 후보 기준 — 시스템 프롬프트 'list 키' 설명 참고). "
+            "후보가 다 광고/위젯이면 → list_candidates.html_repeating_patterns 중 진짜 글 목록인 걸 list_html 에서 확인해 strategy=\"playwright_html\" + list.row_selector / list.wait_selector. 마땅한 게 없으면 억지로 만들지 말고 그렇게 적어라."
         )
     if (digest.get("list_candidates") or {}).get("html_repeating_patterns"):
         return (
-            "목록 페이지가 정적 GET(httpx)으론 안 열리고(headless 로만 200 OK — JS 렌더) 목록 JSON API 후보도 없다 — strategy=\"playwright_html\" 를 검토하라: "
-            "list.row_selector / list.wait_selector 에 list_candidates.html_repeating_patterns 중 *글 목록처럼 보이는 것*"
-            "(child_count 가 크고 href_pattern_guess 가 글 상세 URL 패턴인 항목)의 selector 를 넣어 목록이 그려질 때까지 기다리게 하고, "
-            "fields 는 그 렌더된 행 기준으로. article.content 는 글 상세 HTML 의 본문 컨테이너 selector 로(필요하면 article.wait_selector 도)."
+            "목록 페이지가 정적 GET(httpx)으론 200 OK 가 안 나왔고(JS 렌더 가능성) 목록 JSON API 후보도 없다. "
+            "list_candidates.html_repeating_patterns 중 *진짜 글 목록처럼 보이는 것*(child_count 가 크고 href_pattern_guess 가 글 상세 URL 패턴 — 네비 메뉴·푸터 링크·댓글·'관련글' 위젯 말고)을 **list_html 에서 직접 확인해** 고르고: strategy=\"playwright_html\" + list.row_selector / list.wait_selector 로 그 목록이 그려질 때까지 대기, fields 는 그 렌더된 행 기준. article.content 는 글 상세 HTML 의 본문 컨테이너 selector. "
+            "마땅한 글 목록 후보가 없으면(반복 패턴이 다 메뉴/위젯) 억지로 selector 만들지 말고 그렇게 적어라(handwritten 어댑터 영역)."
         )
     return None
 
@@ -398,28 +396,53 @@ def _preflight(slug: str, url: Optional[str], digest: dict, *, no_escalate: bool
       (b) probe 신호로 목록 전략 hint(_list_strategy_hint)를 digest.escalation_hint 에. + probe 가 잡은 첫 글 URL 의 글 ID 가
           목록 행 어디 있는지 보라는 list 필드 hint.
 
-    --no-escalate / playwright 미설치 / 첫 글 URL 없음 이면 해당 단계만 조용히 건너뛴다. 반환: (보강된) digest.
+    --no-escalate / playwright 미설치 면 해당 단계 건너뜀. probe 가 잡은 '첫 글' URL 이 *없거나 신뢰도 낮으면*(같은 호스트도
+    아님 — probe 가 외부 링크를 첫 글로 오인) re-probe 를 건너뛰고 "gemini 가 list_html 에서 직접 찾아라" hint 만 준다. 반환: (보강된) digest.
     """
     if no_escalate:
         return digest
+    url = url or digest.get("url") or ""
     art = _best_article_url(digest, "")
-    if art:
+    host = urlsplit(url).netloc or urlsplit(art or "").netloc  # 목록 URL 호스트를 모르면(--slug + diagnosis 에 url 없음 등) art 호스트를 그 기준으로
+    # 같은 호스트 이상이어야 re-probe (점수: 같은 호스트 +4, 글ID 숫자 +2, view/detail 류 경로 +1).
+    # 그것보다 낮으면 probe 가 외부/엉뚱한 링크를 첫 글로 집은 것 — re-probe 해봤자 잘못된 article.html 샘플로 gemini 만 오도함.
+    art_ok = bool(art) and _article_url_score(art, host) >= 4
+    if art_ok:
         print(f"[register] preflight: 첫 글 페이지를 render+HAR 로 re-probe → {art}")
+        _set_first_article_url(slug, art)          # digest 의 article_sample.url 이 우리가 re-probe 한 URL 과 일치하도록(_best_article_url 이 first_article_url 과 다른 후보를 골랐을 수 있음)
         n_api = _reprobe_article(slug, art)        # playwright 없으면 article_candidates.json=[] 쓰고 0 반환(조용)
         # _reprobe_article 이 article.html(렌더 DOM) / article_candidates.json 을 갱신했을 수 있으니 digest 재구성.
         # (playwright 미설치라 아무것도 못 바꿨어도 결과는 동일 — 무해.)
         digest = build_digest(slug=slug, url=url)
         if n_api:
-            print(f"[register]   → 본문 JSON API 후보 {n_api}건, 프롬프트에 ⚡ 블록으로 첨부됨 (article.fetch_kind:json 유도)")
+            print(f"[register]   → 본문 JSON API 후보 {n_api}건, 프롬프트에 ⚡ 블록으로 첨부됨 (단, gemini 가 진짜 본문인지 확인하게 함)")
+    elif art:
+        print(f"[register] preflight: probe 가 첫 글로 집은 게 다른 호스트({art}) — re-probe 건너뜀(probe 오인 가능성). gemini 가 list_html 에서 직접 찾게 둠.")
+    else:
+        print("[register] preflight: probe 가 첫 글 URL 을 못 찾음 — re-probe 건너뜀.")
+
     hints: list[str] = []
     lh = _list_strategy_hint(digest)
     if lh:
         hints.append(lh)
-    if art:
+    if art_ok:
         hints.append(
-            f"probe 가 '{art}' 를 첫 글로 잡았다 — 이 글 URL 에 박힌 글 ID 숫자가 목록 행의 어디(href / data-* 속성 / JSON 필드)에 "
-            "나오는지 보고 list.fields.post_id 와 list.fields.url 을 그에 맞춰 잡아라. "
-            "(probe 가 첫 글을 잘못 집은 것 같으면 register.py --article-url \"<진짜 글 하나 URL>\" 로 다시 등록.)"
+            f"probe 가 '{art}' 를 '첫 글' 로 추정하고 그 페이지를 render+HAR 로 re-probe 했다 — article_sample.html / api_candidates / article_sample.url 이 그것. "
+            "**이게 진짜 글 본문 페이지가 맞는지 article_sample.html 을 보고 먼저 판단하라** — 메뉴/카테고리/서브게시판 페이지였을 수 있다. "
+            "맞으면: 이 글 URL 에 박힌 글 ID 숫자가 목록 행의 어디(href / data-* 속성 / JSON 필드)에 나오는지 list_html 에서 보고 list.fields.post_id·url 을 그에 맞춰라. "
+            "아니면: list_html 의 글 목록 행에서 글 상세로 가는 href 패턴을 직접 보고 article.url_template / list.fields.url 을 잡아라(article_sample 은 부정확하니 본문 selector 는 fallback chain 2~3개로, 또는 register.py --article-url \"<진짜 글 URL>\" 로 재등록)."
+        )
+    elif art:
+        hints.append(
+            f"⚠ probe 가 '첫 글' 로 집은 게 이 사이트와 *다른 호스트*({art}) — 외부 링크를 글로 오인한 것이다. article_sample.html / article_sample.url / first_article_url 을 *글 페이지로 쓰지 마라*. "
+            "list_html 의 글 목록 행에서 글 상세로 가는 href(또는 data-* / 인라인 JS) 패턴을 직접 보고 list.fields.url 과 (필요하면) article.url_template·list.fields.post_id 를 잡아라. 본문 selector 는 그렇게 잡은 글 URL 기준으로(확신 없으면 fallback chain 2~3개). "
+            "확신 안 서면 멈추고 그렇게 적어라 — register.py --article-url \"<진짜 글 하나 URL>\" 로 글 URL 을 직접 주면 정확해진다."
+        )
+    else:
+        hints.append(
+            "probe 가 '첫 글' URL 을 못 찾았다(목록 행에 글 상세 링크가 안 보임 — href 가 javascript: 거나 인라인 JS 데이터거나) — article_sample 은 비어있거나 부정확하다. "
+            "list_html / list_candidates.html_repeating_patterns / inline_js_data_candidates 를 보고 글 ID·글 URL 이 어디 있는지 찾아 list.fields.post_id·url 을 잡아라(샘플 article 이 없으니 article.content selector 는 글 상세를 직접 받아 정해야 할 수도). "
+            "정적 CSS 만으론 안 될 것 같으면(javascript: 링크 + data-* 도 없음) 억지로 만들지 말고 handwritten 어댑터가 필요하다고 적어라."
         )
     if hints:
         digest["escalation_hint"] = "\n\n".join(hints)
