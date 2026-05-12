@@ -26,11 +26,12 @@ _PLACEHOLDER_RE = re.compile(r"\{\{\s*(\w+)\s*\}\}")
 
 @lru_cache(maxsize=None)
 def load_prompt(name: str) -> str:
-    """prompts/<name>.txt 를 그대로 읽어 반환(치환 없음). 끝의 개행은 떼어냄."""
+    """prompts/<name>.txt 를 읽어 반환(치환 없음). CRLF→LF 정규화 + 끝의 개행 제거
+    (Windows 체크아웃의 autocrlf 든 뭐든 결과 동일)."""
     p = PROMPTS_DIR / f"{name}.txt"
     if not p.exists():
         raise FileNotFoundError(f"프롬프트 파일 없음: {p}")
-    return p.read_text(encoding="utf-8").rstrip("\n")
+    return p.read_text(encoding="utf-8").replace("\r\n", "\n").rstrip("\n")
 
 
 def render_prompt(name: str, **values: object) -> str:
