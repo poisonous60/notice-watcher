@@ -21,9 +21,10 @@ crwalingTest/
 │
 ├── bot/                        # Discord 봇 (discord.py): /watch /preview /list /unwatch /status
 │   ├── main.py                 # 게이트웨이 봇 + 슬래시 명령 (register.py 를 subprocess 로)
+│   ├── url_gate.py             # /watch·/preview(처음 보는 사이트) probe 전단 URL 게이트 — 구조검증/SSRF/SNS·축약·파일 블랙리스트/Safe Browsing(v4). 단독 실행: python -m bot.url_gate "<url>"
 │   ├── db.py                   # SQLite — 구독(필터·스케줄·대상) / 다이제스트 대기열 / 발송 기록
 │   ├── discord_rest.py         # 봇 토큰으로 Discord REST 직접 (notify.py 가 발송에 사용)
-│   └── config.py               # .env 로드 + BOT_TOKEN/OWNER_USER_ID/GUILD_ID
+│   └── config.py               # .env 로드 + BOT_TOKEN/OWNER_USER_ID/GUILD_ID/SAFE_BROWSING_API_KEY
 ├── deploy/                     # systemd 유닛 + .env.example (배포 가이드 참고)
 │
 ├── probe/                      # 사이트 정찰 도구 패키지
@@ -89,9 +90,10 @@ python scripts/probe.py "https://arca.live/b/akendfield" --login
 python scripts/probe.py "https://endfield.gryphline.com/ko-kr/news"
 
 # 3) 산출물 확인
-#    output/probe/<slug>/summary.txt    ← 1페이지 요약
-#    output/probe/<slug>/traffic.har    ← Chrome DevTools에서 열기
-#    output/probe/<slug>/list_candidates.json
+#    output/probe/<slug>/summary.txt           ← 1페이지 요약
+#    output/probe/<slug>/traffic.har           ← Chrome DevTools에서 열기
+#    output/probe/<slug>/list_candidates.json  ← html_repeating_patterns(href_is_js/row_data_attrs 포함) / traffic_json_api_candidates(relevance_score 순) / inline_js_data_candidates(var X=[…] · X.push({…}) · <script type=application/json>) / first_article_url
+#    output/probe/<slug>/article_click.{html,json} + traffic.article_click.har  ← 목록에서 글 링크를 실제로 클릭한 결과(직접 GET 으론 다른 데로 튕기는 클라이언트 라우트·href=javascript: 목록 진단용; --no-article-click 로 끔)
 
 # 4) 어댑터 데모 (개별)
 python scripts/demo_endfield.py

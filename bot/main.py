@@ -31,8 +31,8 @@ sys.path.insert(0, str(ROOT))
 import discord  # noqa: E402
 from discord import app_commands  # noqa: E402
 
-from bot import db  # noqa: E402
-from bot.config import bot_token, owner_user_id, guild_id  # noqa: E402
+from bot import db, url_gate  # noqa: E402
+from bot.config import bot_token, owner_user_id, guild_id, safe_browsing_api_key  # noqa: E402
 from scripts._chromium_lock import chromium_lock  # noqa: E402
 from scripts.notify import format_message, summarize_post  # noqa: E402
 from probe.paths import url_to_slug  # noqa: E402
@@ -182,6 +182,18 @@ async def _ensure_registered(url: str, *, via: str = "?", requested_by: Optional
     slug = url_to_slug(url)
     if _is_registered(slug):
         return True, slug, "이미 등록됨"
+    # probe 전단 URL 게이트: 구조 검증 / SSRF(DNS) / SNS·축약·파일 블랙리스트 / Safe Browsing.
+    # 막히면 register.py(→probe) 를 아예 안 띄움. (triage_queue 엔 안 쌓음 — 사이트 실패가 아니라 입력 오류/차단.)
+    try:
+        await url_gate.check(url, article_url=article_url)
+    except url_gate.UrlRejected as e:
+        log.info("[url_gate] reject %s (article=%s): %s — %s", url, article_url, e.reason, e.msg)
+        if e.reason == "malicious":
+            await _dm_owner(f"⚠️ [url_gate] 악성 URL 등록 시도 차단\nURL: {url}\n사유: {e.msg}\n"
+                            f"요청: {(requested_by or {}).get('name', '?')} (via {via})", key="url_gate_malicious")
+        elif e.reason == "gsb_error":
+            await _dm_owner(f"⚠️ [url_gate] Safe Browsing 검사 실패 — {e.msg}\nURL: {url}", key="url_gate_gsb")
+        return False, slug, e.msg
     rc, out = await asyncio.to_thread(_blocking_register, url, article_url)
     if rc == 0 and _is_registered(slug):
         return True, slug, "등록 완료"
@@ -392,9 +404,14 @@ async def status(interaction: discord.Interaction):
             if int(d.get("consecutive_breakage", 0) or 0) > 0:
                 broken.append(d.get("slug", f.stem))
     up = int(time.time() - START_TS)
+    gate = url_gate.rejection_summary_24h()
+    gate_line = ("• URL 게이트 거부(24h, 재시작 시 리셋): "
+                 + (", ".join(f"{k} {v}" for k, v in sorted(gate.items())) if gate else "없음")
+                 + ("" if safe_browsing_api_key() else "  ⚠SAFE_BROWSING_API_KEY 미설정 — 신규 등록 전부 거부됨"))
     lines = [
         "**봇 상태**",
         f"• uptime: {up // 3600}h {(up % 3600) // 60}m",
+        gate_line,
         f"• 등록 config: {n_configs}개 / 구독: {cnt['subscriptions']}건 ({cnt['slugs']} slug) / pending(다이제스트 대기): {cnt['pending']}건",
         f"• 마지막 폴링: {last_poll or '아직 없음'}",
         f"• 깨짐 신호 있는 slug: {', '.join(broken) if broken else '없음'}",
@@ -445,6 +462,10 @@ async def on_guild_join(guild: "discord.Guild"):
 async def on_ready():
     log.info("logged in as %s (id=%s); guilds=%s", client.user,
              client.user.id if client.user else "?", [g.id for g in client.guilds])
+    if not safe_browsing_api_key():
+        log.warning("⚠ SAFE_BROWSING_API_KEY 가 .env 에 없습니다 — URL 게이트의 Safe Browsing 검사가 "
+                    "fail-closed 라 /watch·/preview(처음 보는 사이트)가 전부 거부됩니다. .env 에 키를 설정하세요 "
+                    "(GCP 콘솔 → Safe Browsing API 사용 설정 → API 키).")
     gid = guild_id()
     try:
         if gid:

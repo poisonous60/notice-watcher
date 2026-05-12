@@ -40,6 +40,14 @@ def owner_user_id() -> str:
     return os.environ.get("OWNER_USER_ID", "").strip()
 
 
+def safe_browsing_api_key() -> str:
+    """Google Safe Browsing API 키 (URL 게이트 4단계). 없으면 게이트가 fail-closed 로 신규 등록을 전부 거부.
+    발급: GCP 콘솔 → Safe Browsing API 사용 설정 → API 키 생성 → 그 키를 Safe Browsing API 로만 제한(권장).
+    주의: .env 인라인 주석(KEY=val # ...)은 지원 안 함 — 값만 적을 것."""
+    load_env()
+    return os.environ.get("SAFE_BROWSING_API_KEY", "").strip()
+
+
 def guild_id() -> int | None:
     load_env()
     v = os.environ.get("GUILD_ID", "").strip()
