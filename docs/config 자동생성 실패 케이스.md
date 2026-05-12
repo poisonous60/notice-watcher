@@ -1,6 +1,6 @@
 # config 자동 생성 실패 케이스와 대응
 
-`register.py` (URL → probe → digest → Gemini → config + 검증, 실패 시 escalate)가 **자동으로 config 를 못 만드는** 경우들 정리.
+`register.py` (URL → probe → preflight[글페이지 HAR re-probe + probe 신호 hint] → digest → Gemini → config + 검증 재시도 ≤max_attempts)가 **자동으로 config 를 못 만드는** 경우들 정리.
 새 사이트를 `/watch` 했는데 안 됐거나 `output/poll_state/<slug>.FAILED.json` 이 생겼을 때, *어떤 종류의 실패인지 알아보고 → 무엇을 해야 하는지* 찾는 용도.
 
 관련 문서: **각 사이트별로 실제 실패했던 원인·해결 기록** = `사이트별 등록 시도 기록.md` (이 문서는 *분류*, 그건 *사례 로그*) / 코드 구조·검증 3층위 = `config 기반 엔진 가이드.md` / 손어댑터 작성 = `사이트 어댑터 추가 가이드.md` / 차단 우회 = `차단 우회 기술 조사 (TLS fingerprint, DPI).md` / 배포·운영 = `운영 메모.md`.
@@ -13,9 +13,9 @@
 
 - **`output/poll_state/<slug>.FAILED.json`** — 자동 등록 실패 마커. `{slug, url, failed_at, reason, last_config, last_feedback}`. `last_feedback` 에 *마지막 검증 결과*(어떤 체크가 FAIL 했나 + 실제 추출된 글들 + 본문 길이)가 들어있음 — **여기를 먼저 봐라**.
 - **`output/triage_queue.jsonl`** — 봇이 `/preview`·`/watch` 자동 등록 실패 때마다 append: `{ts, url, slug, via, requested_by, register_tail}` — *누가 어떤 명령으로* 실패시켰는지(요청자에게 다시 알릴 때 쓸 맥락).
-- **봇 로그** (`/watch`·`/preview` 로 등록 시도한 경우): `journalctl --user-unit notice-bot.service -f | grep --line-buffered '\[register\]'` — probe 단계·gemini 시도별 PASS/FAIL·escalation 진행이 다 흐름.
+- **봇 로그** (`/watch`·`/preview` 로 등록 시도한 경우): `journalctl --user-unit notice-bot.service -f | grep --line-buffered '\[register\]'` — probe 단계·preflight(글페이지 re-probe)·gemini 시도별 PASS/FAIL 이 다 흐름.
 - **`register.py --list`** — 등록 현황(`status` 컬럼에 `FAILED` 면 그 사이트).
-- **probe 산출물** `output/probe/<slug>/` — `diagnosis.json`(verdict), `list_candidates.json`(row 후보·JSON API 후보·first_article_url), `list.html`/`article.html`(정제 전 HTML), `traffic*.har`(네트워크), `article_candidates.json`(escalation 의 글 본문 API 후보).
+- **probe 산출물** `output/probe/<slug>/` — `diagnosis.json`(verdict), `list_candidates.json`(row 후보·JSON API 후보·first_article_url), `list.html`/`article.html`(정제 전 HTML; `article.html` 은 preflight 의 re-probe 가 렌더 DOM 으로 덮어씀), `traffic*.har`(네트워크), `article_candidates.json`(preflight 의 글 본문 JSON API 후보).
 
 ---
 
@@ -30,18 +30,18 @@
 
 ---
 
-## 2. config 생성 실패 → escalate 후에도 실패 → `.FAILED.json` (종료코드 1)
+## 2. config 생성 실패 → preflight 했는데도 검증 통과 못 함 → `.FAILED.json` (종료코드 1)
 
-Gemini 가 `max_attempts`(기본 4)회 만들어도 검증을 못 통과 → `register.py` 가 ① lite→full probe 재정찰 ② (본문 추출 실패였으면) 글페이지 render+HAR re-probe 후 강한 hint 로 재시도 → 그래도 안 되면 `.FAILED.json`. `last_feedback` 의 `[FAIL] <체크명>` 으로 어떤 케이스인지 판별.
+`register.py` 가 등록 전에 preflight(첫 글 페이지 render+HAR re-probe 로 본문 JSON API 후보·렌더 DOM 확보 + probe 신호로 목록 전략 hint 주입)를 끝낸 뒤 Gemini 에게 config 를 시키고, 검증 실패하면 한 라운드 안에서 ≤`max_attempts`(기본 4)회 수정 재시도 → 그래도 안 되면 `.FAILED.json`. (옛날엔 "lite gen 실패 → full probe + gen → 본문 hint + gen …" 식으로 최대 16회까지 escalate 했지만 지금은 그 정보를 처음부터 다 주고 한 라운드만 — `config 기반 엔진 가이드.md` §4.) `last_feedback` 의 `[FAIL] <체크명>` 으로 어떤 케이스인지 판별.
 
 ### 2a. `[FAIL] posts_nonempty: 0건` / `[FAIL] fetch_list: ...` — 목록 추출 실패
 - **원인**: ① `row_selector`(httpx_html) 또는 `list_path`(httpx_json) 가 틀림. ② **목록 자체가 JS 렌더** — 정적 HTML 에 글이 없음(SPA). ③ 목록 URL/파라미터가 잘못(엉뚱한 페이지를 받음). ④ 목록 HTML 은 정적으로 멀쩡한데 probe 가 "첫 글"을 사이드바/메뉴 링크로 잘못 집어서(`pick_first_article_url`) LLM 이 엉뚱한 글 URL 패턴을 보고 selector·검증이 다 어긋남 *(넥슨 포럼 케이스 — `board_list?board=1018` 에서 서브게시판 링크 `board_list?board=1618` 를 첫 글로 집음)*.
 - **대응**: probe 의 `list_candidates.json` 의 `html_repeating_patterns` / `traffic_json_api_candidates` 를 보고 진짜 글 목록인 후보를 골라 손으로 `row_selector`/`list_path` 지정 → `register.py --config`. SPA 면 `strategy: "playwright_html"` + `list.wait_selector`(목록 행이 그려질 때까지 대기). 클릭/스크롤 후에야 목록이 로드되면(networkidle 만으론 안 잡힘) → 손어댑터. **④(probe 가 첫 글을 잘못 집음)면 자동 재시도가 효과 있을 수 있다**: `register.py "<목록URL>" --article-url "<실제 글 하나 URL>"`(또는 봇 `/preview`·`/watch` 의 `article_url` 인자) — first_article_url 을 교정하고 그 글페이지를 render+HAR 로 re-probe 한 뒤 강한 hint 와 함께 처음부터 재생성. (`config 기반 엔진 가이드.md` §4.)
 
 ### 2b. `[FAIL] article_body_len: post_id=... 0자 (<100 — content selector 의심)` — 목록은 OK, 본문 추출 실패
-가장 흔함. `register.py` 가 자동으로 ②(글페이지 render+HAR re-probe → 본문 JSON API 후보가 있으면 `article.fetch_kind:"json"` config, 없으면 `playwright_html`)까지 시도했는데도 실패한 것. 원인 분류:
-- **(i) 본문 selector 가 틀림 (정적 HTML 엔 본문이 있음)** — probe 의 `article.html` (또는 글페이지를 직접 `curl`)을 보고 본문 컨테이너 CSS 를 찾아 `article.content` 에 fallback chain 으로 지정 → `register.py --config`. (escalation 이 자동으로 못 맞춘 경우 — selector 후보가 애매하거나 본문이 여러 조각으로 나뉘어 있음.)
-- **(ii) 본문이 SPA/JS 렌더 — 정적 HTML 에 아예 없음** — escalation 이 글페이지를 Playwright 로 렌더했는데도 본문이 안 나옴 (networkidle 후에야/스크롤 후에야 로드되거나, iframe 안이거나). → 본문을 주는 XHR 을 *대화형*으로 찾아야 함: 브라우저 DevTools → Network 켜고 그 사이트에서 글을 *클릭* → 본문(HTML/텍스트)을 담아오는 요청 URL/응답 구조 확인 → `article.url_template`(글 ID 자리 `{post_id}`) + `fetch_kind:"json"` + `content:[{from:"json", path:[...]}]` 손작성. (`probe/extract.py:traffic_article_body_candidates` 는 글페이지를 *직접* 열었을 때의 HAR 만 봄 — 직접 GET 이 안 되는 SPA 면 못 잡음.)
+가장 흔함. `register.py` 의 preflight 가 글페이지를 render+HAR 로 re-probe 해서 본문 JSON API 후보(있으면 `article.fetch_kind:"json"` 유도)·렌더 DOM 을 미리 줬는데도 Gemini 가 본문 추출에 실패한 것. 원인 분류:
+- **(i) 본문 selector 가 틀림 (정적 HTML 엔 본문이 있음)** — probe 의 `article.html` (또는 글페이지를 직접 `curl`)을 보고 본문 컨테이너 CSS 를 찾아 `article.content` 에 fallback chain 으로 지정 → `register.py --config`. (Gemini 가 못 맞춘 경우 — selector 후보가 애매하거나 본문이 여러 조각으로 나뉘어 있음.)
+- **(ii) 본문이 SPA/JS 렌더 — 정적 HTML 에 아예 없음** — preflight 가 글페이지를 Playwright 로 렌더했는데도 본문이 안 나옴 (networkidle 후에야/스크롤 후에야 로드되거나, iframe 안이거나). → 본문을 주는 XHR 을 *대화형*으로 찾아야 함: 브라우저 DevTools → Network 켜고 그 사이트에서 글을 *클릭* → 본문(HTML/텍스트)을 담아오는 요청 URL/응답 구조 확인 → `article.url_template`(글 ID 자리 `{post_id}`) + `fetch_kind:"json"` + `content:[{from:"json", path:[...]}]` 손작성. (`probe/extract.py:traffic_article_body_candidates` 는 글페이지를 *직접* 열었을 때의 HAR 만 봄 — 직접 GET 이 안 되는 SPA 면 못 잡음.)
 - **(iii) 목록의 글 링크 ≠ 직접 접근 가능한 글 URL** *(마비노기 모바일 케이스, 2026-05-11)* — 목록의 `<a href>` 는 `…/News/notice/View?threadId=3440249` 인데 직접 GET 하면 `/Main` 으로 302 튕김(= 클라이언트 라우트). 실제로 클릭하면 가는 `…/News/Notice/3440249` (경로형)은 직접 GET 시 200 + 본문이 정적 HTML 에 들어있음. → 자동 파이프라인은 페이지 HTML 어디에도 없는 URL 형을 추측 못 함. **손작성 config 에서 `url` 필드를 `{from:"template", value:"https://…/News/Notice/{post_id}"}` 로** (`post_id` 는 href 의 `threadId=(\d+)` 에서 추출), `article.content` 는 그 경로형 페이지의 본문 selector. → `register.py --config`. (예: `configs/mabinogimobile.nexon.com_News_notice.json`)
 - **(iv) `skip_status` 케이스** — 일부 글이 401/403(접근 제한) 이면 그건 정상 — `article.skip_status:[401,403]` 두면 그 글은 본문 비워서 넘어가고 다른 글로 본문 검증. *모든* 글이 그러면 BLOCKED 쪽(§1).
 
@@ -67,7 +67,7 @@ Gemini 가 `max_attempts`(기본 4)회 만들어도 검증을 못 통과 → `re
 ## 3. "되긴 됐는데 이상함" — 자동 등록은 성공했지만 품질 문제 (소프트 경고)
 
 `.FAILED.json` 은 안 생기지만 `register.py` 출력의 `경고:` 줄, 또는 `last_feedback` 의 `[warn]`:
-- `matches_probe_first_article: probe first_article_url=... 와 일치하는 글 URL 없음` — probe 가 헤더의 잡 링크(myinfo/login 등)를 first_article_url 로 잡았을 수 있음(2026-05-11 escalation 쪽은 점수 기반으로 고치긴 했음). 등록은 됐으니 폴링 결과를 한 번 확인.
+- `matches_probe_first_article: probe first_article_url=... 와 일치하는 글 URL 없음` — probe 가 헤더의 잡 링크(myinfo/login 등)를 first_article_url 로 잡았을 수 있음(`register.py:_best_article_url` 이 점수 기반으로 더 그럴듯한 글 URL 을 고르긴 함, 2026-05-11). 등록은 됐으니 폴링 결과를 한 번 확인.
 - `article_body_chrome: content 에 <nav>+<footer> 둘 다 있음` — `article.content` 가 페이지를 통째로 긁었을 수 있음 → 더 좁은 selector 로 손수정 권장.
 - `count_ballpark: N건 (probe 후보 child_count≈M)` 차이 큼 — 목록을 일부만 잡았거나 노이즈 행을 포함했을 수 있음.
 
@@ -91,9 +91,18 @@ Gemini 가 `max_attempts`(기본 4)회 만들어도 검증을 못 통과 → `re
 
 ---
 
-## 5. 미래 개선 아이디어
+## 5. probe 보강 (자동 성공률 ↑) — 2026-05-12 추가
 
-- ~~`register.py --article-url "<글URL>"` (+ 봇 `/preview`·`/watch` 의 `article_url` 인자) — probe 가 "첫 글"을 잘못 집는 사이트에서 사람이 진짜 글 URL 을 주면 first_article_url 교정 + 그 글페이지 render+HAR re-probe + 강한 hint.~~ → 구현됨(2026-05-12). `config 기반 엔진 가이드.md` §4. (그래도 추측 불가형 — 목록 링크와 직접접근 URL 이 아예 다른 마비노기류 §2b(iii) — 는 여전히 손작성 config.)
-- `register.py --hint "<자유 텍스트>"` 같은 더 일반적인 사람-힌트 주입 — escalation_hint 로 직접 주입.
-- 대화형 글페이지 probe (목록 띄움 → 글 링크 클릭 → 본문 렌더 대기 → HAR 캡처) — SPA 본문 API 자동 발견.
+지금까지 손작성으로 떨어진 케이스들(마비노기·다음카페·게임라운지·넥슨포럼)이 공통적으로 "probe 가 진짜 목록/본문 엔드포인트를 digest 에 안 올려줘서" 또는 "엔드포인트가 페이지 어디에도 없어서(클릭해야만 나옴)" 였다. 그래서 probe 에 다음을 통합:
+
+- **JSON API 후보 관련도 점수화** — `probe/extract.py:traffic_api_candidates(har, page_url=...)`. 광고/트래커 도메인(`display.ad.daum.net`, `criteo`, `/collect`, gtm 등) 제외, 페이지와 다른 사이트 제외, XHR/fetch·URL 경로 키워드(feed/board/list/notice…)·항목 dict 의 날짜 키·항목 수·GET·200 으로 점수를 매겨 **`relevance_score` 내림차순** 으로 정렬해 `list_candidates.json` 에 쓴다. (게임 라운지: 광고 SDK 호출이 앞에 오던 문제, 다음카페: 카카오 광고 배너가 본문 API 로 오인되던 문제.)
+- **인라인 JS / JSON-island 데이터 후보** — `probe/hydration.py:extract_inline_data(html)` → `list_candidates.json` 의 `inline_js_data_candidates`. `<script type=application/json>` islands, `var X=[{...}]` 배열 리터럴, `X.push({...})` 반복(다음카페 모바일 `articles.push({dataid,fldid,title,...})`)을 찾아 raw 샘플/구조를 올린다. (`__NEXT_DATA__`/`__NUXT__` 는 기존 `hydration` 으로 따로.) — 보통 여기 잡히면 handwritten 어댑터로 그 변수를 정규식 파싱.
+- **`javascript:` / `#` href 플래그 + 행 data-* 노출** — `html_repeating_patterns` 의 후보에 `href_is_js`(글 링크가 `javascript:` 라 href 로 post_id/url 못 뽑음)와 `row_data_attrs`(행 요소·그 안 `<a>` 의 data-* 속성 — js href 일 때 post_id 가 보통 거기) 추가. (다음카페: `class="link_cafe make-list-uri"` 같은 javascript: 링크.)
+- **클릭 기반 글페이지 probe (Phase 9b)** — `probe/fetch_headless.py:fetch_article_by_click(list_url, ...)`. 목록을 띄워 '진짜 글' 로 보이는 링크를 *실제로 클릭* → 그 결과 페이지의 최종 URL/HTML/HAR(`article_click.{html,json}`, `traffic.article_click.har`)을 캡처. `scripts/probe.py` Phase 9b 가 호출(`--no-article-click` 로 끔; lite 에선 직접 GET 으로 본문을 이미 잘 받았으면 생략). digest 는 `article_sample.clicked_resolved_url` 로 노출하고, 그게 `first_article_url`(=직접 GET URL)과 다르면 ⚠ note 를 띄운다. → **마비노기 §2b(iii)** 류(목록 링크 `…/notice/View?threadId=N` 직접 GET 하면 `/Main` 으로 튕기고, 클릭하면 `…/News/Notice/N` 로 가는)·**다음카페** 류(href 가 javascript:)가 이제 자동 digest 에 그 정보가 들어간다.
+
+### 남은 미래 개선 아이디어
+- ~~`register.py --article-url "<글URL>"` (+ 봇 `/preview`·`/watch` 의 `article_url` 인자) — probe 가 "첫 글"을 잘못 집는 사이트에서 사람이 진짜 글 URL 을 주면 first_article_url 교정 + 그 글페이지 render+HAR re-probe + 강한 hint.~~ → 구현됨(2026-05-12). `config 기반 엔진 가이드.md` §4.
+- ~~대화형 글페이지 probe (목록 띄움 → 글 링크 클릭 → 본문 렌더 대기 → HAR 캡처).~~ → 구현됨(2026-05-12, Phase 9b ↑). 본문 API 가 클릭 후에야 호출되는 경우(SPA)도 `traffic.article_click.har` 에 들어가지만, register.py 의 `_reprobe_article` 는 아직 직접 GET HAR(`traffic.article.har`)만 본문 API 후보로 본다 — `traffic.article_click.har` 도 보게 확장하면 더 잡힌다.
+- `register.py --hint "<자유 텍스트>"` 같은 더 일반적인 사람-힌트 주입 — preflight 의 `escalation_hint` 에 합쳐 직접 주입.
+- 포기 전 큰 모델로 한 라운드 더 — Flash 가 `max_attempts` 회 실패하면 `.FAILED.json` 전에 `GEMINI_MODEL=gemini-2.5-pro`(또는 gemini-3)로 한 번. "HAR 에서 진짜 API 골라내기" 는 Pro 가 훨씬 낫고 비용은 어려운 사이트에서만. (preflight 정보는 이미 다 digest 에 있으니 모델만 바꿔 재호출.)
 - `list-only` 등록 모드 — 본문을 못 얻는 사이트도 제목·날짜·링크만으로 등록(요약 없이). 현재는 `article.content` 가 빈 config 를 손작성해서 `--config` 로 우회 가능(검증을 안 거치므로).

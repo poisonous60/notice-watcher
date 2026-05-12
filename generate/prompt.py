@@ -55,14 +55,16 @@ def build_user_prompt(digest: dict, *, max_html_chars: int = 120_000) -> str:
     api_cands = article.get("api_candidates") or []
     eh = d.pop("escalation_hint", None)  # 위 ⚠ 블록으로만 보여줌(meta JSON 중복 X)
     if eh:
-        d["escalation_hint"] = "(위 '⚠ 재시도 지침' 블록 참고)"
+        d["escalation_hint"] = "(위 '⚠ 중요 지침' 블록 참고)"
     lh = (list_html.get("html") or "")[:max_html_chars]
     ah = (article.get("html") or "")[:max_html_chars]
 
     meta = json.dumps(d, ensure_ascii=False, indent=2)
     examples = _load_examples()
 
-    eh_block = f"\n## ⚠ 재시도 지침 (이전 시도가 실패함 — 반드시 따를 것)\n{eh}\n" if eh else ""
+    # probe 분석으로 미리 준 전략 hint(register.py preflight / --article-url). 재시도 시(build_retry_prompt)에도
+    # 같은 hint 가 유지되고, "직전 시도가 무엇을 FAIL 했나" 는 build_retry_prompt 가 별도 블록(feedback)으로 붙인다.
+    eh_block = f"\n## ⚠ 중요 지침 (probe 분석 — 반드시 따를 것)\n{eh}\n" if eh else ""
     api_block = ""
     if api_cands:
         api_block = (

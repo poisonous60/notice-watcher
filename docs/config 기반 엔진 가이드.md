@@ -7,11 +7,11 @@
 ```
 사용자가 링크 입력
   → 경량 probe (scripts/probe.py --lite)
-  → digest 구성 (engine/digest.py — 정제 HTML + probe 후보 + 통과 헤더 + hydration)
+  → preflight (register.py — gemini 부르기 *전에* 1회): probe 가 잡은 첫 글 페이지를 Playwright+HAR 로 re-probe
+     (본문 JSON API 후보 / 렌더된 DOM 확보) + probe 신호로 목록 전략 hint(목록이 JS-gated 면 httpx_json/playwright_html) 미리 주입
+  → digest 구성 (engine/digest.py — 정제 HTML + probe 후보 + 통과 헤더 + hydration + 위 hint·본문 API 후보)
   → Gemini 가 config JSON 작성 (generate/) — structured(JSON) 출력
-  → 엔진이 config 실행 + 자동 검증 (3층위) — 실패하면 피드백 주고 재생성 (≤4회, 2라운드부터 사실상 partial regen)
-     → 그래도 실패면 escalate: ① lite probe 였으면 full probe 로 다시 → 재시도. ② 글 *본문* 추출 실패였으면
-        글페이지를 Playwright+HAR 로 re-probe(본문 JSON API 후보 / 렌더된 DOM 확보) → "본문 API 를 써라 / 안 되면 strategy=playwright_html" hint 와 함께 재시도.
+  → 엔진이 config 실행 + 자동 검증 (3층위) — 실패하면 피드백 주고 재생성 (≤4회 = --max-attempts, 2라운드부터 사실상 partial regen)
   → 통과: configs/<name>.json 저장 + output/poll_state/<slug>.json (baseline = 현재 글 집합)
      실패: <slug>.FAILED.json + "손으로 config/어댑터 작성 필요" 안내 (→ docs/사이트 어댑터 추가 가이드.md)
   → 매 폴링(scripts/poll.py): config 실행 → post_id diff 로 새 글 감지 → output/collected/<ts>/ 에 기록
@@ -65,7 +65,7 @@ python scripts/demo_config.py --check-all
 
 ### register.py 의 처리 순서
 1. **알려진 플랫폼 인식** (`engine/known_platforms.py`, `--no-recognize` 면 생략) — URL 이 *이미 손어댑터/검증된 config 패턴이 있는 플랫폼*(네이버 카페·다음 카페·아카라이브·디시 미니갤·넥슨 포럼·네이버 게임 라운지)이면 그 자리에서 config 를 만들어 `fetch_list` 로 글이 1건 이상 잡히는지 확인하고 바로 등록 — **probe·Gemini 안 돌림**. 잘못 인식했으면(글 0건/예외) 조용히 2번으로 폴백. 같은 플랫폼의 새 게시판은 `cafe_id`/`board`/`channel` 만 다르므로 이걸로 즉시 잡힘.
-2. **probe → digest → Gemini(재시도+escalation) → 검증** — 1에서 안 잡힌 사이트. (아래 §4.)
+2. **probe → preflight(글페이지 HAR re-probe + probe 신호 hint) → digest → Gemini(검증 재시도 ≤max_attempts) → 검증** — 1에서 안 잡힌 사이트. (아래 §4.)
 3. **`--config <path>`** — 사람이 손으로 짠 config 를 그대로 등록(probe/Gemini 둘 다 생략, `fetch_list` 로 baseline 만).
 
 → 새 플랫폼을 손어댑터/손config 로 한 번 처리했으면 `engine/known_platforms.py` 의 `_RECOGNIZERS` 에 인식기 한 줄 추가 → 그 플랫폼의 다음 게시판은 자동으로 1번에서 처리된다.
@@ -188,14 +188,15 @@ python scripts/demo_config.py --check-all
 - **층위 1 (하드 — 실패하면 재생성)**: `fetch_list` 동작 / ≥1건 / `post_id` 유니크·비어있지않음·안정적 모양(공백 없는 짧은 ID) / `title` 비어있지않음 / `published_at`(있으면) ISO8601 파싱 / 첫 글 `fetch_article` 본문 ≥100자 (또는 첫 글들이 전부 `skip_status` 면 보류)
 - **층위 2 (소프트 — 경고만)**: 생성 목록의 글 URL 이 probe 의 `first_article_url` 과 관련 있나 / 건수가 probe 후보 child_count 와 같은 ballpark 인가
 
-`generate/generator.py:generate_config_validated` 가 이걸 ≤`max_attempts`(기본 4) 회 돌린다. 1라운드는 새 프롬프트, 2라운드부터는 "이전 config + 무엇이 FAIL 했나 + 실제 추출된 글들 + 수정 힌트" 를 주고 *수정* 요청(=사실상 partial regen).
+`generate/generator.py:generate_config_validated` 가 이걸 ≤`max_attempts`(기본 4) 회 돌린다. 1라운드는 새 프롬프트, 2라운드부터는 "이전 config + 무엇이 FAIL 했나 + 실제 추출된 글들 + 수정 힌트" 를 주고 *수정* 요청(=사실상 partial regen). **gemini 호출은 사이트당 이 한 라운드(≤max_attempts)뿐** — 옛날엔 "lite gen 4회 실패 → full probe + gen 4회 → 본문 hint + gen 4회 …" 식으로 escalate 해서 최대 16회까지 불렀지만, 이제 그 정보를 ↓ preflight 로 처음부터 다 주고 한 라운드만 돌린다.
 
-전부 실패하면 `register.py:_generate_with_escalation` 가 단계별로 escalate:
-1. **lite→full probe**: lite probe 로 시작했으면 full probe 로 다시 정찰하고(HAR·렌더 DOM 더 확보) 재시도.
-2. **글페이지 render+HAR re-probe** (`article_body_len` 실패였을 때만): `first_article_url` 을 Playwright 로 다시 열어 `article.html`(렌더된 DOM, digest 가 자동으로 더 큰 쪽을 글 샘플로 씀) + `output/probe/<slug>/article_candidates.json`(본문을 담은 JSON XHR 후보 — `probe/extract.py:traffic_article_body_candidates`)를 만들고, digest 에 `escalation_hint`(본문 API 후보가 있으면 "article.url_template+fetch_kind:json+content from:json 로 그 API 를 써라", 없으면 "strategy 를 playwright_html 로 바꿔라")를 넣어 한 라운드 더 재시도.
-3. 그래도 실패면 `<slug>.FAILED.json` + "손으로 config/어댑터 작성" 안내. (`--no-escalate` 면 1·2 다 생략. 2 엔 playwright 필요.)
+**preflight** (`register.py:_preflight` — gemini 부르기 *전에* 1회 실행. `--no-escalate` / playwright 미설치 / 첫 글 URL 없음 이면 해당 단계만 건너뜀):
+1. **첫 글 페이지 render+HAR re-probe**: probe 가 잡은 첫 글(`_best_article_url`)을 Playwright 로 다시 열어 `article.html`(렌더된 DOM, digest 가 자동으로 더 큰 쪽을 글 샘플로 씀) + `output/probe/<slug>/article_candidates.json`(본문을 담은 JSON XHR 후보 — `probe/extract.py:traffic_article_body_candidates`)를 만든다. `build_user_prompt` 가 이 후보들을 "⚡ 글 본문 JSON API 후보" 블록으로 자동 첨부 → 본문 API 를 쓰는 config(`article.fetch_kind:"json"`) 또는 `strategy:"playwright_html"` 로 유도. (본문이 정적 HTML 에 멀쩡히 있는 사이트면 후보 0건이지만, 렌더된 DOM 샘플은 더 깨끗함.)
+2. **probe 신호 기반 목록 전략 hint**: 목록 페이지가 정적 GET(httpx)으론 안 열리면(`static_ok_preset` 없음 = headless 로만 200 OK = JS 렌더) — 목록 JSON API 후보가 있으면 "`strategy:"httpx_json"` 우선 검토(list.url_template/list_path/success_when/fields…)", 없으면 "`strategy:"playwright_html"`(row_selector/wait_selector 로 목록 렌더 대기)" 를 `digest.escalation_hint` 에 넣어 1회차부터 제공. + probe 가 잡은 첫 글 URL 의 글 ID 가 목록 행 어디 있는지 보라는 list 필드 hint.
 
-**`--article-url <글URL>` 힌트** (`register.py`, 그리고 봇 `/preview`·`/watch` 의 선택 인자 `article_url`): probe 의 "첫 글" 자동 탐지(`pick_first_article_url`)가 사이드바/메뉴 링크를 글로 잘못 집는 사이트가 있다(예: 넥슨 포럼 — `board_list?board=1018` 에서 서브게시판 링크 `board_list?board=1618` 를 첫 글로 집음). 그러면 위 2번 re-probe 도 엉뚱한 페이지를 열고, LLM 이 받은 글 샘플·`article.url_template` 추측이 다 어긋난다. `--article-url` 을 주면 *생성 전에* `list_candidates.json` 의 `first_article_url` 을 그 URL 로 교정하고 그 글페이지를 render+HAR 로 re-probe 해서 digest 의 `article_sample`(html/api_candidates/url)을 그걸로 맞춘 뒤, "이 글페이지 기준으로 article 을 잡고 list 의 post_id/url 필드도 이 글 ID 에 맞춰라"는 강한 `escalation_hint` 와 함께 1회차부터 생성한다. (이 힌트를 줬을 땐 1번 lite→full re-probe escalation 은 건너뛴다 — full probe 가 `list_candidates.json` 을 다시 쓰면서 교정을 날리고, 어차피 도움 안 되므로.)
+전부 실패하면 `<slug>.FAILED.json` + "손으로 config/어댑터 작성" 안내. (probe 가 첫 글을 잘못 집은 게 의심되면 ↓ `--article-url` 로 재시도.)
+
+**`--article-url <글URL>` 힌트** (`register.py`, 그리고 봇 `/preview`·`/watch` 의 선택 인자 `article_url`): probe 의 "첫 글" 자동 탐지(`pick_first_article_url`)가 사이드바/메뉴 링크를 글로 잘못 집는 사이트가 있다(예: 넥슨 포럼 — `board_list?board=1018` 에서 서브게시판 링크 `board_list?board=1618` 를 첫 글로 집음). 그러면 preflight 의 re-probe 도 엉뚱한 페이지를 열고, LLM 이 받은 글 샘플·`article.url_template` 추측이 다 어긋난다. `--article-url` 을 주면 preflight 대신 — `list_candidates.json` 의 `first_article_url` 을 그 URL 로 교정하고 그 글페이지를 render+HAR 로 re-probe 해서 digest 의 `article_sample`(html/api_candidates/url)을 그걸로 맞춘 뒤, "이 글페이지 기준으로 article 을 잡고 list 의 post_id/url 필드도 이 글 ID 에 맞춰라"는 강한 `escalation_hint` 와 함께 1회차부터 생성한다.
 
 ---
 
