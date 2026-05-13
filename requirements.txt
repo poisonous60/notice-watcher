@@ -4,9 +4,6 @@ lxml>=5.2
 jsonschema>=4.0
 playwright>=1.45
 playwright-stealth>=1.0.6
+firecrawl-py>=1.0
+crawl4ai>=0.4
 discord.py>=2.3
-
-# 선택 — probe.py 의 --firecrawl / --crawl4ai (외부 렌더링 폴백) 에만 필요.
-# register.py 는 --no-paid --no-crawl4ai 로 호출하므로 봇/폴링 동작엔 불필요. 쓰려면 주석 해제:
-# firecrawl-py>=1.0
-# crawl4ai>=0.4

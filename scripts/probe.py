@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -29,13 +30,14 @@ from probe.fetch_headful import (
     is_available as headful_available,
 )
 from probe.fetch_headless import (
+    fetch_article_by_click,
     fetch_with_capture,
     is_available as headless_available,
     load_captured_headers,
 )
 from probe.fetch_static import fetch as fetch_static
 from probe.headers import all_presets, merge_captured
-from probe.hydration import extract_hydration, find_list_in_json
+from probe.hydration import extract_hydration, extract_inline_data, find_list_in_json
 from probe.paid import PaidKeys, try_all_paid
 from probe.paths import OUTPUT_ROOT, PROJECT_ROOT, output_dir, state_file, url_to_slug
 from probe.polite import polite_sleep
@@ -53,6 +55,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--no-login", action="store_true", help="LOGIN_REQUIRED 시 자동 헤드풀 띄우지 않음")
     p.add_argument("--login", action="store_true", help="분류 결과와 무관하게 헤드풀 로그인 흐름을 강제로 시도 (사용자 로그인 후 같은 URL 재진입)")
     p.add_argument("--no-headless", action="store_true", help="Phase 2 headless 비활성화 (Playwright 자체 비활성)")
+    p.add_argument("--no-article-click", action="store_true",
+                   help="Phase 9b(목록에서 글 링크 클릭 → 최종 페이지 캡처) 생략. 클라이언트 라우트/href=javascript: 목록 진단에 쓰임.")
     p.add_argument("--headful-debug", action="store_true", help="Phase 2를 headful로 (디버깅)")
     p.add_argument("--extra-header", action="append", default=[], help='K=V 형식, 여러 번 가능')
     p.add_argument("--no-crawl4ai", action="store_true")
@@ -278,11 +282,12 @@ def main(argv: list[str]) -> int:
                 hydration_lists.append(h)
 
     html_lists = html_repeating_patterns(page_html, base_url=url)
+    inline_js_lists = extract_inline_data(page_html)
 
     har_path = out_dir / "traffic.har"
     if not har_path.exists():
         har_path = out_dir / "traffic.list.har"
-    json_api_lists = traffic_api_candidates(har_path) if har_path.exists() else []
+    json_api_lists = traffic_api_candidates(har_path, page_url=url) if har_path.exists() else []
 
     first_article_url = pick_first_article_url(
         html_candidates=html_lists,
@@ -297,10 +302,12 @@ def main(argv: list[str]) -> int:
         json_api_candidates=json_api_lists,
         hydration_candidates=hydration_lists,
         first_article_url=first_article_url,
+        inline_js_candidates=inline_js_lists,
     )
     print(f"  HTML 반복 패턴: {len(html_lists)}건")
-    print(f"  JSON API 후보: {len(json_api_lists)}건")
+    print(f"  JSON API 후보: {len(json_api_lists)}건 (관련도순)")
     print(f"  Hydration 후보: {len(hydration_lists)}건")
+    print(f"  인라인 JS/JSON 데이터 후보: {len(inline_js_lists)}건")
     print(f"  첫 글 URL: {first_article_url}")
 
     # ---- Phase 8: replay ----
@@ -340,6 +347,36 @@ def main(argv: list[str]) -> int:
         if article_result is not None:
             all_results.append(article_result)
             print(f"  {article_result.strategy} {article_result.status} {article_result.classification.value}")
+
+    # ---- Phase 9b: article-by-click (직접 GET 으론 다른 데로 튕기는 클라이언트 라우트 / href=javascript: 목록 대응) ----
+    click_meta: dict = {}
+    do_click = (not args.no_article_click and not args.no_headless and headless_available()
+                and headless is not None and bool(first_article_url or html_lists))
+    if do_click and args.lite:
+        # lite 에선 직접 GET 으로 *진짜 글로 보이는* URL 의 본문 페이지를 이미 잘 받았으면 클릭 probe 생략(시간 절약).
+        # 단, first_article_url 이 None 이거나(모든 행 href 가 javascript:) 글 ID 숫자가 없으면(메뉴/카테고리 링크였을 수 있음)
+        # — 이 기능의 주 타깃 — got_body 여도 클릭 probe 를 돌린다.
+        got_body = (article_result is not None
+                    and article_result.classification == Classification.OK
+                    and article_result.body_path
+                    and Path(article_result.body_path).is_file()
+                    and Path(article_result.body_path).stat().st_size > 8000)
+        looks_like_real_article_url = bool(first_article_url and re.search(r"\d{3,}", first_article_url))
+        if got_body and looks_like_real_article_url:
+            do_click = False
+    if do_click:
+        print("\n[Phase 9b] article-by-click probe (목록에서 글 링크 클릭 → 최종 페이지/URL/HAR 캡처) ...")
+        try:
+            click_result, click_meta = fetch_article_by_click(
+                list_url=url, out_dir=out_dir,
+                headless=not args.headful_debug, baseline_blocked=blocked,
+            )
+            all_results.append(click_result)
+            _note = click_meta.get("note")
+            print(f"  {click_result.strategy} {click_result.status} {click_result.classification.value}  "
+                  f"resolved={click_meta.get('resolved_url')}" + (f"  ({_note})" if _note else ""))
+        except Exception as e:  # noqa: BLE001
+            print(f"  article-by-click 실패: {type(e).__name__}: {e}")
 
     # ---- Phase 10: diagnose + summary ----
     print("\n[Phase 10] diagnose + write summary ...")

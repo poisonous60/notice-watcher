@@ -1,10 +1,39 @@
-output/
+# secrets / runtime
+.env
+GEMINI_API_KEY.md
+config.local.toml
+
+# Python build
 __pycache__/
 *.pyc
 .venv/
-.env
-GEMINI_API_KEY.md
+
+# runtime data (N100 only)
+output/
 *.sqlite3
 *.sqlite3-wal
 *.sqlite3-shm
-config.local.toml
+
+# dev workspace only (not part of deploy)
+experiments/
+reference/
+vercel-proxy/
+.agents/
+skills-lock.json
+docs/tmp_log.md
+
+# Claude Code: only hand-config skill is part of deploy
+.claude/skills/cavecrew/
+.claude/skills/caveman/
+.claude/skills/caveman-commit/
+.claude/skills/caveman-compress/
+.claude/skills/caveman-help/
+.claude/skills/caveman-review/
+.claude/skills/caveman-stats/
+
+# dev-only scripts (not deployed per docs/운영 메모.md §8)
+scripts/demo_*.py
+scripts/collect_all.py
+scripts/gate_check.py
+scripts/notify_skku.py
+scripts/verify_m1.py

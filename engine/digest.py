@@ -157,14 +157,33 @@ def _list_body_path(out_dir: Path, results: list[dict]) -> Optional[Path]:
 
 
 def _article_body_path(out_dir: Path, results: list[dict]) -> Optional[Path]:
-    """글 본문 HTML 샘플 경로. 정적 fetch 결과 / headless 렌더(article.html) / register 의 re-probe(article.html 덮어씀)
-    중 *가장 큰* 파일을 고른다 — SPA 껍데기보다 렌더된 DOM 이 크므로 그게 본문 selector 잡기에 낫다."""
+    """글 본문 HTML 샘플 경로.
+
+    클릭 진입(article_click.html)이 성공했으면 그게 가장 신뢰도 높다 — 목록에서 *실제로 클릭했을 때* 가는 페이지라,
+    직접 GET 하면 다른 데로 튕기는 클라이언트 라우트(마비노기모바일류)에서 직접-GET 결과(엉뚱한 페이지)보다 정확하다.
+    그 외엔 정적 fetch / headless 렌더(article.html) / register 의 re-probe(article.html 덮어씀) 중 *가장 큰* 파일을 고른다
+    (SPA 껍데기보다 렌더된 DOM 이 크므로)."""
+    cm = _read_json(out_dir / "article_click.json") or {}
+    click_p = out_dir / "article_click.html"
+    note = str(cm.get("note") or "")
+    click_result_ok = any(r.get("strategy") == "S4.click" and r.get("classification") == "OK" for r in results)
+
+    def _strip_url(u: object) -> str:
+        return str(u or "").split("#")[0].rstrip("/").lower()
+
+    click_ok = (click_result_ok and click_p.is_file() and click_p.stat().st_size > 2000
+                and bool(cm.get("resolved_url"))
+                and _strip_url(cm.get("resolved_url")) != _strip_url(cm.get("requested_url"))   # 클릭했는데 목록 URL 그대로면(=글 페이지 아님) 제외
+                and "후보 없음" not in note and "클릭 실패" not in note)
     cands: list[Path] = []
+    if click_ok:
+        cands.append(click_p)
     ar = _pick_article_result(results)
     if ar and ar.get("body_path"):
         p = Path(ar["body_path"])
-        if p.exists():
+        if p.exists() and p not in cands:
             cands.append(p)
+    # NOTE: article_click.html 은 click_ok 일 때만 후보로 — 클릭이 OK 가 아니었으면(엉뚱한 링크 클릭 등) 신뢰 안 함.
     for name in ("article.html", "article.captured.html", "article"):
         p = out_dir / name
         if p.is_file() and p not in cands:
@@ -172,6 +191,8 @@ def _article_body_path(out_dir: Path, results: list[dict]) -> Optional[Path]:
     cands = [p for p in cands if p.is_file()]
     if not cands:
         return None
+    if click_ok:
+        return click_p
     return max(cands, key=lambda p: p.stat().st_size)
 
 
@@ -222,6 +243,7 @@ def build_digest(
     feeds = _read_json(out_dir / "feed_candidates.json") or {}
     captured_headers = _read_json(out_dir / "list.captured_headers.json") or {}
     article_body_apis = _read_json(out_dir / "article_candidates.json")  # register.py 의 글페이지 re-probe 가 씀 (없으면 None)
+    click_meta = _read_json(out_dir / "article_click.json") or {}        # probe Phase 9b: 목록에서 글 링크 클릭 → 최종 URL/페이지
     results = diag.get("results") or []
 
     # 통과한 정적 프리셋의 request 헤더
@@ -274,9 +296,34 @@ def build_digest(
             "html": article_html_clean,
             # 글 페이지가 SPA 라서 정적 HTML 본문이 비어있을 때 register.py 의 re-probe 가 채우는 본문 JSON API 후보 (없으면 None)
             "api_candidates": (article_body_apis if isinstance(article_body_apis, list) and article_body_apis else None),
+            # probe Phase 9b: 목록에서 글 링크를 실제로 클릭했을 때 간 최종 URL (직접 GET 한 first_article_url 과 다르면 클라이언트 라우트)
+            "clicked_resolved_url": click_meta.get("resolved_url"),
+            "clicked_note": click_meta.get("note"),
         },
-        # NOTE: 글 샘플은 현재 1개(probe 가 first_article_url 만 fetch). 2~3개 확장은 추후 probe 보강 때.
+        # NOTE: 글 샘플은 현재 1개(probe 가 first_article_url / 클릭 진입 1건만 fetch). 2~3개 확장은 추후 probe 보강 때.
     }
+
+    # 클릭 진입 URL 이 직접 GET URL 과 다르면(클라이언트 라우트) — 또는 애초에 href 가 없었으면 — 강하게 알린다.
+    # 단, 클릭 결과가 OK 로 분류됐을 때만 (UNKNOWN_ERROR 면 엉뚱한 링크를 클릭했을 수 있음 → 잘못된 hint 를 주지 않는다).
+    resolved = click_meta.get("resolved_url")
+    first_au = list_cands.get("first_article_url") if isinstance(list_cands, dict) else None
+    click_result_ok = any(r.get("strategy") == "S4.click" and r.get("classification") == "OK" for r in results)
+    if resolved and click_result_ok:
+        def _norm(u: Optional[str]) -> str:
+            return (u or "").split("#")[0].rstrip("/").lower()
+        notes = list(digest.get("notes") or [])
+        if first_au and _norm(resolved) != _norm(first_au):
+            notes.append(
+                f"⚠ 목록의 글 링크({first_au})를 직접 GET 하면 다른 페이지로 가지만, 목록에서 *클릭*하면 {resolved} 로 간다 "
+                f"— 클라이언트 사이드 라우트. handwritten config 에서 article.url_template(또는 list.fields.url)을 {resolved} 형태로 "
+                f"(URL 안 숫자 ID 를 {{post_id}} 로). article_sample.html 은 이미 그 클릭 후 페이지다."
+            )
+        elif not first_au:
+            notes.append(
+                f"목록의 글 링크가 href 없이 JS 로 동작 — 클릭하면 {resolved} 로 간다. article_sample.html 은 그 페이지. "
+                f"post_id 는 그 URL, 또는 list_candidates.html_repeating_patterns[].row_data_attrs / inline_js_data_candidates 에서."
+            )
+        digest["notes"] = notes
     return digest
 
 
@@ -287,11 +334,14 @@ def _summary_line(digest: dict) -> str:
     n_html = len(lc.get("html_repeating_patterns") or [])
     n_json = len(lc.get("traffic_json_api_candidates") or [])
     n_hyd = len(lc.get("hydration_list_candidates") or [])
+    n_ijs = len(lc.get("inline_js_data_candidates") or [])
+    clicked = ah.get("clicked_resolved_url")
     return (
         f"verdict={digest.get('verdict')!r}  recommended={digest.get('recommended_strategy')!r}\n"
         f"  list_html: {len((lh.get('html') or '').encode('utf-8'))} bytes (truncated={lh.get('truncated')})  src={lh.get('source')}\n"
         f"  article_html: {len((ah.get('html') or '').encode('utf-8'))} bytes (truncated={ah.get('truncated')})  src={ah.get('source')}\n"
-        f"  candidates: html={n_html} json_api={n_json} hydration={n_hyd}  first_article={lc.get('first_article_url')}\n"
+        f"  candidates: html={n_html} json_api={n_json} hydration={n_hyd} inline_js={n_ijs}  first_article={lc.get('first_article_url')}"
+        + (f"  clicked→{clicked}" if clicked else "") + "\n"
         f"  robots: crawl_delay={digest['robots'].get('crawl_delay')}  disallow={len(digest['robots'].get('disallow') or [])}건\n"
         f"  captured_headers={'yes' if digest.get('captured_headers') else 'no'}  static_ok_preset={digest.get('static_ok_preset')}  hydration_keys={list((digest.get('hydration') or {}).keys())}"
     )

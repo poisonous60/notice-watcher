@@ -40,16 +40,19 @@ def html_repeating_patterns(html: str, base_url: str, *, min_children: int = 5) 
         for sig, group in groups.items():
             if len(group) < min_children:
                 continue
-            # 자식 안의 a 태그 href 공통 prefix
-            hrefs = []
+            # 자식 안의 a 태그 href — javascript:/#/빈값은 따로 분류(글 링크가 href 가 아니라 data-* / 인라인 JS 에 있음)
+            hrefs: list[str] = []
             for child in group:
                 a = child if child.name == "a" else child.find("a", href=True)
                 if a and a.has_attr("href"):
                     hrefs.append(a["href"])
-            common_prefix = _common_url_prefix(hrefs) if hrefs else None
-            url_pattern = _href_pattern(hrefs) if hrefs else None
+            real_hrefs = [h for h in hrefs if not _is_js_href(h)]
+            href_is_js = bool(hrefs) and not real_hrefs   # 모든 href 가 javascript:/#/빈값
+            common_prefix = _common_url_prefix(real_hrefs) if real_hrefs else None
+            url_pattern = _href_pattern(real_hrefs) if real_hrefs else None
             first_text = " ".join((group[0].get_text(" ", strip=True) or "").split())[:120]
-            sample_url = urljoin(base_url, hrefs[0]) if hrefs else None
+            sample_url = urljoin(base_url, real_hrefs[0]) if real_hrefs else None
+            row_data_attrs = _row_data_attrs(group[0])
 
             selector = _css_selector(parent) + " > " + sig
             candidates.append({
@@ -59,6 +62,8 @@ def html_repeating_patterns(html: str, base_url: str, *, min_children: int = 5) 
                 "href_common_prefix": common_prefix,
                 "href_pattern_guess": url_pattern,
                 "sample_url": sample_url,
+                "href_is_js": href_is_js or None,         # True → 글 링크가 javascript: — post_id/url 은 row_data_attrs / inline_js 에서. handwritten 어댑터 가능성.
+                "row_data_attrs": row_data_attrs or None,  # 행 요소(와 그 안 첫 <a>)의 data-* 속성 샘플 (href 가 js 일 때 post_id 가 보통 여기)
             })
 
     # 같은 selector 중복 제거 + 큰 순
@@ -113,12 +118,67 @@ def _href_pattern(hrefs: list[str]) -> Optional[str]:
     return h
 
 
-def traffic_api_candidates(har_path: Path) -> list[dict]:
-    """HAR 파일에서 JSON 응답 + 5개 이상 항목 배열을 가진 응답을 후보로.
+_JS_HREF_RE = re.compile(r"^\s*(?:#|javascript:)", re.IGNORECASE)
+
+
+def _is_js_href(h: Optional[str]) -> bool:
+    """href 가 글 URL 이 아닌 것 — 빈값, '#', 'javascript:...' (클릭 핸들러가 URL 을 만드는 목록)."""
+    h = (h or "").strip()
+    return (not h) or bool(_JS_HREF_RE.match(h))
+
+
+def _row_data_attrs(tag: Tag, *, max_attrs: int = 8) -> dict:
+    """행 요소(와 그 안 첫 <a>)의 data-* 속성 샘플. href 가 javascript: 인 목록에서 post_id 가 보통 여기 박혀 있다."""
+    out: dict[str, str] = {}
+    els: list[Tag] = [tag]
+    try:
+        a = tag.find("a")
+    except Exception:  # noqa: BLE001
+        a = None
+    if isinstance(a, Tag) and a is not tag:
+        els.append(a)
+    for el in els:
+        for k, v in (getattr(el, "attrs", {}) or {}).items():
+            ks = str(k)
+            if not ks.startswith("data-") or ks in out:
+                continue
+            sv = v if isinstance(v, str) else (" ".join(v) if isinstance(v, list) else str(v))
+            out[ks] = sv[:80]
+            if len(out) >= max_attrs:
+                return out
+    return out
+
+
+# JSON API 후보 점수용 — 광고/트래커 도메인·경로(글 목록 API 가 아님) / 글 목록스러운 URL 경로 키워드.
+_AD_TRACKER_RE = re.compile(
+    r"(doubleclick|googlesyndication|googletagmanager|google-analytics|/gtag/|/gtm[./]|"
+    r"\bpagead\b|adservice|adsystem|adnxs|criteo|taboola|outbrain|scorecardresearch|"
+    r"amplitude|mixpanel|segment\.io|sentry|hotjar|clarity\.ms|onetag|/collect\b|/beacon|"
+    r"/pixel|facebook\.com/tr|connect\.facebook|display\.ad\.|\bad\.daum\.|adlog\.|"
+    r"/track(?:ing)?\b|/log(?:s|ging)?\b|/metric|/telemetry|/stat[s]?\b)", re.IGNORECASE,
+)
+_LIST_PATH_RE = re.compile(
+    r"(feed|board|list|article|thread|notice|posts?|bbs|communit|content|news|bulletin|"
+    r"gallery|topic|cafe|lounge|menus?|timeline)", re.IGNORECASE,
+)
+_DATEISH_KEY_RE = re.compile(r"(date|time|created|published|reg|updated|displayat|elapsed)", re.IGNORECASE)
+_PAGING_PARAM_RE = re.compile(r"[?&](limit|offset|page|pageno|page_?size|page_?unit|page_?index|size|count|per_?page|start|rows)=", re.IGNORECASE)
+
+
+def _entry_resource_type(entry: dict) -> str:
+    return str(entry.get("_resourceType") or entry.get("resourceType") or "").lower()
+
+
+def traffic_api_candidates(har_path: Path, *, page_url: str = "") -> list[dict]:
+    """HAR 에서 '글 목록' 일 만한 JSON 응답 후보를 *관련도(relevance_score) 순* 으로.
+
+    예전엔 5개 이상 배열을 가진 JSON 응답을 *발견 순서대로* 다 넣었다 — 그래서 광고 SDK/트래커 응답이 위에
+    오거나(다음카페: 카카오 광고 배너 호출이 본문 API 로 오인됨), 진짜 목록 API 가 묻혀(네이버 게임 라운지
+    `comm-api.game.naver.com/...feed`) Gemini 가 못 골랐다. 이제: 광고/트래커 도메인·경로 제외, 페이지와 다른
+    사이트면 제외(page_url 알 때), XHR/fetch·URL 경로 키워드·항목 dict 의 날짜 키·항목 수·GET·200 으로 점수화해 정렬.
 
     응답 본문은 인라인 text / base64 / `record_har_content:"attach"` 의 외부 파일(`_file`) 셋 다 처리한다
-    — headless 캡처는 attach 모드라 본문이 별도 .json 파일에 있어서, 안 그러면 큰 JSON API 가 전부 누락된다
-    (네이버 게임 라운지 feed API 등이 이래서 안 잡혔다).
+    — headless 캡처는 attach 모드라 본문이 별도 .json 파일에 있어서, 안 그러면 큰 JSON API 가 전부 누락된다.
     """
     if not har_path.exists():
         return []
@@ -127,18 +187,26 @@ def traffic_api_candidates(har_path: Path) -> list[dict]:
     except Exception:
         return []
 
-    candidates: list[dict] = []
-    entries = har.get("log", {}).get("entries", [])
-    for entry in entries:
-        req = entry.get("request", {})
-        resp = entry.get("response", {})
+    from urllib.parse import urlsplit
+    page_host = urlsplit(page_url).netloc if page_url else ""
+
+    scored: list[tuple[int, dict]] = []
+    for entry in (har.get("log", {}).get("entries", []) or []):
+        req = entry.get("request", {}) or {}
+        resp = entry.get("response", {}) or {}
+        url = req.get("url") or ""
+        if not url:
+            continue
+        if _AD_TRACKER_RE.search(url):
+            continue                                  # 광고/트래커 — 글 목록 API 가 아님
+        if page_url and not _same_site(url, page_url):
+            continue                                  # 페이지와 다른 사이트 — 거의 글 목록이 아님
         ct = ""
-        for h in resp.get("headers", []):
-            if h.get("name", "").lower() == "content-type":
-                ct = h.get("value", "")
+        for h in resp.get("headers", []) or []:
+            if str(h.get("name", "")).lower() == "content-type":
+                ct = h.get("value", "") or ""
                 break
         content = resp.get("content", {}) or {}
-        # content-type 헤더가 없거나 octet-stream 이어도 mimeType / _file 확장자가 json 이면 JSON 으로 본다.
         looks_json = ("json" in ct.lower()
                       or "json" in str(content.get("mimeType", "")).lower()
                       or str(content.get("_file") or "").endswith(".json"))
@@ -154,16 +222,48 @@ def traffic_api_candidates(har_path: Path) -> list[dict]:
         list_hits = find_list_in_json(data, min_items=5)
         if not list_hits:
             continue
-        candidates.append({
+
+        rtype = _entry_resource_type(entry)
+        status = resp.get("status") or 0
+        method = str(req.get("method") or "GET").upper()
+        path = urlsplit(url).path or ""
+        best_count = max((h.get("count") or 0) for h in list_hits)
+        sample_keys = " ".join(str(k) for h in list_hits for k in (h.get("sample_keys") or []))
+        score = 0
+        if status == 200:
+            score += 2
+        elif status >= 400:
+            score -= 3
+        if rtype in ("xhr", "fetch"):
+            score += 3
+        elif rtype in ("document", "navigationpreload"):
+            score -= 2
+        if page_host and urlsplit(url).netloc == page_host:
+            score += 1
+        if _LIST_PATH_RE.search(path):
+            score += 3                            # URL 경로에 feed/board/list/notice… — 글 목록 API 의 가장 강한 신호
+        if method == "GET":
+            score += 1
+        score += min(2, best_count // 8)          # 8건+ → +1, 16건+ → +2 (게시판 목록은 보통 10~30건)
+        if _DATEISH_KEY_RE.search(sample_keys):
+            score += 1
+        if _PAGING_PARAM_RE.search(url):
+            score += 1                            # limit/offset/page… 쿼리 — 페이징 가능한 *목록* API 의 신호 (sticky pins API 와 구분됨)
+
+        scored.append((score, {
             "method": req.get("method"),
-            "url": req.get("url"),
+            "url": url,
             "status": resp.get("status"),
             "content_type": ct,
+            "resource_type": rtype or None,
+            "relevance_score": score,
             "list_hits": list_hits,
             "request_headers": {str(h.get("name", "")): str(h.get("value", "")) for h in (req.get("headers") or [])},
             "request_body_text": (req.get("postData") or {}).get("text"),
-        })
-    return candidates
+        }))
+
+    scored.sort(key=lambda t: t[0], reverse=True)
+    return [c for _, c in scored]
 
 
 # --------------------------------------------------------------------------- #
@@ -349,7 +449,7 @@ def pick_first_article_url(
     예전엔 그냥 첫 번째를 썼는데, 헤더의 myinfo/login 같은 반복 링크가 첫 후보로 잡히면 엉뚱한 URL 이 됐음.)"""
     from urllib.parse import urlsplit
     base_host = urlsplit(base_url or "").netloc
-    cand_urls = [c["sample_url"] for c in html_candidates if c.get("sample_url")]
+    cand_urls = [c["sample_url"] for c in html_candidates if c.get("sample_url") and not c.get("href_is_js")]
     if cand_urls:
         best = max(cand_urls, key=lambda u: _article_url_score(u, base_host))
         if _article_url_score(best, base_host) >= 4:   # 최소 same-host 는 만족
@@ -372,6 +472,7 @@ def write_list_candidates(
     json_api_candidates: list[dict],
     hydration_candidates: list[dict],
     first_article_url: Optional[str],
+    inline_js_candidates: Optional[list[dict]] = None,
 ) -> None:
     payload = {
         "html_repeating_patterns": html_candidates,
@@ -379,6 +480,8 @@ def write_list_candidates(
             {k: v for k, v in c.items() if k != "request_body_text"} for c in json_api_candidates
         ],
         "hydration_list_candidates": hydration_candidates,
+        # 목록이 정적 HTML 행이 아니라 인라인 JS/JSON 안에 있을 때 (다음카페 모바일: articles.push({...}) 등). probe/hydration.extract_inline_data 산출.
+        "inline_js_data_candidates": inline_js_candidates or [],
         "first_article_url": first_article_url,
     }
     (out_dir / "list_candidates.json").write_text(
