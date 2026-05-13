@@ -4,7 +4,7 @@ description: >-
   게시판/공지 URL 로 손작성 config(또는 손어댑터)를 만들어 등록·N100 배포하는 워크플로우.
   사용자가 링크를 주며 "손 config 작성", "이 사이트 등록해줘", "config 만들어줘" 라고 할 때(모드 A),
   또는 봇 /preview·/watch 자동 등록이 실패한 사이트들을 모아 처리(triage)하라고 할 때(모드 B) 사용.
-  이 프로젝트 (crwalingTest = `poisonous60/notice-watcher` 의 dev박스 clone) 전용.
+  이 프로젝트 (`poisonous60/notice-watcher` 의 dev박스 clone) 전용.
 ---
 
 이 프로젝트는 게시판 글을 선언적 config(JSON)로 수집한다. 경량 LLM 자동 생성(`register.py "<URL>"`)이
@@ -16,7 +16,7 @@ description: >-
 - `docs/config 기반 엔진 가이드.md` — 전략(httpx_html/httpx_json/playwright_html/handwritten)·실행·폴링.
 - `docs/config 자동생성 실패 케이스.md` — `[FAIL] <체크>` 별 원인·대응 분류. **triage(모드 B) 진단의 기준**.
 - `docs/사이트 어댑터 추가 가이드.md` — config 로 표현 안 될 때 손어댑터 추가 표준 절차.
-- `docs/운영 메모.md` §1~3, §8 — N100 SSH/IP/venv/systemctl, 새 워크플로(crwalingTest 가 `-` repo dev clone — 직접 `git commit && git push` → N100 `git pull`).
+- `docs/운영 메모.md` §1~3, §8 — N100 SSH/IP/venv/systemctl, 새 워크플로(이 dev 폴더가 곧 `notice-watcher` repo 의 clone — 직접 `git commit && git push` → N100 `git pull`).
 - `docs/사이트별 등록 시도 기록.md` — 사이트별 시도/해결 로그. **끝나면 항목 추가/갱신(상태 이모지: ✅자동 / 🔧손config / 🧩손어댑터 / ❌FAILED / 🚫거부)**.
 - 레퍼런스 config(`configs/*.json`): httpx_html=`skku_cse_1582`·`mabinogimobile.nexon.com_News_notice`, httpx_json=`endfield_official`·`forum.nexon.com_bluearchive_board_list_board_1018`·`game.naver.com_lounge_Trickcal_board_3`, handwritten=`arca_akendfield`·`cafe.naver.com_f-e_cafes_30291108_menus_6_viewType_L`·`m.cafe.daum.net_umamusume-kor_Z4os_boardType`.
 - 현재 손어댑터 목록: `adapters/__init__.py` (navercafe=`NaverCafeAdapter`, daumcafe=`DaumCafeAdapter`, arca=`ArcaLiveAdapter`, dcinside=`DCInsideMGalleryAdapter`, skku=`SkkuCseAdapter`, endfield=`EndfieldAdapter`).
@@ -57,7 +57,7 @@ description: >-
 8. **doc 갱신** — `docs/사이트별 등록 시도 기록.md` 에 항목 추가/갱신: 상태 이모지, (자동) 실패 원인, 무엇을 어떻게 했나(어떤 strategy/adapter, 어떤 selector/kwargs).
    - **이게 *플랫폼*이면**(특정 사이트 하나가 아니라 같은 패턴 게시판이 여럿 — 네이버/다음 카페, 넥슨 포럼류) → `engine/known_platforms.py` 의 `_RECOGNIZERS` 에 URL 인식기 한 줄 추가(builder 가 이번에 만든 config 와 동형의 dict 를 돌려주게). 그러면 같은 플랫폼의 다음 게시판은 `/watch`·`/preview` 만으로 즉시 등록됨. `python -c "from engine.known_platforms import recognize; print(recognize('<다른 게시판 URL>'))"` 로 확인. 잘못 매칭해도 fetch_list 0건이면 폴백하니 안전.
 9. **N100 배포** (`docs/운영 메모.md` §8) —
-   - crwalingTest 자체가 `-` repo dev clone 이라 별도 cp 단계 없음. 바뀐 파일들(`configs/<slug>.json` + 손어댑터면 `adapters/<x>.py`·`adapters/__init__.py` + 인식기면 `engine/known_platforms.py` + 엔진/스크립트면 그것 + `docs/사이트별 등록 시도 기록.md`)을 그대로 stage.
+   - dev 폴더 자체가 `notice-watcher` repo dev clone 이라 별도 cp 단계 없음. 바뀐 파일들(`configs/<slug>.json` + 손어댑터면 `adapters/<x>.py`·`adapters/__init__.py` + 인식기면 `engine/known_platforms.py` + 엔진/스크립트면 그것 + `docs/사이트별 등록 시도 기록.md`)을 그대로 stage.
    - `git add -A; git commit -m "<요지>"; git push origin main`  (커밋 메시지 끝에 `Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>`)
    - `ssh aaaa@<lan-ip> 'cd ~/notice-watcher && git pull --ff-only && .venv/bin/python scripts/register.py --config "configs/<slug>.json"'`  ← **반드시 `.venv/bin/python`**(시스템 python 엔 httpx 없음). 손어댑터/엔진에 새 import 추가했으면 앞에 `.venv/bin/pip install -r requirements.txt &&`.
    - **`adapters/` 에 파일을 새로 추가/수정했거나(`__init__.py` 포함), `engine/`·`scripts/notify.py`·`bot/` 을 고쳤으면 반드시 뒤에 `&& systemctl --user restart notice-bot.service`** — 봇은 장기 실행 프로세스라 켜져 있는 동안 import 된 모듈이 캐시됨. 새 어댑터 파일만 pull 하고 봇을 재시작 안 하면 `make_adapter()` 가 `getattr(adapters, "<클래스명>")` → None → `ValueError("handwritten adapter 클래스 없음")` → `/preview` 가 "예시를 만들지 못했어요(목록이 비었거나 본문 추출 실패)" 만 뱉는다(실제 원인은 어댑터 클래스 못 찾음). 또 `git pull` 과 `register.py --config` 사이/직후에 봇을 재시작하면 새 모듈을 못 받으니, **순서는 pull → (필요시 pip install) → register --config → restart** 로.

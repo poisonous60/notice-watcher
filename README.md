@@ -1,4 +1,4 @@
-# crwalingTest — 게임 공지/게시판 크롤링: 정찰 도구 + 어댑터 + config 기반 자동 엔진
+# notice-watcher — 게임 공지/게시판 크롤링: 정찰 도구 + 어댑터 + config 기반 자동 엔진
 
 게임 공지·아카라이브 채널·디시인사이드 마이너 갤러리 등의 글을 수집하기 위한 작업 공간.
 - **probe 도구** (`probe/`, `scripts/probe.py`): 크롤링 *전에* 사이트 접근 경로·request 입출력을 파악.
@@ -8,7 +8,7 @@
 ## 디렉토리 구조
 
 ```
-crwalingTest/
+notice-watcher/
 ├── docs/                       # 가이드/지침 문서 (모두 읽기)
 │   ├── 프로젝트 개요.md
 │   ├── 크롤링 지침.md                   # 안전 운영 (§6 = config 엔진의 정책 적용)
