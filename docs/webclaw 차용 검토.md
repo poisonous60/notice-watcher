@@ -53,7 +53,7 @@ webclaw가 자랑하는 "20 thread → 32.1 pages/sec" 같은 벤치마크는 **
 
 webclaw 는 이전 수집 결과의 hash 와 비교해 변경분만 출력하는 옵션이 있다.
 
-본 프로젝트는 공지 봇 특성상 **"새 글만 푸시"** 가 핵심 요구사항이고, `post_id` 기반 dedup 은 [skku-notice-bot/](../skku-notice-bot/) 등에서 이미 하고 있을 것으로 보인다. 여기에 한 단계 더 얹을 만한 부분:
+본 프로젝트는 공지 봇 특성상 **"새 글만 푸시"** 가 핵심 요구사항이고, `post_id` 기반 dedup 은 [poisonous60/skku-notice-bot](https://github.com/poisonous60/skku-notice-bot) 등에서 이미 하고 있을 것으로 보인다. 여기에 한 단계 더 얹을 만한 부분:
 
 - **본문 hash 비교**: `post_id` 가 같아도 본문이 수정된 글을 잡고 싶을 때. `content_html` 의 정규화된 hash 를 같이 저장.
 - **제목 hash 비교**: 운영자가 제목만 바꾸는 경우 (예: `[모집중]` → `[마감]`).
