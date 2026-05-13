@@ -39,7 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from probe.paths import output_dir, url_to_slug  # noqa: E402
 from engine.digest import build_digest  # noqa: E402
-from engine.known_platforms import recognize as recognize_platform  # noqa: E402
+from engine.recognizers import recognize as recognize_platform  # noqa: E402
 from generate import generate_config_validated, GenerationError, default_model  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -450,7 +450,7 @@ def _preflight(slug: str, url: Optional[str], digest: dict, *, no_escalate: bool
 
 
 def _try_known_platform(url: str, slug: str, *, out: Optional[str], force: bool) -> Optional[int]:
-    """url 이 알려진 플랫폼(engine.known_platforms)이면 probe/Gemini 없이 바로 config 작성·등록.
+    """url 이 알려진 플랫폼(engine.recognizers)이면 probe/Gemini 없이 바로 config 작성·등록.
     반환: 0=등록 성공 / None=인식 안 됨 · 잘못 인식(fetch_list 0건/예외) · 기존 config 존재(--force 없이) → 호출 측이 일반 파이프라인으로 폴백.
     (정책 검사 -- 로그인/차단 -- 는 안 함: 알려진 플랫폼은 공개 게시판이고, 비공개·등급제한이면 어댑터가 본문만 비워 반환하니 목록 등록은 그대로 됨.)
     slug 는 register.py 가 호출된 URL 기준(봇 _is_registered 가 그 slug 로 찾으므로) — config 의 _source_url 도 그 url 로 맞춤."""
@@ -509,7 +509,7 @@ def main(argv) -> int:
     p.add_argument("--no-escalate", action="store_true",
                    help="preflight(첫 글 페이지 render+HAR re-probe + probe 신호 기반 목록 전략 hint 주입) 생략 — raw lite digest 로만 생성 (디버깅용)")
     p.add_argument("--no-recognize", action="store_true",
-                   help="알려진 플랫폼(engine.known_platforms) 자동 인식을 끄고 probe→gemini 일반 파이프라인을 강제 (디버깅/검증용)")
+                   help="알려진 플랫폼(engine.recognizers) 자동 인식을 끄고 probe→gemini 일반 파이프라인을 강제 (디버깅/검증용)")
     p.add_argument("--article-url", metavar="URL",
                    help="실제 글 본문 페이지 URL 힌트 (probe 의 '첫 글' 자동 탐지가 메뉴/사이드바 링크를 잘못 집는 사이트용). "
                         "이 URL 을 render+HAR 로 미리 re-probe 해서 본문 JSON API 후보·렌더 DOM 을 확보하고 digest 의 article_sample 을 그걸로 맞춘 뒤 생성한다.")
