@@ -2,16 +2,21 @@
 
 흐름(사이트별, 순차):
   1. output/poll_state/<slug>.json 읽기 (slug, url, config_path, seen_post_ids, consecutive_breakage)
-  2. config 로 ConfigAdapter 만들어 fetch_list
+  2. **구독자 체크** — bot.sqlite3 의 subscriptions 에 그 slug 가 1건도 없으면 *lurking* 모드:
+     - fetch_list 는 함(seen 갱신 + 깨짐 판정 + 자가복구 위해)
+     - 본문 fetch 안 함, collected/*.new.json 안 씀 → notify.py 가 자동 스킵 (Gemini/Discord 호출 0)
+     - 등록 ≠ 구독: /preview 만 한 사이트·실험 등록 사이트는 비용 0
+  3. config 로 ConfigAdapter 만들어 fetch_list
      - 에러 / 0건(이전엔 글 있었는데) / 포맷 급변(post_id 모양 이상·title 대부분 빔) → 깨짐 신호
-  3. 깨짐 아니면: new = 현재 post_id − seen.  새 글 본문 fetch(상한 --max-new-articles, polite_sleep).  seen 갱신.
-  4. 깨짐이고 consecutive_breakage ≥ 2 (= 연속 2회째) → register.py 재실행(re-probe + 재생성, 옛 config 는 .bak 보관, 실패 시 복구).  --no-reprobe 면 리포트만.
-  5. 상태 파일 갱신.  결과를 output/collected/<ts>/ 에 기록.
+  4. 깨짐 아니면: new = 현재 post_id − seen.  (lurking 아니면) 새 글 본문 fetch(상한 --max-new-articles, polite_sleep).  seen 갱신.
+  5. 깨짐이고 consecutive_breakage ≥ 2 (= 연속 2회째) → register.py 재실행(re-probe + 재생성, 옛 config 는 .bak 보관, 실패 시 복구).  --no-reprobe 면 리포트만.
+  6. 상태 파일 갱신.  결과를 output/collected/<ts>/ 에 기록.
 
 사용:
     python scripts/poll.py
     python scripts/poll.py --sites cse.skku.edu_cse_notice... --max-new-articles 5
     python scripts/poll.py --no-reprobe          # 깨져도 재-probe 안 함(리포트만)
+    python scripts/poll.py --all                 # 구독자 0 사이트도 본문 fetch (lurking 모드 끔, 기존 동작)
 필요(재-probe 시): Gemini API 키 (GEMINI_API_KEYS/GEMINI_API_KEY env 또는 GEMINI_API_KEY.md).
 """
 from __future__ import annotations
@@ -30,6 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from engine import load_config, make_adapter  # noqa: E402
 from engine.base_compat import NoticePost  # noqa: E402
+from bot import db as bot_db  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 STATE_DIR = ROOT / "output" / "poll_state"
@@ -69,12 +75,15 @@ def _looks_broken(posts: list[NoticePost]) -> tuple[bool, str]:
     return False, ""
 
 
-async def _fetch_one(state: dict, *, page_size: int, max_new_articles: int) -> dict:
-    """한 사이트 폴링. 갱신된 state 일부 + 결과 dict 반환(상태 파일/리포트 작성은 호출 측)."""
+async def _fetch_one(state: dict, *, page_size: int, max_new_articles: int, lurking: bool = False) -> dict:
+    """한 사이트 폴링. 갱신된 state 일부 + 결과 dict 반환(상태 파일/리포트 작성은 호출 측).
+
+    lurking=True: 구독자 0 인 사이트. fetch_list 는 하지만(seen 갱신·깨짐 판정용) 본문 fetch X, collected 파일 X.
+    """
     slug = state["slug"]
     cfg_path = Path(state["config_path"])
     out = {"slug": slug, "url": state.get("url"), "status": "?", "n_posts": 0, "n_new": 0,
-           "new_posts": [], "note": "", "broken": False}
+           "new_posts": [], "note": "", "broken": False, "lurking": lurking}
 
     if not cfg_path.exists():
         out["status"] = "error"
@@ -104,20 +113,23 @@ async def _fetch_one(state: dict, *, page_size: int, max_new_articles: int) -> d
             cur_ids = {str(p.post_id) for p in posts}
             new_posts = [p for p in posts if str(p.post_id) not in seen]
             out["n_new"] = len(new_posts)
-            # 새 글 본문 fetch (상한, polite_sleep)
-            fetched: list[NoticePost] = []
-            for i, p in enumerate(new_posts[:max_new_articles]):
-                if i > 0:
-                    await a.polite_sleep()
-                try:
-                    fetched.append(await a.fetch_article(p))
-                except Exception as e:
-                    p2 = NoticePost(**{**p.to_dict(), "raw": {**(p.raw or {}), "fetch_error": f"{type(e).__name__}: {e}"}})
-                    fetched.append(p2)
-            # 상한 넘은 새 글은 본문 없이
-            fetched.extend(new_posts[max_new_articles:])
-            out["new_posts"] = [p.to_dict() for p in fetched]
-            out["status"] = "ok"
+            # 구독자 0 (lurking) 이면 본문 fetch / collected 저장 / 알림 모두 건너뜀.
+            # fetch_list 자체는 위에서 이미 했으니 seen 갱신 + 깨짐 판정·자가복구는 그대로 적용됨.
+            if not lurking:
+                # 새 글 본문 fetch (상한, polite_sleep)
+                fetched: list[NoticePost] = []
+                for i, p in enumerate(new_posts[:max_new_articles]):
+                    if i > 0:
+                        await a.polite_sleep()
+                    try:
+                        fetched.append(await a.fetch_article(p))
+                    except Exception as e:
+                        p2 = NoticePost(**{**p.to_dict(), "raw": {**(p.raw or {}), "fetch_error": f"{type(e).__name__}: {e}"}})
+                        fetched.append(p2)
+                # 상한 넘은 새 글은 본문 없이
+                fetched.extend(new_posts[max_new_articles:])
+                out["new_posts"] = [p.to_dict() for p in fetched]
+            out["status"] = "lurking" if lurking else "ok"
             out["_new_seen"] = _cap_seen(seen | cur_ids, keep=cur_ids)  # 호출 측이 state 에 반영
             return out
     except Exception as e:
@@ -178,11 +190,20 @@ async def run(args) -> int:
     run_dir = COLLECTED_DIR / ts
     run_dir.mkdir(parents=True, exist_ok=True)
 
+    # 구독자가 1건도 없는 사이트는 lurking 모드(fetch_list + seen 갱신만, 본문/알림 X).
+    # --all 옵션이면 끔 (디버깅·재구독 직전 baseline 채우고 싶을 때).
+    bot_conn = bot_db.connect()
+    try:
+        subscribed = set(bot_db.all_slugs(bot_conn))
+    finally:
+        bot_conn.close()
+
     rows = []
     for st in states:
         slug = st["slug"]
-        print(f"\n=== {slug} ===  {st.get('url')}")
-        res = await _fetch_one(st, page_size=args.page_size, max_new_articles=args.max_new_articles)
+        lurking = (not args.all) and (slug not in subscribed)
+        print(f"\n=== {slug} ===  {st.get('url')}" + ("  [lurking — 구독자 0]" if lurking else ""))
+        res = await _fetch_one(st, page_size=args.page_size, max_new_articles=args.max_new_articles, lurking=lurking)
         st["last_poll_at"] = _now_iso()
 
         if res["broken"]:
@@ -213,16 +234,19 @@ async def run(args) -> int:
                 print("  (--no-reprobe — 재-probe 생략, 리포트만)")
         else:
             st["consecutive_breakage"] = 0
-            st["last_status"] = "ok"
+            st["last_status"] = res["status"]  # "ok" 또는 "lurking"
             if "_new_seen" in res:
                 st["seen_post_ids"] = res["_new_seen"]
-            n_fetched_bodies = sum(1 for p in res["new_posts"] if (p.get("content_html") or "").strip())
-            print(f"  {res['n_posts']}건 / 새 글 {res['n_new']}건 (본문 fetch {n_fetched_bodies}건)")
-            for p in res["new_posts"][:5]:
-                print(f"    NEW {p.get('post_id')}  {p.get('published_at')}  {(p.get('title') or '')[:60]}")
-            if res["new_posts"]:
-                (run_dir / f"{slug}.new.json").write_text(
-                    json.dumps(res["new_posts"], ensure_ascii=False, indent=2), encoding="utf-8")
+            if res.get("lurking"):
+                print(f"  {res['n_posts']}건 / 새 글 {res['n_new']}건 (lurking — 본문 fetch·알림 생략, seen 갱신만)")
+            else:
+                n_fetched_bodies = sum(1 for p in res["new_posts"] if (p.get("content_html") or "").strip())
+                print(f"  {res['n_posts']}건 / 새 글 {res['n_new']}건 (본문 fetch {n_fetched_bodies}건)")
+                for p in res["new_posts"][:5]:
+                    print(f"    NEW {p.get('post_id')}  {p.get('published_at')}  {(p.get('title') or '')[:60]}")
+                if res["new_posts"]:
+                    (run_dir / f"{slug}.new.json").write_text(
+                        json.dumps(res["new_posts"], ensure_ascii=False, indent=2), encoding="utf-8")
 
         # 상태 파일 저장
         st_path = Path(st.pop("_state_path"))
@@ -254,6 +278,8 @@ def main(argv) -> int:
     p.add_argument("--page-size", type=int, default=30)
     p.add_argument("--max-new-articles", type=int, default=10, help="사이트당 폴링 1회에 본문 fetch 할 새 글 상한")
     p.add_argument("--no-reprobe", action="store_true", help="깨져도 재-probe 안 함(리포트만)")
+    p.add_argument("--all", action="store_true",
+                   help="구독자 0 사이트도 본문 fetch + 알림(=lurking 모드 끔). 기본은 lurking — bot.sqlite3 의 subscriptions 에 1건도 없으면 fetch_list 만.")
     p.add_argument("--model", help="재-probe 시 gemini 모델")
     args = p.parse_args(argv)
     if args.sites:
