@@ -4,7 +4,7 @@ description: >-
   게시판/공지 URL 로 손작성 config(또는 손어댑터)를 만들어 등록·N100 배포하는 워크플로우.
   사용자가 링크를 주며 "손 config 작성", "이 사이트 등록해줘", "config 만들어줘" 라고 할 때(모드 A),
   또는 봇 /preview·/watch 자동 등록이 실패한 사이트들을 모아 처리(triage)하라고 할 때(모드 B) 사용.
-  이 프로젝트 (crwalingTest = `poisonous60/game_event_capturer` 의 dev박스 clone) 전용.
+  이 프로젝트 (crwalingTest = `poisonous60/notice-watcher` 의 dev박스 clone) 전용.
 ---
 
 이 프로젝트는 게시판 글을 선언적 config(JSON)로 수집한다. 경량 LLM 자동 생성(`register.py "<URL>"`)이
