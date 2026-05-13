@@ -1,0 +1,120 @@
+{
+  "version": 1,
+  "site": "endfield.gryphline.com",
+  "board": "news",
+  "strategy": "httpx_json",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "ko-KR,ko;q=0.9",
+    "Origin": "https://endfield.gryphline.com",
+    "Referer": "https://endfield.gryphline.com/"
+  },
+  "timeout": 15.0,
+  "list": {
+    "url_template": "https://web-news.gryphline.com/api/bulletin?lang=ko-kr&code=arknights_endfield_official",
+    "pagination": {
+      "kind": "query_param",
+      "page_param": "page",
+      "size_param": "pageSize"
+    },
+    "page_size_max": 20,
+    "success_when": {
+      "path": [
+        "code"
+      ],
+      "equals": 0
+    },
+    "list_path": [
+      "data",
+      "list"
+    ],
+    "fields": {
+      "post_id": [
+        {
+          "from": "json",
+          "path": [
+            "cid"
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "json",
+          "path": [
+            "title"
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "json",
+          "path": [
+            "displayTime"
+          ],
+          "transform": [
+            [
+              "unixtime_to_iso",
+              "Z",
+              "s"
+            ]
+          ]
+        }
+      ],
+      "author": [
+        {
+          "from": "json",
+          "path": [
+            "author"
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "json",
+          "path": [
+            "tab"
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "json",
+          "path": [
+            "brief"
+          ]
+        }
+      ],
+      "cover_image": [
+        {
+          "from": "json",
+          "path": [
+            "cover"
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "url_template": "https://web-news.gryphline.com/api/bulletin/{post_id}?lang=ko-kr&code=arknights_endfield_official",
+    "fetch_kind": "json",
+    "success_when": {
+      "path": [
+        "code"
+      ],
+      "equals": 0
+    },
+    "data_path": [
+      "data"
+    ],
+    "content": [
+      {
+        "from": "json",
+        "path": [
+          "data"
+        ]
+      }
+    ],
+    "re_extract": true
+  }
+}

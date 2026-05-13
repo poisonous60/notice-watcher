@@ -38,12 +38,12 @@ from generate.prompts import load_prompt, render_prompt  # noqa: E402
 from bot import db  # noqa: E402
 from bot.config import bot_token  # noqa: E402
 from bot.discord_rest import deliver, post_webhook, CannotDeliver, DiscordRestError  # noqa: E402
+from bot.runtime_config import settings  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 COLLECTED_DIR = ROOT / "output" / "collected"
 DEFAULT_TARGETS = ROOT / "output" / "notify_targets.json"
 DEFAULT_DELIVERED = ROOT / "output" / "delivered.json"
-DELIVERED_CAP = 5000
 KST = timezone(timedelta(hours=9))
 
 
@@ -108,8 +108,9 @@ def load_delivered(path: Path) -> set[tuple[str, str]]:
 
 def save_delivered(path: Path, delivered: set[tuple[str, str]]) -> None:
     items = sorted(delivered)
-    if len(items) > DELIVERED_CAP:
-        items = items[-DELIVERED_CAP:]
+    cap = settings.notify.delivered_cap
+    if len(items) > cap:
+        items = items[-cap:]
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps([list(t) for t in items], ensure_ascii=False), encoding="utf-8")
 

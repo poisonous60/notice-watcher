@@ -18,6 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scripts._chromium_lock import chromium_lock  # noqa: E402
+from bot.runtime_config import settings  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 PY = sys.executable
@@ -42,7 +43,7 @@ def main(argv: list[str]) -> int:
 
     rc = 0
     try:
-        with chromium_lock(timeout=1800.0):
+        with chromium_lock(timeout=settings.chromium_lock.poll_timeout):
             print("[poll_and_notify] poll.py ...")
             rc = subprocess.call([PY, str(ROOT / "scripts" / "poll.py"), *argv], cwd=str(ROOT))
     except TimeoutError as e:

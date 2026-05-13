@@ -1,8 +1,9 @@
 """Discord 봇 — 게시판 등록(/watch) · 미리보기(/preview) · 목록(/list) · 해제(/unwatch) · 상태(/status).
 
 - 게이트웨이 연결(아웃바운드만 — 포트포워딩 불필요). 슬래시 명령 *수신* 용.
-- `/watch`·`/preview`(처음 보는 사이트) 는 register.py 를 subprocess 로 실행(chromium 락 안에서, 워커 스레드). >3s 걸리므로 즉시 defer 응답 후 수정.
-  register.py 의 stdout/stderr 는 `[register] …` 로 봇 로그에 실시간 흘러나감 → `journalctl --user-unit notice-bot.service -f` 로 config 생성 과정 관전 가능.
+- `/watch`·`/preview`(처음 보는 사이트) 는 jobs 큐에 enqueue 만 함. 실제 register.py 실행은
+  bot/worker.py 의 단일 백그라운드 task 가 FIFO 로 처리(chromium_lock 안). 처리 끝나면 사용자가
+  본 채널 메시지를 worker 가 직접 edit(interaction token 만료와 무관). 폴링의 re-probe 도 같은 큐.
 - 구독 정보(필터·스케줄·발송대상)는 SQLite(output/bot.sqlite3, bot/db.py)에만 — configs/·poll_state/ 엔 안 씀.
 - 실제 알림 발송은 polling 쪽(scripts/notify.py)이 봇 토큰으로 REST 직접 — 이 봇 프로세스가 떠 있을 필요 없음.
 - 미처리 예외는 로그 + OWNER_USER_ID 에게 DM(쿨다운).
@@ -12,13 +13,10 @@
 from __future__ import annotations
 
 import asyncio
-import collections
 import json
 import logging
 import re
-import subprocess
 import sys
-import threading
 import time
 import traceback
 from datetime import datetime, timezone
@@ -31,19 +29,12 @@ sys.path.insert(0, str(ROOT))
 import discord  # noqa: E402
 from discord import app_commands  # noqa: E402
 
-from bot import db, url_gate  # noqa: E402
+from bot import db, site_ops, url_gate, worker  # noqa: E402
 from bot.config import bot_token, owner_user_id, guild_id, safe_browsing_api_key  # noqa: E402
-from scripts._chromium_lock import chromium_lock  # noqa: E402
-from scripts.notify import format_message, summarize_post  # noqa: E402
 from probe.paths import url_to_slug  # noqa: E402
-from engine import load_config, make_adapter  # noqa: E402
-from generate import GeminiClient, GeminiError  # noqa: E402
 
-CONFIGS_DIR = ROOT / "configs"
-STATE_DIR = ROOT / "output" / "poll_state"
-TRIAGE_QUEUE = ROOT / "output" / "triage_queue.jsonl"  # 자동 등록 실패한 /preview·/watch 기록 (scripts/triage.py 가 읽음)
-REGISTER_PY = ROOT / "scripts" / "register.py"
-PY = sys.executable
+CONFIGS_DIR = site_ops.CONFIGS_DIR
+STATE_DIR = site_ops.STATE_DIR
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("bot")
@@ -59,43 +50,15 @@ intents = discord.Intents.default()
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 _conn = db.connect()
-_gemini: Optional[GeminiClient] = None
 
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _gemini_client() -> GeminiClient:
-    global _gemini
-    if _gemini is None:
-        _gemini = GeminiClient()
-    return _gemini
-
-
-def _config_path_for(slug: str) -> Optional[Path]:
-    st = STATE_DIR / f"{slug}.json"
-    if st.exists():
-        try:
-            cp = json.loads(st.read_text(encoding="utf-8")).get("config_path")
-            if cp and Path(cp).exists():
-                return Path(cp)
-        except Exception:  # noqa: BLE001
-            pass
-    default = CONFIGS_DIR / f"{slug}.json"
-    return default if default.exists() else None
-
-
-def _is_registered(slug: str) -> bool:
-    return (STATE_DIR / f"{slug}.json").exists() and not (STATE_DIR / f"{slug}.FAILED.json").exists()
-
-
-def _baseline_count(slug: str) -> Optional[int]:
-    st = STATE_DIR / f"{slug}.json"
-    try:
-        return int(json.loads(st.read_text(encoding="utf-8")).get("n_baseline", 0))
-    except Exception:  # noqa: BLE001
-        return None
+# site_ops 의 헬퍼를 짧은 alias 로 — 기존 호출부 호환
+_is_registered = site_ops.is_registered
+_baseline_count = site_ops.baseline_count
 
 
 def _parse_schedule(raw: Optional[str]) -> Optional[str]:
@@ -115,77 +78,14 @@ def _parse_schedule(raw: Optional[str]) -> Optional[str]:
 
 
 # --------------------------------------------------------------------------- #
-# register.py subprocess (chromium 락 안에서, 워커 스레드)
+# URL 게이트 wrapper — 거부 시 OWNER DM 등 부수 처리
 # --------------------------------------------------------------------------- #
-def _blocking_register(url: str, article_url: Optional[str] = None) -> tuple[int, str]:
-    """register.py 를 chromium 락 안에서 실행.
-    stdout/stderr 를 줄 단위로 봇 로그(`[register] …`)에 흘려보냄 → N100 콘솔에서
-    `journalctl --user-unit notice-bot.service -f` 로 config 생성 과정 실시간 확인 가능.
-    실패 시 Discord 에 보여줄 마지막 ~4000자는 따로 모아 반환. (-u: 자식 출력 버퍼링 끔)
-    article_url 이 주어지면 register.py 에 --article-url 로 전달(probe 의 '첫 글' 자동탐지가 잘못 잡는 사이트용)."""
-    cmd = [PY, "-u", str(REGISTER_PY), url]
-    if article_url:
-        cmd += ["--article-url", article_url]
-    try:
-        with chromium_lock(timeout=900.0):
-            proc = subprocess.Popen(cmd, cwd=str(ROOT),
-                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                    text=True, errors="replace", bufsize=1)
-            timed_out = threading.Event()
-
-            def _kill_on_timeout() -> None:
-                if proc.poll() is None:
-                    timed_out.set()
-                    proc.kill()
-
-            killer = threading.Timer(600.0, _kill_on_timeout)
-            killer.start()
-            tail: "collections.deque[str]" = collections.deque(maxlen=400)
-            log.info("register.py 시작: %s", url)
-            try:
-                for line in (proc.stdout or []):
-                    s = line.rstrip("\n")
-                    tail.append(s)
-                    log.info("[register] %s", s)
-                rc = proc.wait()
-            finally:
-                killer.cancel()
-            log.info("register.py 종료: rc=%s%s (%s)", rc, " (타임아웃 kill)" if timed_out.is_set() else "", url)
-        if timed_out.is_set():
-            return -2, "register.py 실행 시간 초과 (10분)"
-        return rc, "\n".join(tail)[-4000:]
-    except TimeoutError as e:  # chromium 락 못 잡음
-        return -1, f"chromium 락 대기 초과: {e}"
-    except Exception as e:  # noqa: BLE001
-        return -3, f"register.py 실행 중 예외: {e!r}"
-
-
-def _append_triage_queue(url: str, slug: str, via: str, requested_by: Optional[dict], note: str) -> None:
-    """자동 등록 실패를 output/triage_queue.jsonl 에 한 줄 append.
-    나중에 dev박스에서 `python scripts/triage.py pull/list` 로 보고 hand-config 스킬로 처리한다.
-    (register.py 가 쓰는 <slug>.FAILED.json 에 [FAIL] 사유·last_config 가 있고, 이쪽은 누가/어떤 명령으로 실패했는지.)"""
-    try:
-        TRIAGE_QUEUE.parent.mkdir(parents=True, exist_ok=True)
-        rec = {"ts": _now_iso(), "url": url, "slug": slug, "via": via,
-               "requested_by": requested_by or {}, "register_tail": (note or "")[-2000:]}
-        with TRIAGE_QUEUE.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-    except Exception as e:  # noqa: BLE001
-        log.warning("triage_queue 기록 실패 (%s): %r", slug, e)
-
-
-async def _ensure_registered(url: str, *, via: str = "?", requested_by: Optional[dict] = None,
-                             article_url: Optional[str] = None) -> tuple[bool, str, str]:
-    """등록돼 있으면 그대로, 아니면 register.py 실행. 반환 (ok, slug, msg).
-    via/requested_by 는 실패 시 triage_queue.jsonl 에 남길 맥락(어떤 명령/누가).
-    article_url: 실제 글페이지 URL 힌트 — register.py 의 --article-url 로 넘어감(처음 등록할 때만 의미 있음)."""
-    slug = url_to_slug(url)
-    if _is_registered(slug):
-        return True, slug, "이미 등록됨"
-    # probe 전단 URL 게이트: 구조 검증 / SSRF(DNS) / SNS·축약·파일 블랙리스트 / Safe Browsing.
-    # 막히면 register.py(→probe) 를 아예 안 띄움. (triage_queue 엔 안 쌓음 — 사이트 실패가 아니라 입력 오류/차단.)
+async def _gate_check(url: str, *, article_url: Optional[str], via: str,
+                       requested_by: Optional[dict]) -> Optional[str]:
+    """URL 게이트 통과 시 None, 거부 시 사용자에게 보여줄 메시지(이미 OWNER DM 등 부수 처리 완료)."""
     try:
         await url_gate.check(url, article_url=article_url)
+        return None
     except url_gate.UrlRejected as e:
         log.info("[url_gate] reject %s (article=%s): %s — %s", url, article_url, e.reason, e.msg)
         if e.reason == "malicious":
@@ -193,45 +93,7 @@ async def _ensure_registered(url: str, *, via: str = "?", requested_by: Optional
                             f"요청: {(requested_by or {}).get('name', '?')} (via {via})", key="url_gate_malicious")
         elif e.reason == "gsb_error":
             await _dm_owner(f"⚠️ [url_gate] Safe Browsing 검사 실패 — {e.msg}\nURL: {url}", key="url_gate_gsb")
-        return False, slug, e.msg
-    rc, out = await asyncio.to_thread(_blocking_register, url, article_url)
-    if rc == 0 and _is_registered(slug):
-        return True, slug, "등록 완료"
-    if rc == -1:
-        return False, slug, "다른 작업이 크롤러를 쓰는 중입니다. 잠시 후 다시 시도해 주세요."
-    if rc == -2:
-        _append_triage_queue(url, slug, via, requested_by, "TIMEOUT — register.py 10분 초과")
-        return False, slug, "사이트 분석 시간 초과(10분) — 너무 느리거나 막힌 사이트일 수 있습니다."
-    # 그 외: 자동 등록 실패
-    tail = "\n".join((out or "").strip().splitlines()[-6:])
-    _append_triage_queue(url, slug, via, requested_by, tail)
-    return False, slug, ("이 사이트는 자동 등록이 안 됩니다 — 손어댑터가 필요합니다 "
-                         "(docs/사이트 어댑터 추가 가이드.md).\n```\n" + tail + "\n```")
-
-
-# --------------------------------------------------------------------------- #
-# 예시 1건 생성 (config 로드 → fetch_list → fetch_article → 요약 → format_message)
-# --------------------------------------------------------------------------- #
-async def _make_example(slug: str) -> Optional[str]:
-    cfg_path = _config_path_for(slug)
-    if not cfg_path:
-        return None
-    try:
-        cfg = load_config(cfg_path)
-        async with make_adapter(cfg) as a:
-            posts = await a.fetch_list(page=1, page_size=10)
-            if not posts:
-                return None
-            try:
-                full = await a.fetch_article(posts[0])
-            except Exception:  # noqa: BLE001
-                full = posts[0]
-        post_dict = full.to_dict()
-        summary = await asyncio.to_thread(summarize_post, _gemini_client(), post_dict)
-        return format_message(post_dict, summary)
-    except (GeminiError, Exception) as e:  # noqa: BLE001
-        log.warning("예시 생성 실패 (%s): %r", slug, e)
-        return None
+        return e.msg
 
 
 # --------------------------------------------------------------------------- #
@@ -285,7 +147,8 @@ async def watch(interaction: discord.Interaction, url: str, filter: Optional[str
         await interaction.edit_original_response(
             content="❌ notify_empty(새 공지 없음 알림)는 schedule='realtime' 일 때만 돼요. 다이제스트 모드에선 못 켭니다.")
         return
-    if not re.match(r"^https?://", url.strip()):
+    url = url.strip()
+    if not re.match(r"^https?://", url):
         await interaction.edit_original_response(content="❌ http(s):// 로 시작하는 URL 을 주세요.")
         return
     art = (article_url or "").strip() or None
@@ -293,35 +156,62 @@ async def watch(interaction: discord.Interaction, url: str, filter: Optional[str
         await interaction.edit_original_response(content="❌ article_url 은 http(s):// 로 시작하는 글 URL 이어야 해요.")
         return
 
-    await interaction.edit_original_response(content="⏳ 사이트 분석 중… (처음 보는 사이트면 수 분 걸릴 수 있어요)")
-    ok, slug, msg = await _ensure_registered(
-        url.strip(), via="watch",
-        requested_by={"id": str(interaction.user.id), "name": str(interaction.user)},
-        article_url=art)
-    if not ok:
-        await interaction.edit_original_response(content=f"⚠️ {msg}")
+    slug = url_to_slug(url)
+    user_id = str(interaction.user.id)
+    target_kind = "channel" if here else "dm"
+    target_id = str(interaction.channel_id) if here else user_id
+    filter_prompt = (filter.strip() if filter and filter.strip() else None)
+    where = "이 채널" if here else "내 DM"
+
+    # 이미 등록된 사이트면 큐 안 거치고 즉시 subscription 추가 + 예시
+    if _is_registered(slug):
+        db.add_subscription(_conn, user_id=user_id, slug=slug, url=url,
+                            filter_prompt=filter_prompt, schedule=sched,
+                            target_kind=target_kind, target_id=target_id,
+                            notify_empty=notify_empty)
+        n = _baseline_count(slug)
+        head = (f"✅ 구독 추가 — `{slug}` (이미 등록된 사이트)\n"
+                f"• baseline {n if n is not None else '?'}건\n"
+                f"• 필터: {filter_prompt or '없음(새 글 전부)'}\n"
+                f"• 스케줄: {sched}\n"
+                f"• 알림: {where}\n"
+                f"• 새 글 없을 때도 알림: {'예' if notify_empty else '아니오'}")
+        await interaction.edit_original_response(content=head + "\n\n📋 예시 알림 만드는 중…")
+        example = await site_ops.make_example(slug)
+        if example:
+            await interaction.edit_original_response(
+                content=head + "\n\n📋 **예시 알림** (이런 형식으로 옵니다):\n" + example)
+        else:
+            await interaction.edit_original_response(content=head + "\n\n(예시 알림 생성은 건너뜀 — 등록은 정상)")
         return
 
-    target_kind = "channel" if here else "dm"
-    target_id = str(interaction.channel_id) if here else str(interaction.user.id)
-    db.add_subscription(_conn, user_id=str(interaction.user.id), slug=slug, url=url.strip(),
-                        filter_prompt=(filter.strip() if filter and filter.strip() else None),
-                        schedule=sched, target_kind=target_kind, target_id=target_id,
-                        notify_empty=notify_empty)
-    n = _baseline_count(slug)
-    where = "이 채널" if here else "내 DM"
-    head = (f"✅ 등록 완료 — `{slug}`\n"
-            f"• baseline {n if n is not None else '?'}건(이 글들은 '새 글' 아님)\n"
-            f"• 필터: {filter.strip() if filter and filter.strip() else '없음(새 글 전부)'}\n"
-            f"• 스케줄: {sched}\n"
-            f"• 알림: {where}\n"
-            f"• 새 글 없을 때도 알림: {'예' if notify_empty else '아니오'}")
-    await interaction.edit_original_response(content=head + "\n\n📋 예시 알림 만드는 중…")
-    example = await _make_example(slug)
-    if example:
-        await interaction.edit_original_response(content=head + "\n\n📋 **예시 알림** (이런 형식으로 옵니다):\n" + example)
+    # 신규 사이트 — URL 게이트 → 큐 enqueue → worker 가 처리하면 ack 메시지 edit
+    requested_by = {"id": user_id, "name": str(interaction.user)}
+    err = await _gate_check(url, article_url=art, via="watch", requested_by=requested_by)
+    if err:
+        await interaction.edit_original_response(content=f"⚠️ {err}")
+        return
+
+    # interaction 응답을 채널 메시지로 promote → worker 가 token 만료와 무관하게 edit 가능
+    await interaction.edit_original_response(content="📥 큐 추가 중…")
+    msg = await interaction.original_response()
+    sub_payload = json.dumps({
+        "user_id": user_id, "filter_prompt": filter_prompt, "schedule": sched,
+        "target_kind": target_kind, "target_id": target_id, "notify_empty": bool(notify_empty),
+    })
+    job_id, inserted = db.enqueue_job(
+        _conn, kind="register", url=url, slug=slug, article_url=art,
+        via="watch", requested_by=json.dumps(requested_by),
+        ack_channel_id=str(msg.channel.id), ack_message_id=str(msg.id),
+        sub_payload=sub_payload, dedupe=False,
+    )
+    pos = db.queue_position(_conn, job_id)
+    if pos <= 1:
+        text = f"📥 큐 추가됨 (잡 #{job_id}) — 곧 처리 시작합니다. 끝나면 이 메시지로 알려드릴게요."
     else:
-        await interaction.edit_original_response(content=head + "\n\n(예시 알림 생성은 건너뜀 — 등록은 정상)")
+        text = (f"📥 큐 추가됨 (잡 #{job_id}) — 현재 대기열 **{pos}번째**. "
+                f"이전 잡들이 끝나면 처리되고, 결과는 이 메시지로 알려드릴게요.")
+    await interaction.edit_original_response(content=text)
 
 
 @tree.command(name="preview", description="등록 없이 그 게시판의 최신 글 하나를 요약해 알림 예시를 보여줍니다.")
@@ -330,30 +220,52 @@ async def watch(interaction: discord.Interaction, url: str, filter: Optional[str
     article_url="(선택) 이 사이트가 처음이고 자동 분석에 실패할 때, 그 게시판의 실제 글 하나 URL 을 같이 주면 분석 성공률이 올라갑니다.",
 )
 async def preview(interaction: discord.Interaction, url: str, article_url: Optional[str] = None):
-    await interaction.response.defer(thinking=True, ephemeral=True)
-    if not re.match(r"^https?://", url.strip()):
+    # ephemeral=False 로 — worker 가 채널 메시지 edit 으로 ack 해야 하니까 (token 만료 영향 X).
+    # 단 등록 끝나면 자동 unsubscribe — preview 만 보고 싶었던 사용자를 위해 결과 보여준 후 정리.
+    await interaction.response.defer(thinking=True)
+    url = url.strip()
+    if not re.match(r"^https?://", url):
         await interaction.edit_original_response(content="❌ http(s):// 로 시작하는 URL 을 주세요.")
         return
     art = (article_url or "").strip() or None
     if art and not re.match(r"^https?://", art):
         await interaction.edit_original_response(content="❌ article_url 은 http(s):// 로 시작하는 글 URL 이어야 해요.")
         return
-    slug = url_to_slug(url.strip())
-    if not _is_registered(slug):
-        await interaction.edit_original_response(content="⏳ config 생성 중… (이 사이트는 처음이라 수 분 걸려요)")
-        ok, slug, msg = await _ensure_registered(
-            url.strip(), via="preview",
-            requested_by={"id": str(interaction.user.id), "name": str(interaction.user)},
-            article_url=art)
-        if not ok:
-            await interaction.edit_original_response(content=f"⚠️ {msg}")
-            return
-    await interaction.edit_original_response(content="⏳ 최신 글 가져와 요약 중…")
-    example = await _make_example(slug)
-    if example:
-        await interaction.edit_original_response(content="📋 **이 게시판 알림 예시:**\n" + example)
+
+    slug = url_to_slug(url)
+    if _is_registered(slug):
+        # 등록된 사이트 — 즉시 예시만
+        await interaction.edit_original_response(content="⏳ 최신 글 가져와 요약 중…")
+        example = await site_ops.make_example(slug)
+        if example:
+            await interaction.edit_original_response(content="📋 **이 게시판 알림 예시:**\n" + example)
+        else:
+            await interaction.edit_original_response(content="⚠️ 예시를 만들지 못했어요(목록이 비었거나 본문 추출 실패).")
+        return
+
+    # 신규 사이트 — URL 게이트 → 큐 enqueue
+    requested_by = {"id": str(interaction.user.id), "name": str(interaction.user)}
+    err = await _gate_check(url, article_url=art, via="preview", requested_by=requested_by)
+    if err:
+        await interaction.edit_original_response(content=f"⚠️ {err}")
+        return
+
+    await interaction.edit_original_response(content="📥 큐 추가 중…")
+    msg = await interaction.original_response()
+    job_id, inserted = db.enqueue_job(
+        _conn, kind="register", url=url, slug=slug, article_url=art,
+        via="preview", requested_by=json.dumps(requested_by),
+        ack_channel_id=str(msg.channel.id), ack_message_id=str(msg.id),
+        sub_payload=None,  # preview 는 subscription 안 만듦
+        dedupe=False,
+    )
+    pos = db.queue_position(_conn, job_id)
+    if pos <= 1:
+        text = f"📥 큐 추가됨 (잡 #{job_id}) — 곧 처리 시작합니다. 끝나면 이 메시지에 예시 알림이 뜹니다."
     else:
-        await interaction.edit_original_response(content="⚠️ 예시를 만들지 못했어요(목록이 비었거나 본문 추출 실패).")
+        text = (f"📥 큐 추가됨 (잡 #{job_id}) — 현재 대기열 **{pos}번째**. "
+                f"끝나면 이 메시지에 예시 알림이 뜹니다.")
+    await interaction.edit_original_response(content=text)
 
 
 @tree.command(name="unwatch", description="구독 해제. slug 또는 URL 을 줍니다.")
@@ -385,6 +297,7 @@ async def list_cmd(interaction: discord.Interaction):
 @tree.command(name="status", description="봇/폴링 상태")
 async def status(interaction: discord.Interaction):
     cnt = db.counts(_conn)
+    jq = db.jobs_summary(_conn)
     n_configs = len(list(CONFIGS_DIR.glob("*.json"))) if CONFIGS_DIR.exists() else 0
     last_poll = None
     broken: list[str] = []
@@ -409,10 +322,13 @@ async def status(interaction: discord.Interaction):
                  + (", ".join(f"{k} {v}" for k, v in sorted(gate.items())) if gate else "없음")
                  + f"  · blacklist: {url_gate.blacklist_status()}"
                  + ("" if safe_browsing_api_key() else "  · ⚠SAFE_BROWSING_API_KEY 미설정 — 신규 등록 전부 거부됨"))
+    jq_line = (f"• 잡 큐: pending {jq.get('pending', 0)}건 / running {jq.get('running', 0)}건 "
+               f"/ done {jq.get('done', 0)} / failed {jq.get('failed', 0)}")
     lines = [
         "**봇 상태**",
         f"• uptime: {up // 3600}h {(up % 3600) // 60}m",
         gate_line,
+        jq_line,
         f"• 등록 config: {n_configs}개 / 구독: {cnt['subscriptions']}건 ({cnt['slugs']} slug) / pending(다이제스트 대기): {cnt['pending']}건",
         f"• 마지막 폴링: {last_poll or '아직 없음'}",
         f"• 깨짐 신호 있는 slug: {', '.join(broken) if broken else '없음'}",
@@ -467,6 +383,11 @@ async def on_ready():
         log.warning("⚠ SAFE_BROWSING_API_KEY 가 .env 에 없습니다 — URL 게이트의 Safe Browsing 검사가 "
                     "fail-closed 라 /watch·/preview(처음 보는 사이트)가 전부 거부됩니다. .env 에 키를 설정하세요 "
                     "(GCP 콘솔 → Safe Browsing API 사용 설정 → API 키).")
+    # 잡 큐 worker 시작 — 재시작 시 running 잡 → pending 리셋. on_ready 가 reconnect 마다 호출돼도 worker.start 안에서 idempotent.
+    try:
+        await worker.start(client, _conn, dm_owner=_dm_owner)
+    except Exception as e:  # noqa: BLE001
+        _record_error("worker.start", e)
     gid = guild_id()
     try:
         if gid:

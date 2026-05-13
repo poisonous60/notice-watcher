@@ -1,0 +1,31 @@
+# 운영 튜닝값 (repo 기본, 모든 머신 공통). 비밀(BOT_TOKEN/GEMINI_API_KEYS 등)은 .env 에.
+#
+# 머신별로 다른 값 쓰고 싶으면 같은 폴더에 config.local.toml 만들고 일부 키만 적기.
+# 예: dev박스에서 chromium 동시 4개 돌리고 싶다면
+#   # config.local.toml
+#   [poll]
+#   concurrency_chromium = 4
+# → config.local.toml 의 값이 config.toml 을 덮어씀. 안 적은 키는 config.toml 값 그대로.
+#
+# 로더: bot/runtime_config.py.  변경 후 봇/폴링 재시작 필요(import 시점에 한 번 읽음).
+
+[poll]
+# 사이트 동시 fetch 상한. chromium=playwright_html + ArcaLiveAdapter(handwritten), 그 외는 httpx.
+concurrency_httpx = 8        # httpx 사이트 — 가벼움(httpx + bs4), 늘려도 메모리 부담 X
+concurrency_chromium = 1     # chromium 사이트 — 1개당 RAM ~200MB+, N100(12GiB) 보호용
+page_size = 30               # fetch_list 첫 페이지 크기
+max_new_articles = 10        # 폴링 1회당 본문 fetch 상한 (사이트당)
+breakage_threshold = 2       # 연속 N회 깨지면 reprobe 잡 enqueue
+seen_cap = 5000              # seen_post_ids 무한 증가 방지 상한
+
+[worker]
+idle_poll_seconds = 2.0      # 잡 큐 비었을 때 sleep 주기 (낮으면 응답 빠르지만 DB poll 잦음)
+
+[chromium_lock]
+# 모두 초 단위.
+bot_timeout = 900            # 봇 register 잡이 락 대기 한도 (= Discord interaction defer token 만료 15분)
+poll_timeout = 1800          # 폴링이 락 대기 한도 (chromium_lock 풀릴 때까지; 봇 worker 가 처리 중일 수 있음)
+register_subprocess_timeout = 600   # register.py 실행 자체 한도 — 넘으면 SIGKILL
+
+[notify]
+delivered_cap = 5000         # bot.sqlite3 의 deliveries 한도 (오래된 거 잘림)

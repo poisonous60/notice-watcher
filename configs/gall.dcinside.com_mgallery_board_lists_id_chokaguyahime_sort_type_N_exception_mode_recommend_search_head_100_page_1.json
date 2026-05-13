@@ -1,0 +1,188 @@
+{
+  "version": 1,
+  "site": "dcinside.mgallery",
+  "board": "chokaguyahime",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept-Language": "ko-KR",
+    "Upgrade-Insecure-Requests": "1",
+    "Referer": "https://gall.dcinside.com/"
+  },
+  "timeout": 15.0,
+  "polite_sleep": {
+    "min": 30.0,
+    "max": 35.0
+  },
+  "list": {
+    "url_template": "https://gall.dcinside.com/mgallery/board/lists/?id={board}&sort_type=N&exception_mode=recommend&search_head=100",
+    "pagination": {
+      "kind": "query_param",
+      "page_param": "page"
+    },
+    "row_selector": "tbody.listwrap2 > tr.ub-content.us-post",
+    "row_required_selector": "td.gall_num",
+    "include_notices": false,
+    "fields": {
+      "post_id": [
+        {
+          "from": "css",
+          "selector": "td.gall_num",
+          "text": true,
+          "match": "^\\d+$"
+        },
+        {
+          "from": "attr",
+          "selector": "td.gall_tit a",
+          "attr": "href",
+          "transform": [
+            [
+              "regex_extract",
+              "[?&]no=(\\d+)"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "td.gall_tit a",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        },
+        {
+          "from": "css",
+          "selector": "td.gall_tit",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "td.gall_tit a",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://gall.dcinside.com"
+            ]
+          ]
+        },
+        {
+          "from": "template",
+          "value": "https://gall.dcinside.com/mgallery/board/view/?id={board}&no={post_id}&exception_mode=recommend&search_head=100&page=1"
+        }
+      ],
+      "author": [
+        {
+          "from": "css",
+          "selector": "td.gall_writer",
+          "text": true
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "td.gall_date",
+          "attr": "title",
+          "match": "^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$",
+          "transform": [
+            [
+              "replace",
+              " ",
+              "T"
+            ],
+            [
+              "append",
+              "+09:00"
+            ]
+          ]
+        },
+        {
+          "from": "css",
+          "selector": "td.gall_date",
+          "text": true,
+          "transform": [
+            [
+              "iso8601",
+              [
+                "%m.%d %H:%M",
+                "%H:%M"
+              ],
+              "+09:00"
+            ]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "css",
+          "selector": "td.gall_subject",
+          "text": true
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "div.write_div",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": ".writing_view_box",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": ".gallview_contents",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "div.gallview_head .title_subject",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "div.gallview_head .gall_date",
+          "attr": "title",
+          "match": "^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$",
+          "transform": [
+            [
+              "replace",
+              " ",
+              "T"
+            ],
+            [
+              "append",
+              "+09:00"
+            ]
+          ]
+        }
+      ]
+    }
+  }
+}

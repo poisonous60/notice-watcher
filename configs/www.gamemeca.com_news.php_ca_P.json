@@ -1,0 +1,154 @@
+{
+  "version": 1,
+  "site": "www.gamemeca.com",
+  "board": "P",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept-Language": "ko-KR",
+    "Upgrade-Insecure-Requests": "1",
+    "sec-ch-ua": "\"HeadlessChrome\";v=\"147\", \"Not.A/Brand\";v=\"8\", \"Chromium\";v=\"147\"",
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": "\"Windows\""
+  },
+  "timeout": 15.0,
+  "list": {
+    "url_template": "https://www.gamemeca.com/news.php?ca={board}",
+    "pagination": {
+      "kind": "query_param",
+      "page_param": "p"
+    },
+    "row_selector": "ul.list_news > li",
+    "row_required_selector": "div.cont_thumb strong.tit_thumb a",
+    "exclude_selector": "div.google-auto-placed",
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "div.cont_thumb strong.tit_thumb a",
+          "attr": "href",
+          "transform": [
+            [
+              "regex_extract",
+              "[?&]gid=(\\d+)"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "div.cont_thumb strong.tit_thumb a",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "div.cont_thumb strong.tit_thumb a",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://www.gamemeca.com"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "div.day_news",
+          "text": true,
+          "transform": [
+            [
+              "iso8601",
+              [
+                "%Y.%m.%d %H:%M"
+              ],
+              "+09:00"
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "div.desc_thumb",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "cover_image": [
+        {
+          "from": "attr",
+          "selector": "a.link_thumb img",
+          "attr": "src",
+          "transform": [
+            [
+              "urljoin",
+              "https://www.gamemeca.com"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "div.article",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "author": [
+        {
+          "from": "css",
+          "selector": "div.article-info span.writer",
+          "text": true,
+          "transform": [
+            [
+              "remove_prefix",
+              "게임메카 "
+            ],
+            [
+              "remove_prefix",
+              " 기자"
+            ],
+            [
+              "strip"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "div.article-info span.date",
+          "text": true,
+          "transform": [
+            [
+              "iso8601",
+              [
+                "%Y.%m.%d %H:%M"
+              ],
+              "+09:00"
+            ]
+          ]
+        }
+      ]
+    }
+  }
+}

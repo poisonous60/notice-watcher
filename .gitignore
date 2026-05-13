@@ -7,3 +7,4 @@ GEMINI_API_KEY.md
 *.sqlite3
 *.sqlite3-wal
 *.sqlite3-shm
+config.local.toml

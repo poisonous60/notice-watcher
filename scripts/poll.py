@@ -9,7 +9,7 @@
   3. config 로 ConfigAdapter 만들어 fetch_list
      - 에러 / 0건(이전엔 글 있었는데) / 포맷 급변(post_id 모양 이상·title 대부분 빔) → 깨짐 신호
   4. 깨짐 아니면: new = 현재 post_id − seen.  (lurking 아니면) 새 글 본문 fetch(상한 --max-new-articles, polite_sleep).  seen 갱신.
-  5. 깨짐이고 consecutive_breakage ≥ 2 (= 연속 2회째) → register.py 재실행(re-probe + 재생성, 옛 config 는 .bak 보관, 실패 시 복구).  --no-reprobe 면 리포트만.
+  5. 깨짐이고 consecutive_breakage ≥ 2 (= 연속 2회째) → bot.sqlite3 의 jobs 큐에 reprobe 잡 enqueue. 봇 worker(bot/worker.py)가 폴링 끝난 뒤 차례로 처리. --no-reprobe 면 리포트만.
   6. 상태 파일 갱신.  결과를 output/collected/<ts>/ 에 기록.
 
 사용:
@@ -17,7 +17,9 @@
     python scripts/poll.py --sites cse.skku.edu_cse_notice... --max-new-articles 5
     python scripts/poll.py --no-reprobe          # 깨져도 재-probe 안 함(리포트만)
     python scripts/poll.py --all                 # 구독자 0 사이트도 본문 fetch (lurking 모드 끔, 기존 동작)
-필요(재-probe 시): Gemini API 키 (GEMINI_API_KEYS/GEMINI_API_KEY env 또는 GEMINI_API_KEY.md).
+    python scripts/poll.py --concurrency-httpx 8 --concurrency-chromium 1   # 동시 fetch 상한
+병렬: 사이트별로 동시에 fetch 한다. chromium 띄우는 strategy(playwright_html/handwritten)는 메모리 폭주 방지를 위해 별도 작은 세마포(기본 1), pure httpx 사이트는 큰 세마포(기본 8). 사이트별 print 는 fetch 완료 후 한 묶음으로 출력해 가독성 유지.
+재-probe 는 폴링 중 inline 실행 X — bot.sqlite3 의 jobs 큐에 enqueue 만 함. 실제 register.py 실행은 봇 worker(bot/worker.py) 가 폴링 종료 후 chromium 락 안에서 직렬 처리.
 """
 from __future__ import annotations
 
@@ -25,8 +27,6 @@ import argparse
 import asyncio
 import json
 import re
-import shutil
-import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -36,30 +36,52 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from engine import load_config, make_adapter  # noqa: E402
 from engine.base_compat import NoticePost  # noqa: E402
 from bot import db as bot_db  # noqa: E402
+from bot.runtime_config import settings  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 STATE_DIR = ROOT / "output" / "poll_state"
 COLLECTED_DIR = ROOT / "output" / "collected"
 
 _STABLE_ID_RE = re.compile(r"^[\w\-./:%]{1,64}$")
-_BREAKAGE_THRESHOLD = 2  # 연속 N회 깨지면 재-probe
+# strategy == "handwritten" 이면 adapter 이름을 보고 결정. 여기 들어있는 어댑터만 chromium sem.
+_CHROMIUM_HANDWRITTEN = {"ArcaLiveAdapter"}
+
+
+def _config_meta(state: dict) -> tuple[str, str]:
+    """(strategy, adapter_name) 반환. 둘 다 빈 문자열 가능. 실패 시 ('', '')."""
+    cp = state.get("config_path")
+    if not cp:
+        return "", ""
+    try:
+        cfg = json.loads(Path(cp).read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return "", ""
+    return str(cfg.get("strategy") or ""), str(cfg.get("adapter") or "")
+
+
+def _uses_chromium(state: dict) -> bool:
+    """이 사이트의 fetch 가 chromium 을 띄우나? (메모리 무거운 sem 결정용)."""
+    strategy, adapter = _config_meta(state)
+    if strategy == "playwright_html":
+        return True
+    if strategy == "handwritten":
+        return adapter in _CHROMIUM_HANDWRITTEN
+    return False
 
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-_SEEN_CAP = 5000  # seen_post_ids 무한 증가 방지 상한
-
-
 def _cap_seen(ids: set[str], *, keep: set[str]) -> list[str]:
     """seen 집합을 상한 이하로. 최근(현재 페이지=keep)은 무조건 유지하고 나머지는 잘라낸다.
-    이미 사라진 옛 글 id 를 떨어뜨려도 다시 안 올라오므로 안전."""
-    if len(ids) <= _SEEN_CAP:
+    이미 사라진 옛 글 id 를 떨어뜨려도 다시 안 올라오므로 안전. 상한 = settings.poll.seen_cap."""
+    cap = settings.poll.seen_cap
+    if len(ids) <= cap:
         return sorted(ids)
     keep = set(keep)
     rest = list(ids - keep)
-    room = max(0, _SEEN_CAP - len(keep))
+    room = max(0, cap - len(keep))
     return sorted(keep | set(rest[:room]))
 
 
@@ -139,27 +161,26 @@ async def _fetch_one(state: dict, *, page_size: int, max_new_articles: int, lurk
         return out
 
 
-def _reprobe(state: dict, *, model: str | None) -> tuple[bool, str]:
-    """register.py 재실행(re-probe + 재생성). 옛 config 는 .bak 보관, 실패 시 복구. (성공?, 메시지)."""
+def _enqueue_reprobe(state: dict) -> tuple[bool, str]:
+    """bot.sqlite3 의 jobs 큐에 reprobe 잡 enqueue. (성공?, 메시지). 실제 register.py 실행은 봇 worker 가.
+
+    같은 slug 의 pending/running reprobe 가 이미 있으면 dedupe 되어 새로 안 만듦. inline 실행 안 함 —
+    폴링이 chromium_lock 풀어줘야 worker 가 진입 가능. 그래서 폴링 종료 후 차례로 처리됨.
+    """
     url = state.get("url")
-    cfg_path = Path(state["config_path"])
-    if not url:
-        return False, "state 에 url 없음 — 재-probe 불가"
-    bak = cfg_path.with_suffix(cfg_path.suffix + ".bak")
-    if cfg_path.exists():
-        shutil.copy2(cfg_path, bak)
-    cmd = [sys.executable, str(ROOT / "scripts" / "register.py"), url, "--out", str(cfg_path), "--force"]
-    if model:
-        cmd += ["--model", model]
-    env_note = ""
-    rc = subprocess.call(cmd)
-    if rc == 0:
-        return True, f"재-probe + 재생성 성공 (옛 config → {bak.name})"
-    # 실패 → 복구
-    if bak.exists():
-        shutil.copy2(bak, cfg_path)
-        env_note = " (옛 config 복구함)"
-    return False, f"재-probe 실패 (rc={rc}){env_note} — 유지보수자 확인 필요"
+    slug = state.get("slug")
+    if not url or not slug:
+        return False, "state 에 url/slug 없음 — reprobe 잡 enqueue 불가"
+    conn = bot_db.connect()
+    try:
+        job_id, inserted = bot_db.enqueue_job(
+            conn, kind="reprobe", url=url, slug=slug, via="poll-reprobe", dedupe=True,
+        )
+    finally:
+        conn.close()
+    if inserted:
+        return True, f"reprobe 잡 enqueue (#{job_id}) — 폴링 끝난 뒤 봇 worker 가 처리"
+    return True, f"reprobe 잡 이미 큐에 있음 (#{job_id}) — 새로 enqueue 안 함"
 
 
 def _load_states(only: set[str] | None) -> list[dict]:
@@ -180,6 +201,72 @@ def _load_states(only: set[str] | None) -> list[dict]:
     return out
 
 
+async def _process_site(st: dict, *, page_size: int, max_new_articles: int,
+                         lurking: bool, no_reprobe: bool, run_dir: Path,
+                         sem_chromium: asyncio.Semaphore, sem_httpx: asyncio.Semaphore) -> tuple[list[str], tuple]:
+    """한 사이트의 fetch + 결과 처리 + state 파일 쓰기 + collected 쓰기까지. (log_lines, row) 반환.
+
+    동시 실행 가드: strategy 가 playwright_html / handwritten 이면 chromium 세마포, 아니면 httpx 세마포.
+    print 안 함 — 호출 측이 묶어서 출력해 사이트 로그 가독성 유지.
+    """
+    slug = st["slug"]
+    strategy, adapter = _config_meta(st)
+    chromium = _uses_chromium(st)
+    sem = sem_chromium if chromium else sem_httpx
+    tag = strategy + (f":{adapter}" if strategy == "handwritten" else "")
+    lines: list[str] = [
+        f"=== {slug} ===  {st.get('url')} [{tag or '?'}{' (chromium)' if chromium else ''}]"
+        + ("  [lurking — 구독자 0]" if lurking else "")
+    ]
+    async with sem:
+        res = await _fetch_one(st, page_size=page_size, max_new_articles=max_new_articles, lurking=lurking)
+    st["last_poll_at"] = _now_iso()
+
+    if res["broken"]:
+        st["consecutive_breakage"] = int(st.get("consecutive_breakage", 0)) + 1
+        st["last_status"] = res["status"]
+        lines.append(f"  ⚠ 깨짐 신호 #{st['consecutive_breakage']}: {res['note']}")
+        if st["consecutive_breakage"] >= settings.poll.breakage_threshold and not no_reprobe:
+            lines.append(f"  → 연속 {st['consecutive_breakage']}회 → reprobe 잡 enqueue (봇 worker 가 폴링 후 처리)")
+            ok, msg = _enqueue_reprobe(st)
+            lines.append(f"  {msg}")
+            if ok:
+                res["note"] += f" | {msg}"
+                st["last_status"] = "reprobe_enqueued"
+            else:
+                st["last_status"] = "reprobe_enqueue_failed"
+                res["note"] += f" | {msg}"
+        elif no_reprobe and st["consecutive_breakage"] >= settings.poll.breakage_threshold:
+            lines.append("  (--no-reprobe — reprobe 큐 enqueue 생략, 리포트만)")
+    else:
+        st["consecutive_breakage"] = 0
+        st["last_status"] = res["status"]  # "ok" 또는 "lurking"
+        if "_new_seen" in res:
+            st["seen_post_ids"] = res["_new_seen"]
+        if res.get("lurking"):
+            lines.append(f"  {res['n_posts']}건 / 새 글 {res['n_new']}건 (lurking — 본문 fetch·알림 생략, seen 갱신만)")
+        else:
+            n_fetched_bodies = sum(1 for p in res["new_posts"] if (p.get("content_html") or "").strip())
+            lines.append(f"  {res['n_posts']}건 / 새 글 {res['n_new']}건 (본문 fetch {n_fetched_bodies}건)")
+            for p in res["new_posts"][:5]:
+                lines.append(f"    NEW {p.get('post_id')}  {p.get('published_at')}  {(p.get('title') or '')[:60]}")
+            if res["new_posts"]:
+                (run_dir / f"{slug}.new.json").write_text(
+                    json.dumps(res["new_posts"], ensure_ascii=False, indent=2), encoding="utf-8")
+
+    # 상태 파일 저장 (사이트별 독립 파일 — 동시성 안전).
+    # _state_path 는 안 지움 — task 예외 핸들러도 같은 경로로 minimal write 가능하게.
+    st_path = Path(st["_state_path"])
+    if "_new_seen" in res:
+        res.pop("_new_seen", None)
+    st_path.write_text(
+        json.dumps({k: v for k, v in st.items() if k != "_state_path"}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    row = (slug, st["last_status"], res["n_posts"], res["n_new"], res["note"])
+    return lines, row
+
+
 async def run(args) -> int:
     states = _load_states(set(args.sites) if args.sites else None)
     if not states:
@@ -190,70 +277,56 @@ async def run(args) -> int:
     run_dir = COLLECTED_DIR / ts
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    # 구독자가 1건도 없는 사이트는 lurking 모드(fetch_list + seen 갱신만, 본문/알림 X).
-    # --all 옵션이면 끔 (디버깅·재구독 직전 baseline 채우고 싶을 때).
     bot_conn = bot_db.connect()
     try:
         subscribed = set(bot_db.all_slugs(bot_conn))
     finally:
         bot_conn.close()
 
+    sem_chromium = asyncio.Semaphore(args.concurrency_chromium)
+    sem_httpx = asyncio.Semaphore(args.concurrency_httpx)
+    print(f"[poll] 병렬 fetch — chromium sem={args.concurrency_chromium}, httpx sem={args.concurrency_httpx}, 사이트 {len(states)}개")
+
+    tasks = [
+        asyncio.create_task(_process_site(
+            st, page_size=args.page_size, max_new_articles=args.max_new_articles,
+            lurking=(not args.all) and (st["slug"] not in subscribed),
+            no_reprobe=args.no_reprobe, run_dir=run_dir,
+            sem_chromium=sem_chromium, sem_httpx=sem_httpx,
+        ))
+        for st in states
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
     rows = []
-    for st in states:
-        slug = st["slug"]
-        lurking = (not args.all) and (slug not in subscribed)
-        print(f"\n=== {slug} ===  {st.get('url')}" + ("  [lurking — 구독자 0]" if lurking else ""))
-        res = await _fetch_one(st, page_size=args.page_size, max_new_articles=args.max_new_articles, lurking=lurking)
-        st["last_poll_at"] = _now_iso()
-
-        if res["broken"]:
+    for st, res in zip(states, results):
+        if isinstance(res, BaseException):
+            # _process_site 본문 안에서 처리 못한 예외 — state 파일에 fallback 업데이트:
+            # consecutive_breakage 증가시켜 reprobe 파이프라인이 인지하게.
+            slug = st.get("slug", "?")
+            note = f"{type(res).__name__}: {res}"
+            print(f"\n=== {slug} ===")
+            print(f"  ⚠ task 예외: {note}")
+            st["last_poll_at"] = _now_iso()
             st["consecutive_breakage"] = int(st.get("consecutive_breakage", 0)) + 1
-            st["last_status"] = res["status"]
-            print(f"  ⚠ 깨짐 신호 #{st['consecutive_breakage']}: {res['note']}")
-            if st["consecutive_breakage"] >= _BREAKAGE_THRESHOLD and not args.no_reprobe:
-                print(f"  → 연속 {st['consecutive_breakage']}회 → 재-probe + 재생성 시도")
-                ok, msg = _reprobe(st, model=args.model)
-                print(f"  {msg}")
-                if ok:
-                    res["note"] += f" | {msg}"
-                    # register.py 가 새 state 파일을 썼음(baseline=현재 글) — 그걸 기준으로 삼되 poll 메타만 덧씌움
-                    sp = st["_state_path"]
-                    try:
-                        fresh = json.loads(Path(sp).read_text(encoding="utf-8"))
-                        fresh["_state_path"] = sp
-                        st = fresh
-                    except Exception:
-                        pass
-                    st["consecutive_breakage"] = 0
-                    st["last_status"] = "reprobed_ok"
-                    st["last_poll_at"] = _now_iso()
-                else:
-                    st["last_status"] = "reprobe_failed"
-                    res["note"] += f" | {msg}"
-            elif args.no_reprobe and st["consecutive_breakage"] >= _BREAKAGE_THRESHOLD:
-                print("  (--no-reprobe — 재-probe 생략, 리포트만)")
-        else:
-            st["consecutive_breakage"] = 0
-            st["last_status"] = res["status"]  # "ok" 또는 "lurking"
-            if "_new_seen" in res:
-                st["seen_post_ids"] = res["_new_seen"]
-            if res.get("lurking"):
-                print(f"  {res['n_posts']}건 / 새 글 {res['n_new']}건 (lurking — 본문 fetch·알림 생략, seen 갱신만)")
-            else:
-                n_fetched_bodies = sum(1 for p in res["new_posts"] if (p.get("content_html") or "").strip())
-                print(f"  {res['n_posts']}건 / 새 글 {res['n_new']}건 (본문 fetch {n_fetched_bodies}건)")
-                for p in res["new_posts"][:5]:
-                    print(f"    NEW {p.get('post_id')}  {p.get('published_at')}  {(p.get('title') or '')[:60]}")
-                if res["new_posts"]:
-                    (run_dir / f"{slug}.new.json").write_text(
-                        json.dumps(res["new_posts"], ensure_ascii=False, indent=2), encoding="utf-8")
-
-        # 상태 파일 저장
-        st_path = Path(st.pop("_state_path"))
-        if "_new_seen" in res:
-            res.pop("_new_seen", None)
-        st_path.write_text(json.dumps({k: v for k, v in st.items()}, ensure_ascii=False, indent=2), encoding="utf-8")
-        rows.append((slug, st["last_status"], res["n_posts"], res["n_new"], res["note"]))
+            st["last_status"] = "task_exception"
+            sp = st.get("_state_path")
+            if sp:
+                try:
+                    Path(sp).write_text(
+                        json.dumps({k: v for k, v in st.items() if k != "_state_path"},
+                                   ensure_ascii=False, indent=2),
+                        encoding="utf-8",
+                    )
+                except Exception as we:  # noqa: BLE001
+                    print(f"  ⚠ state 파일 쓰기 실패: {we!r}")
+            rows.append((slug, "task_exception", 0, 0, note))
+            continue
+        lines, row = res
+        print()
+        for line in lines:
+            print(line)
+        rows.append(row)
 
     # 요약 (사람용 summary.txt + 기계용 poll_result.json — notify.py 의 heartbeat 가 읽음)
     lines = [f"[poll {ts}]", ""]
@@ -274,13 +347,18 @@ async def run(args) -> int:
 
 def main(argv) -> int:
     p = argparse.ArgumentParser(description="등록된 사이트 폴링 (새 글 감지 + 깨짐 시 재-probe)")
+    # 기본값은 config.toml ([poll]) 에서. CLI args 가 그걸 한 번 더 덮음.
     p.add_argument("--sites", help="쉼표 구분 slug 목록 (기본: 전부)")
-    p.add_argument("--page-size", type=int, default=30)
-    p.add_argument("--max-new-articles", type=int, default=10, help="사이트당 폴링 1회에 본문 fetch 할 새 글 상한")
-    p.add_argument("--no-reprobe", action="store_true", help="깨져도 재-probe 안 함(리포트만)")
+    p.add_argument("--page-size", type=int, default=settings.poll.page_size)
+    p.add_argument("--max-new-articles", type=int, default=settings.poll.max_new_articles,
+                   help="사이트당 폴링 1회에 본문 fetch 할 새 글 상한")
+    p.add_argument("--no-reprobe", action="store_true", help="깨져도 reprobe 잡 enqueue 안 함(리포트만)")
     p.add_argument("--all", action="store_true",
                    help="구독자 0 사이트도 본문 fetch + 알림(=lurking 모드 끔). 기본은 lurking — bot.sqlite3 의 subscriptions 에 1건도 없으면 fetch_list 만.")
-    p.add_argument("--model", help="재-probe 시 gemini 모델")
+    p.add_argument("--concurrency-httpx", type=int, default=settings.poll.concurrency_httpx,
+                   help="httpx_html / httpx_json 사이트 동시 fetch 상한. 가벼우니 늘려도 메모리 부담 X")
+    p.add_argument("--concurrency-chromium", type=int, default=settings.poll.concurrency_chromium,
+                   help="playwright_html / ArcaLiveAdapter(handwritten) 동시 fetch 상한. chromium 1개당 RAM ~200MB+ 라 작은 박스 보호용")
     args = p.parse_args(argv)
     if args.sites:
         args.sites = [s.strip() for s in args.sites.split(",") if s.strip()]

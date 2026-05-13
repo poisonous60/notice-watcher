@@ -1,4 +1,4 @@
-"""SQLite — 봇 구독 정보 + 다이제스트 대기열 + 발송 기록.
+"""SQLite — 봇 구독 정보 + 다이제스트 대기열 + 발송 기록 + register/re-probe 잡 큐.
 
 DB 파일: output/bot.sqlite3 (이미 .gitignore 됨).
 필터 프롬프트·발송 대상·스케줄은 *여기에만* 산다 (configs/ · poll_state/ 엔 절대 안 씀).
@@ -13,6 +13,10 @@ DB 파일: output/bot.sqlite3 (이미 .gitignore 됨).
       UNIQUE(slug, post_id, target_id)
   deliveries(slug, post_id, target_id, sent_at)          이미 보낸 (slug,post_id,target_id) — 다시 안 보냄
       PRIMARY KEY(slug, post_id, target_id)
+  jobs(id, kind, url, slug, article_url, via, requested_by, ack_*, sub_payload, status, ...)
+      register/re-probe 잡 큐. bot/worker.py 가 직렬로 처리(chromium 단일 직렬). FIFO by id.
+      kind = 'register' (사용자 /watch·/preview) | 'reprobe' (poll.py 의 깨짐 감지)
+      status = 'pending' → 'running' → 'done' | 'failed'
 """
 from __future__ import annotations
 
@@ -62,6 +66,28 @@ CREATE TABLE IF NOT EXISTS deliveries (
     sent_at   TEXT NOT NULL,
     PRIMARY KEY (slug, post_id, target_id)
 );
+
+CREATE TABLE IF NOT EXISTS jobs (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind            TEXT NOT NULL CHECK (kind IN ('register','reprobe')),
+    url             TEXT NOT NULL,
+    slug            TEXT NOT NULL,
+    article_url     TEXT,
+    via             TEXT,
+    requested_by    TEXT,
+    ack_channel_id  TEXT,
+    ack_message_id  TEXT,
+    sub_payload     TEXT,
+    status          TEXT NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending','running','done','failed')),
+    created_at      TEXT NOT NULL,
+    started_at      TEXT,
+    finished_at     TEXT,
+    result_rc       INTEGER,
+    result_tail     TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status, id);
+CREATE INDEX IF NOT EXISTS idx_jobs_slug ON jobs(slug);
 """
 
 
@@ -226,3 +252,124 @@ def mark_drained(conn: sqlite3.Connection, target_id: str, rows: list[sqlite3.Ro
             conn.execute("DELETE FROM pending WHERE id=?", (r["id"],))
         conn.commit()
     _retry(_do)
+
+
+# --------------------------------------------------------------------------- #
+# jobs (register / re-probe 큐) — bot/worker.py 가 소비
+# --------------------------------------------------------------------------- #
+def enqueue_job(conn: sqlite3.Connection, *,
+                kind: str, url: str, slug: str,
+                article_url: Optional[str] = None,
+                via: Optional[str] = None,
+                requested_by: Optional[str] = None,
+                ack_channel_id: Optional[str] = None,
+                ack_message_id: Optional[str] = None,
+                sub_payload: Optional[str] = None,
+                dedupe: bool = True) -> tuple[int, bool]:
+    """잡 enqueue. (job_id, newly_inserted) 반환.
+
+    dedupe=True 면 같은 (kind, slug) 가 이미 pending/running 이면 그 잡 id 를 반환하고 새로 안 넣음.
+    request_by/sub_payload 는 JSON 문자열. ack_* 는 호출자가 보낸 채널 메시지 id (worker 가 그걸 edit).
+    """
+    if kind not in ("register", "reprobe"):
+        raise ValueError(f"invalid kind: {kind}")
+    if dedupe:
+        row = conn.execute(
+            "SELECT id FROM jobs WHERE kind=? AND slug=? AND status IN ('pending','running') ORDER BY id ASC LIMIT 1",
+            (kind, slug),
+        ).fetchone()
+        if row is not None:
+            return int(row["id"]), False
+    def _do():
+        cur = conn.execute(
+            "INSERT INTO jobs(kind,url,slug,article_url,via,requested_by,ack_channel_id,ack_message_id,sub_payload,"
+            "status,created_at) VALUES(?,?,?,?,?,?,?,?,?, 'pending', ?)",
+            (kind, url, slug, article_url, via, requested_by, ack_channel_id, ack_message_id, sub_payload, _now_iso()),
+        )
+        conn.commit()
+        return int(cur.lastrowid)
+    return _retry(_do), True
+
+
+def claim_next_pending(conn: sqlite3.Connection) -> Optional[sqlite3.Row]:
+    """가장 오래된 pending 잡 하나를 running 으로 표시하고 반환. 없으면 None.
+
+    SELECT-then-UPDATE 패턴 (Python sqlite3 의 implicit 트랜잭션과 충돌 없도록 BEGIN IMMEDIATE 피함).
+    UPDATE WHERE status='pending' 조건으로 race 가드 — 다른 워커가 같은 잡 채갔으면 rowcount=0, 다음 잡으로.
+    """
+    for _ in range(8):
+        row = conn.execute(
+            "SELECT id FROM jobs WHERE status='pending' ORDER BY id ASC LIMIT 1"
+        ).fetchone()
+        if row is None:
+            return None
+        def _do():
+            cur = conn.execute(
+                "UPDATE jobs SET status='running', started_at=? WHERE id=? AND status='pending'",
+                (_now_iso(), row["id"]),
+            )
+            conn.commit()
+            return cur.rowcount
+        if _retry(_do) > 0:
+            return conn.execute("SELECT * FROM jobs WHERE id=?", (row["id"],)).fetchone()
+        # race — 다른 워커가 가져감. 다음 후보 시도
+    return None
+
+
+def mark_job_finished(conn: sqlite3.Connection, job_id: int, *,
+                      ok: bool, rc: Optional[int], tail: Optional[str]) -> None:
+    """잡을 done/failed 로 표시. status='running' 조건으로 멱등(두 번 불려도 두 번째는 no-op).
+    이래서 _process_job 의 try/except finalizer 가 이미 mark 끝낸 잡을 또 fail 로 뒤집지 않음."""
+    status = "done" if ok else "failed"
+    def _do():
+        conn.execute(
+            "UPDATE jobs SET status=?, finished_at=?, result_rc=?, result_tail=? "
+            "WHERE id=? AND status='running'",
+            (status, _now_iso(), rc, (tail or "")[-4000:], job_id),
+        )
+        conn.commit()
+    _retry(_do)
+
+
+def queue_position(conn: sqlite3.Connection, job_id: int) -> int:
+    """이 잡의 큐 위치 (1-base). 이미 running 이면 0, done/failed 면 -1, 없는 잡이면 -1."""
+    row = conn.execute("SELECT status FROM jobs WHERE id=?", (job_id,)).fetchone()
+    if row is None:
+        return -1
+    if row["status"] == "running":
+        return 0
+    if row["status"] in ("done", "failed"):
+        return -1
+    return int(conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE status='pending' AND id<=?", (job_id,)
+    ).fetchone()[0])
+
+
+def queue_pending_count(conn: sqlite3.Connection) -> int:
+    return int(conn.execute("SELECT COUNT(*) FROM jobs WHERE status='pending'").fetchone()[0])
+
+
+def reset_running_to_pending(conn: sqlite3.Connection) -> int:
+    """봇 재시작 직후 호출 — 이전 worker 가 들고 있던 running 잡들을 pending 으로 되돌림."""
+    def _do():
+        cur = conn.execute("UPDATE jobs SET status='pending', started_at=NULL WHERE status='running'")
+        conn.commit()
+        return cur.rowcount
+    return _retry(_do)
+
+
+def get_job(conn: sqlite3.Connection, job_id: int) -> Optional[sqlite3.Row]:
+    return conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+
+
+def recent_jobs(conn: sqlite3.Connection, limit: int = 20) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM jobs ORDER BY id DESC LIMIT ?", (limit,)
+    ).fetchall()
+
+
+def jobs_summary(conn: sqlite3.Connection) -> dict:
+    rows = conn.execute(
+        "SELECT status, COUNT(*) as n FROM jobs GROUP BY status"
+    ).fetchall()
+    return {r["status"]: int(r["n"]) for r in rows}

@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "site": "reddit.com",
+  "board": "CosmicPrincessKaguya/flair=Fan Art",
+  "strategy": "handwritten",
+  "adapter": "RedditAdapter",
+  "kwargs": {
+    "subreddit": "CosmicPrincessKaguya",
+    "flair": "Fan Art"
+  },
+  "_source_url": "https://www.reddit.com/r/CosmicPrincessKaguya/?f=flair_name:%22Fan%20Art%22",
+  "_note": "Reddit 서브레딧 — known-platform 자동 인식. 손어댑터 RedditAdapter 가 공개 .json 엔드포인트(목록 /r/{sub}/{sort}.json, 본문 permalink+/.json) 사용. 기본 sort=new(새 글 전부); URL 이 /r/X/hot/ 또는 /top/?t=day 면 그 정렬, ?f=flair_name:\"...\" 면 그 플레어 글만(창작/공식소식 탭 효과). 자동 인식되면 sort/flair 외의 옵션은 configs/<slug>.json 을 직접 손봐서(kwargs.include_stickied 등) register.py --config 로 재등록. robots.txt 는 Disallow:/ 라 회색지대 — 저빈도 개인용·UA+polite_sleep·우회 없음.",
+  "_recognized_platform": "reddit"
+}
