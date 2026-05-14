@@ -383,6 +383,10 @@ async def control_cmd(request: Request, action: str,
     elif action == "status":
         u = unit if unit in {"bot", "poll", "notify", "poll-timer"} else "bot"
         res = await ctrl.run_remote("status", u)
+        # systemctl status 는 one-shot 서비스가 inactive 면 rc=3 반환 — 마지막 run 이 성공해도.
+        # 출력의 `Active:` 줄을 보고 의미 있는 ok/fail 로 재해석.
+        res["ok"] = ctrl.interpret_systemctl_status(res["output"]) != "failed"
+        res["status_state"] = ctrl.interpret_systemctl_status(res["output"])
     elif action == "logs":
         if unit not in _REMOTE_LOG_UNITS:
             raise HTTPException(status_code=400, detail="invalid unit")

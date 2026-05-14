@@ -77,6 +77,45 @@ async def run_remote(action: str, *args: str) -> dict:
     return res
 
 
+_ACTIVE_RE = re.compile(r"^\s*Active:\s*(\S+)\s*(?:\(([^)]+)\))?", re.MULTILINE)
+
+
+def interpret_systemctl_status(output: str) -> str:
+    """`systemctl status` 의 `Active:` 줄을 파싱해 의미 있는 상태로.
+
+    Returns:
+      - "active"        — 현재 실행 중
+      - "inactive_ok"   — one-shot 서비스가 정상 종료 후 다음 trigger 대기 중 (정상)
+      - "failed"        — 진짜 실패 (`Active: failed (...)` 또는 마지막 exit 비0)
+      - "activating"    — 시작 중
+      - "deactivating"  — 종료 중
+      - "unknown"       — 파싱 실패 (서비스 없음 등)
+
+    rc 만 보면 inactive 도 fail 로 잘못 분류됨 — one-shot/timer-triggered 서비스에 특히 중요.
+    """
+    m = _ACTIVE_RE.search(output or "")
+    if not m:
+        return "unknown"
+    state = m.group(1).strip().lower()
+    if state == "active":
+        return "active"
+    if state == "failed":
+        return "failed"
+    if state == "inactive":
+        # `Main PID: ... (code=exited, status=0/SUCCESS)` 가 있으면 정상 종료
+        if re.search(r"code=exited,\s*status=0/SUCCESS", output):
+            return "inactive_ok"
+        # 종료 코드가 명시 안 됨 (한 번도 안 돈 timer) → 보수적으로 inactive_ok
+        if "code=exited" not in output and "status=" not in output:
+            return "inactive_ok"
+        return "failed"
+    if state == "activating":
+        return "activating"
+    if state == "deactivating":
+        return "deactivating"
+    return "unknown"
+
+
 # --------------------------------------------------------------------------- #
 # routing.json
 # --------------------------------------------------------------------------- #
