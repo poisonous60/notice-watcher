@@ -25,6 +25,17 @@ TIMER_PATH = ROOT / "output" / "notice-poll.timer"
 AUDIT_PATH = ROOT / "output" / "control_audit.jsonl"
 PUSH_SCRIPT = ROOT / "scripts" / "push.py"
 REMOTE_SCRIPT = ROOT / "scripts" / "remote.py"
+PRICES_PATH = ROOT / "model_prices.json"
+
+
+# 4 call_site + _default. UI dropdown 순서/라벨용.
+CALL_SITES = [
+    ("config_generate",  "신규 config 생성 (1차)"),
+    ("config_retry",     "config 생성 retry (i≥2)"),
+    ("notify_summarize", "공지 본문 요약"),
+    ("notify_filter",    "사용자 필터 판정"),
+    ("_default",         "기본 (위 매핑 없을 때)"),
+]
 
 
 # `.env` 에서 마스킹할 키 (값을 ●●●● 로 표시). 부분 매치 (in) 로 검사.
@@ -86,9 +97,31 @@ def load_routing_local() -> dict:
     if not ROUTING_PATH.exists():
         return {}
     try:
-        return json.loads(ROUTING_PATH.read_text(encoding="utf-8"))
+        d = json.loads(ROUTING_PATH.read_text(encoding="utf-8"))
+        if isinstance(d, dict):
+            # _comment 같은 메타 키 제외
+            return {k: v for k, v in d.items() if isinstance(v, str)}
+        return {}
     except (OSError, json.JSONDecodeError):
         return {}
+
+
+def known_models() -> list[str]:
+    """`model_prices.json` 의 키에서 'provider:model' 형식만 뽑아 정렬. 드롭다운 옵션 source."""
+    out: list[str] = []
+    try:
+        data = json.loads(PRICES_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return out
+    for k in data.keys():
+        if k.startswith("_"):
+            continue
+        if ":" in k and "/" not in k.split(":", 1)[0]:
+            # 'gemini:...' 또는 'openrouter:...' 형식만
+            prefix = k.split(":", 1)[0]
+            if prefix in ("gemini", "openrouter"):
+                out.append(k)
+    return sorted(set(out))
 
 
 def validate_routing(data: dict) -> Optional[str]:
@@ -107,19 +140,17 @@ def validate_routing(data: dict) -> Optional[str]:
     return None
 
 
-async def save_routing(json_text: str) -> dict:
-    try:
-        data = json.loads(json_text)
-    except json.JSONDecodeError as e:
-        audit("save.routing", ok=False, detail={"err": f"JSON 파싱 실패: {e}"})
-        return {"ok": False, "rc": -1, "output": f"JSON 파싱 실패: {e}"}
-    err = validate_routing(data)
+async def save_routing(routing: dict) -> dict:
+    """call_site → 'provider:model' dict. 빈 값은 routing 에서 제거."""
+    cleaned = {k: v.strip() for k, v in routing.items() if isinstance(v, str) and v.strip()}
+    err = validate_routing(cleaned)
     if err:
         audit("save.routing", ok=False, detail={"err": err})
         return {"ok": False, "rc": -1, "output": err}
     ROUTING_PATH.parent.mkdir(parents=True, exist_ok=True)
-    ROUTING_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-    audit("save.routing", ok=True, detail={"keys": sorted(data.keys())})
+    payload = {"_comment": "dashboard /control 저장. mtime 캐시가 다음 LLM 호출에서 재로드.", **cleaned}
+    ROUTING_PATH.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    audit("save.routing", ok=True, detail={"keys": sorted(cleaned.keys())})
     return await run_push("routing")
 
 
@@ -133,6 +164,85 @@ def load_runtime_local() -> str:
         return RUNTIME_PATH.read_text(encoding="utf-8")
     except OSError:
         return ""
+
+
+# `bot/runtime_config.py` 의 dataclass 필드 → UI 폼 메타.
+# (section, field, type, default, description) — 변경 시 양쪽 동기화 필요.
+RUNTIME_FIELDS: list[tuple[str, str, type, object, str]] = [
+    ("poll", "concurrency_httpx",    int,   8,      "httpx polling 동시 요청 수"),
+    ("poll", "concurrency_chromium", int,   1,      "chromium polling 동시 (보통 1)"),
+    ("poll", "page_size",            int,   30,     "한 페이지 글 수"),
+    ("poll", "max_new_articles",     int,   10,     "한 사이클 최대 새 글"),
+    ("poll", "breakage_threshold",   int,   2,      "연속 실패 임계 (이후 FAILED)"),
+    ("poll", "seen_cap",             int,   5000,   "seen post id 보관 상한"),
+    ("worker", "idle_poll_seconds",  float, 2.0,    "워커 idle 주기 (초)"),
+    ("chromium_lock", "bot_timeout",                   float, 900.0,  "봇 chromium lock 타임아웃 (초)"),
+    ("chromium_lock", "poll_timeout",                  float, 1800.0, "폴링 chromium lock 타임아웃 (초)"),
+    ("chromium_lock", "register_subprocess_timeout",   float, 600.0,  "register 서브프로세스 타임아웃 (초)"),
+    ("notify", "delivered_cap",      int,   5000,   "delivered id 보관 상한"),
+]
+
+
+def runtime_current() -> dict:
+    """`config.local.toml` 파싱해 {section: {field: value}} 반환. 없는 키는 default 가 적용됨."""
+    import tomllib
+    if not RUNTIME_PATH.exists():
+        return {}
+    try:
+        return tomllib.loads(RUNTIME_PATH.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return {}
+
+
+def runtime_rows() -> list[dict]:
+    """UI 가 렌더링할 행. 각 항목: section/field/type/default/desc + current value (override 있을 때만)."""
+    cur = runtime_current()
+    out = []
+    for section, field, t, default, desc in RUNTIME_FIELDS:
+        v = cur.get(section, {}).get(field)
+        out.append({
+            "section": section,
+            "field": field,
+            "name": f"{section}__{field}",   # form name (TOML 키와 매핑)
+            "type": "int" if t is int else "float",
+            "default": default,
+            "current": "" if v is None else v,
+            "desc": desc,
+        })
+    return out
+
+
+def build_runtime_toml(form_data: dict) -> str:
+    """form_data {f'{section}__{field}': str_value} → config.local.toml 텍스트. 빈 값/default 와 같은 값은 생략."""
+    by_section: dict[str, dict[str, object]] = {}
+    for section, field, t, default, _desc in RUNTIME_FIELDS:
+        key = f"{section}__{field}"
+        raw = form_data.get(key, "")
+        if not isinstance(raw, str) or not raw.strip():
+            continue
+        try:
+            if t is int:
+                val = int(raw.strip())
+            else:
+                val = float(raw.strip())
+        except ValueError:
+            raise ValueError(f"{section}.{field}: 숫자 변환 실패 ({raw!r})")
+        if val == default:
+            continue  # default 와 같으면 override 불필요
+        by_section.setdefault(section, {})[field] = val
+    # TOML 직렬화 — stdlib 에 writer 없어서 손으로
+    lines: list[str] = []
+    for section in ("poll", "worker", "chromium_lock", "notify"):
+        if section not in by_section:
+            continue
+        lines.append(f"[{section}]")
+        for k, v in by_section[section].items():
+            if isinstance(v, float):
+                lines.append(f"{k} = {v}")
+            else:
+                lines.append(f"{k} = {v}")
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n" if lines else ""
 
 
 def validate_toml(text: str) -> Optional[str]:
@@ -293,14 +403,18 @@ async def gather_state(*, load_remote: bool = False) -> dict:
 
     원격 읽기는 SSH 비용이 있어 기본은 off — 사용자가 명시적 클릭(Load) 으로 트리거.
     """
+    routing_map = load_routing_local()
     state = {
         "routing": {
             "local_present": ROUTING_PATH.exists(),
-            "local_text": ROUTING_PATH.read_text(encoding="utf-8") if ROUTING_PATH.exists() else "",
+            "current": routing_map,                # {call_site: 'provider:model'}
+            "models":  known_models(),             # dropdown 옵션
+            "call_sites": CALL_SITES,
         },
         "runtime": {
             "local_present": RUNTIME_PATH.exists(),
             "local_text": load_runtime_local(),
+            "rows": runtime_rows(),
         },
         "env": {
             "loaded": False,

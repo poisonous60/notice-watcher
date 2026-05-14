@@ -22,15 +22,68 @@
 <summary>1. Model routing  <span class="muted" style="font-weight:normal;font-size:0.88rem;">— call_site 별 provider:model</span></summary>
 <form hx-post="/control/save/routing" hx-target="#routing-result" hx-swap="innerHTML">
   <p class="muted" style="font-size:0.85rem;margin:0.2rem 0;">
-    형식: <code>{"config_generate":"gemini:gemini-2.5-flash", "notify_summarize":"openrouter:google/gemini-flash-1.5-8b", ...}</code>
-    <br>허용 키: <code>config_generate · config_retry · notify_summarize · notify_filter · _default</code>
+    각 call_site 에 사용할 모델 선택. 비워두면 그 매핑 제거 (→ <code>_default</code> 사용).
+    "<em>custom...</em>" 선택 시 직접 입력 (예: 새 OpenRouter 모델 테스트).
+    옵션은 <code>model_prices.json</code> 에서 자동 로드.
   </p>
-  <textarea name="data" rows="10"
-            style="width:100%;font-family:monospace;font-size:0.88rem;">{{ ctrl.routing.local_text }}</textarea>
+  <table class="compact" style="width:100%;">
+    <thead>
+      <tr>
+        <th style="width:18em;">call_site</th>
+        <th>모델</th>
+        <th style="width:24em;">custom 입력</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for key, label in ctrl.routing.call_sites %}
+      {% set current = ctrl.routing.current.get(key, '') %}
+      {% set is_custom = current and current not in ctrl.routing.models %}
+      <tr>
+        <td class="mono">
+          {{ key }}<br>
+          <span class="muted" style="font-size:0.78rem;font-weight:normal;">{{ label }}</span>
+        </td>
+        <td>
+          <select name="{{ key }}" style="width:100%;margin:0;"
+                  onchange="this.parentElement.parentElement.querySelector('input.routing-custom').style.display = this.value==='__custom__' ? 'block' : 'none'; if (this.value !== '__custom__') this.parentElement.parentElement.querySelector('input.routing-custom').value='';">
+            <option value="" {{ 'selected' if not current else '' }}>— (매핑 없음)</option>
+            {% for m in ctrl.routing.models %}
+            <option value="{{ m }}" {{ 'selected' if current==m else '' }}>{{ m }}</option>
+            {% endfor %}
+            <option value="__custom__" {{ 'selected' if is_custom else '' }}>custom...</option>
+          </select>
+        </td>
+        <td>
+          <input type="text" class="routing-custom" data-key="{{ key }}"
+                 value="{{ current if is_custom else '' }}"
+                 placeholder="provider:model (예: openrouter:anthropic/claude-haiku-4-5)"
+                 style="width:100%;margin:0;font-family:monospace;font-size:0.85rem;display:{{ 'block' if is_custom else 'none' }};">
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
   <button type="submit" class="primary" style="margin-top:0.4rem;width:auto;padding:0.4rem 0.9rem;">💾 Save & Push</button>
   <span class="muted">→ N100 mtime 캐시가 다음 호출에서 자동 재로드</span>
 </form>
 <div id="routing-result"></div>
+<script>
+// __custom__ 선택 시 text 입력값이 select.value 를 덮어쓰도록 submit 직전 처리.
+// text input 은 name 없음 (data-key 만) — 단독 submit 안 됨, JS 가 매핑.
+(function () {
+  const form = document.querySelector('form[hx-post="/control/save/routing"]');
+  if (!form) return;
+  form.addEventListener('htmx:configRequest', (e) => {
+    const params = e.detail.parameters;
+    form.querySelectorAll('select').forEach((sel) => {
+      if (sel.value === '__custom__') {
+        const ti = form.querySelector(`input.routing-custom[data-key="${sel.name}"]`);
+        params[sel.name] = (ti && ti.value.trim()) ? ti.value.trim() : '';
+      }
+    });
+  });
+})();
+</script>
 </details>
 
 <!-- ============ 2. Runtime tuning ============ -->
@@ -38,14 +91,53 @@
 <summary>2. Runtime tuning  <span class="muted" style="font-weight:normal;font-size:0.88rem;">— config.local.toml override</span></summary>
 <form hx-post="/control/save/runtime" hx-target="#runtime-result" hx-swap="innerHTML">
   <p class="muted" style="font-size:0.85rem;margin:0.2rem 0;">
-    repo <code>config.toml</code> 위에 덮어쓰는 머신별 override. 변경 후 봇/폴링 재시작 필요.
+    repo <code>config.toml</code> 의 default 위에 덮어쓸 머신별 override.
+    빈 값 = default 사용. default 와 같은 값을 넣어도 자동 생략. 변경 후 봇/폴링 재시작 필요.
   </p>
-  <textarea name="data" rows="14" placeholder="[poll]&#10;concurrency_httpx = 4&#10;page_size = 20"
-            style="width:100%;font-family:monospace;font-size:0.88rem;">{{ ctrl.runtime.local_text }}</textarea>
-  <label style="display:block;margin:0.3rem 0;">
+  {% set sections = {'poll':'폴링','worker':'워커','chromium_lock':'Chromium 락','notify':'알림'} %}
+  {% set grouped = {} %}
+  {% for r in ctrl.runtime.rows %}
+    {% set _ = grouped.setdefault(r.section, []).append(r) %}
+  {% endfor %}
+  {% for section_key, label in sections.items() %}
+  {% if section_key in grouped %}
+  <h4 style="margin:0.7rem 0 0.3rem 0;">[{{ section_key }}]  <span class="muted" style="font-weight:normal;font-size:0.82rem;">{{ label }}</span></h4>
+  <table class="compact" style="width:100%;">
+    <thead>
+      <tr>
+        <th style="width:16em;">field</th>
+        <th style="width:8em;">type</th>
+        <th style="width:10em;">default</th>
+        <th>현재 override (비우면 default)</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in grouped[section_key] %}
+      <tr>
+        <td class="mono">{{ r.field }}<br><span class="muted" style="font-size:0.78rem;font-weight:normal;">{{ r.desc }}</span></td>
+        <td><code>{{ r.type }}</code></td>
+        <td class="mono">{{ r.default }}</td>
+        <td>
+          <input type="{{ 'number' if r.type=='int' else 'text' }}"
+                 name="{{ r.name }}" value="{{ r.current }}"
+                 placeholder="{{ r.default }}"
+                 step="{{ '1' if r.type=='int' else 'any' }}"
+                 style="width:100%;margin:0;font-family:monospace;font-size:0.9rem;">
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+  {% endfor %}
+  <label style="display:block;margin:0.5rem 0;">
     <input type="checkbox" name="restart" value="1"> 저장 후 봇 재시작
   </label>
   <button type="submit" class="primary" style="width:auto;padding:0.4rem 0.9rem;">💾 Save & Push</button>
+  <details style="margin-top:0.5rem;">
+    <summary class="muted" style="font-size:0.82rem;">현재 config.local.toml 원본 보기</summary>
+    <pre class="tail">{{ ctrl.runtime.local_text or '(파일 없음 — 모두 default 사용)' }}</pre>
+  </details>
 </form>
 <div id="runtime-result"></div>
 </details>

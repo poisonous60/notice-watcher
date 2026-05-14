@@ -317,15 +317,29 @@ async def control_page(request: Request, load_remote: int = Query(0)):
 
 
 @app.post("/control/save/routing", response_class=HTMLResponse)
-async def control_save_routing(request: Request, data: str = Form(...)):
-    res = await ctrl.save_routing(data)
+async def control_save_routing(request: Request):
+    form = await request.form()
+    routing = {
+        "config_generate":  form.get("config_generate", ""),
+        "config_retry":     form.get("config_retry", ""),
+        "notify_summarize": form.get("notify_summarize", ""),
+        "notify_filter":    form.get("notify_filter", ""),
+        "_default":         form.get("_default", ""),
+    }
+    res = await ctrl.save_routing(routing)
     return _partial("_control_result.html", request, res=res, title="routing")
 
 
 @app.post("/control/save/runtime", response_class=HTMLResponse)
-async def control_save_runtime(request: Request, data: str = Form(...),
-                               restart: Optional[str] = Form(None)):
-    res = await ctrl.save_runtime(data, restart=bool(restart))
+async def control_save_runtime(request: Request):
+    form = await request.form()
+    restart = bool(form.get("restart"))
+    try:
+        toml_text = ctrl.build_runtime_toml(dict(form))
+    except ValueError as e:
+        res = {"ok": False, "rc": -1, "output": str(e)}
+        return _partial("_control_result.html", request, res=res, title="runtime")
+    res = await ctrl.save_runtime(toml_text, restart=restart)
     return _partial("_control_result.html", request, res=res, title="runtime")
 
 
