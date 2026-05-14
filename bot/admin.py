@@ -21,7 +21,7 @@ from bot import db, inspector
 from bot.config import admin_guild_id, owner_user_id
 
 ANNOUNCE_FOOTER = (
-    "DM 옵트아웃: /announce dm:false  ·  "
+    "공지 끄기: /announce dm:false  ·  "
     "이 채널: /announce channel:false (Manage Channels 권한 필요)"
 )
 SEND_SLEEP = 0.5
