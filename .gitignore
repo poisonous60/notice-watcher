@@ -1,6 +1,8 @@
 # secrets / runtime
 .env
+.env.push
 GEMINI_API_KEY.md
+OPENROUTER_API_KEY.md
 config.local.toml
 
 # Python build

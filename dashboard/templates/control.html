@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% block title %}Control — notice-watcher{% endblock %}
+{% block body %}
+
+<h2>🎛 Control</h2>
+
+<p class="muted" style="font-size:0.88rem;margin:0 0 0.6rem 0;">
+  localhost-only 1인 운영 패널. 저장은 즉시 N100 으로 push.
+  routing 은 N100 의 mtime 캐시가 다음 LLM 호출에서 자동 재로드. runtime/env 변경은 봇 재시작 필요.
+</p>
+
+{% if not load_remote %}
+<p style="margin:0.5rem 0;">
+  <a href="/control?load_remote=1" class="secondary" role="button"
+     style="padding:0.4rem 0.9rem;width:auto;">⬇ N100 에서 .env · timer 읽기</a>
+  <span class="muted" style="margin-left:0.6rem;">env/timer 편집하려면 먼저 누르세요.</span>
+</p>
+{% endif %}
+
+<!-- ============ 1. Model routing ============ -->
+<details class="control-section" open>
+<summary>1. Model routing  <span class="muted" style="font-weight:normal;font-size:0.88rem;">— call_site 별 provider:model</span></summary>
+<form hx-post="/control/save/routing" hx-target="#routing-result" hx-swap="innerHTML">
+  <p class="muted" style="font-size:0.85rem;margin:0.2rem 0;">
+    형식: <code>{"config_generate":"gemini:gemini-2.5-flash", "notify_summarize":"openrouter:google/gemini-flash-1.5-8b", ...}</code>
+    <br>허용 키: <code>config_generate · config_retry · notify_summarize · notify_filter · _default</code>
+  </p>
+  <textarea name="data" rows="10"
+            style="width:100%;font-family:monospace;font-size:0.88rem;">{{ ctrl.routing.local_text }}</textarea>
+  <button type="submit" class="primary" style="margin-top:0.4rem;width:auto;padding:0.4rem 0.9rem;">💾 Save & Push</button>
+  <span class="muted">→ N100 mtime 캐시가 다음 호출에서 자동 재로드</span>
+</form>
+<div id="routing-result"></div>
+</details>
+
+<!-- ============ 2. Runtime tuning ============ -->
+<details class="control-section">
+<summary>2. Runtime tuning  <span class="muted" style="font-weight:normal;font-size:0.88rem;">— config.local.toml override</span></summary>
+<form hx-post="/control/save/runtime" hx-target="#runtime-result" hx-swap="innerHTML">
+  <p class="muted" style="font-size:0.85rem;margin:0.2rem 0;">
+    repo <code>config.toml</code> 위에 덮어쓰는 머신별 override. 변경 후 봇/폴링 재시작 필요.
+  </p>
+  <textarea name="data" rows="14" placeholder="[poll]&#10;concurrency_httpx = 4&#10;page_size = 20"
+            style="width:100%;font-family:monospace;font-size:0.88rem;">{{ ctrl.runtime.local_text }}</textarea>
+  <label style="display:block;margin:0.3rem 0;">
+    <input type="checkbox" name="restart" value="1"> 저장 후 봇 재시작
+  </label>
+  <button type="submit" class="primary" style="width:auto;padding:0.4rem 0.9rem;">💾 Save & Push</button>
+</form>
+<div id="runtime-result"></div>
+</details>
+
+<!-- ============ 3. Environment ============ -->
+<details class="control-section">
+<summary>3. Environment (.env)  <span class="muted" style="font-weight:normal;font-size:0.88rem;">— 비밀 포함, 봇 재시작 필요</span></summary>
+{% if not load_remote %}
+<p class="muted">N100 의 <code>.env</code> 를 먼저 로드하세요 (상단 ⬇ 버튼). 로컬에 비밀이 저장되지 않도록 메모리에서만 다룸.</p>
+{% elif not ctrl.env.loaded %}
+<p style="color:#c62828;">N100 에서 .env 읽기 실패 — SSH 연결 또는 경로 확인.</p>
+{% else %}
+<form hx-post="/control/save/env" hx-target="#env-result" hx-swap="innerHTML"
+      onsubmit="return confirm('⚠ .env 를 N100 에 덮어씁니다. 진행할까요?');">
+  <p class="muted" style="font-size:0.85rem;margin:0.2rem 0;">
+    아래 textarea 는 N100 의 .env 원본. 비밀 키(<code>BOT_TOKEN/GEMINI_API_KEYS/...</code>) 가 보임 — Reveal 토글로 가림/표시.
+    안전장치: BOT_TOKEN 또는 GEMINI_API_KEYS 가 없으면 저장 거부.
+  </p>
+  <label style="display:block;margin:0.3rem 0;">
+    <input type="checkbox" id="env-reveal"> Reveal (입력값 표시)
+  </label>
+  <textarea name="data" id="env-textarea" rows="18"
+            style="width:100%;font-family:monospace;font-size:0.88rem;-webkit-text-security:disc;text-security:disc;">{{ ctrl.env.raw }}</textarea>
+  <label style="display:block;margin:0.3rem 0;">
+    <input type="checkbox" name="restart" value="1"> 저장 후 봇 재시작
+  </label>
+  <button type="submit" class="primary danger-btn" style="width:auto;padding:0.4rem 0.9rem;">💾 Save & Push (.env)</button>
+</form>
+<div id="env-result"></div>
+<script>
+document.getElementById('env-reveal').addEventListener('change', (e) => {
+  const ta = document.getElementById('env-textarea');
+  ta.style.webkitTextSecurity = e.target.checked ? 'none' : 'disc';
+  ta.style.textSecurity = e.target.checked ? 'none' : 'disc';
+});
+</script>
+{% endif %}
+</details>
+
+<!-- ============ 4. Poll schedule ============ -->
+<details class="control-section">
+<summary>4. Poll schedule  <span class="muted" style="font-weight:normal;font-size:0.88rem;">— notice-poll.timer OnCalendar</span></summary>
+{% if not load_remote %}
+<p class="muted">N100 의 timer 파일을 먼저 로드하세요 (상단 ⬇ 버튼).</p>
+{% elif not ctrl.timer.loaded %}
+<p style="color:#c62828;">N100 에서 timer 읽기 실패.</p>
+{% else %}
+<form hx-post="/control/save/timer" hx-target="#timer-result" hx-swap="innerHTML">
+  <p class="muted" style="font-size:0.85rem;margin:0.2rem 0;">
+    현재: <code>OnCalendar={{ ctrl.timer.oncalendar }}</code>
+  </p>
+  <input type="text" name="oncalendar" value="{{ ctrl.timer.oncalendar }}"
+         style="width:100%;font-family:monospace;font-size:0.92rem;">
+  <p class="muted" style="font-size:0.82rem;margin:0.2rem 0;">
+    프리셋:
+    <a href="#" onclick="document.querySelector('input[name=oncalendar]').value='*-*-* 08:20:00 Asia/Seoul';return false;">매일 08:20 KST</a>
+    ·
+    <a href="#" onclick="document.querySelector('input[name=oncalendar]').value='*-*-* 18:00:00 Asia/Seoul';return false;">매일 18:00 KST</a>
+    ·
+    <a href="#" onclick="document.querySelector('input[name=oncalendar]').value='hourly';return false;">매시간</a>
+    ·
+    <a href="#" onclick="document.querySelector('input[name=oncalendar]').value='*-*-* *:00/30:00';return false;">30분마다 (테스트)</a>
+  </p>
+  <label style="display:block;margin:0.3rem 0;">
+    <input type="checkbox" name="restart" value="1" checked> 저장 후 daemon-reload + status
+  </label>
+  <button type="submit" class="primary" style="width:auto;padding:0.4rem 0.9rem;">💾 Save & Push timer</button>
+</form>
+<details style="margin-top:0.5rem;"><summary class="muted" style="font-size:0.82rem;">timer 원본</summary><pre class="tail">{{ ctrl.timer.raw }}</pre></details>
+<div id="timer-result"></div>
+{% endif %}
+</details>
+
+<!-- ============ 5. Remote commands ============ -->
+<details class="control-section" open>
+<summary>5. Remote commands  <span class="muted" style="font-weight:normal;font-size:0.88rem;">— systemctl --user</span></summary>
+<div style="display:flex;flex-wrap:wrap;gap:0.4rem;margin:0.3rem 0;">
+  <form hx-post="/control/cmd/poll-now" hx-target="#cmd-result" hx-swap="innerHTML">
+    <button class="secondary" style="margin:0;padding:0.4rem 0.9rem;width:auto;">▶ Poll now</button>
+  </form>
+  <form hx-post="/control/cmd/restart-bot" hx-target="#cmd-result" hx-swap="innerHTML"
+        onsubmit="return confirm('Discord 봇 재시작. 게이트웨이 ~5초 끊김. 진행?');">
+    <button class="danger-btn" style="margin:0;padding:0.4rem 0.9rem;width:auto;">🔁 Restart bot</button>
+  </form>
+  <form hx-post="/control/cmd/daemon-reload" hx-target="#cmd-result" hx-swap="innerHTML">
+    <button class="secondary" style="margin:0;padding:0.4rem 0.9rem;width:auto;">↺ daemon-reload</button>
+  </form>
+</div>
+<div style="display:flex;flex-wrap:wrap;gap:0.4rem;margin:0.3rem 0;align-items:center;">
+  <form hx-post="/control/cmd/status" hx-target="#cmd-result" hx-swap="innerHTML">
+    <select name="unit" style="margin:0;">
+      <option value="bot">bot</option>
+      <option value="poll">poll</option>
+      <option value="poll-timer">poll-timer</option>
+      <option value="notify">notify</option>
+    </select>
+    <button class="secondary" style="margin:0;padding:0.4rem 0.9rem;width:auto;">⏵ status</button>
+  </form>
+  <form hx-post="/control/cmd/logs" hx-target="#cmd-result" hx-swap="innerHTML">
+    <select name="unit" style="margin:0;">
+      <option value="bot">bot</option>
+      <option value="poll">poll</option>
+      <option value="notify">notify</option>
+    </select>
+    <input type="number" name="tail" value="100" min="10" max="2000" style="width:6em;margin:0;">
+    <button class="secondary" style="margin:0;padding:0.4rem 0.9rem;width:auto;">📜 logs</button>
+  </form>
+</div>
+<div id="cmd-result"></div>
+</details>
+
+{% endblock %}

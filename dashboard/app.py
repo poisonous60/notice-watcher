@@ -18,6 +18,7 @@ from bot import db, inspector
 from dashboard import actions as act
 from dashboard import prompts, state
 from dashboard import usage_view
+from dashboard import control_actions as ctrl
 
 HERE = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(HERE / "templates"))
@@ -304,6 +305,68 @@ async def usage_page(request: Request,
                    call_sites=sites, range=rng, ranges=_USAGE_RANGES,
                    filter_call_site=call_site, limit=limit,
                    active="usage")
+
+
+# --------------------------------------------------------------------------- #
+# Control (5 섹션 — routing / runtime / env / timer / commands)
+# --------------------------------------------------------------------------- #
+@app.get("/control", response_class=HTMLResponse)
+async def control_page(request: Request, load_remote: int = Query(0)):
+    st = await ctrl.gather_state(load_remote=bool(load_remote))
+    return _render("control.html", request, ctrl=st, load_remote=bool(load_remote), active="control")
+
+
+@app.post("/control/save/routing", response_class=HTMLResponse)
+async def control_save_routing(request: Request, data: str = Form(...)):
+    res = await ctrl.save_routing(data)
+    return _partial("_control_result.html", request, res=res, title="routing")
+
+
+@app.post("/control/save/runtime", response_class=HTMLResponse)
+async def control_save_runtime(request: Request, data: str = Form(...),
+                               restart: Optional[str] = Form(None)):
+    res = await ctrl.save_runtime(data, restart=bool(restart))
+    return _partial("_control_result.html", request, res=res, title="runtime")
+
+
+@app.post("/control/save/env", response_class=HTMLResponse)
+async def control_save_env(request: Request, data: str = Form(...),
+                           restart: Optional[str] = Form(None)):
+    res = await ctrl.save_env(data, restart=bool(restart))
+    return _partial("_control_result.html", request, res=res, title="env")
+
+
+@app.post("/control/save/timer", response_class=HTMLResponse)
+async def control_save_timer(request: Request, oncalendar: str = Form(...),
+                             restart: Optional[str] = Form(None)):
+    res = await ctrl.save_timer(oncalendar, restart=bool(restart))
+    return _partial("_control_result.html", request, res=res, title="timer")
+
+
+_REMOTE_ACTIONS = {
+    "poll-now":      ("poll-now",),
+    "restart-bot":   ("restart-bot",),
+    "daemon-reload": ("daemon-reload",),
+}
+_REMOTE_LOG_UNITS = {"bot", "poll", "notify"}
+
+
+@app.post("/control/cmd/{action}", response_class=HTMLResponse)
+async def control_cmd(request: Request, action: str,
+                      unit: Optional[str] = Form(None),
+                      tail: int = Form(100)):
+    if action in _REMOTE_ACTIONS:
+        res = await ctrl.run_remote(*_REMOTE_ACTIONS[action])
+    elif action == "status":
+        u = unit if unit in {"bot", "poll", "notify", "poll-timer"} else "bot"
+        res = await ctrl.run_remote("status", u)
+    elif action == "logs":
+        if unit not in _REMOTE_LOG_UNITS:
+            raise HTTPException(status_code=400, detail="invalid unit")
+        res = await ctrl.run_remote("logs", unit, "--tail", str(int(tail)))
+    else:
+        raise HTTPException(status_code=400, detail="unknown action")
+    return _partial("_control_result.html", request, res=res, title=f"cmd:{action}")
 
 
 # --------------------------------------------------------------------------- #
