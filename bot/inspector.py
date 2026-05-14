@@ -59,7 +59,8 @@ def _row_to_dict(row: Optional[sqlite3.Row]) -> Optional[dict]:
 
 
 def recent_jobs(conn: sqlite3.Connection, limit: int = 20) -> list[dict]:
-    """최근 register 잡 (kind='register'). 각 항목: id/slug/url/status/finished_at/via/requested_by(parsed)."""
+    """최근 register 잡 (kind='register'). 각 항목: id/slug/url/status/finished_at/via/requested_by(parsed)
+    /sub_payload(parsed). preview 잡은 sub_payload=None."""
     out: list[dict] = []
     for r in db.recent_register_jobs(conn, limit=limit):
         d = dict(r)
@@ -67,6 +68,12 @@ def recent_jobs(conn: sqlite3.Connection, limit: int = 20) -> list[dict]:
         if rb:
             try:
                 d["requested_by"] = json.loads(rb)
+            except json.JSONDecodeError:
+                pass
+        sp = d.get("sub_payload")
+        if sp:
+            try:
+                d["sub_payload"] = json.loads(sp)
             except json.JSONDecodeError:
                 pass
         out.append(d)
@@ -585,9 +592,17 @@ def format_recent_jobs(rows: list[dict]) -> str:
             rb_str = f"{name} (<@{uid}>)" if uid else name
         else:
             rb_str = "?"
+        # preview 잡은 sub_payload 없음. watch 잡은 filter_prompt(None/문자열) 가 안에 있음.
+        sp = r.get("sub_payload")
+        filt_line = ""
+        if isinstance(sp, dict):
+            fp = sp.get("filter_prompt")
+            target_kind = sp.get("target_kind") or "?"
+            ne = " · notify_empty" if sp.get("notify_empty") else ""
+            filt_line = f"\n   filter: {fp if fp else '없음(새 글 전부)'} · target={target_kind}{ne}"
         lines.append(
             f"- #{r['id']} `{r.get('slug')}` · {r.get('status')} · via={r.get('via')} · {rb_str}\n"
-            f"   URL: {r.get('url')}\n"
+            f"   URL: {r.get('url')}{filt_line}\n"
             f"   {r.get('finished_at') or r.get('created_at')}")
     return "\n".join(lines)
 
