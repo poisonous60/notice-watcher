@@ -19,6 +19,7 @@ from .llm_base import (
 )
 from .usage_recorder import UsageRecorder, default_db_path, get_default_recorder
 from .prices import compute_cost
+from .routing import client_for, resolve as resolve_route, set_process_override
 from .gemini import _parse_json_loose as parse_json  # JSON 응답 텍스트 파서 (loose) — caller 가 .generate 후 직접 호출.
 from .validate import validate_built_config, ValidationReport
 
@@ -30,6 +31,7 @@ __all__ = [
     "LLMError", "LLMNetworkError", "LLMQuotaError", "LLMHttpError", "LLMParseError",
     "UsageRecorder", "default_db_path", "get_default_recorder",
     "compute_cost",
+    "client_for", "resolve_route", "set_process_override",
     "parse_json",
     "validate_built_config", "ValidationReport",
 ]

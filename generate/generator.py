@@ -12,9 +12,10 @@ from urllib.parse import urlsplit
 
 from engine import validate_config, ConfigError
 from .gemini import GeminiClient, GeminiError, _parse_json_loose
-from .llm_base import LLMError
+from .llm_base import LLMClient, LLMError
 from .prices import compute_cost
 from .usage_recorder import get_default_recorder
+from .routing import client_for
 from .prompt import SYSTEM_INSTRUCTION, build_user_prompt, build_retry_prompt
 from .validate import validate_built_config, ValidationReport
 
@@ -45,7 +46,7 @@ def _slug_from_digest(digest: dict) -> Optional[str]:
     return None
 
 
-def _generate_raw(digest: dict, *, client: GeminiClient, prompt_text: str, temperature: float,
+def _generate_raw(digest: dict, *, client: LLMClient, prompt_text: str, temperature: float,
                   call_site: str, attempt: int) -> dict:
     try:
         resp = client.generate(system_instruction=SYSTEM_INSTRUCTION, user_text=prompt_text,
@@ -57,10 +58,13 @@ def _generate_raw(digest: dict, *, client: GeminiClient, prompt_text: str, tempe
     return _patch_minimal(cfg, digest)
 
 
-def generate_config(digest: dict, *, client: Optional[GeminiClient] = None,
+def generate_config(digest: dict, *, client: Optional[LLMClient] = None,
                     model: Optional[str] = None, temperature: float = 0.2) -> dict:
-    """1-shot. 스키마 검증 통과한 config 반환. 실패 시 GenerationError. (실행 검증은 안 함 — generate_config_validated 사용.)"""
-    cli = client or GeminiClient(model=model, recorder=get_default_recorder(), cost_fn=compute_cost)
+    """1-shot. 스키마 검증 통과한 config 반환. 실패 시 GenerationError. (실행 검증은 안 함 — generate_config_validated 사용.)
+
+    `model` 인자는 CLI `--model` 호환용 — 지정 시 routing.json 무시하고 그 모델 사용 (provider=gemini 기본).
+    """
+    cli = client or client_for("config_generate", override=(f"gemini:{model}" if model else None))
     cfg = _generate_raw(digest, client=cli, prompt_text=build_user_prompt(digest),
                         temperature=temperature, call_site="config_generate", attempt=1)
     try:
@@ -73,7 +77,7 @@ def generate_config(digest: dict, *, client: Optional[GeminiClient] = None,
 async def generate_config_validated(
     digest: dict,
     *,
-    client: Optional[GeminiClient] = None,
+    client: Optional[LLMClient] = None,
     model: Optional[str] = None,
     temperature: float = 0.25,
     max_attempts: int = 4,
@@ -84,8 +88,11 @@ async def generate_config_validated(
     """생성 → 실행검증 → 실패 시 피드백 재생성, ≤max_attempts. 성공 (config, report) 반환. 전부 실패 시 GenerationError.
 
     on_attempt(i, cfg_or_None, report_or_None, ok, msg) — 진행 로깅용 콜백.
+
+    `client` 가 None 이면 i==1 은 config_generate routing, i>=2 는 config_retry routing 사용 (routing.json).
+    `model` 명시되면 모든 attempt 가 그 모델 사용 (CLI override).
     """
-    cli = client or GeminiClient(model=model, recorder=get_default_recorder(), cost_fn=compute_cost)
+    override = f"gemini:{model}" if model else None
     prev_cfg: Optional[dict] = None
     prev_feedback: str = ""
 
@@ -97,6 +104,7 @@ async def generate_config_validated(
 
         # i==1 은 신규 생성, i>=2 는 retry 라운드 (다른 모델 라우팅 가능하도록 call_site 분리).
         call_site = "config_generate" if i == 1 else "config_retry"
+        cli = client or client_for(call_site, override=override)
         try:
             cfg = _generate_raw(digest, client=cli, prompt_text=prompt_text, temperature=temperature,
                                 call_site=call_site, attempt=i)

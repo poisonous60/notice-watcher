@@ -39,7 +39,7 @@ from bs4 import BeautifulSoup
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from generate import GeminiClient, GeminiError, LLMError, parse_json  # noqa: E402
-from generate import get_default_recorder, compute_cost  # noqa: E402
+from generate import get_default_recorder, compute_cost, client_for, set_process_override  # noqa: E402
 from generate.prompts import load_prompt, render_prompt  # noqa: E402
 from bot import db  # noqa: E402
 from bot.config import bot_token  # noqa: E402
@@ -376,13 +376,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     print(f"[notify] dir={collected.name if collected else '-'}  new_slugs={list(new_posts)}  "
           f"sub_slugs={db.all_slugs(conn)}  webhook_slugs={list(targets)}  token={'yes' if tok else 'no'}  dry_run={dry_run}")
 
-    _client: list[Optional[GeminiClient]] = [None]
-
-    def gem() -> GeminiClient:
-        if _client[0] is None:
-            _client[0] = GeminiClient(model=args.model, recorder=get_default_recorder(),
-                                      cost_fn=compute_cost)
-        return _client[0]
+    # CLI `--model` 은 process-wide override — routing.json 무시하고 모든 call_site 에 적용.
+    if args.model:
+        set_process_override(f"gemini:{args.model}")
 
     realtime_sent = 0
     digest_sent = 0
@@ -416,7 +412,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                 if webhook and not subs:
                     if (slug, pid) not in delivered_file:
                         if summary is None:
-                            summary = summarize_post(gem(), post, slug=slug)
+                            summary = summarize_post(client_for("notify_summarize"), post, slug=slug)
                         content = format_message(post, summary)
                         if dry_run:
                             print(f"\n--- [webhook {slug}] {pid} ---\n{content}\n")
@@ -439,11 +435,11 @@ def main(argv: Optional[list[str]] = None) -> int:
                     fp = r["filter_prompt"]
                     if fp:
                         if summary is None:
-                            summary = summarize_post(gem(), post, slug=slug)
-                        if not filter_pass(gem(), fp, post, summary, slug=slug):
+                            summary = summarize_post(client_for("notify_summarize"), post, slug=slug)
+                        if not filter_pass(client_for("notify_filter"), fp, post, summary, slug=slug):
                             continue
                     if summary is None:
-                        summary = summarize_post(gem(), post, slug=slug)
+                        summary = summarize_post(client_for("notify_summarize"), post, slug=slug)
                     content = format_message(post, summary)
                     if dry_run:
                         print(f"\n--- [{target_kind}:{target_id} {slug}] {pid} ---\n{content}\n")
