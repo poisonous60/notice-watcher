@@ -185,7 +185,8 @@ def build_admin_tree(client: discord.Client, conn, *, admin_guild: discord.Objec
             await interaction.response.send_message("❌ owner 전용 명령입니다.", ephemeral=True)
             return
         title_s = (title or "📢 봇 업데이트").strip()[:256]
-        message_s = message.strip()
+        # discord slash 입력창은 Enter 가 제출이라 줄바꿈 입력 불가. literal `\n` (2글자) 를 실제 newline 으로 변환.
+        message_s = message.strip().replace("\\n", "\n")
         if not message_s:
             await interaction.response.send_message("❌ message 가 비어있습니다.", ephemeral=True)
             return
