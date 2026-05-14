@@ -51,15 +51,17 @@ KST = timezone(timedelta(hours=9))
 # collected 디렉터리 / 새 글
 # --------------------------------------------------------------------------- #
 def latest_collected_dir() -> Optional[Path]:
-    """가장 최근 '완료된 폴링 run' 디렉터리. poll.py 가 매 run 마다 poll_result.json 을 쓰므로 그게 앵커.
-    (옛날엔 *.new.json 이 있는 dir 만 골랐는데, 새 글이 0건이면 *.new.json 이 안 생겨서 오래된 dir 을 잘못 집었음 → heartbeat 가 stale 데이터를 봄.)"""
+    """가장 최근 '완료된 미처리 폴링 run' 디렉터리. poll_result.json 을 앵커로 사용.
+    `.notified` 마커 있는 디렉터리는 이미 처리됨 → 스킵 (notify-timer 매 15분 호출 시 중복 Gemini 방지)."""
     if not COLLECTED_DIR.exists():
         return None
     dirs = sorted(d for d in COLLECTED_DIR.iterdir() if d.is_dir())  # 이름 = 타임스탬프 → 정렬 = 시간순
     for d in reversed(dirs):
+        if (d / ".notified").exists():
+            continue
         if (d / "poll_result.json").exists() or any(d.glob("*.new.json")):
             return d
-    return dirs[-1] if dirs else None
+    return None
 
 
 def load_new_posts(collected_dir: Optional[Path]) -> dict[str, list[dict]]:
@@ -457,6 +459,12 @@ def main(argv: Optional[list[str]] = None) -> int:
                             db.add_pending(conn, slug=slug, post_id=pid, target_id=target_id,
                                            summary=summary, title=post.get("title"),
                                            url=post.get("url"), published_at=post.get("published_at"))
+        # collected 처리 끝 — 마킹 (이후 notify-timer 호출에서 같은 dir 재처리 안 함)
+        if collected and not dry_run and new_posts:
+            try:
+                (collected / ".notified").touch()
+            except OSError as e:  # noqa: BLE001
+                print(f"  [warn] .notified 마커 생성 실패({collected}): {e}", file=sys.stderr)
         # --- 다이제스트 flush --- (digest_sent/hb_sent 는 try 밖에서 0 초기화됨)
         if not args.no_digest:
             digest_sent = flush_digests(conn, tok, dry_run=dry_run)
