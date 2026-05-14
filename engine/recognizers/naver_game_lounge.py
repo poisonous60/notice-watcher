@@ -16,6 +16,7 @@ def _build(m: "re.Match", url: str) -> Optional[dict]:
     view_url = f"https://game.naver.com/lounge/{game}/board/{board_id}"
     return {
         "version": 1, "site": "game.naver.com", "board": f"lounge/{game}/{board_id}", "strategy": "httpx_json",
+        "_slug_board": f"{game}_{board_id}",
         "headers": {
             "User-Agent": UA, "Accept": "application/json, text/plain, */*", "Accept-Language": "ko-KR,ko;q=0.9",
             "Origin": "https://game.naver.com", "Referer": view_url,

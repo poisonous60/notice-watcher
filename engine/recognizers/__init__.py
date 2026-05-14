@@ -8,6 +8,14 @@ probe + Gemini 없이 config 를 바로 만들어 등록한다. `register.py` �
        builder: (re.Match, url) -> config dict | None
        매칭이 잘못됐을 가능성이 있으면 None 반환 → 일반 파이프라인 폴백.
 
+builder 가 cfg 에 *선택적으로* 넣을 수 있는 키:
+  - `_slug_board: str`  `engine.slug.url_to_slug` 가 slug 의 board 부분으로 쓰는 식별자.
+                        없으면 `cfg["board"]` 의 `/` `:` 만 `_` 로 치환해 사용.
+                        예) arca-live: `channel` (또는 `channel_<url-encoded-category>`),
+                            naver-cafe: `cafe<id>_menu<id>`, dcinside-mgallery: `gallery_id`.
+                        ⚠ PATTERNS / builder / `_slug_board` 식 어느 하나라도 바꾸면 *같은 URL 의 slug 가
+                        달라질 수 있음* → `scripts/migrate_slug_schema.py` 재실행 필요 (idempotent).
+
 새 플랫폼 추가:
   1. 손어댑터/손config 로 한 사이트 처리 후
   2. `engine/recognizers/<plat>.py` 한 개 신규 작성 — 비슷한 기존 파일을 참고하면 충분

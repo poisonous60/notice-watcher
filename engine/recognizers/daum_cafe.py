@@ -32,6 +32,7 @@ def _build(m: "re.Match", url: str) -> Optional[dict]:
         "version": 1, "site": "m.cafe.daum.net", "board": board,
         "strategy": "handwritten", "adapter": "DaumCafeAdapter",
         "kwargs": {"cafe_name": cafe_name, "board_id": board},
+        "_slug_board": f"{cafe_name}_{board}",
         "_source_url": url,
         "_note": ("다음카페 모바일 — known-platform 자동 인식. 글 목록이 페이지 인라인 JS(var articles=[]; articles.push({...}))로만 와서 "
                   "손어댑터 DaumCafeAdapter 가 그 블록을 regex 파싱 + 본문(div#article) fetch. 비공개·등급제한이면 본문 401/403 → 본문 비워 반환(우회 안 함)."),

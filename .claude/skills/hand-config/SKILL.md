@@ -29,7 +29,7 @@ description: >-
 0. **이미 알려진 플랫폼인가?** — `python -c "from engine.known_platforms import recognize; import json; print(json.dumps(recognize('<URL>'), ensure_ascii=False, indent=1))"`.
    - **매칭되면** 손작업 필요 없음 → 그냥 `python scripts/register.py "<URL>"` (probe/Gemini 없이 즉시 등록) → 모드 A 8~10(doc·N100 배포)만. 끝.
    - 매칭은 안 되는데 **같은 플랫폼의 다른 게시판이 이미 손어댑터/손config 로 있으면**(예: 다음카페 다른 게시판인데 인식기가 그 URL 형태를 아직 안 받음) → `engine/known_platforms.py` 의 `_RECOGNIZERS` 에 그 URL 형태를 받는 인식기를 추가/확장하는 게 1순위(그러면 그 플랫폼 전체가 자동). 그게 아닌 진짜 새 사이트면 ↓ 1번부터.
-1. **slug 확정** — `python -c "from probe.paths import url_to_slug; print(url_to_slug('<URL>'))"`. config 파일명·state 파일명·doc 항목 모두 이 slug.
+1. **slug 확정** — `python -c "from probe.paths import url_to_slug; print(url_to_slug('<URL>'))"`. 출력 형식: `<platform>_<board-id>_<hash>` (recognizer 매칭 시) 또는 `host_<host>_<seg>_<hash>` (fallback). config 파일명·state 파일명·doc 항목 모두 이 slug.
 2. **probe** — `python scripts/probe.py "<URL>"` (느리면 `--lite`). `output/probe/<slug>/` 의 `summary.txt`·`list_candidates.json`·`article_candidates.json`·`traffic.har`·`diagnosis.json` 확인.
    - 봇이 이미 자동 등록을 시도했었다면 `output/poll_state/<slug>.FAILED.json` 의 `last_feedback`(=`[FAIL] <체크>`)·`last_config` 부터 본다 — 뭐가 막혔는지·LLM 이 어디까지 갔는지 거기 다 있다. 로컬에 없으면 모드 B의 `triage.py pull` 로 N100 에서 가져온다.
 3. **전략 선택**

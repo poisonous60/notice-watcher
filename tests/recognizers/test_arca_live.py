@@ -76,6 +76,20 @@ def run() -> list[tuple[str, bool, str]]:
         f"got strategy={cfg and cfg.get('strategy')!r} adapter={cfg and cfg.get('adapter')!r}",
     ))
 
+    # 8) _slug_board — engine.slug.url_to_slug 가 이 키를 board 부분으로 사용
+    cfg = _build_for("https://arca.live/b/akendfield")
+    cases.append((
+        "slug_board_channel_only",
+        cfg is not None and cfg.get("_slug_board") == "akendfield",
+        f"got {cfg and cfg.get('_slug_board')!r}",
+    ))
+    cfg = _build_for("https://arca.live/b/akendfield?category=공식")
+    cases.append((
+        "slug_board_channel_plus_url_encoded_category",
+        cfg is not None and cfg.get("_slug_board") == "akendfield_%EA%B3%B5%EC%8B%9D",
+        f"got {cfg and cfg.get('_slug_board')!r}",
+    ))
+
     return cases
 
 

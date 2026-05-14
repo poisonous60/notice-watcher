@@ -22,6 +22,7 @@ def _cfg(cafe_id: int, menu_id: int, url: str) -> dict:
         "version": 1, "site": "cafe.naver.com", "board": f"cafe{cafe_id}/menu{menu_id}",
         "strategy": "handwritten", "adapter": "NaverCafeAdapter",
         "kwargs": {"cafe_id": int(cafe_id), "menu_id": int(menu_id), "include_notices": True, "timeout": 15.0},
+        "_slug_board": f"{cafe_id}_{menu_id}",
         "_source_url": url, "_note": _NOTE,
     }
 

@@ -17,6 +17,7 @@ def _build(m: "re.Match", url: str) -> Optional[dict]:
     view_url = f"https://forum.nexon.com/{game}/board_list?board={board}"
     return {
         "version": 1, "site": "forum.nexon.com", "board": str(board), "strategy": "httpx_json",
+        "_slug_board": f"{game}_{board}",
         "_source_url": view_url,
         "_note": (f"넥슨 포럼({game}) — known-platform 자동 인식. 목록=/api/v1/board/{{board}}/threads?alias={game}, "
                   f"본문=/api/v1/thread/{{threadId}}?alias={game}. createDate=unix epoch(초), title/summary 는 HTML 이스케이프됨."),

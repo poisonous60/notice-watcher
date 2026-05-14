@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import re
 from typing import Optional
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from ._common import qs
 
@@ -51,9 +51,19 @@ def _build(m: "re.Match", url: str) -> Optional[dict]:
         board_parts.append(f"flair={flair}")
     sort_seg = "" if sort == "new" else f"/{sort}"
     src = f"https://www.reddit.com/r/{sub}{sort_seg}/" + (f"?t={time_filter}" if sort == "top" else "")
+
+    # slug-friendly board id — sub + sort + time + flair 를 `_` 로 join, 한글 등은 URL-encode.
+    slug_parts = [sub]
+    if sort != "new":
+        slug_parts.append(sort)
+        if sort == "top":
+            slug_parts.append(f"t{time_filter}")
+    if flair:
+        slug_parts.append(f"flair_{quote(flair, safe='')}")
     return {
         "version": 1, "site": "reddit.com", "board": "/".join(board_parts),
         "strategy": "handwritten", "adapter": "RedditAdapter", "kwargs": kwargs,
+        "_slug_board": "_".join(slug_parts),
         "_source_url": src,
         "_note": ("Reddit 서브레딧 — known-platform 자동 인식. 손어댑터 RedditAdapter 가 공개 .json 엔드포인트"
                   "(목록 /r/{sub}/{sort}.json, 본문 permalink+/.json) 사용. 기본 sort=new(새 글 전부); URL 이 /r/X/hot/ 또는 /top/?t=day 면 그 정렬, "

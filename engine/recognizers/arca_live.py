@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 from typing import Optional
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 
 NAME = "arca-live"
 
@@ -33,13 +33,16 @@ def _build(m: "re.Match", url: str) -> Optional[dict]:
     if cats:
         kwargs["category"] = cats[0]
     src = f"https://arca.live/b/{channel}"
+    slug_board = channel
     if "category" in kwargs:
-        from urllib.parse import quote
-        src = f"{src}?category={quote(kwargs['category'], safe='')}"
+        cat_enc = quote(kwargs["category"], safe="")
+        src = f"{src}?category={cat_enc}"
+        slug_board = f"{channel}_{cat_enc}"
     return {
         "version": 1, "site": "arca.live", "board": channel,
         "strategy": "handwritten", "adapter": "ArcaLiveAdapter",
         "kwargs": kwargs,
+        "_slug_board": slug_board,
         "_source_url": src,
         "_note": ("아카라이브 — known-platform 자동 인식. Cloudflare 보호 + JS 렌더라 손어댑터 ArcaLiveAdapter(playwright-stealth) 사용. "
                   + ("선택된 카테고리 탭(`category="

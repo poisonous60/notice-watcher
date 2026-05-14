@@ -1,9 +1,14 @@
-"""URL → slug, 출력 디렉토리 경로 헬퍼."""
+"""URL → slug, 출력 디렉토리 경로 헬퍼.
+
+slug 생성 본체는 `engine.slug.url_to_slug` — 여기선 그것을 `@heuristic` 로 wrap 해 re-export 만 한다.
+probe 의 휴리스틱 추적 (`scripts/probe_smoke.py` stage 5) 이 `@heuristic` 데코레이터를 보고 mtime 회귀를
+잡으므로 wrapper 가 필요.
+"""
 from __future__ import annotations
 
-import re
 from pathlib import Path
-from urllib.parse import urlsplit
+
+from engine.slug import url_to_slug as _engine_url_to_slug
 
 from ._heuristic import heuristic
 
@@ -15,12 +20,8 @@ STATE_ROOT = PROJECT_ROOT / "output" / "state"
 
 @heuristic
 def url_to_slug(url: str) -> str:
-    parts = urlsplit(url)
-    raw = f"{parts.netloc}_{parts.path.strip('/')}"
-    if parts.query:
-        raw = f"{raw}_{parts.query}"
-    slug = re.sub(r"[^A-Za-z0-9._-]+", "_", raw).strip("_")
-    return slug[:120] or "site"
+    """`<platform>_<board-id>_<hash>` 형식 (≤100자). 정의·세부는 `engine.slug.url_to_slug`."""
+    return _engine_url_to_slug(url)
 
 
 def output_dir(slug: str) -> Path:
