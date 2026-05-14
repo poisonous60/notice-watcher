@@ -153,6 +153,14 @@ def build_admin_tree(client: discord.Client, conn, *, admin_guild: discord.Objec
             await interaction.response.send_message(
                 f"❌ 신고 #{report_id} 가 없거나 이미 resolved.", ephemeral=True)
 
+    @admin.command(name="triage", description="처리 대기 backlog 요약 (신고/깨짐/실패/큐/의견).")
+    async def triage_cmd(interaction: discord.Interaction):
+        if not _is_owner(interaction):
+            await interaction.response.send_message("❌ owner 전용 명령입니다.", ephemeral=True)
+            return
+        summary = inspector.triage_summary(conn, paths)
+        await _ack_and_dm(interaction, inspector.format_triage(summary))
+
     @admin.command(name="feedback", description="사용자가 보낸 자유 의견 목록.")
     @app_commands.describe(count="최근 개수 (기본 10, 최대 50)")
     async def feedback_list_cmd(interaction: discord.Interaction,

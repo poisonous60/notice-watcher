@@ -516,6 +516,63 @@ def format_inspect_result(r: InspectResult) -> str:
     return "\n\n".join(parts)
 
 
+def triage_summary(conn: sqlite3.Connection, paths: "InspectorPaths") -> dict:
+    """admin 처리-대기 backlog 카운트. state dir 스캔 + DB 카운트."""
+    from datetime import datetime, timedelta, timezone
+
+    open_reports = db.list_reports(conn, status="open", limit=500)
+    all_feedback = db.list_feedback(conn, limit=1000)
+    pending_jobs = db.queue_pending_count(conn)
+    jobs_summary = db.jobs_summary(conn)
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+    def _is_recent(iso: str) -> bool:
+        try:
+            return datetime.fromisoformat(iso) >= cutoff
+        except (ValueError, TypeError):
+            return False
+    recent_fb_count = sum(1 for f in all_feedback if _is_recent(f["created_at"]))
+    recent_report_count = sum(1 for r in open_reports if _is_recent(r["created_at"]))
+
+    broken: list[str] = []
+    failed: list[str] = []
+    if paths.state_dir.exists():
+        for f in paths.state_dir.glob("*.json"):
+            if f.name.endswith(".FAILED.json"):
+                failed.append(f.name[: -len(".FAILED.json")])
+                continue
+            d = _read_json(f)
+            if d and int(d.get("consecutive_breakage", 0) or 0) > 0:
+                broken.append(d.get("slug", f.stem))
+
+    return {
+        "open_reports": len(open_reports),
+        "open_reports_recent_7d": recent_report_count,
+        "feedback_total": len(all_feedback),
+        "feedback_recent_7d": recent_fb_count,
+        "broken_slugs": sorted(broken),
+        "failed_slugs": sorted(failed),
+        "pending_jobs": pending_jobs,
+        "running_jobs": int(jobs_summary.get("running", 0)),
+    }
+
+
+def format_triage(summary: dict) -> str:
+    lines = ["**🚦 Triage 백로그**"]
+    lines.append(f"• 미해결 신고(open): **{summary['open_reports']}건** "
+                 f"(최근 7d: {summary['open_reports_recent_7d']}건)")
+    bs = summary["broken_slugs"]
+    lines.append(f"• 깨짐 신호 slug: **{len(bs)}건**"
+                 + (f" — {', '.join(bs)}" if bs else ""))
+    fs = summary["failed_slugs"]
+    lines.append(f"• 자동등록 실패 slug: **{len(fs)}건**"
+                 + (f" — {', '.join(fs)}" if fs else ""))
+    lines.append(f"• 잡 큐: pending {summary['pending_jobs']}건 / running {summary['running_jobs']}건")
+    lines.append(f"• 의견(feedback) 누적: **{summary['feedback_total']}건** "
+                 f"(최근 7d: {summary['feedback_recent_7d']}건)")
+    return "\n".join(lines)
+
+
 def format_recent_jobs(rows: list[dict]) -> str:
     if not rows:
         return "_(최근 register 잡 없음)_"
