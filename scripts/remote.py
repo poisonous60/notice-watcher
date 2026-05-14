@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 from typing import Optional
@@ -28,6 +29,12 @@ from typing import Optional
 
 DEPLOY_HOST = os.environ.get("DEPLOY_HOST", "aaaa@<lan-ip>")
 DEPLOY_PATH_RAW = os.environ.get("DEPLOY_PATH", "~/notice-watcher")
+
+# DEPLOY_PATH 가 SSH command 에 직접 interpolation 되므로 안전 문자만 허용. 위반 시 즉시 거부.
+# 허용: 영숫자, `_`, `.`, `/`, `-`, `~`, `$` (예: `~/notice-watcher`, `$HOME/foo`).
+_DEPLOY_PATH_RE = re.compile(r"^[A-Za-z0-9_./~$-]+$")
+if not _DEPLOY_PATH_RE.match(DEPLOY_PATH_RAW):
+    raise SystemExit(f"[remote] DEPLOY_PATH unsafe characters: {DEPLOY_PATH_RAW!r}")
 
 
 # unit alias → 실제 systemd 유닛명
@@ -94,10 +101,9 @@ def cmd_read(alias: str) -> int:
         print(f"[remote] 알 수 없는 read alias: {alias!r}. 허용: {sorted(READABLE)}", file=sys.stderr)
         return 4
     path = READABLE[alias]
-    # `cat` 만 — 쓰기/실행 권한 X. path 는 DEPLOY_PATH env 가 섞일 수 있어 single-quote 로 감쌈
-    # (shell metachar 차단). path 자체에 single quote 가 있으면 안전 분해.
-    safe_path = "'" + path.replace("'", "'\\''") + "'"
-    return _ssh(f"cat {safe_path}")
+    # `cat` 만 — 쓰기/실행 권한 X. path 는 우리가 만든 READABLE 매핑 + 모듈 로드 시 검증한 DEPLOY_PATH 만 사용 →
+    # shell metachar 안전. quote 안 함 (single-quote 는 `~/` 의 tilde 확장을 깨뜨림).
+    return _ssh(f"cat {path}")
 
 
 def list_actions() -> int:
