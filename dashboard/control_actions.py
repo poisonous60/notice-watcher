@@ -60,15 +60,17 @@ def audit(action: str, *, ok: bool, detail: Any = None) -> None:
 # --------------------------------------------------------------------------- #
 # subprocess helpers
 # --------------------------------------------------------------------------- #
+def _run_blocking(cmd: list[str]) -> dict:
+    p = subprocess.run(cmd, cwd=str(ROOT),
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                       text=True, errors="replace")
+    return {"ok": p.returncode == 0, "rc": p.returncode, "output": p.stdout or ""}
+
+
 async def _run(cmd: list[str]) -> dict:
-    proc = await asyncio.create_subprocess_exec(
-        *cmd, cwd=str(ROOT),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT,
-    )
-    out, _ = await proc.communicate()
-    output = (out or b"").decode("utf-8", errors="replace")
-    return {"ok": proc.returncode == 0, "rc": proc.returncode, "output": output}
+    """Windows asyncio 기본 event loop 는 subprocess 미지원 (`NotImplementedError`).
+    `to_thread` 로 동기 호출을 워커 스레드에 보내 우회. POSIX 에서도 동일하게 동작."""
+    return await asyncio.to_thread(_run_blocking, cmd)
 
 
 async def run_push(target: str, *, slug: Optional[str] = None) -> dict:

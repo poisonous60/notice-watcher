@@ -6,6 +6,7 @@ Pull 은 scripts/inspect_subs.py pull 을 그대로 호출 (구현 중복 회피
 from __future__ import annotations
 
 import asyncio
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -14,25 +15,23 @@ from bot import inspector
 from dashboard.state import snapshot_paths, ROOT
 
 
+def _run_blocking(cmd: list[str]) -> dict[str, Any]:
+    p = subprocess.run(cmd, cwd=str(ROOT),
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                       text=True, errors="replace")
+    return {"rc": p.returncode, "ok": p.returncode == 0, "output": p.stdout or ""}
+
+
 async def run_pull() -> dict[str, Any]:
     """`python scripts/inspect_subs.py pull` 을 별도 프로세스로 실행. stdout/stderr·rc 캡처해 반환.
 
+    Windows 의 asyncio 기본 event loop(`SelectorEventLoop`) 는 subprocess 미지원 — `asyncio.create_subprocess_exec`
+    가 `NotImplementedError` 던짐. 대신 동기 `subprocess.run` 을 `to_thread` 로 감싸 호환성 확보.
+
     UI 흐름: HTMX POST 가 await → 끝나면 토스트 + 페이지 새로고침. 보통 5~30 초 (SSH + scp).
     """
-    py = sys.executable
-    script = ROOT / "scripts" / "inspect_subs.py"
-    proc = await asyncio.create_subprocess_exec(
-        py, str(script), "pull",
-        cwd=str(ROOT),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT,
-    )
-    out, _ = await proc.communicate()
-    return {
-        "rc": proc.returncode,
-        "ok": proc.returncode == 0,
-        "output": (out or b"").decode("utf-8", errors="replace"),
-    }
+    cmd = [sys.executable, str(ROOT / "scripts" / "inspect_subs.py"), "pull"]
+    return await asyncio.to_thread(_run_blocking, cmd)
 
 
 async def run_fetch(slug: str, n: int = 5) -> dict[str, Any]:
