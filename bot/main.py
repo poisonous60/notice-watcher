@@ -527,15 +527,9 @@ async def on_error(event_method: str, *args, **kwargs):
 
 @client.event
 async def on_guild_join(guild: "discord.Guild"):
+    # GUILD_ID 고정(dev) — 그 길드만 씀, 새 길드는 무시. production(글로벌) — 글로벌 commands 가
+    # 자동으로 새 길드에 노출되므로 별도 sync 불필요. 둘 다 로그만 남김.
     log.info("joined guild %s (%s)", guild.id, getattr(guild, "name", "?"))
-    if guild_id():
-        return  # GUILD_ID 고정 모드면 거기만 씀
-    try:
-        tree.copy_global_to(guild=guild)
-        synced = await tree.sync(guild=guild)
-        log.info("synced %d commands to new guild %s", len(synced), guild.id)
-    except Exception as e:  # noqa: BLE001
-        log.warning("new guild %s sync 실패: %r", guild.id, e)
 
 
 @client.event
@@ -552,35 +546,39 @@ async def on_ready():
     except Exception as e:  # noqa: BLE001
         _record_error("worker.start", e)
     gid = guild_id()
+    agid = admin_guild_id()
     try:
         if gid:
+            # dev mode — GUILD_ID 지정. 그 길드에 즉시 sync (copy_global_to 로 글로벌 set 도 포함).
             g = discord.Object(id=gid)
             tree.copy_global_to(guild=g)
             synced = await tree.sync(guild=g)
-            log.info("synced %d commands to guild %s", len(synced), gid)
+            log.info("synced %d commands to guild %s (dev mode)", len(synced), gid)
         else:
-            # GUILD_ID 미설정 — 봇이 들어가 있는 길드들에 즉시 동기화 + 글로벌(DM/추후 길드용, 전파 ~1h)
+            # production — 글로벌 sync 만. 기존에 guild-scoped 로 복사된 commands 가 있으면 clear
+            # (이전 버전이 copy_global_to + per-guild sync 도 같이 해서 검색 결과에 명령이 2개씩 떴음).
+            # admin guild 는 /admin 그룹을 guild-scope 로 일부러 두므로 clear 대상에서 제외.
             for g in client.guilds:
+                if agid and g.id == agid:
+                    continue
                 try:
-                    tree.copy_global_to(guild=g)
-                    synced = await tree.sync(guild=g)
-                    log.info("synced %d commands to guild %s", len(synced), g.id)
+                    tree.clear_commands(guild=g)
+                    await tree.sync(guild=g)
                 except Exception as e:  # noqa: BLE001
-                    log.warning("guild %s sync 실패: %r", g.id, e)
+                    log.warning("guild %s 기존 guild-scoped commands 정리 실패: %r", g.id, e)
             synced = await tree.sync()
-            log.info("synced %d global commands (DM/추후 길드용, 전파 ~1h)", len(synced))
+            log.info("synced %d global commands (전파 ~1h)", len(synced))
     except Exception as e:  # noqa: BLE001
         _record_error("tree.sync", e)
 
     # admin 전용 명령(`/admin ...`) — ADMIN_GUILD_ID 설정된 경우만 그 길드에 sync.
     # 메인 tree 와 분리: 다른 길드/DM autocomplete 에 admin 명령이 노출되지 않게 한다.
-    agid = admin_guild_id()
     if agid:
         try:
             ag = discord.Object(id=agid)
             admin_mod.build_admin_tree(client, _conn, admin_guild=ag, tree=tree)
             synced = await tree.sync(guild=ag)
-            log.info("synced %d admin commands to admin guild %s (포함: main + admin)", len(synced), agid)
+            log.info("synced %d admin commands to admin guild %s (guild-scoped)", len(synced), agid)
         except Exception as e:  # noqa: BLE001
             _record_error("admin_tree.sync", e)
     else:
