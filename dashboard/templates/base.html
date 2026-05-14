@@ -1,9 +1,28 @@
 <!doctype html>
-<html lang="ko" data-theme="light">
+<html lang="ko" data-theme="light" data-theme-preset="default" data-theme-size="normal">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}notice-watcher dashboard{% endblock %}</title>
+  <script>
+    // FOUC 방지용 inline loader — Pico CSS 가 로드되기 전에 html 속성을 먼저 박는다.
+    (function () {
+      try {
+        var p = localStorage.getItem('nw.themePreset') || 'default';
+        var s = localStorage.getItem('nw.themeSize')   || 'normal';
+        var m = localStorage.getItem('nw.themeMode')   || 'light'; // light|dark|auto
+        var root = document.documentElement;
+        root.setAttribute('data-theme-preset', p);
+        root.setAttribute('data-theme-size', s);
+        if (m === 'auto') {
+          var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          root.setAttribute('data-theme', prefersDark ? 'dark' : 'light');
+        } else {
+          root.setAttribute('data-theme', m);
+        }
+      } catch (e) { /* localStorage 막혀도 silent */ }
+    })();
+  </script>
   <link rel="stylesheet"
         href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
   <script src="https://unpkg.com/htmx.org@2.0.3"></script>

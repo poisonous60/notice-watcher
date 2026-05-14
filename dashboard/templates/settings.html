@@ -2,8 +2,151 @@
 {% block title %}Settings — notice-watcher{% endblock %}
 {% block body %}
 
-<h2>⚙ Settings (read-only)</h2>
+<h2>⚙ Settings</h2>
 
+<h3>🎨 테마</h3>
+<p class="muted">브라우저(localStorage) 에 저장. 다른 기기에서는 따로 설정.</p>
+
+<h4>모드</h4>
+<div class="theme-size-row" data-theme-mode-row>
+  <button type="button" data-mode="light">☀ Light</button>
+  <button type="button" data-mode="dark">🌙 Dark</button>
+  <button type="button" data-mode="auto">🖥 시스템 따라</button>
+</div>
+
+<h4>프리셋</h4>
+<div class="theme-grid" data-theme-preset-grid>
+  <div class="theme-swatch" data-preset="default">
+    <div class="name">Default (Pico)</div>
+    <div class="palette">
+      <span style="background:#ffffff"></span>
+      <span style="background:#f6f8fa"></span>
+      <span style="background:#1c1f24"></span>
+      <span style="background:#4c7cf0"></span>
+    </div>
+  </div>
+  <div class="theme-swatch" data-preset="solarized-light">
+    <div class="name">Solarized Light</div>
+    <div class="palette">
+      <span style="background:#fdf6e3"></span>
+      <span style="background:#eee8d5"></span>
+      <span style="background:#073642"></span>
+      <span style="background:#268bd2"></span>
+    </div>
+  </div>
+  <div class="theme-swatch" data-preset="nord">
+    <div class="name">Nord</div>
+    <div class="palette">
+      <span style="background:#2e3440"></span>
+      <span style="background:#3b4252"></span>
+      <span style="background:#eceff4"></span>
+      <span style="background:#88c0d0"></span>
+    </div>
+  </div>
+  <div class="theme-swatch" data-preset="dracula">
+    <div class="name">Dracula</div>
+    <div class="palette">
+      <span style="background:#282a36"></span>
+      <span style="background:#44475a"></span>
+      <span style="background:#f8f8f2"></span>
+      <span style="background:#bd93f9"></span>
+    </div>
+  </div>
+  <div class="theme-swatch" data-preset="gruvbox">
+    <div class="name">Gruvbox Warm</div>
+    <div class="palette">
+      <span style="background:#fbf1c7"></span>
+      <span style="background:#ebdbb2"></span>
+      <span style="background:#3c3836"></span>
+      <span style="background:#b57614"></span>
+    </div>
+  </div>
+  <div class="theme-swatch" data-preset="high-contrast">
+    <div class="name">High Contrast</div>
+    <div class="palette">
+      <span style="background:#ffffff"></span>
+      <span style="background:#f0f0f0"></span>
+      <span style="background:#000000"></span>
+      <span style="background:#0033cc"></span>
+    </div>
+  </div>
+</div>
+
+<h4>폰트 크기</h4>
+<div class="theme-size-row" data-theme-size-row>
+  <button type="button" data-size="small">A− Small</button>
+  <button type="button" data-size="normal">A Normal</button>
+  <button type="button" data-size="large">A+ Large</button>
+</div>
+
+<script>
+(function () {
+  var root = document.documentElement;
+  var KEY = { preset: 'nw.themePreset', size: 'nw.themeSize', mode: 'nw.themeMode' };
+
+  function applyMode(m) {
+    if (m === 'auto') {
+      var dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      root.setAttribute('data-theme', dark ? 'dark' : 'light');
+    } else {
+      root.setAttribute('data-theme', m);
+    }
+  }
+  function markActive(container, attr, value) {
+    container.querySelectorAll('[' + attr + ']').forEach(function (el) {
+      el.classList.toggle('is-active', el.getAttribute(attr) === value);
+    });
+  }
+  function init() {
+    var preset = localStorage.getItem(KEY.preset) || 'default';
+    var size   = localStorage.getItem(KEY.size)   || 'normal';
+    var mode   = localStorage.getItem(KEY.mode)   || 'light';
+    var presetGrid = document.querySelector('[data-theme-preset-grid]');
+    var sizeRow    = document.querySelector('[data-theme-size-row]');
+    var modeRow    = document.querySelector('[data-theme-mode-row]');
+    markActive(presetGrid, 'data-preset', preset);
+    markActive(sizeRow,    'data-size',   size);
+    markActive(modeRow,    'data-mode',   mode);
+
+    presetGrid.addEventListener('click', function (ev) {
+      var el = ev.target.closest('[data-preset]');
+      if (!el) return;
+      var v = el.getAttribute('data-preset');
+      root.setAttribute('data-theme-preset', v);
+      localStorage.setItem(KEY.preset, v);
+      markActive(presetGrid, 'data-preset', v);
+    });
+    sizeRow.addEventListener('click', function (ev) {
+      var el = ev.target.closest('[data-size]');
+      if (!el) return;
+      var v = el.getAttribute('data-size');
+      root.setAttribute('data-theme-size', v);
+      localStorage.setItem(KEY.size, v);
+      markActive(sizeRow, 'data-size', v);
+    });
+    modeRow.addEventListener('click', function (ev) {
+      var el = ev.target.closest('[data-mode]');
+      if (!el) return;
+      var v = el.getAttribute('data-mode');
+      applyMode(v);
+      localStorage.setItem(KEY.mode, v);
+      markActive(modeRow, 'data-mode', v);
+    });
+    // 'auto' 모드일 때 OS 변경 따라가기
+    var mq = window.matchMedia('(prefers-color-scheme: dark)');
+    mq.addEventListener('change', function () {
+      if (localStorage.getItem(KEY.mode) === 'auto') applyMode('auto');
+    });
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+</script>
+
+<h3 style="margin-top:1.5rem;">📂 Snapshot</h3>
 <dl class="kv">
   <dt>snapshot DB</dt><dd class="mono">{{ info.snapshot_db }}</dd>
   <dt>configs dir</dt><dd class="mono">{{ info.configs_dir }}</dd>
@@ -14,7 +157,7 @@
   <dt>FAILED 수</dt><dd>{{ info.n_failed }}</dd>
 </dl>
 
-<p class="muted">이 페이지는 snapshot 위치만 보여줍니다. 실제 N100 의 <code>.env</code>·서비스 상태는
+<p class="muted">이 페이지의 snapshot 정보는 read-only 입니다. 실제 N100 의 <code>.env</code>·서비스 상태는
 SSH 로 확인하세요 (<code>docs/운영 메모.md</code> §7 참고).</p>
 
 {% endblock %}
