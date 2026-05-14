@@ -269,12 +269,17 @@ async def list_cmd(interaction: discord.Interaction):
 
 async def _report_slug_autocomplete(interaction: discord.Interaction, current: str
                                      ) -> list[app_commands.Choice[str]]:
-    """`/report` 의 slug 인자 자동완성 — 본인 subscriptions 중 current 로 시작/포함하는 것."""
+    """`/report` 의 slug 인자 자동완성 — 본인 subscriptions 중 current 로 시작/포함하는 것.
+    Discord 의 autocomplete Choice.value 는 최대 100자 — 그 이상 slug 는 *제외* 한다(전체 응답이
+    400 Bad Request 로 깨져 "옵션 불러오기 실패" 가 뜨므로). 100자 넘는 slug 의 신고는 사용자가
+    /report 의 slug 인자에 직접 타이핑해 전송할 수 있다(검증은 report_cmd 에서)."""
     rows = db.list_subscriptions(_conn, user_id=str(interaction.user.id))
     cur = (current or "").lower()
     out: list[app_commands.Choice[str]] = []
     for r in rows:
         slug = r["slug"]
+        if len(slug) > 100:
+            continue
         if not cur or cur in slug.lower():
             out.append(app_commands.Choice(name=slug[:100], value=slug))
             if len(out) >= 25:  # Discord 상한
