@@ -285,6 +285,42 @@ async def list_cmd(interaction: discord.Interaction):
     await interaction.response.send_message("\n".join(lines)[:1900], ephemeral=True)
 
 
+FEEDBACK_MAX_LEN = 5900
+
+
+@tree.command(name="feedback", description="자유 의견을 남깁니다 (slug 무관, 5900자 이내).")
+@app_commands.describe(message="의견 — 자연어 자유 입력. 5900자 이내.")
+async def feedback_cmd(interaction: discord.Interaction, message: str):
+    msg = (message or "").strip()
+    if not msg:
+        await interaction.response.send_message("❌ message 가 비어있습니다.", ephemeral=True)
+        return
+    if len(msg) > FEEDBACK_MAX_LEN:
+        await interaction.response.send_message(
+            f"❌ 너무 깁니다 — {FEEDBACK_MAX_LEN}자 이내로 줄여 주세요. (현재 {len(msg)}자)",
+            ephemeral=True,
+        )
+        return
+    fid = db.add_feedback(
+        _conn, user_id=str(interaction.user.id),
+        username=str(interaction.user), message=msg,
+    )
+    await interaction.response.send_message(
+        f"✅ 의견 접수됨 (#{fid}). 읽어볼게요. 추가 의견은 다시 `/feedback`.",
+        ephemeral=True,
+    )
+    # OWNER DM — 전문 그대로. send_chunked_dm 이 2000자 단위로 split.
+    try:
+        oid = owner_user_id()
+        if oid and oid.isdigit():
+            body = (f"💬 새 의견 #{fid}\n"
+                    f"• from: {interaction.user} (id={interaction.user.id})\n"
+                    f"• at: {_now_iso()}\n\n{msg}")
+            await admin_mod.send_chunked_dm(client, oid, body)
+    except Exception as e:  # noqa: BLE001
+        log.warning("feedback owner DM 실패: %r", e)
+
+
 @tree.command(name="announce", description="봇 공지 수신 설정 — 인자 없이 호출하면 현재 상태 표시.")
 @app_commands.describe(
     dm="내 DM 으로 공지 받기 (true=받음 / false=옵트아웃). 미지정이면 변경 안 함.",
@@ -350,9 +386,10 @@ async def help_cmd(interaction: discord.Interaction):
         inline=False,
     )
     embed.add_field(
-        name="문제 신고 · 상태",
+        name="문제 신고 · 의견 · 상태",
         value=(
             "`/report <slug> <issue>` — 본인 구독에 문제 있을 때 신고. 관리자가 진단·해결.\n"
+            "`/feedback <message>` — 자유 의견(slug 무관, 5900자 이내).\n"
             "`/status` — 봇·폴링 상태 (가동시간, 잡 큐, 마지막 폴링 등)."
         ),
         inline=False,

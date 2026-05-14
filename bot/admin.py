@@ -153,6 +153,27 @@ def build_admin_tree(client: discord.Client, conn, *, admin_guild: discord.Objec
             await interaction.response.send_message(
                 f"❌ 신고 #{report_id} 가 없거나 이미 resolved.", ephemeral=True)
 
+    @admin.command(name="feedback", description="사용자가 보낸 자유 의견 목록.")
+    @app_commands.describe(count="최근 개수 (기본 10, 최대 50)")
+    async def feedback_list_cmd(interaction: discord.Interaction,
+                                count: app_commands.Range[int, 1, 50] = 10):
+        if not _is_owner(interaction):
+            await interaction.response.send_message("❌ owner 전용 명령입니다.", ephemeral=True)
+            return
+        rows = db.list_feedback(conn, limit=int(count))
+        if not rows:
+            await interaction.response.send_message("의견 없음.", ephemeral=True)
+            return
+        out_lines = [f"**의견 목록 ({len(rows)}건)**"]
+        for r in rows:
+            ts = (r["created_at"] or "")[:16]
+            user = r["username"] or r["user_id"]
+            preview = (r["message"] or "").replace("\n", " ")
+            if len(preview) > 200:
+                preview = preview[:200] + "…"
+            out_lines.append(f"- #{r['id']} `{user}` · {ts}\n   {preview}")
+        await _ack_and_dm(interaction, "\n".join(out_lines))
+
     @admin.command(name="announce", description="봇 공지 발송 — preview 후 버튼으로 확인 발송.")
     @app_commands.describe(
         message="공지 본문 (markdown 허용, 최대 ~4000자)",

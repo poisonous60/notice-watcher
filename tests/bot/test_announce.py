@@ -161,6 +161,32 @@ def run() -> list[tuple[str, bool, str]]:
         f"got aid={aid} aid2={aid2}",
     ))
 
+    # ----- 8. feedback — add + recent ordering -----
+    conn6 = _setup_conn()
+    f1 = db.add_feedback(conn6, user_id="u1", username="alice#001", message="first")
+    f2 = db.add_feedback(conn6, user_id="u2", username="bob#002", message="second\nwith newline")
+    rows = db.list_feedback(conn6)
+    cases.append((
+        "feedback_recent_desc",
+        len(rows) == 2 and rows[0]["id"] == f2 and rows[1]["id"] == f1,
+        f"got ids={[r['id'] for r in rows]!r}",
+    ))
+    cases.append((
+        "feedback_fields_persisted",
+        rows[0]["user_id"] == "u2" and rows[0]["username"] == "bob#002"
+        and rows[0]["message"] == "second\nwith newline",
+        f"got {dict(rows[0])!r}",
+    ))
+
+    # limit honored
+    f3 = db.add_feedback(conn6, user_id="u3", username="carol#003", message="third")
+    rows = db.list_feedback(conn6, limit=2)
+    cases.append((
+        "feedback_limit_honored",
+        len(rows) == 2 and rows[0]["id"] == f3,
+        f"got n={len(rows)} ids={[r['id'] for r in rows]!r}",
+    ))
+
     return cases
 
 

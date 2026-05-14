@@ -26,6 +26,9 @@ DB 파일: output/bot.sqlite3 (이미 .gitignore 됨).
       기본 opt-in — *row 가 있고 opted_out=1* 인 경우만 발송 대상에서 제외 (행 없음 = 수신).
   announcements(id, title, message, sent_by, sent_at, dm_sent, dm_failed, channel_sent, channel_failed)
       `/admin announce` 발송 audit. 재발송 dedup 안 함 — owner 가 같은 글 재전송 가능.
+  feedback(id, user_id, username, message, created_at)
+      `/feedback` 으로 사용자가 보낸 자유 의견. status 없음(inbox-only).
+      slug/triage 무관 — owner 가 읽고 자체 판단.
 """
 from __future__ import annotations
 
@@ -150,6 +153,16 @@ CREATE TABLE IF NOT EXISTS announcements (
     channel_failed  INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_announce_sent_at ON announcements(sent_at DESC);
+
+-- 자유 의견(`/feedback`). slug/status 없음 — owner 가 읽기만. message 는 5900자 cap(클라이언트 강제).
+CREATE TABLE IF NOT EXISTS feedback (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    TEXT NOT NULL,
+    username   TEXT,
+    message    TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_feedback_created ON feedback(created_at DESC);
 """
 
 
@@ -593,4 +606,25 @@ def update_announcement_counts(conn: sqlite3.Connection, announcement_id: int, *
 def recent_announcements(conn: sqlite3.Connection, limit: int = 20) -> list[sqlite3.Row]:
     return conn.execute(
         "SELECT * FROM announcements ORDER BY id DESC LIMIT ?", (limit,)
+    ).fetchall()
+
+
+# --------------------------------------------------------------------------- #
+# feedback (`/feedback`) — 의견 inbox. owner 가 `/admin feedback` 으로 읽음.
+# --------------------------------------------------------------------------- #
+def add_feedback(conn: sqlite3.Connection, *, user_id: str, username: Optional[str],
+                 message: str) -> int:
+    def _do():
+        cur = conn.execute(
+            "INSERT INTO feedback(user_id,username,message,created_at) VALUES(?,?,?,?)",
+            (user_id, username, message, _now_iso()),
+        )
+        conn.commit()
+        return int(cur.lastrowid)
+    return _retry(_do)
+
+
+def list_feedback(conn: sqlite3.Connection, limit: int = 20) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM feedback ORDER BY id DESC LIMIT ?", (limit,)
     ).fetchall()
