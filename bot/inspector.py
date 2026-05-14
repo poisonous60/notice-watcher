@@ -522,7 +522,12 @@ def format_recent_jobs(rows: list[dict]) -> str:
     lines = ["**최근 register 잡:**"]
     for r in rows:
         rb = r.get("requested_by") or {}
-        rb_str = rb.get("name", "?") if isinstance(rb, dict) else "?"
+        if isinstance(rb, dict):
+            name = rb.get("name", "?")
+            uid = rb.get("id")
+            rb_str = f"{name} (<@{uid}>)" if uid else name
+        else:
+            rb_str = "?"
         lines.append(
             f"- #{r['id']} `{r.get('slug')}` · {r.get('status')} · via={r.get('via')} · {rb_str}\n"
             f"   URL: {r.get('url')}\n"
