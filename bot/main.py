@@ -30,7 +30,9 @@ import discord  # noqa: E402
 from discord import app_commands  # noqa: E402
 
 from bot import admin as admin_mod, db, inspector, site_ops, url_gate, worker  # noqa: E402
-from bot.config import admin_guild_id, bot_token, guild_id, owner_user_id, safe_browsing_api_key  # noqa: E402
+from bot.config import (  # noqa: E402
+    admin_guild_id, bot_token, feedback_max_len, guild_id, owner_user_id, safe_browsing_api_key,
+)
 from probe.paths import url_to_slug  # noqa: E402
 
 CONFIGS_DIR = site_ops.CONFIGS_DIR
@@ -285,19 +287,25 @@ async def list_cmd(interaction: discord.Interaction):
     await interaction.response.send_message("\n".join(lines)[:1900], ephemeral=True)
 
 
-FEEDBACK_MAX_LEN = 5900
+_FEEDBACK_MAX_LEN_AT_LOAD = feedback_max_len()  # description 은 등록 시점에 고정 — restart 시 갱신
 
 
-@tree.command(name="feedback", description="자유 의견을 남깁니다 (slug 무관, 5900자 이내).")
-@app_commands.describe(message="의견 — 자연어 자유 입력. 5900자 이내.")
+@tree.command(
+    name="feedback",
+    description=f"자유 의견 (slug 무관, 최대 {_FEEDBACK_MAX_LEN_AT_LOAD}자).",
+)
+@app_commands.describe(
+    message=f"의견 — 자연어 자유 입력. 최대 {_FEEDBACK_MAX_LEN_AT_LOAD}자.",
+)
 async def feedback_cmd(interaction: discord.Interaction, message: str):
+    max_len = feedback_max_len()
     msg = (message or "").strip()
     if not msg:
         await interaction.response.send_message("❌ message 가 비어있습니다.", ephemeral=True)
         return
-    if len(msg) > FEEDBACK_MAX_LEN:
+    if len(msg) > max_len:
         await interaction.response.send_message(
-            f"❌ 너무 깁니다 — {FEEDBACK_MAX_LEN}자 이내로 줄여 주세요. (현재 {len(msg)}자)",
+            f"❌ 너무 깁니다 — {max_len}자 이내로 줄여 주세요. (현재 {len(msg)}자)",
             ephemeral=True,
         )
         return
@@ -389,7 +397,7 @@ async def help_cmd(interaction: discord.Interaction):
         name="문제 신고 · 의견 · 상태",
         value=(
             "`/report <slug> <issue>` — 본인 구독에 문제 있을 때 신고. 관리자가 진단·해결.\n"
-            "`/feedback <message>` — 자유 의견(slug 무관, 5900자 이내).\n"
+            f"`/feedback <message>` — 자유 의견(slug 무관, 최대 {_FEEDBACK_MAX_LEN_AT_LOAD}자).\n"
             "`/status` — 봇·폴링 상태 (가동시간, 잡 큐, 마지막 폴링 등)."
         ),
         inline=False,

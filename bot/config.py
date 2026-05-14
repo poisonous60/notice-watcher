@@ -61,3 +61,18 @@ def admin_guild_id() -> int | None:
     load_env()
     v = os.environ.get("ADMIN_GUILD_ID", "").strip()
     return int(v) if v.isdigit() else None
+
+
+FEEDBACK_MAX_LEN_DEFAULT = 5700  # discord 6000자 STRING 인자 한계 - 마진
+
+
+def feedback_max_len() -> int:
+    """`/feedback` 의 message 인자 최대 길이. .env `FEEDBACK_MAX_LEN` 로 override.
+    discord slash command STRING 인자는 6000자가 한계 — 안전 마진 두고 5700자 기본."""
+    load_env()
+    v = os.environ.get("FEEDBACK_MAX_LEN", "").strip()
+    if v.isdigit():
+        n = int(v)
+        if 1 <= n <= 6000:
+            return n
+    return FEEDBACK_MAX_LEN_DEFAULT
