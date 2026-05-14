@@ -2,7 +2,7 @@
 {% block title %}Control — notice-watcher{% endblock %}
 {% block body %}
 
-<h2>🎛 Control</h2>
+<h2 class="control-title">🎛 Control</h2>
 
 <p class="muted" style="font-size:0.88rem;margin:0 0 0.6rem 0;">
   localhost-only 1인 운영 패널. 저장은 즉시 N100 으로 push.
@@ -17,8 +17,10 @@
 </p>
 {% endif %}
 
+<div class="control-grid">
+
 <!-- ============ 1. Model routing ============ -->
-<details class="control-section" open>
+<details class="control-section full-span" open>
 <summary>1. Model routing  <span class="muted" style="font-weight:normal;font-size:0.88rem;">— call_site 별 provider:model</span></summary>
 <form hx-post="/control/save/routing" hx-target="#routing-result" hx-swap="innerHTML">
   <p class="muted" style="font-size:0.85rem;margin:0.2rem 0;">
@@ -96,7 +98,7 @@
 </details>
 
 <!-- ============ 2. Runtime tuning ============ -->
-<details class="control-section">
+<details class="control-section full-span">
 <summary>2. Runtime tuning  <span class="muted" style="font-weight:normal;font-size:0.88rem;">— config.local.toml override</span></summary>
 <form hx-post="/control/save/runtime" hx-target="#runtime-result" hx-swap="innerHTML">
   <p class="muted" style="font-size:0.85rem;margin:0.2rem 0;">
@@ -152,7 +154,7 @@
 </details>
 
 <!-- ============ 3. Environment ============ -->
-<details class="control-section">
+<details class="control-section full-span">
 <summary>3. Environment (.env)  <span class="muted" style="font-weight:normal;font-size:0.88rem;">— 비밀 포함, 봇 재시작 필요</span></summary>
 {% if not load_remote %}
 <p class="muted">N100 의 <code>.env</code> 를 먼저 로드하세요 (상단 ⬇ 버튼). 로컬에 비밀이 저장되지 않도록 메모리에서만 다룸.</p>
@@ -221,7 +223,7 @@ document.getElementById('env-reveal').addEventListener('change', (e) => {
 </details>
 
 <!-- ============ 5. Remote commands ============ -->
-<details class="control-section" open>
+<details class="control-section full-span" open>
 <summary>5. Remote commands  <span class="muted" style="font-weight:normal;font-size:0.88rem;">— systemctl --user</span></summary>
 <div style="display:flex;flex-wrap:wrap;gap:0.4rem;margin:0.3rem 0;">
   <form hx-post="/control/cmd/poll-now" hx-target="#cmd-result" hx-swap="innerHTML">
@@ -235,9 +237,11 @@ document.getElementById('env-reveal').addEventListener('change', (e) => {
     <button class="secondary" style="margin:0;padding:0.4rem 0.9rem;width:auto;">↺ daemon-reload</button>
   </form>
 </div>
-<div style="display:flex;flex-wrap:wrap;gap:0.4rem;margin:0.3rem 0;align-items:center;">
-  <form hx-post="/control/cmd/status" hx-target="#cmd-result" hx-swap="innerHTML">
-    <select name="unit" style="margin:0;">
+<div style="display:flex;flex-wrap:wrap;gap:0.8rem;margin:0.5rem 0;align-items:center;">
+  <form hx-post="/control/cmd/status" hx-target="#cmd-result" hx-swap="innerHTML"
+        style="display:inline-flex;align-items:center;gap:0.4rem;margin:0;">
+    <span class="muted" style="font-size:0.85rem;">unit:</span>
+    <select name="unit" style="margin:0;width:auto;min-width:7em;">
       <option value="bot">bot</option>
       <option value="poll">poll</option>
       <option value="poll-timer">poll-timer</option>
@@ -245,13 +249,16 @@ document.getElementById('env-reveal').addEventListener('change', (e) => {
     </select>
     <button class="secondary" style="margin:0;padding:0.4rem 0.9rem;width:auto;">⏵ status</button>
   </form>
-  <form hx-post="/control/cmd/logs" hx-target="#cmd-result" hx-swap="innerHTML">
-    <select name="unit" style="margin:0;">
+  <form hx-post="/control/cmd/logs" hx-target="#cmd-result" hx-swap="innerHTML"
+        style="display:inline-flex;align-items:center;gap:0.4rem;margin:0;">
+    <span class="muted" style="font-size:0.85rem;">unit:</span>
+    <select name="unit" style="margin:0;width:auto;min-width:7em;">
       <option value="bot">bot</option>
       <option value="poll">poll</option>
       <option value="notify">notify</option>
     </select>
-    <input type="number" name="tail" value="100" min="10" max="2000" style="width:6em;margin:0;">
+    <span class="muted" style="font-size:0.85rem;">tail:</span>
+    <input type="number" name="tail" value="100" min="10" max="2000" style="width:5em;margin:0;">
     <button class="secondary" style="margin:0;padding:0.4rem 0.9rem;width:auto;">📜 logs</button>
   </form>
 </div>
