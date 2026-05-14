@@ -16,9 +16,12 @@ from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup, Tag
 
+from ._contract import validate_payload
+from ._heuristic import heuristic
 from .hydration import find_list_in_json
 
 
+@heuristic
 def html_repeating_patterns(html: str, base_url: str, *, min_children: int = 5) -> list[dict]:
     """같은 부모 안에서 같은 시그니처(태그+클래스)를 갖는 자식이 N개 이상인 노드 후보."""
     if not html:
@@ -77,6 +80,7 @@ def html_repeating_patterns(html: str, base_url: str, *, min_children: int = 5) 
     return deduped[:15]
 
 
+@heuristic
 def _signature(tag: Tag) -> str:
     classes = ".".join(tag.get("class") or [])
     return f"{tag.name}.{classes}" if classes else tag.name
@@ -93,6 +97,7 @@ def _css_selector(tag: Tag) -> str:
 _NUM_RE = re.compile(r"\d+")
 
 
+@heuristic
 def _common_url_prefix(hrefs: list[str]) -> Optional[str]:
     if not hrefs:
         return None
@@ -107,6 +112,7 @@ def _common_url_prefix(hrefs: list[str]) -> Optional[str]:
     return s or None
 
 
+@heuristic
 def _href_pattern(hrefs: list[str]) -> Optional[str]:
     """첫 href에서 숫자/슬러그 부분을 placeholder로 치환한 추측 패턴."""
     if not hrefs:
@@ -121,12 +127,14 @@ def _href_pattern(hrefs: list[str]) -> Optional[str]:
 _JS_HREF_RE = re.compile(r"^\s*(?:#|javascript:)", re.IGNORECASE)
 
 
+@heuristic
 def _is_js_href(h: Optional[str]) -> bool:
     """href 가 글 URL 이 아닌 것 — 빈값, '#', 'javascript:...' (클릭 핸들러가 URL 을 만드는 목록)."""
     h = (h or "").strip()
     return (not h) or bool(_JS_HREF_RE.match(h))
 
 
+@heuristic
 def _row_data_attrs(tag: Tag, *, max_attrs: int = 8) -> dict:
     """행 요소(와 그 안 첫 <a>)의 data-* 속성 샘플. href 가 javascript: 인 목록에서 post_id 가 보통 여기 박혀 있다."""
     out: dict[str, str] = {}
@@ -169,6 +177,7 @@ def _entry_resource_type(entry: dict) -> str:
     return str(entry.get("_resourceType") or entry.get("resourceType") or "").lower()
 
 
+@heuristic
 def traffic_api_candidates(har_path: Path, *, page_url: str = "") -> list[dict]:
     """HAR 에서 '글 목록' 일 만한 JSON 응답 후보를 *관련도(relevance_score) 순* 으로.
 
@@ -278,6 +287,7 @@ _BODY_KEY_HINTS = re.compile(
 _HTMLISH_RE = re.compile(r"</[a-z][\w-]*>|<(?:p|div|br|img|span|h[1-6]|ul|li|table|strong)\b|&nbsp;|&lt;", re.IGNORECASE)
 
 
+@heuristic
 def _ids_in_url(url: str) -> set[str]:
     """URL(경로+쿼리)에서 4자리 이상 숫자 런 — post_id 추정용."""
     from urllib.parse import urlsplit
@@ -288,6 +298,7 @@ def _ids_in_url(url: str) -> set[str]:
 _MULTI_TLD = ("co.kr", "co.jp", "co.uk", "com.cn", "or.kr", "ne.jp", "go.kr", "ac.kr")
 
 
+@heuristic
 def _registrable(host: str) -> str:
     """host → 등록가능도메인 근사치 (PSL 없이): co.kr/co.jp 등은 3라벨, 그 외 2라벨."""
     parts = (host or "").lower().split(".")
@@ -296,6 +307,7 @@ def _registrable(host: str) -> str:
     return ".".join(parts[-2:]) if len(parts) >= 2 else (host or "").lower()
 
 
+@heuristic
 def _same_site(url_a: str, url_b: str) -> bool:
     """두 URL 이 같은 사이트(등록가능도메인)인가 — 광고/트래커(onetag.co.kr, criteo.com 등) 후보를 거르는 용도."""
     from urllib.parse import urlsplit
@@ -311,6 +323,7 @@ def _dig(obj: Any, path: list) -> Any:
     return obj
 
 
+@heuristic
 def _walk_long_strings(node: Any, path: list, out: list, *, depth: int = 0, max_depth: int = 7, budget: Optional[list] = None) -> None:
     """JSON 안에서 '본문스러운' 긴 문자열들을 모은다. path = 키(str)/인덱스(int) 리스트(엔진의 from:json path 형식)."""
     if budget is None:
@@ -356,6 +369,7 @@ def _har_entry_response_text(entry: dict, har_path: Path) -> str:
     return text
 
 
+@heuristic
 def traffic_article_body_candidates(har_path: Path, article_url: str = "", *, max_candidates: int = 6) -> list[dict]:
     """HAR 에서 '단일 글 본문' 을 담은 JSON 응답 후보를 점수순으로. (= traffic_api_candidates 의 본문판)
 
@@ -419,6 +433,7 @@ def traffic_article_body_candidates(har_path: Path, article_url: str = "", *, ma
     return cands[:max_candidates]
 
 
+@heuristic
 def _article_url_score(u: Optional[str], base_host: str) -> int:
     """'진짜 글 페이지 URL' 같은 정도. (헤더의 myinfo/login 링크 같은 잡 후보를 거르기 위해)"""
     if not u:
@@ -437,6 +452,7 @@ def _article_url_score(u: Optional[str], base_host: str) -> int:
     return s
 
 
+@heuristic
 def pick_first_article_url(
     *,
     html_candidates: list[dict],
@@ -484,6 +500,7 @@ def write_list_candidates(
         "inline_js_data_candidates": inline_js_candidates or [],
         "first_article_url": first_article_url,
     }
+    validate_payload("list_candidates.json", payload, allow_extra=False)
     (out_dir / "list_candidates.json").write_text(
         json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
     )

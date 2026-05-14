@@ -10,6 +10,8 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from ._contract import validate_payload
+from ._heuristic import heuristic
 from .signals import classify
 from .types import Classification, Result
 
@@ -216,6 +218,7 @@ _ARTICLE_HINT_RE = re.compile(r"(view|detail|article|notice|read|thread|post|bbs
 _ID_DATA_KEY_RE = re.compile(r"(^|[-_])(id|no|seq|article|thread|data|post|board|nid|cid|aid)", re.IGNORECASE)
 
 
+@heuristic
 def _score_click_link(link: dict, *, page_host: str) -> int:
     href = (link.get("href") or "").strip()
     text = (link.get("text") or "").strip()
@@ -408,9 +411,11 @@ def fetch_article_by_click(
     meta["status"] = status
     # NOTE: '클릭 후 URL 이 first_article_url(=probe 가 추측한 글 URL)과 다른가' 비교는 digest.py 에서 한다
     #       (여기선 list_url 밖에 모르는데, 목록→글 클릭이 list_url 과 다른 URL 로 가는 건 당연하므로 의미 없음).
+    # contract validate 를 try 블록 밖에 둠 — audit [B]: contract 위반이 OSError 와 함께 silent drop 되면 안 됨.
+    validate_payload("article_click.json", meta, allow_extra=False)
     try:
         (out_dir / "article_click.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
-    except Exception:  # noqa: BLE001
+    except OSError:  # 디스크 쓰기 실패만 swallow (contract 위반 아님)
         pass
 
     cls, notable = classify(status=status, body=body, headers={}, final_url=final_url,

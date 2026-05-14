@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from typing import Optional
 
+from ._contract import validate_payload
 from .types import Diagnosis, Result
 
 
@@ -72,6 +73,7 @@ def write_summary(
         "results": [r.to_dict() for r in all_results],
         "baseline": {k: v.to_dict() for k, v in baseline.items()},
     }
+    validate_payload("diagnosis.json", payload, allow_extra=False)
     (out_dir / "diagnosis.json").write_text(
         json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
     )

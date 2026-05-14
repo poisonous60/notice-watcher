@@ -351,6 +351,14 @@ def _reprobe_article(slug: str, article_url: str) -> int:
             print(f"[register]   + traffic.article_click.har 에서 본문 API 후보 {len(added)}건 추가")
             cands = (cands + added)[:8]
 
+    # contract 검증 — 실패해도 _reprobe_article 흐름 중단 X (WARN 후 계속)
+    try:
+        from probe._contract import validate_payload as _vp, ContractError as _CE
+        _vp("article_candidates.json", cands, allow_extra=False)
+    except _CE as e:
+        print(f"[register]   ⚠ article_candidates.json contract 위반: {e}")
+    except Exception:  # noqa: BLE001
+        pass
     (out_dir / "article_candidates.json").write_text(json.dumps(cands, ensure_ascii=False, indent=2), encoding="utf-8")
     for c in cands[:3]:
         print(f"[register]     본문 API 후보: {c.get('method')} {c.get('url')}  body_field_path={c.get('body_field_path')} "

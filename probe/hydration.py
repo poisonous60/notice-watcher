@@ -7,11 +7,14 @@ from typing import Any, Optional
 
 from bs4 import BeautifulSoup
 
+from ._heuristic import heuristic
+
 
 _INLINE_NUXT_RE = re.compile(r"window\.__NUXT__\s*=\s*({.*?});", re.DOTALL)
 _INLINE_INIT_RE = re.compile(r"window\.__INITIAL_STATE__\s*=\s*({.*?});", re.DOTALL)
 
 
+@heuristic
 def extract_hydration(html: str) -> dict[str, Any]:
     """발견된 hydration JSON들을 dict로 묶어 반환."""
     out: dict[str, Any] = {}
@@ -50,6 +53,7 @@ _ID_KEYS = ("id", "articleId", "noticeId", "no", "slug", "uid", "uuid", "code",
 _DATE_KEYS = ("publishedAt", "createdAt", "date", "regDate", "pubDate", "datetime", "updatedAt", "displayAt")
 
 
+@heuristic
 def _looks_like_row(first: dict) -> Optional[str]:
     """dict 가 글 한 건처럼 보이면 그 '항목 dict' 까지의 하위 경로를 반환(없으면 None).
     "" = first 자체가 항목. "feed" = first["feed"] 가 항목(엔벨로프형: {feed:{title,feedId,...}, user:{...}, ...}).
@@ -62,6 +66,7 @@ def _looks_like_row(first: dict) -> Optional[str]:
     return None
 
 
+@heuristic
 def find_list_in_json(blob: Any, *, min_items: int = 5) -> list[dict]:
     """블롭 안에서 글 목록일 가능성 있는 배열을 찾는다.
 
@@ -129,6 +134,7 @@ _PUSH_RE = re.compile(r"\b([A-Za-z_$][\w$]*)\s*\.\s*push\s*\(\s*\{")
 _ANALYTICS_QUEUE_RE = re.compile(r"(datalayer|_?gaq|_?paq|appier_q|fbq|_?hsq|gtm|gtag|^ga$|adsbygoogle|amplitude|mixpanel|clarity|optimizely|criteo_q)", re.IGNORECASE)
 
 
+@heuristic
 def _balanced(s: str, start: int, open_ch: str, close_ch: str, *, limit: int = 400_000) -> Optional[tuple[str, int]]:
     """s[start] 가 open_ch 라 가정. 짝 맞는 close_ch 까지의 슬라이스와 그 다음 인덱스를 반환(없으면 None). 문자열 리터럴 안의 괄호는 무시."""
     depth = 0
@@ -155,10 +161,12 @@ def _balanced(s: str, start: int, open_ch: str, close_ch: str, *, limit: int = 4
     return None
 
 
+@heuristic
 def _looks_rowish(d: Any) -> bool:
     return isinstance(d, dict) and any(k in d for k in _TITLE_KEYS) and any(k in d for k in _ID_KEYS)
 
 
+@heuristic
 def extract_inline_data(html: str, *, max_candidates: int = 8) -> list[dict]:
     """페이지 안의 인라인 JSON/JS 에서 '글 목록' 일 만한 데이터 후보를 모은다 (각 후보 dict 의 'kind' 로 구분).
 

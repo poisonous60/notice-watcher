@@ -10,6 +10,7 @@ from urllib.parse import urljoin, urlsplit
 import httpx
 from bs4 import BeautifulSoup
 
+from ._contract import validate_payload
 from .headers import preset_h2_chrome_min
 
 
@@ -55,6 +56,7 @@ def discover_feeds(*, page_url: str, page_html: str, out_dir: Path) -> dict:
             time.sleep(0.5)
 
     out = {"page_url": page_url, "candidates": candidates}
+    validate_payload("feed_candidates.json", out, allow_extra=False)
     (out_dir / "feed_candidates.json").write_text(
         json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8"
     )
@@ -88,6 +90,7 @@ def read_robots(*, page_url: str, out_dir: Path) -> dict:
     except Exception as e:
         info["error"] = f"{type(e).__name__}: {e}"
 
+    validate_payload("robots.json", info, allow_extra=False)
     (out_dir / "robots.json").write_text(
         json.dumps(info, ensure_ascii=False, indent=2), encoding="utf-8"
     )

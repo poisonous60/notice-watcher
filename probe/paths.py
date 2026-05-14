@@ -5,12 +5,15 @@ import re
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from ._heuristic import heuristic
+
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 OUTPUT_ROOT = PROJECT_ROOT / "output" / "probe"
 STATE_ROOT = PROJECT_ROOT / "output" / "state"
 
 
+@heuristic
 def url_to_slug(url: str) -> str:
     parts = urlsplit(url)
     raw = f"{parts.netloc}_{parts.path.strip('/')}"
