@@ -1,17 +1,16 @@
-"""Gemini REST 클라이언트 (httpx). 별도 SDK 의존성 없이.
+"""Gemini REST 클라이언트 (httpx). `LLMClient` 구현.
 
-- 모델: 기본 `gemini-2.5-flash`. `GEMINI_MODEL` env 로 override (예: `gemini-3-flash-preview`, `gemini-flash-latest`).
-- API 키: 여러 개 지원. **호출마다 시작 키를 한 칸씩 굴려(라운드로빈)** 부하를 분산하고, quota(429) 나면
-  그 키를 "소진" 표시 후 다음 키로 자동 전환(한 호출 안에서 링을 한 바퀴까지 시도). 순환 커서는
-  `<repo>/output/state/gemini_key_cursor` 에 영구 저장 → 프로세스 재시작/매일 폴링마다 1번 키로 되돌아가지 않고 이어서 굴림.
+- 모델: 기본 `gemini-2.5-flash`. `GEMINI_MODEL` env 로 override.
+- API 키: 여러 개 지원. **호출마다 시작 키를 한 칸씩 굴려(라운드로빈)** 부하 분산. quota(429) 받은 키는
+  소진 표시 후 다음 키로 자동 전환(한 호출 안에서 링을 한 바퀴까지). 순환 커서는
+  `<repo>/output/state/gemini_key_cursor` 에 영구 저장 → 프로세스 재시작/매일 폴링마다 1번 키로 안 돌아감.
   키 소스(우선순위):
     1. env `GEMINI_API_KEYS` — 쉼표/줄바꿈 구분 여러 개
     2. env `GEMINI_API_KEY` 또는 `GOOGLE_API_KEY` — 한 개
     3. 파일 — env `GEMINI_API_KEY_FILE` 경로, 없으면 `<repo>/GEMINI_API_KEY.md` (한 줄에 키 하나, 빈 줄/`#` 무시)
-  한 프로세스 안에서 429 받은 키는 "소진"으로 표시해 이후 건너뜀. 전부 소진되면 명확히 에러.
-- 출력: `responseMimeType=application/json` 으로 파싱 가능한 JSON 강제(우리 config 포맷은 동적 키/재귀라
-  Gemini responseSchema 로 깔끔히 표현 못 함 → 프롬프트 + few-shot + 우리 validate_config 로 커버).
-- thinking: `thinkingConfig.thinkingBudget=0` 시도 → 모델이 거부(400)하면 그 옵션 빼고 1회 재시도.
+- 출력: `responseMimeType=application/json` 으로 파싱 가능한 JSON 강제(스키마는 prompt + validate 로 커버).
+- thinking: `thinkingConfig.thinkingBudget=0` 시도 → 모델이 거부(400)하면 옵션 빼고 1회 재시도.
+- 호환: 구 `generate_text` / `generate_json` 메서드 유지 (PR2 까지 caller 점진 이전).
 """
 from __future__ import annotations
 
@@ -23,6 +22,11 @@ from typing import Any, Optional
 
 import httpx
 
+from .llm_base import (
+    LLMClient, LLMResponse,
+    LLMError, LLMNetworkError, LLMQuotaError, LLMHttpError, LLMParseError,
+)
+
 
 API_BASE = "https://generativelanguage.googleapis.com/v1beta"
 _DEFAULT_MODEL = "gemini-2.5-flash"
@@ -31,8 +35,8 @@ _DEFAULT_KEY_FILE = _REPO_ROOT / "GEMINI_API_KEY.md"
 _CURSOR_FILE = _REPO_ROOT / "output" / "state" / "gemini_key_cursor"
 
 
-class GeminiError(RuntimeError):
-    pass
+class GeminiError(LLMError):
+    """레거시 alias. 새 코드는 LLMError 계열 catch."""
 
 
 def default_model() -> str:
@@ -56,7 +60,6 @@ def _load_keys() -> list[str]:
         path = Path(kf) if kf else _DEFAULT_KEY_FILE
         if path.exists():
             keys += _split_keys(path.read_text(encoding="utf-8"))
-    # dedupe, 순서 보존
     seen = set()
     out = []
     for k in keys:
@@ -78,21 +81,16 @@ def _write_cursor(n: int) -> None:
         _CURSOR_FILE.parent.mkdir(parents=True, exist_ok=True)
         _CURSOR_FILE.write_text(str(n % 1_000_000_000), encoding="utf-8")
     except OSError:
-        pass  # 커서 저장 실패가 Gemini 호출을 막으면 안 됨
+        pass
 
 
 class _KeyRing:
-    """프로세스 전역 키 링.
-
-    - 호출 단위로 시작 키를 한 칸 굴림(`rotate_start`) — 영구 커서(`_CURSOR_FILE`)라
-      프로세스 재시작/매일 폴링마다 1번 키로 되돌아가지 않음.
-    - 429 받은 키는 (이 프로세스 한정) 소진 표시 후 건너뜀.
-    """
+    """프로세스 전역 키 링."""
 
     def __init__(self) -> None:
         self._keys: Optional[list[str]] = None
         self._exhausted: set[int] = set()
-        self._start: int = 0  # rotate_start 가 갱신하는 라운드로빈 시작 오프셋
+        self._start: int = 0
 
     def _ensure(self) -> list[str]:
         if self._keys is None:
@@ -111,7 +109,6 @@ class _KeyRing:
         return len(self._ensure())
 
     def rotate_start(self) -> None:
-        """호출 단위로 시작 키를 한 칸 굴린다(영구 커서). 키가 1개면 no-op."""
         n = self.count()
         if n <= 1:
             self._start = 0
@@ -127,7 +124,7 @@ class _KeyRing:
             i = (self._start + off) % n
             if i not in self._exhausted:
                 return i
-        raise GeminiError(f"모든 Gemini API 키({n}개) quota 소진. 잠시 후 재시도하거나 키를 추가하세요.")
+        raise LLMQuotaError(f"모든 Gemini API 키({n}개) quota 소진. 잠시 후 재시도하거나 키를 추가하세요.")
 
     def current(self) -> tuple[int, str]:
         i = self.current_index()
@@ -143,9 +140,12 @@ class _KeyRing:
 _KEYRING = _KeyRing()
 
 
-class GeminiClient:
-    def __init__(self, *, model: Optional[str] = None, timeout: float = 120.0):
-        self.model = model or default_model()
+class GeminiClient(LLMClient):
+    provider = "gemini"
+
+    def __init__(self, *, model: Optional[str] = None, timeout: float = 120.0,
+                 recorder=None, cost_fn=None) -> None:
+        super().__init__(model=model or default_model(), recorder=recorder, cost_fn=cost_fn)
         self.timeout = timeout
         self._keyring = _KEYRING
 
@@ -166,39 +166,50 @@ class GeminiClient:
             "generationConfig": gen_cfg,
         }
 
-    def generate_text(self, *, system_instruction: str, user_text: str,
-                      temperature: float = 0.2, json_mode: bool = True) -> str:
-        self._keyring.rotate_start()  # 이번 호출은 다음 키부터 (라운드로빈)
+    def _do_request(self, *, system_instruction: str, user_text: str,
+                    temperature: float, json_mode: bool) -> LLMResponse:
+        self._keyring.rotate_start()
         n_keys = self._keyring.count()
         with_tb0 = True
-        attempts_left = n_keys + 1  # 각 키 1회 + thinkingConfig 거부 시 한 번 더
+        attempts_left = n_keys + 1
+        last_key_idx = None
         while attempts_left > 0:
             attempts_left -= 1
-            idx, key = self._keyring.current()  # 전부 소진이면 여기서 GeminiError
+            idx, key = self._keyring.current()
+            last_key_idx = idx
             body = self._build_body(system_instruction=system_instruction, user_text=user_text,
-                                    temperature=temperature, json_mode=json_mode, with_thinking_budget0=with_tb0)
+                                    temperature=temperature, json_mode=json_mode,
+                                    with_thinking_budget0=with_tb0)
             try:
                 with httpx.Client(timeout=self.timeout) as c:
                     r = c.post(self._url(key), json=body, headers={"Content-Type": "application/json"})
             except httpx.HTTPError as e:
-                raise GeminiError(f"Gemini 요청 실패(네트워크): {e}") from e
+                raise LLMNetworkError(f"Gemini 요청 실패(네트워크): {e}") from e
 
             if r.status_code == 200:
-                return _extract_text(r.json())
+                return _parse_response(r.json(), key_idx=idx, fallback_model=self.model)
 
             txt = r.text
             if r.status_code == 429 or ("RESOURCE_EXHAUSTED" in txt) or ("exceeded your current quota" in txt.lower()):
                 if n_keys > 1:
                     print(f"  [gemini] 키 #{idx + 1}/{n_keys} quota 소진(429) → 다음 키로 전환")
                 self._keyring.mark_exhausted(idx)
-                attempts_left = max(attempts_left, n_keys)  # 남은 키들 다 시도하도록 보장
+                attempts_left = max(attempts_left, n_keys)
                 continue
             if r.status_code == 400 and "thinking" in txt.lower() and with_tb0:
                 with_tb0 = False
                 attempts_left += 1
                 continue
-            raise GeminiError(f"Gemini API {r.status_code}: {txt[:600]}")
-        raise GeminiError("Gemini 호출 실패(키 소진 또는 재시도 한도)")
+            raise LLMHttpError(f"Gemini API {r.status_code}: {txt[:600]}", status_code=r.status_code)
+        raise LLMQuotaError(f"Gemini 호출 실패(키 소진 또는 재시도 한도) last_key_idx={last_key_idx}")
+
+    # ---- 레거시 호환: 기존 caller 가 점진 이전될 때까지 유지 ---- #
+    def generate_text(self, *, system_instruction: str, user_text: str,
+                      temperature: float = 0.2, json_mode: bool = True) -> str:
+        resp = self.generate(system_instruction=system_instruction, user_text=user_text,
+                             temperature=temperature, json_mode=json_mode,
+                             call_site="legacy")
+        return resp.text
 
     def generate_json(self, *, system_instruction: str, user_text: str, temperature: float = 0.2) -> Any:
         txt = self.generate_text(system_instruction=system_instruction, user_text=user_text,
@@ -206,17 +217,29 @@ class GeminiClient:
         return _parse_json_loose(txt)
 
 
-def _extract_text(data: dict) -> str:
+def _parse_response(data: dict, *, key_idx: Optional[int], fallback_model: str) -> LLMResponse:
     cands = data.get("candidates") or []
     if not cands:
-        raise GeminiError(f"응답에 candidates 없음 (promptFeedback={data.get('promptFeedback')})")
+        raise LLMParseError(f"응답에 candidates 없음 (promptFeedback={data.get('promptFeedback')})")
     c0 = cands[0]
     finish = c0.get("finishReason")
     parts = ((c0.get("content") or {}).get("parts") or [])
     text = "".join(p.get("text", "") for p in parts if isinstance(p, dict))
     if not text:
-        raise GeminiError(f"빈 응답 (finishReason={finish})")
-    return text
+        raise LLMParseError(f"빈 응답 (finishReason={finish})")
+    um = data.get("usageMetadata") or {}
+    pt = int(um.get("promptTokenCount") or 0)
+    ct = int(um.get("candidatesTokenCount") or 0)
+    tt = int(um.get("totalTokenCount") or (pt + ct))
+    raw_model = str(data.get("modelVersion") or fallback_model)
+    return LLMResponse(
+        text=text,
+        prompt_tokens=pt,
+        completion_tokens=ct,
+        total_tokens=tt,
+        raw_model=raw_model,
+        key_idx=key_idx,
+    )
 
 
 def _parse_json_loose(text: str) -> Any:
@@ -236,4 +259,4 @@ def _parse_json_loose(text: str) -> Any:
                 return json.loads(t[i:j + 1])
             except json.JSONDecodeError:
                 pass
-        raise GeminiError(f"모델 응답을 JSON 으로 파싱 실패: {e}\n--- 응답 앞부분 ---\n{text[:800]}")
+        raise LLMParseError(f"모델 응답을 JSON 으로 파싱 실패: {e}\n--- 응답 앞부분 ---\n{text[:800]}")
