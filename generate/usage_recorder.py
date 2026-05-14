@@ -80,4 +80,18 @@ def default_db_path() -> Path:
     return Path(__file__).resolve().parent.parent / "output" / "usage.sqlite3"
 
 
-__all__ = ["UsageRecorder", "default_db_path"]
+_default: Optional[UsageRecorder] = None
+
+
+def get_default_recorder() -> UsageRecorder:
+    """프로세스 전역 lazy recorder. notify/generator/bot 셋이 같은 인스턴스를 공유.
+
+    sqlite WAL 모드라 동시 writer 안전. 한 프로세스 안에서 매번 새로 만들 필요 X.
+    """
+    global _default
+    if _default is None:
+        _default = UsageRecorder(default_db_path())
+    return _default
+
+
+__all__ = ["UsageRecorder", "default_db_path", "get_default_recorder"]

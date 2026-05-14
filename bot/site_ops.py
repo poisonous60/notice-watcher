@@ -29,6 +29,7 @@ from scripts._chromium_lock import chromium_lock  # noqa: E402
 from scripts.notify import format_message, summarize_post  # noqa: E402
 from engine import load_config, make_adapter  # noqa: E402
 from generate import GeminiClient  # noqa: E402
+from generate import get_default_recorder, compute_cost  # noqa: E402
 from bot.runtime_config import settings  # noqa: E402
 
 
@@ -36,9 +37,10 @@ _gemini: Optional[GeminiClient] = None
 
 
 def gemini_client() -> GeminiClient:
+    """PR3 에서 call_site 별 factory 로 교체 예정. 그때까지 봇 프로세스 한정 싱글톤 + recorder 주입."""
     global _gemini
     if _gemini is None:
-        _gemini = GeminiClient()
+        _gemini = GeminiClient(recorder=get_default_recorder(), cost_fn=compute_cost)
     return _gemini
 
 
@@ -149,7 +151,7 @@ async def make_example(slug: str) -> Optional[str]:
             except Exception:  # noqa: BLE001
                 full = posts[0]
         post_dict = full.to_dict()
-        summary = await asyncio.to_thread(summarize_post, gemini_client(), post_dict)
+        summary = await asyncio.to_thread(summarize_post, gemini_client(), post_dict, slug=slug)
         return format_message(post_dict, summary)
     except Exception as e:  # noqa: BLE001
         log.warning("예시 생성 실패 (%s): %r", slug, e)

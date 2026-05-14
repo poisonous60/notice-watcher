@@ -11,7 +11,10 @@ from typing import Callable, Optional
 from urllib.parse import urlsplit
 
 from engine import validate_config, ConfigError
-from .gemini import GeminiClient, GeminiError
+from .gemini import GeminiClient, GeminiError, _parse_json_loose
+from .llm_base import LLMError
+from .prices import compute_cost
+from .usage_recorder import get_default_recorder
 from .prompt import SYSTEM_INSTRUCTION, build_user_prompt, build_retry_prompt
 from .validate import validate_built_config, ValidationReport
 
@@ -31,10 +34,25 @@ def _patch_minimal(cfg: dict, digest: dict) -> dict:
     return cfg
 
 
-def _generate_raw(digest: dict, *, client: GeminiClient, prompt_text: str, temperature: float) -> dict:
+def _slug_from_digest(digest: dict) -> Optional[str]:
+    """digest 에 slug 직접 키가 있으면 그걸, 없으면 url netloc 기반 fallback. usage 기록의 차원용."""
+    s = digest.get("slug")
+    if isinstance(s, str) and s:
+        return s
+    url = digest.get("url")
+    if isinstance(url, str) and url:
+        return urlsplit(url).netloc or None
+    return None
+
+
+def _generate_raw(digest: dict, *, client: GeminiClient, prompt_text: str, temperature: float,
+                  call_site: str, attempt: int) -> dict:
     try:
-        cfg = client.generate_json(system_instruction=SYSTEM_INSTRUCTION, user_text=prompt_text, temperature=temperature)
-    except GeminiError as e:
+        resp = client.generate(system_instruction=SYSTEM_INSTRUCTION, user_text=prompt_text,
+                               temperature=temperature, json_mode=True,
+                               call_site=call_site, slug=_slug_from_digest(digest), attempt=attempt)
+        cfg = _parse_json_loose(resp.text)
+    except LLMError as e:
         raise GenerationError(f"gemini 호출/파싱 실패: {e}") from e
     return _patch_minimal(cfg, digest)
 
@@ -42,8 +60,9 @@ def _generate_raw(digest: dict, *, client: GeminiClient, prompt_text: str, tempe
 def generate_config(digest: dict, *, client: Optional[GeminiClient] = None,
                     model: Optional[str] = None, temperature: float = 0.2) -> dict:
     """1-shot. 스키마 검증 통과한 config 반환. 실패 시 GenerationError. (실행 검증은 안 함 — generate_config_validated 사용.)"""
-    cli = client or GeminiClient(model=model)
-    cfg = _generate_raw(digest, client=cli, prompt_text=build_user_prompt(digest), temperature=temperature)
+    cli = client or GeminiClient(model=model, recorder=get_default_recorder(), cost_fn=compute_cost)
+    cfg = _generate_raw(digest, client=cli, prompt_text=build_user_prompt(digest),
+                        temperature=temperature, call_site="config_generate", attempt=1)
     try:
         validate_config(cfg)
     except ConfigError as e:
@@ -66,7 +85,7 @@ async def generate_config_validated(
 
     on_attempt(i, cfg_or_None, report_or_None, ok, msg) — 진행 로깅용 콜백.
     """
-    cli = client or GeminiClient(model=model)
+    cli = client or GeminiClient(model=model, recorder=get_default_recorder(), cost_fn=compute_cost)
     prev_cfg: Optional[dict] = None
     prev_feedback: str = ""
 
@@ -76,8 +95,11 @@ async def generate_config_validated(
         else:
             prompt_text = build_retry_prompt(digest, prev_cfg or {}, prev_feedback)
 
+        # i==1 은 신규 생성, i>=2 는 retry 라운드 (다른 모델 라우팅 가능하도록 call_site 분리).
+        call_site = "config_generate" if i == 1 else "config_retry"
         try:
-            cfg = _generate_raw(digest, client=cli, prompt_text=prompt_text, temperature=temperature)
+            cfg = _generate_raw(digest, client=cli, prompt_text=prompt_text, temperature=temperature,
+                                call_site=call_site, attempt=i)
         except GenerationError as e:
             msg = f"생성 실패: {e}"
             if on_attempt:

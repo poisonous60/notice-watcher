@@ -38,7 +38,8 @@ from bs4 import BeautifulSoup
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from generate import GeminiClient, GeminiError  # noqa: E402
+from generate import GeminiClient, GeminiError, LLMError, parse_json  # noqa: E402
+from generate import get_default_recorder, compute_cost  # noqa: E402
 from generate.prompts import load_prompt, render_prompt  # noqa: E402
 from bot import db  # noqa: E402
 from bot.config import bot_token  # noqa: E402
@@ -136,30 +137,36 @@ SUMMARY_SYSTEM = load_prompt("notify_summary.system")
 FILTER_SYSTEM = load_prompt("notify_filter.system")
 
 
-def summarize_post(client: GeminiClient, post: dict) -> str:
+def summarize_post(client: GeminiClient, post: dict, *, slug: Optional[str] = None) -> str:
     title = (post.get("title") or "").strip()
     body = body_text_from_html(post.get("content_html"))
     if len(body) < 30:
         return body or title or "(내용 없음)"
     user_text = render_prompt("notify_summary.user", title=title, body=body)
     try:
-        s = client.generate_text(system_instruction=SUMMARY_SYSTEM, user_text=user_text,
-                                 temperature=0.3, json_mode=False).strip()
+        resp = client.generate(system_instruction=SUMMARY_SYSTEM, user_text=user_text,
+                               temperature=0.3, json_mode=False,
+                               call_site="notify_summarize", slug=slug)
+        s = resp.text.strip()
         return s or (body[:400] + ("…" if len(body) > 400 else ""))
-    except GeminiError as e:
+    except LLMError as e:
         print(f"  [warn] Gemini 요약 실패({post.get('post_id')}), 본문 발췌로 폴백: {e}", file=sys.stderr)
         return body[:400] + ("…" if len(body) > 400 else "")
 
 
-def filter_pass(client: GeminiClient, filter_prompt: str, post: dict, summary: str) -> bool:
+def filter_pass(client: GeminiClient, filter_prompt: str, post: dict, summary: str,
+                *, slug: Optional[str] = None) -> bool:
     title = (post.get("title") or "").strip()
     cat = post.get("category") or ""
     user_text = render_prompt("notify_filter.user", filter_prompt=filter_prompt,
                               title=title, category=cat, summary=summary)
     try:
-        res = client.generate_json(system_instruction=FILTER_SYSTEM, user_text=user_text, temperature=0.0)
+        resp = client.generate(system_instruction=FILTER_SYSTEM, user_text=user_text,
+                               temperature=0.0, json_mode=True,
+                               call_site="notify_filter", slug=slug)
+        res = parse_json(resp.text)
         return bool(res.get("include", True)) if isinstance(res, dict) else True
-    except (GeminiError, Exception) as e:  # noqa: BLE001
+    except (LLMError, Exception) as e:  # noqa: BLE001
         print(f"  [warn] 필터 판단 실패({post.get('post_id')}) → 통과시킴: {e}", file=sys.stderr)
         return True  # fail-open
 
@@ -373,7 +380,8 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     def gem() -> GeminiClient:
         if _client[0] is None:
-            _client[0] = GeminiClient(model=args.model)
+            _client[0] = GeminiClient(model=args.model, recorder=get_default_recorder(),
+                                      cost_fn=compute_cost)
         return _client[0]
 
     realtime_sent = 0
@@ -408,7 +416,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                 if webhook and not subs:
                     if (slug, pid) not in delivered_file:
                         if summary is None:
-                            summary = summarize_post(gem(), post)
+                            summary = summarize_post(gem(), post, slug=slug)
                         content = format_message(post, summary)
                         if dry_run:
                             print(f"\n--- [webhook {slug}] {pid} ---\n{content}\n")
@@ -431,11 +439,11 @@ def main(argv: Optional[list[str]] = None) -> int:
                     fp = r["filter_prompt"]
                     if fp:
                         if summary is None:
-                            summary = summarize_post(gem(), post)
-                        if not filter_pass(gem(), fp, post, summary):
+                            summary = summarize_post(gem(), post, slug=slug)
+                        if not filter_pass(gem(), fp, post, summary, slug=slug):
                             continue
                     if summary is None:
-                        summary = summarize_post(gem(), post)
+                        summary = summarize_post(gem(), post, slug=slug)
                     content = format_message(post, summary)
                     if dry_run:
                         print(f"\n--- [{target_kind}:{target_id} {slug}] {pid} ---\n{content}\n")
