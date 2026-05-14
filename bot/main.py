@@ -285,6 +285,99 @@ async def list_cmd(interaction: discord.Interaction):
     await interaction.response.send_message("\n".join(lines)[:1900], ephemeral=True)
 
 
+@tree.command(name="announce", description="봇 공지 수신 설정 — 인자 없이 호출하면 현재 상태 표시.")
+@app_commands.describe(
+    dm="내 DM 으로 공지 받기 (true=받음 / false=옵트아웃). 미지정이면 변경 안 함.",
+    channel="이 채널로 공지 받기 (true=받음 / false=옵트아웃). 'Manage Channels' 권한 필요. DM 에선 사용 불가.",
+)
+async def announce_cmd(interaction: discord.Interaction,
+                       dm: Optional[bool] = None,
+                       channel: Optional[bool] = None):
+    user_id = str(interaction.user.id)
+    is_guild = interaction.guild is not None
+    ch_id = str(interaction.channel_id) if interaction.channel_id else None
+    lines: list[str] = []
+
+    # dm 토글 — bool 인자 제공 시
+    if dm is not None:
+        db.set_announce_optout(_conn, "dm", user_id, opted_out=not dm)
+        lines.append(f"📩 DM 공지: **{'ON' if dm else 'OFF'}** 로 설정됨.")
+
+    # channel 토글 — guild 안 + manage_channels 권한 + 채널에 봇이 알림 보내는 곳인지
+    if channel is not None:
+        if not is_guild or not ch_id:
+            lines.append("❌ `channel:` 인자는 길드 채널에서만 사용 가능 (DM 에선 불가).")
+        else:
+            perms = interaction.channel.permissions_for(interaction.user) if interaction.channel else None
+            if not (perms and perms.manage_channels):
+                lines.append("❌ 이 채널의 공지 설정은 `Manage Channels` 권한이 있는 사람만 변경 가능.")
+            else:
+                db.set_announce_optout(_conn, "channel", ch_id, opted_out=not channel)
+                lines.append(f"📢 이 채널 공지: **{'ON' if channel else 'OFF'}** 로 설정됨.")
+
+    # 무인자 또는 토글 후 — 현재 상태 표시
+    dm_off = db.get_announce_optout(_conn, "dm", user_id)
+    state = [f"📩 내 DM 공지: **{'OFF' if dm_off else 'ON'}**"]
+    if is_guild and ch_id:
+        ch_off = db.get_announce_optout(_conn, "channel", ch_id)
+        state.append(f"📢 이 채널 공지: **{'OFF' if ch_off else 'ON'}**")
+    if not lines:
+        lines.append("**현재 공지 설정**")
+    lines.append("")
+    lines.extend(state)
+    lines.append("")
+    lines.append("토글: `/announce dm:false` 로 DM 끄기, `/announce dm:true` 로 다시 켜기. "
+                 "채널은 `Manage Channels` 권한자가 그 채널에서 `/announce channel:false`.")
+    await interaction.response.send_message("\n".join(lines), ephemeral=True)
+
+
+@tree.command(name="help", description="봇 명령어 안내")
+async def help_cmd(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="📖 notice-watcher 명령어",
+        description="공지/게시판을 등록해 새 글이 올라오면 Discord 로 알려주는 봇.",
+        color=0x5865F2,
+    )
+    embed.add_field(
+        name="구독 관리",
+        value=(
+            "`/watch <url> [filter:] [here:] [notify_empty:] [article_url:]`\n"
+            "└ 게시판 URL 등록. filter 로 자연어 조건, here=true 면 이 채널에, 끄면 내 DM.\n"
+            "`/preview <url>` — 등록 없이 최신 글 한 건으로 알림 예시 보기.\n"
+            "`/list` — 내 구독 목록.\n"
+            "`/unwatch <slug 또는 url>` — 구독 해제 (slug 자동완성)."
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="문제 신고 · 상태",
+        value=(
+            "`/report <slug> <issue>` — 본인 구독에 문제 있을 때 신고. 관리자가 진단·해결.\n"
+            "`/status` — 봇·폴링 상태 (가동시간, 잡 큐, 마지막 폴링 등)."
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="공지 수신 설정",
+        value=(
+            "`/announce` — 현재 공지 수신 상태 표시.\n"
+            "`/announce dm:false` — 내 DM 공지 끄기 / `dm:true` 로 다시 켜기.\n"
+            "`/announce channel:false` — 이 채널 공지 끄기 (`Manage Channels` 권한 필요)."
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="기타",
+        value=(
+            "`/help` — 이 안내.\n"
+            "모든 응답은 ephemeral (본인만 보임). 알림 발송은 폴링 직후 즉시."
+        ),
+        inline=False,
+    )
+    embed.set_footer(text="문제가 생기면 /report 로 신고해 주세요.")
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
 @tree.command(name="report", description="본인 구독에 문제가 있을 때 신고 — 관리자가 진단·해결합니다.")
 @app_commands.describe(
     slug="문제 있는 구독의 slug (목록에서 자동완성)",

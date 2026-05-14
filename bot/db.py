@@ -21,6 +21,11 @@ DB 파일: output/bot.sqlite3 (이미 .gitignore 됨).
       status = 'pending' → 'running' → 'done' | 'failed'
   reports(id, user_id, username, slug, issue, created_at, status, resolved_at, resolved_note)
       사용자 `/report` 가 쌓는 신고. open → resolved. bot/inspector.py 의 진단 + admin 명령에서 사용.
+  announce_prefs(scope_kind, scope_id, opted_out, updated_at)
+      공지 옵트아웃 설정. scope_kind='dm' → scope_id=user_id, 'channel' → scope_id=channel_id.
+      기본 opt-in — *row 가 있고 opted_out=1* 인 경우만 발송 대상에서 제외 (행 없음 = 수신).
+  announcements(id, title, message, sent_by, sent_at, dm_sent, dm_failed, channel_sent, channel_failed)
+      `/admin announce` 발송 audit. 재발송 dedup 안 함 — owner 가 같은 글 재전송 가능.
 """
 from __future__ import annotations
 
@@ -120,6 +125,31 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status, id);
 CREATE INDEX IF NOT EXISTS idx_jobs_slug ON jobs(slug);
+
+-- 공지 옵트아웃: 기본 opt-in. 행이 있고 opted_out=1 일 때만 발송에서 제외.
+-- scope_kind='dm' → scope_id 는 discord user_id, 'channel' → channel_id.
+-- 옵트인 복귀는 opted_out=0 으로 set (행 유지 — updated_at 추적용).
+CREATE TABLE IF NOT EXISTS announce_prefs (
+    scope_kind TEXT NOT NULL CHECK (scope_kind IN ('dm','channel')),
+    scope_id   TEXT NOT NULL,
+    opted_out  INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (scope_kind, scope_id)
+);
+
+-- 공지 발송 audit. 같은 글 재전송 dedup 안 함 — 운영자 의도된 재전송 허용.
+CREATE TABLE IF NOT EXISTS announcements (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    title           TEXT NOT NULL,
+    message         TEXT NOT NULL,
+    sent_by         TEXT NOT NULL,
+    sent_at         TEXT NOT NULL,
+    dm_sent         INTEGER NOT NULL DEFAULT 0,
+    dm_failed       INTEGER NOT NULL DEFAULT 0,
+    channel_sent    INTEGER NOT NULL DEFAULT 0,
+    channel_failed  INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_announce_sent_at ON announcements(sent_at DESC);
 """
 
 
@@ -478,3 +508,89 @@ def resolve_report(conn: sqlite3.Connection, report_id: int, note: Optional[str]
         conn.commit()
         return cur.rowcount > 0
     return _retry(_do)
+
+
+# --------------------------------------------------------------------------- #
+# announce_prefs — 공지 옵트아웃 토글. 기본 opt-in (행 없음 = 수신).
+# --------------------------------------------------------------------------- #
+def get_announce_optout(conn: sqlite3.Connection, scope_kind: str, scope_id: str) -> bool:
+    if scope_kind not in ("dm", "channel"):
+        raise ValueError(f"invalid scope_kind: {scope_kind}")
+    row = conn.execute(
+        "SELECT opted_out FROM announce_prefs WHERE scope_kind=? AND scope_id=?",
+        (scope_kind, scope_id),
+    ).fetchone()
+    return bool(row["opted_out"]) if row else False
+
+
+def set_announce_optout(conn: sqlite3.Connection, scope_kind: str, scope_id: str,
+                        opted_out: bool) -> None:
+    if scope_kind not in ("dm", "channel"):
+        raise ValueError(f"invalid scope_kind: {scope_kind}")
+    def _do():
+        conn.execute(
+            "INSERT INTO announce_prefs(scope_kind,scope_id,opted_out,updated_at) "
+            "VALUES(?,?,?,?) "
+            "ON CONFLICT(scope_kind,scope_id) DO UPDATE SET "
+            "opted_out=excluded.opted_out, updated_at=excluded.updated_at",
+            (scope_kind, scope_id, 1 if opted_out else 0, _now_iso()),
+        )
+        conn.commit()
+    _retry(_do)
+
+
+def announce_recipients_dm(conn: sqlite3.Connection) -> list[str]:
+    """공지 받을 user_id 목록 — subscriptions 의 distinct user_id, 옵트아웃한 user 제외.
+    구독 한 번이라도 한 사람이 대상. 옵트인 default → announce_prefs.opted_out=1 만 제외."""
+    rows = conn.execute(
+        "SELECT DISTINCT s.user_id FROM subscriptions s "
+        "LEFT JOIN announce_prefs p "
+        "  ON p.scope_kind='dm' AND p.scope_id=s.user_id "
+        "WHERE COALESCE(p.opted_out, 0)=0"
+    ).fetchall()
+    return [r[0] for r in rows]
+
+
+def announce_recipients_channel(conn: sqlite3.Connection) -> list[str]:
+    """공지 보낼 channel_id 목록 — `/watch here` 로 등록된 distinct channel_id, 옵트아웃 채널 제외."""
+    rows = conn.execute(
+        "SELECT DISTINCT s.target_id FROM subscriptions s "
+        "LEFT JOIN announce_prefs p "
+        "  ON p.scope_kind='channel' AND p.scope_id=s.target_id "
+        "WHERE s.target_kind='channel' AND COALESCE(p.opted_out, 0)=0"
+    ).fetchall()
+    return [r[0] for r in rows]
+
+
+# --------------------------------------------------------------------------- #
+# announcements — 발송 audit.
+# --------------------------------------------------------------------------- #
+def add_announcement(conn: sqlite3.Connection, *, title: str, message: str,
+                     sent_by: str) -> int:
+    def _do():
+        cur = conn.execute(
+            "INSERT INTO announcements(title,message,sent_by,sent_at) VALUES(?,?,?,?)",
+            (title, message, sent_by, _now_iso()),
+        )
+        conn.commit()
+        return int(cur.lastrowid)
+    return _retry(_do)
+
+
+def update_announcement_counts(conn: sqlite3.Connection, announcement_id: int, *,
+                               dm_sent: int, dm_failed: int,
+                               channel_sent: int, channel_failed: int) -> None:
+    def _do():
+        conn.execute(
+            "UPDATE announcements SET dm_sent=?, dm_failed=?, channel_sent=?, channel_failed=? "
+            "WHERE id=?",
+            (dm_sent, dm_failed, channel_sent, channel_failed, announcement_id),
+        )
+        conn.commit()
+    _retry(_do)
+
+
+def recent_announcements(conn: sqlite3.Connection, limit: int = 20) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM announcements ORDER BY id DESC LIMIT ?", (limit,)
+    ).fetchall()

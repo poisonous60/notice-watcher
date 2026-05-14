@@ -1,4 +1,4 @@
-"""Owner 전용 admin 명령 — `/admin recent | inspect | fetch | reports | resolve`.
+"""Owner 전용 admin 명령 — `/admin recent | inspect | fetch | reports | resolve | announce`.
 
 가시성: `.env` 의 `ADMIN_GUILD_ID` 가 가리키는 *private* guild 에만 등록(다른 길드/DM 의 autocomplete
 에 안 보임). 환경변수 없으면 admin 명령은 어디에도 등록되지 않는다 — `bot/main.py` 의 `on_ready` 가
@@ -10,6 +10,7 @@ admin 가능성은 일단 없음 — 필요해지면 list 로 확장).
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Optional
 
@@ -18,6 +19,12 @@ from discord import app_commands
 
 from bot import db, inspector
 from bot.config import admin_guild_id, owner_user_id
+
+ANNOUNCE_FOOTER = (
+    "DM 옵트아웃: /announce dm:false  ·  "
+    "이 채널: /announce channel:false (Manage Channels 권한 필요)"
+)
+SEND_SLEEP = 0.5
 
 log = logging.getLogger("bot.admin")
 
@@ -164,5 +171,158 @@ def build_admin_tree(client: discord.Client, conn, *, admin_guild: discord.Objec
             await interaction.response.send_message(
                 f"❌ 신고 #{report_id} 가 없거나 이미 resolved.", ephemeral=True)
 
+    @admin.command(name="announce", description="봇 공지 발송 — preview 후 버튼으로 확인 발송.")
+    @app_commands.describe(
+        message="공지 본문 (markdown 허용, 최대 ~4000자)",
+        title="공지 제목 (기본: '📢 봇 업데이트', 최대 256자)",
+    )
+    async def announce_cmd(interaction: discord.Interaction, message: str,
+                           title: Optional[str] = None):
+        if not _is_owner(interaction):
+            await interaction.response.send_message("❌ owner 전용 명령입니다.", ephemeral=True)
+            return
+        title_s = (title or "📢 봇 업데이트").strip()[:256]
+        message_s = message.strip()
+        if not message_s:
+            await interaction.response.send_message("❌ message 가 비어있습니다.", ephemeral=True)
+            return
+        message_s = message_s[:4000]  # embed description 4096 한계 — footer 여유 96자
+        dm_targets = db.announce_recipients_dm(conn)
+        ch_targets = db.announce_recipients_channel(conn)
+        embed = _build_announce_embed(title_s, message_s)
+        view = AnnounceConfirmView(
+            client=client, conn=conn, title=title_s, message=message_s,
+            dm_targets=dm_targets, ch_targets=ch_targets,
+            sent_by_id=str(interaction.user.id),
+        )
+        await interaction.response.send_message(
+            content=f"**프리뷰** — 발송 대상: DM **{len(dm_targets)}명** · 채널 **{len(ch_targets)}개**",
+            embed=embed, view=view, ephemeral=True,
+        )
+
     tree.add_command(admin, guild=admin_guild)
     return tree
+
+
+# --------------------------------------------------------------------------- #
+# 공지 — embed builder · 발송 view (Button confirm)
+# --------------------------------------------------------------------------- #
+def _build_announce_embed(title: str, message: str) -> discord.Embed:
+    embed = discord.Embed(title=title, description=message, color=0x5865F2)
+    embed.set_footer(text=ANNOUNCE_FOOTER)
+    return embed
+
+
+class AnnounceConfirmView(discord.ui.View):
+    """Owner 전용 confirm view — 60s timeout. 버튼 1회만 동작 (재클릭/타임아웃 후 disable)."""
+
+    def __init__(self, *, client: discord.Client, conn,
+                 title: str, message: str,
+                 dm_targets: list[str], ch_targets: list[str],
+                 sent_by_id: str, timeout: float = 60.0) -> None:
+        super().__init__(timeout=timeout)
+        self.client = client
+        self.conn = conn
+        self.title = title
+        self.message = message
+        self.dm_targets = dm_targets
+        self.ch_targets = ch_targets
+        self.sent_by_id = sent_by_id
+        self._used = False
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if str(interaction.user.id) != self.sent_by_id:
+            await interaction.response.send_message(
+                "❌ 이 confirm 은 호출자만 누를 수 있습니다.", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="발송", style=discord.ButtonStyle.danger)
+    async def send_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if self._used:
+            await interaction.response.send_message("이미 처리됨.", ephemeral=True)
+            return
+        self._used = True
+        for child in self.children:
+            child.disabled = True
+        await interaction.response.edit_message(
+            content="📤 발송 중… (DM/채널 발송 결과는 OWNER DM 으로)", view=self)
+        task = asyncio.create_task(self._do_send())
+        task.add_done_callback(self._on_send_done)
+
+    def _on_send_done(self, task: "asyncio.Task") -> None:
+        exc = task.exception() if not task.cancelled() else None
+        if exc is None:
+            return
+        import traceback as _tb
+        tb = "".join(_tb.format_exception(type(exc), exc, exc.__traceback__))
+        log.error("announce _do_send 예외: %s\n%s", exc, tb)
+        # owner 한테 별도 알림 (DM 도 실패할 수 있어 best-effort)
+        asyncio.create_task(send_chunked_dm(
+            self.client, self.sent_by_id,
+            f"⚠️ 공지 발송 중 예외 — `{type(exc).__name__}: {exc}`\n```\n{tb[-1500:]}\n```"))
+
+    @discord.ui.button(label="취소", style=discord.ButtonStyle.secondary)
+    async def cancel_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if self._used:
+            await interaction.response.send_message("이미 처리됨.", ephemeral=True)
+            return
+        self._used = True
+        for child in self.children:
+            child.disabled = True
+        await interaction.response.edit_message(content="🛑 발송 취소됨.", view=self)
+        self.stop()
+
+    async def on_timeout(self) -> None:
+        for child in self.children:
+            child.disabled = True
+
+    async def _do_send(self) -> None:
+        ann_id = db.add_announcement(
+            self.conn, title=self.title, message=self.message, sent_by=self.sent_by_id)
+        embed = _build_announce_embed(self.title, self.message)
+        dm_sent = dm_failed = ch_sent = ch_failed = 0
+        dm_fail_log: list[str] = []
+        ch_fail_log: list[str] = []
+
+        for uid in self.dm_targets:
+            try:
+                user = await self.client.fetch_user(int(uid))
+                await user.send(embed=embed)
+                dm_sent += 1
+            except Exception as e:  # noqa: BLE001
+                dm_failed += 1
+                dm_fail_log.append(f"  user {uid}: {type(e).__name__}: {e}")
+                log.warning("announce DM 실패 user=%s: %r", uid, e)
+            await asyncio.sleep(SEND_SLEEP)
+
+        for cid in self.ch_targets:
+            try:
+                ch = self.client.get_channel(int(cid)) or await self.client.fetch_channel(int(cid))
+                await ch.send(embed=embed)
+                ch_sent += 1
+            except Exception as e:  # noqa: BLE001
+                ch_failed += 1
+                ch_fail_log.append(f"  channel {cid}: {type(e).__name__}: {e}")
+                log.warning("announce channel 실패 channel=%s: %r", cid, e)
+            await asyncio.sleep(SEND_SLEEP)
+
+        db.update_announcement_counts(
+            self.conn, ann_id, dm_sent=dm_sent, dm_failed=dm_failed,
+            channel_sent=ch_sent, channel_failed=ch_failed)
+
+        report = [
+            f"📊 공지 #{ann_id} 발송 완료",
+            f"• 제목: {self.title}",
+            f"• DM: {dm_sent}/{len(self.dm_targets)} 성공  ·  실패 {dm_failed}",
+            f"• 채널: {ch_sent}/{len(self.ch_targets)} 성공  ·  실패 {ch_failed}",
+        ]
+        if dm_fail_log:
+            report.append("\nDM 실패 상세:\n" + "\n".join(dm_fail_log[:20]))
+        if ch_fail_log:
+            report.append("\n채널 실패 상세:\n" + "\n".join(ch_fail_log[:20]))
+        ok = await send_chunked_dm(self.client, self.sent_by_id, "\n".join(report))
+        if not ok:
+            # OWNER DM 실패 — counts 는 DB 에 이미 commit 됨. 로그에라도 남김.
+            log.warning("announce #%s 결과 OWNER DM 발송 실패 — counts: DM %d/%d ch %d/%d",
+                        ann_id, dm_sent, len(self.dm_targets), ch_sent, len(self.ch_targets))
