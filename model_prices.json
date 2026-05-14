@@ -1,13 +1,24 @@
 {
-  "_comment": "USD per 1M tokens. prompt = input cost, completion = output cost. Update as providers change pricing. Keys: 'provider:model' or just 'model'.",
+  "_comment": "USD per 1M tokens (input=prompt, output=completion). Verified 2026-05-14 against ai.google.dev/gemini-api/docs/pricing and openrouter.ai/google/* model pages. Update when providers change pricing. Lookup keys: 'provider:model' (preferred) or 'model' (fallback).",
   "_per_default": "1M",
+  "_caveat_2_5_pro": "gemini-2.5-pro uses context-window-tier pricing: ≤200K input $1.25/output $10, >200K input $2.50/output $15. Our prices.py models a single (prompt, completion) pair, so cost is UNDERESTIMATED for prompts above 200K tokens. Acceptable for our usage (config_generate prompts are <50K).",
 
-  "gemini:gemini-2.5-flash": {"prompt": 0.30, "completion": 2.50, "per": "1M"},
-  "gemini:gemini-2.5-pro":   {"prompt": 1.25, "completion": 10.0, "per": "1M"},
-  "gemini-2.5-flash":        {"prompt": 0.30, "completion": 2.50, "per": "1M"},
-  "gemini-2.5-pro":          {"prompt": 1.25, "completion": 10.0, "per": "1M"},
+  "gemini:gemini-2.5-flash":           {"prompt": 0.30,  "completion": 2.50,  "per": "1M"},
+  "gemini:gemini-2.5-flash-lite":      {"prompt": 0.10,  "completion": 0.40,  "per": "1M"},
+  "gemini:gemini-2.5-pro":             {"prompt": 1.25,  "completion": 10.0,  "per": "1M"},
+  "gemini-2.5-flash":                  {"prompt": 0.30,  "completion": 2.50,  "per": "1M"},
+  "gemini-2.5-flash-lite":             {"prompt": 0.10,  "completion": 0.40,  "per": "1M"},
+  "gemini-2.5-pro":                    {"prompt": 1.25,  "completion": 10.0,  "per": "1M"},
 
-  "openrouter:google/gemini-2.5-flash":       {"prompt": 0.30, "completion": 2.50, "per": "1M"},
-  "openrouter:google/gemini-flash-1.5-8b":    {"prompt": 0.0375, "completion": 0.15, "per": "1M"},
-  "openrouter:google/gemini-flash-1.5-8b:free": {"prompt": 0.0, "completion": 0.0, "per": "1M"}
+  "openrouter:google/gemini-2.5-flash":              {"prompt": 0.30,  "completion": 2.50, "per": "1M"},
+  "openrouter:google/gemini-2.5-flash-lite":         {"prompt": 0.10,  "completion": 0.40, "per": "1M"},
+  "openrouter:google/gemini-2.5-pro":                {"prompt": 1.25,  "completion": 10.0, "per": "1M"},
+  "openrouter:google/gemini-2.0-flash-001":          {"prompt": 0.10,  "completion": 0.40, "per": "1M"},
+  "openrouter:google/gemini-2.0-flash-lite-001":     {"prompt": 0.075, "completion": 0.30, "per": "1M"},
+  "openrouter:google/gemini-3-flash-preview":        {"prompt": 0.50,  "completion": 3.00, "per": "1M"},
+  "openrouter:google/gemini-3.1-flash-lite-preview": {"prompt": 0.25,  "completion": 1.50, "per": "1M"},
+
+  "_comment_legacy": "gemini 1.5 변종은 OpenRouter 에서 retired 됐을 가능성. :free 만 유효한 별칭으로 남아있을 수 있음. 확인 후 사용.",
+  "openrouter:google/gemini-flash-1.5-8b":      {"prompt": 0.0375, "completion": 0.15, "per": "1M"},
+  "openrouter:google/gemini-flash-1.5-8b:free": {"prompt": 0.0,    "completion": 0.0,  "per": "1M"}
 }
