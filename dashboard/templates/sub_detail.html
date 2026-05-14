@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}{{ slug }} — notice-watcher{% endblock %}
+{% block body %}
+
+<p><a href="/subs">← Subs</a></p>
+<h2>🔗 <code>{{ slug }}</code></h2>
+
+{% if failed %}
+<article style="border-left:3px solid #d32f2f;padding-left:1rem;background:#fff5f5;">
+  <strong>⚠ 자동등록 실패 (FAILED.json):</strong>
+  <pre style="font-size:0.82rem;white-space:pre-wrap;">{{ failed | tojson(indent=2) }}</pre>
+</article>
+{% endif %}
+
+<h3>진단</h3>
+<ul>
+  {% for f in result.findings %}
+    <li><strong>{{ f.tag }}</strong> ({{ f.severity }}): {{ f.msg }}</li>
+  {% else %}
+    <li class="muted">없음</li>
+  {% endfor %}
+</ul>
+
+<h3>구독 행 ({{ result.subscriptions | length }}건)</h3>
+{% if result.subscriptions %}
+<table class="compact striped">
+  <thead><tr><th>user</th><th>target</th><th>filter</th><th>notify_empty</th><th>created</th><th>url</th></tr></thead>
+  <tbody>
+    {% for s in result.subscriptions %}
+    <tr>
+      <td class="mono">{{ s.user_id }}</td>
+      <td class="mono">{{ s.target_kind }}/{{ s.target_id }}</td>
+      <td>{{ s.filter_prompt or '—' }}</td>
+      <td>{{ '✓' if s.notify_empty else '—' }}</td>
+      <td>{{ (s.created_at or '')[:10] }}</td>
+      <td class="mono" style="max-width:25em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+        <span title="{{ s.url or '' }}">{{ s.url or '' }}</span>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}<p class="muted">없음.</p>{% endif %}
+
+{% if result.latest_job %}
+<h3>최근 register 잡 <a href="/jobs/{{ result.latest_job.id }}">#{{ result.latest_job.id }}</a></h3>
+<p>status=<code>{{ result.latest_job.status }}</code> · via=<code>{{ result.latest_job.via }}</code></p>
+{% endif %}
+
+<details>
+  <summary>config / state JSON</summary>
+  <h4>config</h4>
+  <pre class="tail" style="background:#f4f4f4;color:#222;">{{ result.config | tojson(indent=2) if result.config else '(없음)' }}</pre>
+  <h4>state</h4>
+  <pre class="tail" style="background:#f4f4f4;color:#222;">{{ result.state | tojson(indent=2) if result.state else '(없음)' }}</pre>
+</details>
+
+<h3>🔬 Fetch 시뮬</h3>
+<form hx-post="/actions/fetch" hx-target="#fetch-out" hx-swap="innerHTML"
+      hx-indicator="#fetch-spin" style="display:flex;gap:0.5rem;align-items:center;">
+  <input type="hidden" name="slug" value="{{ slug }}">
+  <label>개수
+    <input type="number" name="n" value="5" min="1" max="20" style="width:5em;">
+  </label>
+  <button type="submit" class="secondary" style="margin:0;padding:0.4rem 0.9rem;width:auto;">▶ 돌리기</button>
+  <span id="fetch-spin" class="htmx-indicator">…fetching</span>
+</form>
+<div id="fetch-out"></div>
+
+<h3>🛠 Skill 액션</h3>
+<div class="prompt-card">
+  <div class="row">
+    <span class="label">손 config 재작성</span>
+    <button class="secondary" data-copy-target="#p-redo">📋 복사</button>
+  </div>
+  <details><summary>미리보기</summary><pre id="p-redo">{{ p_redo }}</pre></details>
+</div>
+<div class="prompt-card">
+  <div class="row">
+    <span class="label">진단 (자연어)</span>
+    <button class="secondary" data-copy-target="#p-diag">📋 복사</button>
+  </div>
+  <details><summary>미리보기</summary><pre id="p-diag">{{ p_diag }}</pre></details>
+</div>
+
+{% endblock %}

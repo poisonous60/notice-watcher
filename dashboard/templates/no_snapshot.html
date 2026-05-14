@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}snapshot 없음 — notice-watcher dashboard{% endblock %}
+{% block body %}
+<article>
+  <h2>⚠ snapshot 없음</h2>
+  <p>아직 N100 에서 데이터를 가져오지 않았습니다. 위 <strong>🔄 Pull from N100</strong> 버튼을 눌러주세요.</p>
+  <p class="muted">또는 셸에서: <code>python scripts/inspect_subs.py pull</code></p>
+</article>
+{% endblock %}

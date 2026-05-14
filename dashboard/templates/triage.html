@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Triage — notice-watcher{% endblock %}
+{% block body %}
+
+<h2>📊 Triage</h2>
+
+<section class="cards">
+  <div class="card">
+    <p class="lbl">미해결 신고 (open)</p>
+    <p class="n">{{ summary.open_reports }}</p>
+    <p class="muted">최근 7d: {{ summary.open_reports_recent_7d }}건</p>
+    <a href="/reports">view →</a>
+  </div>
+  <div class="card">
+    <p class="lbl">자동등록 실패 (FAILED)</p>
+    <p class="n">{{ summary.failed_slugs | length }}</p>
+    <p class="muted">손 config 대상</p>
+    {% if summary.failed_slugs %}<a href="/subs">view →</a>{% endif %}
+  </div>
+  <div class="card">
+    <p class="lbl">깨짐 신호 slug</p>
+    <p class="n">{{ summary.broken_slugs | length }}</p>
+    <p class="muted">consecutive_breakage&gt;0</p>
+    {% if summary.broken_slugs %}<a href="/subs">view →</a>{% endif %}
+  </div>
+  <div class="card">
+    <p class="lbl">잡 큐</p>
+    <p class="n">{{ summary.pending_jobs }} / {{ summary.running_jobs }}</p>
+    <p class="muted">pending / running</p>
+    <a href="/jobs">view →</a>
+  </div>
+  <div class="card">
+    <p class="lbl">의견 (feedback)</p>
+    <p class="n">{{ summary.feedback_total }}</p>
+    <p class="muted">최근 7d: {{ summary.feedback_recent_7d }}건</p>
+    <a href="/feedback">view →</a>
+  </div>
+</section>
+
+<h3>⚡ 빠른 액션 (Skill 프롬프트)</h3>
+{% if quick.report_triage_bulk %}
+<div class="prompt-card">
+  <div class="row">
+    <span class="label">🩺 open 신고 일괄 triage ({{ summary.open_reports }}건)</span>
+    <button class="secondary" data-copy-target="#qp-rt-bulk">📋 복사</button>
+  </div>
+  <details>
+    <summary>미리보기</summary>
+    <pre id="qp-rt-bulk">{{ quick.report_triage_bulk }}</pre>
+  </details>
+</div>
+{% endif %}
+{% if quick.hand_config_triage %}
+<div class="prompt-card">
+  <div class="row">
+    <span class="label">🛠 FAILED 큐 일괄 처리 ({{ summary.failed_slugs | length }}건)</span>
+    <button class="secondary" data-copy-target="#qp-hc-tri">📋 복사</button>
+  </div>
+  <details>
+    <summary>미리보기</summary>
+    <pre id="qp-hc-tri">{{ quick.hand_config_triage }}</pre>
+  </details>
+</div>
+{% endif %}
+{% if not quick.report_triage_bulk and not quick.hand_config_triage %}
+<p class="muted">현재 처리 대기중인 backlog 없음.</p>
+{% endif %}
+
+<h3>🕒 최근 register 잡</h3>
+<table class="compact striped">
+  <thead>
+    <tr>
+      <th>#</th><th>slug</th><th>status</th><th>via</th><th>요청자</th><th>시각</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in recent %}
+    <tr>
+      <td><a href="/jobs/{{ r.id }}">#{{ r.id }}</a></td>
+      <td class="mono">{{ r.slug or "" }}</td>
+      <td>
+        {% set s = r.status or "" %}
+        <span class="badge {{ 'ok' if s=='ok' else ('error' if s in ('error','failed') else '') }}">{{ s }}</span>
+      </td>
+      <td>{{ r.via or "" }}</td>
+      <td>
+        {% set rb = r.requested_by %}
+        {% if rb is mapping %}{{ rb.get('name', '?') }}{% else %}?{% endif %}
+      </td>
+      <td>{{ (r.finished_at or r.created_at or "")[:16] }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% endblock %}

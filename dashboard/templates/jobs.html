@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Jobs — notice-watcher{% endblock %}
+{% block body %}
+
+<h2>📋 Jobs (최근 register)</h2>
+
+<form hx-get="/jobs"
+      hx-target="#jobs-rows"
+      hx-select="#jobs-rows > *"
+      hx-trigger="keyup changed delay:300ms from:find input[name=q], change from:find select, change from:find input[name=count], submit"
+      hx-push-url="true"
+      class="topbar" style="border:0;margin-bottom:0.5rem;gap:0.6rem;">
+  <input type="search" name="q" value="{{ q or '' }}"
+         placeholder="slug · URL · 요청자 검색"
+         style="flex:1;min-width:14em;margin:0;">
+  <label style="margin:0;">개수
+    <input type="number" name="count" value="{{ count }}" min="1" max="200" style="width:6em;">
+  </label>
+  <label style="margin:0;">status
+    <select name="status">
+      <option value="" {{ 'selected' if not filter_status else '' }}>전체</option>
+      <option value="ok" {{ 'selected' if filter_status=='ok' else '' }}>ok</option>
+      <option value="error" {{ 'selected' if filter_status=='error' else '' }}>error</option>
+      <option value="failed" {{ 'selected' if filter_status=='failed' else '' }}>failed</option>
+      <option value="running" {{ 'selected' if filter_status=='running' else '' }}>running</option>
+      <option value="pending" {{ 'selected' if filter_status=='pending' else '' }}>pending</option>
+    </select>
+  </label>
+</form>
+
+<p class="muted" style="font-size:0.85rem;margin:0 0 0.5rem 0;">
+  {{ rows | length }}건 표시 · slug 클릭 → 해당 Sub 페이지
+</p>
+
+<table class="compact striped">
+  <thead>
+    <tr>
+      <th>#</th><th>slug</th><th>status</th><th>via</th><th>요청자</th><th>URL</th><th>시각</th>
+    </tr>
+  </thead>
+  <tbody id="jobs-rows">
+    {% for r in rows %}
+    <tr>
+      <td><a href="/jobs/{{ r.id }}">#{{ r.id }}</a></td>
+      <td class="mono">
+        {% if r.slug %}<a href="/subs/{{ r.slug }}">{{ r.slug }}</a>{% endif %}
+      </td>
+      <td>
+        {% set s = r.status or "" %}
+        <span class="badge {{ 'ok' if s=='ok' else ('error' if s in ('error','failed') else '') }}">{{ s }}</span>
+      </td>
+      <td>{{ r.via or "" }}</td>
+      <td>
+        {% set rb = r.requested_by %}
+        {% if rb is mapping %}{{ rb.get('name', '?') }}{% else %}?{% endif %}
+      </td>
+      <td class="mono" style="max-width:30em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+        <span title="{{ r.url or '' }}">{{ r.url or "" }}</span>
+      </td>
+      <td>{{ (r.finished_at or r.created_at or "")[:16] }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="7" class="muted">검색 결과 없음.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% endblock %}

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Settings — notice-watcher{% endblock %}
+{% block body %}
+
+<h2>⚙ Settings (read-only)</h2>
+
+<dl class="kv">
+  <dt>snapshot DB</dt><dd class="mono">{{ info.snapshot_db }}</dd>
+  <dt>configs dir</dt><dd class="mono">{{ info.configs_dir }}</dd>
+  <dt>state dir</dt><dd class="mono">{{ info.state_dir }}</dd>
+  <dt>마지막 pull</dt><dd>{{ info.last_pull }}</dd>
+  <dt>configs 파일 수</dt><dd>{{ info.n_configs }}</dd>
+  <dt>state 파일 수</dt><dd>{{ info.n_states }}</dd>
+  <dt>FAILED 수</dt><dd>{{ info.n_failed }}</dd>
+</dl>
+
+<p class="muted">이 페이지는 snapshot 위치만 보여줍니다. 실제 N100 의 <code>.env</code>·서비스 상태는
+SSH 로 확인하세요 (<code>docs/운영 메모.md</code> §7 참고).</p>
+
+{% endblock %}

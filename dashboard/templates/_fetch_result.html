@@ -1,0 +1,19 @@
+<div class="fetch-results">
+  {% if not res.ok %}
+    <p class="err">⚠ {{ res.error }}</p>
+  {% else %}
+    <p>✅ <code>{{ slug }}</code> · {{ res.posts | length }}건 (n={{ n }})</p>
+    {% if res.posts %}
+    <ul>
+      {% for p in res.posts %}
+      <li>
+        <code>{{ p.post_id }}</code> · {{ p.title or '(제목 없음)' }}<br>
+        <small class="mono">{{ p.url }}</small>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="muted">결과 0건 — 어댑터 실패 또는 selector drift.</p>
+    {% endif %}
+  {% endif %}
+</div>

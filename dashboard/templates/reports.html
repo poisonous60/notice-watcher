@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Reports — notice-watcher{% endblock %}
+{% block body %}
+
+<h2>🐛 Reports</h2>
+
+<form method="get" action="/reports" class="topbar" style="border:0;margin-bottom:0.5rem;">
+  <label>status
+    <select name="status">
+      <option value="open" {{ 'selected' if filter_status=='open' else '' }}>open</option>
+      <option value="resolved" {{ 'selected' if filter_status=='resolved' else '' }}>resolved</option>
+      <option value="all" {{ 'selected' if filter_status=='all' else '' }}>all</option>
+    </select>
+  </label>
+  <label>개수
+    <input type="number" name="count" value="{{ count }}" min="1" max="500" style="width:6em;">
+  </label>
+  <button type="submit" class="secondary" style="margin:0;padding:0.4rem 0.9rem;width:auto;">적용</button>
+</form>
+
+{% if bulk_prompt %}
+<div class="prompt-card">
+  <div class="row">
+    <span class="label">🩺 표시된 open 신고 일괄 triage ({{ rows | length }}건)</span>
+    <button class="secondary" data-copy-target="#p-rt-bulk">📋 복사</button>
+  </div>
+  <details><summary>미리보기</summary><pre id="p-rt-bulk">{{ bulk_prompt }}</pre></details>
+</div>
+{% endif %}
+
+<table class="compact striped">
+  <thead>
+    <tr><th>#</th><th>slug</th><th>status</th><th>신고자</th><th>issue (요약)</th><th>시각</th></tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+    <tr>
+      <td><a href="/reports/{{ r.id }}">#{{ r.id }}</a></td>
+      <td class="mono">{{ r.slug }}</td>
+      <td>
+        <span class="badge {{ 'ok' if r.status=='resolved' else 'warn' }}">{{ r.status }}</span>
+      </td>
+      <td>{{ r.username or r.user_id }}</td>
+      <td>{{ ((r.issue or '') | replace('\n', ' '))[:120] }}</td>
+      <td>{{ (r.created_at or '')[:16] }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% if not rows %}<p class="muted">신고 없음.</p>{% endif %}
+{% endblock %}

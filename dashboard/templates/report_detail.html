@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Report #{{ report.id }} — notice-watcher{% endblock %}
+{% block body %}
+
+<p><a href="/reports">← Reports</a></p>
+<h2>신고 #{{ report.id }} · <code>{{ result.slug }}</code></h2>
+
+<dl class="kv">
+  <dt>status</dt><dd>
+    <span class="badge {{ 'ok' if report.status=='resolved' else 'warn' }}">{{ report.status }}</span>
+  </dd>
+  <dt>신고자</dt><dd>{{ report.username or '?' }} (<code>{{ report.user_id }}</code>)</dd>
+  <dt>시각</dt><dd>{{ report.created_at }}</dd>
+  {% if report.resolved_note %}<dt>resolved_note</dt><dd>{{ report.resolved_note }}</dd>{% endif %}
+</dl>
+
+<h3>issue</h3>
+<pre class="tail" style="background:#f4f4f4;color:#222;">{{ report.issue or '' }}</pre>
+
+<h3>진단</h3>
+<ul>
+  {% for f in result.findings %}
+    <li><strong>{{ f.tag }}</strong> ({{ f.severity }}): {{ f.msg }}</li>
+  {% else %}
+    <li class="muted">없음</li>
+  {% endfor %}
+</ul>
+
+{% if result.latest_job %}
+<h3>관련 register 잡 <a href="/jobs/{{ result.latest_job.id }}">#{{ result.latest_job.id }}</a></h3>
+<p>status=<code>{{ result.latest_job.status }}</code> · URL=<code>{{ result.latest_job.url }}</code></p>
+{% endif %}
+
+<h3>🛠 Skill 액션</h3>
+<div class="prompt-card">
+  <div class="row">
+    <span class="label">이 신고 처리 (report-triage)</span>
+    <button class="secondary" data-copy-target="#p-rt-single">📋 복사</button>
+  </div>
+  <details><summary>미리보기</summary><pre id="p-rt-single">{{ p_single }}</pre></details>
+</div>
+
+{% endblock %}

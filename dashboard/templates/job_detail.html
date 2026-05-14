@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Job #{{ job.id }} — notice-watcher{% endblock %}
+{% block body %}
+
+<p><a href="/jobs">← Jobs</a></p>
+<h2>잡 #{{ job.id }} · <code>{{ result.slug }}</code></h2>
+
+{% if result.slug %}
+<p>
+  <a href="/subs/{{ result.slug }}" role="button" class="secondary"
+     style="display:inline-block;margin:0;padding:0.35rem 0.9rem;width:auto;font-size:0.92rem;">
+    🔗 이 slug 의 Sub 페이지 →
+  </a>
+</p>
+{% endif %}
+
+<dl class="kv">
+  <dt>status</dt>
+  <dd>
+    {% set s = job.status or "" %}
+    <span class="badge {{ 'ok' if s=='ok' else ('error' if s in ('error','failed') else '') }}">{{ s }}</span>
+    rc={{ job.result_rc }}
+  </dd>
+  <dt>via</dt><dd><code>{{ job.via }}</code></dd>
+  <dt>요청자</dt>
+  <dd>
+    {% set rb = job.requested_by %}
+    {% if rb is mapping %}{{ rb.get('name', '?') }} (id={{ rb.get('id', '?') }}){% else %}?{% endif %}
+  </dd>
+  <dt>제출 URL</dt><dd class="mono">
+    {% if is_http_url(job.url) %}
+      <a href="{{ job.url }}" target="_blank" rel="noopener">{{ job.url }}</a>
+    {% else %}
+      <code>{{ job.url or '' }}</code>
+    {% endif %}
+  </dd>
+  {% if job.article_url %}<dt>article_url</dt><dd class="mono">{{ job.article_url }}</dd>{% endif %}
+  <dt>시작/종료</dt><dd>{{ job.started_at }} → {{ job.finished_at }}</dd>
+</dl>
+
+<h3>진단</h3>
+<ul>
+  {% for f in result.findings %}
+    <li><strong>{{ f.tag }}</strong> ({{ f.severity }}): {{ f.msg }}</li>
+  {% else %}
+    <li class="muted">없음</li>
+  {% endfor %}
+</ul>
+
+{% if job.result_tail %}
+<h3>register.py tail</h3>
+<pre class="tail">{{ job.result_tail[-2000:] }}</pre>
+{% endif %}
+
+<h3>🛠 Skill 액션</h3>
+<div class="prompt-card">
+  <div class="row">
+    <span class="label">손 config 작성</span>
+    <button class="secondary" data-copy-target="#p-hc-job">📋 복사</button>
+  </div>
+  <details>
+    <summary>미리보기</summary>
+    <pre id="p-hc-job">{{ p_handconfig }}</pre>
+  </details>
+</div>
+
+{% endblock %}
