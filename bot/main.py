@@ -241,8 +241,26 @@ async def preview(interaction: discord.Interaction, url: str, article_url: Optio
     await interaction.edit_original_response(content=text)
 
 
+async def _own_slug_autocomplete(interaction: discord.Interaction, current: str
+                                  ) -> list[app_commands.Choice[str]]:
+    """본인 subscriptions 의 slug 자동완성. Discord Choice.value 100자 한계 — 그 이상은 제외."""
+    rows = db.list_subscriptions(_conn, user_id=str(interaction.user.id))
+    cur = (current or "").lower()
+    out: list[app_commands.Choice[str]] = []
+    for r in rows:
+        slug = r["slug"]
+        if len(slug) > 100:
+            continue
+        if not cur or cur in slug.lower():
+            out.append(app_commands.Choice(name=slug[:100], value=slug))
+            if len(out) >= 25:
+                break
+    return out
+
+
 @tree.command(name="unwatch", description="구독 해제. slug 또는 URL 을 줍니다.")
-@app_commands.describe(target="해제할 구독의 slug, 또는 등록할 때 쓴 URL")
+@app_commands.describe(target="해제할 구독의 slug (자동완성) 또는 등록할 때 쓴 URL")
+@app_commands.autocomplete(target=_own_slug_autocomplete)
 async def unwatch(interaction: discord.Interaction, target: str):
     t = target.strip()
     slug = url_to_slug(t) if re.match(r"^https?://", t) else t
@@ -267,32 +285,12 @@ async def list_cmd(interaction: discord.Interaction):
     await interaction.response.send_message("\n".join(lines)[:1900], ephemeral=True)
 
 
-async def _report_slug_autocomplete(interaction: discord.Interaction, current: str
-                                     ) -> list[app_commands.Choice[str]]:
-    """`/report` 의 slug 인자 자동완성 — 본인 subscriptions 중 current 로 시작/포함하는 것.
-    Discord 의 autocomplete Choice.value 는 최대 100자 — 그 이상 slug 는 *제외* 한다(전체 응답이
-    400 Bad Request 로 깨져 "옵션 불러오기 실패" 가 뜨므로). 100자 넘는 slug 의 신고는 사용자가
-    /report 의 slug 인자에 직접 타이핑해 전송할 수 있다(검증은 report_cmd 에서)."""
-    rows = db.list_subscriptions(_conn, user_id=str(interaction.user.id))
-    cur = (current or "").lower()
-    out: list[app_commands.Choice[str]] = []
-    for r in rows:
-        slug = r["slug"]
-        if len(slug) > 100:
-            continue
-        if not cur or cur in slug.lower():
-            out.append(app_commands.Choice(name=slug[:100], value=slug))
-            if len(out) >= 25:  # Discord 상한
-                break
-    return out
-
-
 @tree.command(name="report", description="본인 구독에 문제가 있을 때 신고 — 관리자가 진단·해결합니다.")
 @app_commands.describe(
     slug="문제 있는 구독의 slug (목록에서 자동완성)",
     issue="무슨 문제? 자연어로 자유롭게 (예: '아카 공식 탭만 받고 싶은데 일반 게시판 글이 와요')",
 )
-@app_commands.autocomplete(slug=_report_slug_autocomplete)
+@app_commands.autocomplete(slug=_own_slug_autocomplete)
 async def report_cmd(interaction: discord.Interaction, slug: str, issue: str):
     user_id = str(interaction.user.id)
     issue = (issue or "").strip()
