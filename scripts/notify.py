@@ -1,21 +1,29 @@
 """폴링으로 모인 새 글(output/collected/<ts>/<slug>.new.json) → Gemini 요약 → 필터 → Discord 발송.
 
+호출 경로:
+  - poll_and_notify.py (notice-poll.service, 1회/일) → notify.py (collected 처리 + flush + heartbeat).
+    collected 처리 후 그 dir 에 .notified 마커 생성 → 이후 호출은 그 dir 스킵 (Gemini 중복 호출 방지).
+  - notice-notify.timer (15분 간격) → notify.py --no-collected (다이제스트 flush 만).
+    사용자 schedule HH:MM 도래 후 다음 슬랏에서 비움. digest_sent 테이블이 일 1회 cap.
+
 발송 경로 (slug 별로):
-  1. SQLite 구독(bot/db.py: subscriptions) 이 있으면 → 봇 토큰으로 REST 직접(DM/채널).
+  1. SQLite 구독(bot/db.py: subscriptions) → 봇 토큰으로 REST 직접(DM/채널).
        구독별 filter_prompt(자연어) → Gemini {include,reason} 로 골라냄(없으면 전부 통과).
-       구독별 schedule: 'realtime' → 지금 발송 / 'HH:MM' → pending 큐에 쌓아뒀다가 그 시각(KST) 폴링 때 다이제스트로.
+       구독별 schedule: 'HH:MM' KST → pending 큐 → flush_digests 가 시각 도래 시 발송.
+       ('realtime' 분기는 _migrate 후 dead path — 모든 구독은 HH:MM. /watch 가 default 로 POLL_SCHEDULE 박음.)
   2. (Phase 1 / 봇 없는 경우) output/notify_targets.json = {"<slug>":"<webhook>"} 또는 NOTIFY_TARGETS_JSON 이 있으면 → webhook 발송 (해당 slug 에 SQLite 구독이 없을 때만; delivered.json 으로 중복 방지).
 
-중복 방지: SQLite deliveries(slug,post_id,target_id) / webhook 은 delivered.json.
+중복 방지: SQLite deliveries(slug,post_id,target_id) / webhook 은 delivered.json / 다이제스트는 digest_sent(target_id,schedule,kst_date).
 봇 프로세스(bot/main.py)가 떠 있을 필요 없음 — 여기서 토큰으로 REST 직접 친다.
 
 사용:
-    python scripts/notify.py                 # 최신 collected 처리 + 다이제스트 시각 도래분 발송
+    python scripts/notify.py                 # 최신 collected 처리 + 다이제스트 도래분 발송
+    python scripts/notify.py --no-collected  # collected 처리 스킵, flush 만 (notice-notify.timer 가 켬)
     python scripts/notify.py --dry-run       # 발송/DB 변경 없이 메시지만 출력
     python scripts/notify.py --collected-dir output/collected/20260511_210242
     python scripts/notify.py --no-digest     # 다이제스트 flush 생략 (이번 collected 분만)
-    python scripts/notify.py --heartbeat     # 추가로, notify_empty=1 인 realtime 구독에 새 글 없으면 "새 공지 없음" 발송
-                                             #   (poll_and_notify.py 가 폴링 직후 이걸 켜서 호출 — 폴링 1회 = heartbeat 1회)
+    python scripts/notify.py --heartbeat     # notify_empty=1 인 구독에 새 글 없으면 '새 공지 없음' 발송
+                                             #   (poll_and_notify 가 폴링 직후 켬; 현재 realtime 구독만 잡음 — 다음 라운드 정리 예정)
 """
 from __future__ import annotations
 
