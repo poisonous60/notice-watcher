@@ -423,10 +423,21 @@ async def gather_state(*, load_remote: bool = False) -> dict:
     원격 읽기는 SSH 비용이 있어 기본은 off — 사용자가 명시적 클릭(Load) 으로 트리거.
     """
     routing_map = load_routing_local()
+    # 실제로 적용되는 모델 — `generate.routing.resolve()` 가 routing.json 캐시를 무시하지 않고 dev박스 로컬 파일만 봄.
+    # routing 가 비어있어도 fallback (`GEMINI_MODEL` env 또는 gemini-2.5-flash) 을 표시할 수 있게 effective 계산.
+    from generate import routing as _routing
+    effective: dict[str, str] = {}
+    for cs, _ in CALL_SITES:
+        if cs == "_default":
+            r = _routing.resolve("__nonexistent_for_default__")  # _default 또는 fallback
+        else:
+            r = _routing.resolve(cs)
+        effective[cs] = f"{r.provider}:{r.model}"
     state = {
         "routing": {
             "local_present": ROUTING_PATH.exists(),
-            "current": routing_map,                # {call_site: 'provider:model'}
+            "current": routing_map,                # {call_site: 'provider:model'} — 명시 override 만
+            "effective": effective,                # {call_site: 'provider:model'} — 실제 적용 (override 없으면 fallback)
             "models":  known_models(),             # dropdown 옵션
             "call_sites": CALL_SITES,
         },

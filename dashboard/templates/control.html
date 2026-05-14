@@ -37,25 +37,34 @@
     <tbody>
       {% for key, label in ctrl.routing.call_sites %}
       {% set current = ctrl.routing.current.get(key, '') %}
-      {% set is_custom = current and current not in ctrl.routing.models %}
+      {% set effective = ctrl.routing.effective.get(key, '') %}
+      {% set selected = current if current else effective %}
+      {% set is_custom = selected and selected not in ctrl.routing.models %}
+      {% set is_override = current != '' %}
       <tr>
         <td class="mono">
           {{ key }}<br>
-          <span class="muted" style="font-size:0.78rem;font-weight:normal;">{{ label }}</span>
+          <span class="muted" style="font-size:0.78rem;font-weight:normal;">{{ label }}</span><br>
+          <span class="badge {{ 'ok' if is_override else '' }}" style="margin-top:0.2rem;">
+            {{ 'override' if is_override else 'default' }}
+          </span>
         </td>
         <td>
           <select name="{{ key }}" style="width:100%;margin:0;"
                   onchange="this.parentElement.parentElement.querySelector('input.routing-custom').style.display = this.value==='__custom__' ? 'block' : 'none'; if (this.value !== '__custom__') this.parentElement.parentElement.querySelector('input.routing-custom').value='';">
-            <option value="" {{ 'selected' if not current else '' }}>— (매핑 없음)</option>
+            <option value="">— (매핑 제거 → default 사용)</option>
             {% for m in ctrl.routing.models %}
-            <option value="{{ m }}" {{ 'selected' if current==m else '' }}>{{ m }}</option>
+            <option value="{{ m }}" {{ 'selected' if selected==m else '' }}>{{ m }}</option>
             {% endfor %}
             <option value="__custom__" {{ 'selected' if is_custom else '' }}>custom...</option>
           </select>
+          {% if not is_override and effective %}
+          <span class="muted" style="font-size:0.78rem;">실제 적용: <code>{{ effective }}</code> (fallback)</span>
+          {% endif %}
         </td>
         <td>
           <input type="text" class="routing-custom" data-key="{{ key }}"
-                 value="{{ current if is_custom else '' }}"
+                 value="{{ selected if is_custom else '' }}"
                  placeholder="provider:model (예: openrouter:anthropic/claude-haiku-4-5)"
                  style="width:100%;margin:0;font-family:monospace;font-size:0.85rem;display:{{ 'block' if is_custom else 'none' }};">
         </td>

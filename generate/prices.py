@@ -15,23 +15,25 @@ from typing import Optional
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_PRICES = _REPO_ROOT / "model_prices.json"
 
-_cache_mtime: float = -1.0
-_cache_data: dict = {}
+_cache: dict[str, tuple[float, dict]] = {}  # path str → (mtime, data)
 
 
 def _load(path: Path) -> dict:
-    global _cache_mtime, _cache_data
+    """파일 path 별로 (mtime, data) 캐시. 같은 mtime 의 다른 path 가 캐시 충돌 안 나도록 path 별 분리."""
     try:
         mtime = path.stat().st_mtime
     except OSError:
         return {}
-    if mtime != _cache_mtime:
-        try:
-            _cache_data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            _cache_data = {}
-        _cache_mtime = mtime
-    return _cache_data
+    key = str(path)
+    cached = _cache.get(key)
+    if cached is not None and cached[0] == mtime:
+        return cached[1]
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        data = {}
+    _cache[key] = (mtime, data)
+    return data
 
 
 def compute_cost(provider: str, model: str, prompt_tokens: int,
