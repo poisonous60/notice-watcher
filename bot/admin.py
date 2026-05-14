@@ -260,10 +260,13 @@ class AnnounceConfirmView(discord.ui.View):
         import traceback as _tb
         tb = "".join(_tb.format_exception(type(exc), exc, exc.__traceback__))
         log.error("announce _do_send 예외: %s\n%s", exc, tb)
-        # owner 한테 별도 알림 (DM 도 실패할 수 있어 best-effort)
-        asyncio.create_task(send_chunked_dm(
-            self.client, self.sent_by_id,
-            f"⚠️ 공지 발송 중 예외 — `{type(exc).__name__}: {exc}`\n```\n{tb[-1500:]}\n```"))
+        # owner 한테 별도 알림 — 봇 종료 중이면 event loop 가 닫혀 RuntimeError. 그땐 로그만.
+        try:
+            asyncio.create_task(send_chunked_dm(
+                self.client, self.sent_by_id,
+                f"⚠️ 공지 발송 중 예외 — `{type(exc).__name__}: {exc}`\n```\n{tb[-1500:]}\n```"))
+        except RuntimeError as re:
+            log.warning("_on_send_done DM task 생성 실패(loop 종료?): %r", re)
 
     @discord.ui.button(label="취소", style=discord.ButtonStyle.secondary)
     async def cancel_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -288,31 +291,33 @@ class AnnounceConfirmView(discord.ui.View):
         dm_fail_log: list[str] = []
         ch_fail_log: list[str] = []
 
-        for uid in self.dm_targets:
-            try:
-                user = await self.client.fetch_user(int(uid))
-                await user.send(embed=embed)
-                dm_sent += 1
-            except Exception as e:  # noqa: BLE001
-                dm_failed += 1
-                dm_fail_log.append(f"  user {uid}: {type(e).__name__}: {e}")
-                log.warning("announce DM 실패 user=%s: %r", uid, e)
-            await asyncio.sleep(SEND_SLEEP)
+        try:
+            for uid in self.dm_targets:
+                try:
+                    user = await self.client.fetch_user(int(uid))
+                    await user.send(embed=embed)
+                    dm_sent += 1
+                except Exception as e:  # noqa: BLE001
+                    dm_failed += 1
+                    dm_fail_log.append(f"  user {uid}: {type(e).__name__}: {e}")
+                    log.warning("announce DM 실패 user=%s: %r", uid, e)
+                await asyncio.sleep(SEND_SLEEP)
 
-        for cid in self.ch_targets:
-            try:
-                ch = self.client.get_channel(int(cid)) or await self.client.fetch_channel(int(cid))
-                await ch.send(embed=embed)
-                ch_sent += 1
-            except Exception as e:  # noqa: BLE001
-                ch_failed += 1
-                ch_fail_log.append(f"  channel {cid}: {type(e).__name__}: {e}")
-                log.warning("announce channel 실패 channel=%s: %r", cid, e)
-            await asyncio.sleep(SEND_SLEEP)
-
-        db.update_announcement_counts(
-            self.conn, ann_id, dm_sent=dm_sent, dm_failed=dm_failed,
-            channel_sent=ch_sent, channel_failed=ch_failed)
+            for cid in self.ch_targets:
+                try:
+                    ch = self.client.get_channel(int(cid)) or await self.client.fetch_channel(int(cid))
+                    await ch.send(embed=embed)
+                    ch_sent += 1
+                except Exception as e:  # noqa: BLE001
+                    ch_failed += 1
+                    ch_fail_log.append(f"  channel {cid}: {type(e).__name__}: {e}")
+                    log.warning("announce channel 실패 channel=%s: %r", cid, e)
+                await asyncio.sleep(SEND_SLEEP)
+        finally:
+            # partial 실패(예외/cancel) 에도 지금까지 누적된 카운트는 영속 — 0 카운트 row 방지.
+            db.update_announcement_counts(
+                self.conn, ann_id, dm_sent=dm_sent, dm_failed=dm_failed,
+                channel_sent=ch_sent, channel_failed=ch_failed)
 
         report = [
             f"📊 공지 #{ann_id} 발송 완료",

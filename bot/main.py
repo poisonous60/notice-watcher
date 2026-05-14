@@ -347,17 +347,16 @@ async def announce_cmd(interaction: discord.Interaction,
         db.set_announce_optout(_conn, "dm", user_id, opted_out=not dm)
         lines.append(f"📩 DM 공지: **{'ON' if dm else 'OFF'}** 로 설정됨.")
 
-    # channel 토글 — guild 안 + manage_channels 권한 + 채널에 봇이 알림 보내는 곳인지
+    # channel 토글 — guild 안 + manage_channels 권한 + 채널에 봇이 알림 보내는 곳인지.
+    # interaction.permissions 는 항상 Permissions 객체(DM 이면 빈, guild 채널이면 effective).
     if channel is not None:
         if not is_guild or not ch_id:
             lines.append("❌ `channel:` 인자는 길드 채널에서만 사용 가능 (DM 에선 불가).")
+        elif not interaction.permissions.manage_channels:
+            lines.append("❌ 이 채널의 공지 설정은 `Manage Channels` 권한이 있는 사람만 변경 가능.")
         else:
-            perms = interaction.channel.permissions_for(interaction.user) if interaction.channel else None
-            if not (perms and perms.manage_channels):
-                lines.append("❌ 이 채널의 공지 설정은 `Manage Channels` 권한이 있는 사람만 변경 가능.")
-            else:
-                db.set_announce_optout(_conn, "channel", ch_id, opted_out=not channel)
-                lines.append(f"📢 이 채널 공지: **{'ON' if channel else 'OFF'}** 로 설정됨.")
+            db.set_announce_optout(_conn, "channel", ch_id, opted_out=not channel)
+            lines.append(f"📢 이 채널 공지: **{'ON' if channel else 'OFF'}** 로 설정됨.")
 
     # 무인자 또는 토글 후 — 현재 상태 표시
     dm_off = db.get_announce_optout(_conn, "dm", user_id)
