@@ -49,30 +49,12 @@ async def send_chunked_dm(client: discord.Client, owner_id: str, text: str) -> b
         return False
 
 
-def build_admin_tree(client: discord.Client, conn, *, admin_guild: discord.Object) -> app_commands.CommandTree:
-    """admin 전용 CommandTree 를 만들어 반환. main.py 가 admin_guild 에 sync.
-    admin tree 는 main tree 와 별개 — main tree 의 `on_app_command_error` 핸들러를 못 받으므로
-    여기서 자체 에러 핸들러를 등록한다(미등록 시 admin 명령 실행 중 예외가 owner 모르게 사라짐)."""
-    tree = app_commands.CommandTree(client)
+def build_admin_tree(client: discord.Client, conn, *, admin_guild: discord.Object,
+                     tree: app_commands.CommandTree) -> app_commands.CommandTree:
+    """admin 명령들을 main tree 의 `/admin` 그룹으로 등록(guild=admin_guild). 같은 client 에 두 번째
+    CommandTree 를 만들면 discord.py 가 거부('This client already has an associated command tree')하므로
+    main 의 tree 를 재사용한다. group 자체에 guild kwarg 를 주면 그 guild 의 autocomplete 에만 노출됨."""
     paths = inspector.InspectorPaths.live()
-
-    @tree.error
-    async def _admin_error(interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
-        import traceback
-        tb = "".join(traceback.format_exception(type(error), error, error.__traceback__))
-        log.error("admin 명령 예외: %s\n%s", error, tb)
-        try:
-            if interaction.response.is_done():
-                await interaction.edit_original_response(
-                    content=f"⚠️ admin 명령 처리 중 오류: `{type(error).__name__}: {error}`")
-            else:
-                await interaction.response.send_message(
-                    f"⚠️ admin 명령 처리 중 오류: `{type(error).__name__}: {error}`", ephemeral=True)
-        except Exception:  # noqa: BLE001
-            pass
-        oid = owner_user_id()
-        if oid and oid.isdigit():
-            await send_chunked_dm(client, oid, f"[admin 에러] `{type(error).__name__}: {error}`\n```\n{tb[-1500:]}\n```")
 
     async def _ack_and_dm(interaction: discord.Interaction, text: str) -> None:
         if not _is_owner(interaction):

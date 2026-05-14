@@ -534,9 +534,9 @@ async def on_ready():
     if agid:
         try:
             ag = discord.Object(id=agid)
-            atree = admin_mod.build_admin_tree(client, _conn, admin_guild=ag)
-            synced = await atree.sync(guild=ag)
-            log.info("synced %d admin commands to admin guild %s", len(synced), agid)
+            admin_mod.build_admin_tree(client, _conn, admin_guild=ag, tree=tree)
+            synced = await tree.sync(guild=ag)
+            log.info("synced %d admin commands to admin guild %s (포함: main + admin)", len(synced), agid)
         except Exception as e:  # noqa: BLE001
             _record_error("admin_tree.sync", e)
     else:
