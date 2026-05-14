@@ -1,0 +1,16 @@
+# 다이제스트 flush (notify-timer 가 15분마다 호출). chromium 락 불필요 — Gemini+Discord 만.
+# 사용자 schedule(HH:MM) 도래한 pending 만 발송. digest_sent 테이블이 일 1회 cap.
+# 설치: sudo cp deploy/notice-notify.service deploy/notice-notify.timer /etc/systemd/system/
+#       sudo systemctl daemon-reload && sudo systemctl enable --now notice-notify.timer
+# 즉시 1회 실행: sudo systemctl start notice-notify.service   |   로그: journalctl -u notice-notify
+[Unit]
+Description=Notice digest flush (15-min slot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=poiso
+WorkingDirectory=/home/<user>/notice-watcher
+EnvironmentFile=/home/<user>/notice-watcher/.env
+ExecStart=/home/<user>/notice-watcher/.venv/bin/python scripts/notify.py

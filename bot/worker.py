@@ -171,7 +171,7 @@ async def _post_register_success(client, conn, job) -> None:
         head = (f"✅ 등록 완료 — `{slug}`\n"
                 f"• baseline {n if n is not None else '?'}건(이 글들은 '새 글' 아님)\n"
                 f"• 필터: {sub.get('filter_prompt') or '없음(새 글 전부)'}\n"
-                f"• 스케줄: {sub['schedule']}\n"
+                f"• 발송 시각: {sub['schedule']} KST\n"
                 f"• 알림: {where}\n"
                 f"• 새 글 없을 때도 알림: {'예' if sub.get('notify_empty') else '아니오'}")
     else:

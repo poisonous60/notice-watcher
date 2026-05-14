@@ -1,0 +1,14 @@
+# 15분마다 발송 슬랏 (00/15/30/45 분). schedule HH:MM 도래 후 다음 슬랏에서 비움 — 최대 ~15분 지연.
+# 폴링과 분리: chromium 락 불필요. notify.py 만 호출(--no-collected) → 다이제스트 flush 만.
+# 설치: sudo cp deploy/notice-notify.service deploy/notice-notify.timer /etc/systemd/system/
+#       sudo systemctl daemon-reload && sudo systemctl enable --now notice-notify.timer
+[Unit]
+Description=Run notice digest flush every 15 minutes
+
+[Timer]
+OnCalendar=*-*-* *:00,15,30,45:00 Asia/Seoul
+Persistent=true
+RandomizedDelaySec=30
+
+[Install]
+WantedBy=timers.target

@@ -39,8 +39,25 @@ STATE_DIR = site_ops.STATE_DIR
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("bot")
 
+# 폴링 시각 (deploy/notice-poll.timer OnCalendar 와 동기화). schedule 미지정 시 default.
+# 발송은 별도 notify-timer (15분 슬랏) 가 처리 — 사용자가 임의 HH:MM 골라도 그 시각 도래 후
+# 다음 notify-timer slot 에서 비움 (최대 ~15분 지연).
+POLL_SCHEDULE = "08:20"
 _SCHEDULE_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
 _HOUR_RE = re.compile(r"^([01]?\d|2[0-3])$")
+
+
+def _parse_schedule(raw: Optional[str]) -> Optional[str]:
+    """'HH:MM' | 'HH' → 정규화. 빈값이면 POLL_SCHEDULE. 잘못된 값이면 None."""
+    if not raw or not raw.strip():
+        return POLL_SCHEDULE
+    s = raw.strip()
+    if _SCHEDULE_RE.match(s):
+        h, m = s.split(":")
+        return f"{int(h):02d}:{m}"
+    if _HOUR_RE.match(s):
+        return f"{int(s):02d}:00"
+    return None
 
 START_TS = time.time()
 LAST_ERROR: dict = {"when": None, "text": None}
@@ -59,22 +76,6 @@ def _now_iso() -> str:
 # site_ops 의 헬퍼를 짧은 alias 로 — 기존 호출부 호환
 _is_registered = site_ops.is_registered
 _baseline_count = site_ops.baseline_count
-
-
-def _parse_schedule(raw: Optional[str]) -> Optional[str]:
-    """'realtime' | 'HH:MM' | 'HH' → 정규화. 잘못된 값이면 None."""
-    if not raw:
-        return "realtime"
-    s = raw.strip().lower()
-    if s in ("realtime", "rt", "즉시", "실시간"):
-        return "realtime"
-    s = raw.strip()
-    if _SCHEDULE_RE.match(s):
-        h, m = s.split(":")
-        return f"{int(h):02d}:{m}"
-    if _HOUR_RE.match(s):
-        return f"{int(s):02d}:00"
-    return None
 
 
 # --------------------------------------------------------------------------- #
@@ -129,23 +130,19 @@ def _record_error(where: str, exc: BaseException) -> str:
 @app_commands.describe(
     url="공지/게시판 목록 페이지 URL",
     filter="(선택) 어떤 글만 받을지 자연어로. 예: '점검 공지는 빼고 신규 콘텐츠/이벤트만'. 비우면 새 글 전부.",
-    schedule="(선택) 'realtime'(기본, 폴링 때마다 바로) 또는 'HH:MM'/'HH'(매일 그 시각에 하루치 모아서, KST)",
+    schedule=f"(선택) 알림 받을 시각 'HH:MM' 또는 'HH' (KST). 기본 {POLL_SCHEDULE} — 폴링 시각.",
     here="(선택) 켜면 이 채널에 발송. 끄면(기본) 내 DM 으로.",
-    notify_empty="(선택) 켜면 폴링했는데 새 글이 없을 때도 '새 공지 없음' 한 줄을 보냄. 끄면(기본) 새 글 있을 때만. realtime 일 때만 동작.",
+    notify_empty="(선택) 켜면 폴링했는데 새 글이 없을 때도 '새 공지 없음' 한 줄을 보냄. 끄면(기본) 새 글 있을 때만.",
     article_url="(선택) 처음 등록하는 사이트가 자동 분석에 실패할 때, 그 게시판의 실제 글 하나 URL 을 같이 주면 분석 성공률이 올라갑니다.",
 )
 async def watch(interaction: discord.Interaction, url: str, filter: Optional[str] = None,
-                schedule: Optional[str] = "realtime", here: bool = False, notify_empty: bool = False,
+                schedule: Optional[str] = None, here: bool = False, notify_empty: bool = False,
                 article_url: Optional[str] = None):
     await interaction.response.defer(thinking=True)
     sched = _parse_schedule(schedule)
     if sched is None:
         await interaction.edit_original_response(
-            content="❌ schedule 형식 오류 — 'realtime' 또는 'HH:MM'(예: 09:00) / 'HH'(예: 9) 로 적어주세요.")
-        return
-    if notify_empty and sched != "realtime":
-        await interaction.edit_original_response(
-            content="❌ notify_empty(새 공지 없음 알림)는 schedule='realtime' 일 때만 돼요. 다이제스트 모드에선 못 켭니다.")
+            content="❌ schedule 형식 오류 — 'HH:MM'(예: 09:00) 또는 'HH'(예: 9) 로 적어주세요.")
         return
     url = url.strip()
     if not re.match(r"^https?://", url):
@@ -173,7 +170,7 @@ async def watch(interaction: discord.Interaction, url: str, filter: Optional[str
         head = (f"✅ 구독 추가 — `{slug}` (이미 등록된 사이트)\n"
                 f"• baseline {n if n is not None else '?'}건\n"
                 f"• 필터: {filter_prompt or '없음(새 글 전부)'}\n"
-                f"• 스케줄: {sched}\n"
+                f"• 발송 시각: {sched} KST (폴링 {POLL_SCHEDULE} 이후 시각만 당일 발송, 이전 시각은 다음날)\n"
                 f"• 알림: {where}\n"
                 f"• 새 글 없을 때도 알림: {'예' if notify_empty else '아니오'}")
         await interaction.edit_original_response(content=head + "\n\n📋 예시 알림 만드는 중…")
@@ -290,7 +287,7 @@ async def list_cmd(interaction: discord.Interaction):
     for r in rows:
         where = "DM" if r["target_kind"] == "dm" else f"<#{r['target_id']}>"
         ne = " — 새글없음알림:on" if r["notify_empty"] else ""  # connect() 가 항상 _migrate 하므로 컬럼은 늘 있음
-        lines.append(f"• `{r['slug']}` — 필터: {r['filter_prompt'] or '없음'} — 스케줄: {r['schedule']} — {where}{ne} — 등록 {r['created_at'][:10]}")
+        lines.append(f"• `{r['slug']}` — 필터: {r['filter_prompt'] or '없음'} — 발송 시각: {r['schedule']} — {where}{ne} — 등록 {r['created_at'][:10]}")
     await interaction.response.send_message("\n".join(lines)[:1900], ephemeral=True)
 
 

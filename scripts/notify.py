@@ -198,14 +198,36 @@ def digest_chunks(rows: list, *, max_len: int = 1850) -> list[str]:
 
 
 # --------------------------------------------------------------------------- #
-# 다이제스트 flush (지금 KST 시(時) 가 도래한 것들)
+# 다이제스트 flush — 발송 시각(HH:MM) 이 도래했고 그 KST 일자에 아직 안 비웠으면 비움.
+#
+# (target_id, schedule HH:MM, kst_date) 단위 cap (digest_sent 테이블) → 같은 timer slot 또는
+# 24×/일 폴링이라 pending 이 자주 차도, 사용자 schedule 시각에 1회만 발송.
+# 단순: schedule 시각이 *오늘* 의 그 시각 이후면 도래 — 다음날 새 폴링 이전엔 pending 이 또 추가되지 않아
+# 자연스럽게 day-rollover. notify-timer 가 15분 간격으로 돌므로 사용자 schedule 시각의 분 단위는
+# 15분 슬랏(00/15/30/45)으로 round-up 효과 — 그 슬랏 내 첫 timer 가 비워줌.
 # --------------------------------------------------------------------------- #
+def _hhmm_to_minutes(sch: str) -> Optional[int]:
+    try:
+        h, m = sch.split(":")
+        h, m = int(h), int(m)
+        if 0 <= h <= 23 and 0 <= m <= 59:
+            return h * 60 + m
+    except (ValueError, IndexError):
+        pass
+    return None
+
+
 def flush_digests(conn, tok: Optional[str], *, dry_run: bool) -> int:
-    cur_hour = datetime.now(KST).hour
+    now_kst = datetime.now(KST)
+    cur_minutes = now_kst.hour * 60 + now_kst.minute
+    kst_date = now_kst.strftime("%Y-%m-%d")
     sent = 0
     for target_id in db.pending_target_ids(conn):
         rows = db.pending_for_target(conn, target_id)
-        due: list = []
+        # target_id 의 schedule 별로 묶음. 한 사용자가 한 사이트당 한 구독이지만 여러 사이트(slug)별 schedule 가
+        # 같다고 가정할 수 없음 — 그러나 (user, slug) 구독은 schedule 하나뿐이고, 같은 target_id 면 사용자도 같음.
+        # 그래서 (target_id, schedule) 쌍별로 cap 추적.
+        by_schedule: dict[str, list] = {}
         target_kind = "dm"
         for r in rows:
             sub = conn.execute(
@@ -217,42 +239,45 @@ def flush_digests(conn, tok: Optional[str], *, dry_run: bool) -> int:
                 conn.commit()
                 continue
             target_kind = sub["target_kind"]
-            sch = sub["schedule"] or "realtime"
-            if sch == "realtime":
-                due.append(r)  # 비정상이지만(원래 pending 안 들어옴) 들어왔으면 지금 보냄
+            sch = sub["schedule"] or ""
+            mins = _hhmm_to_minutes(sch)
+            if mins is None:
+                # 잘못된 schedule (옛 'realtime' 또는 형식 오류) → 즉시 비움 묶음에 넣음
+                by_schedule.setdefault("_immediate_", []).append(r)
                 continue
-            try:
-                if int(sch.split(":")[0]) == cur_hour:
-                    due.append(r)
-            except (ValueError, IndexError):
-                conn.execute("DELETE FROM pending WHERE id=?", (r["id"],))
-                conn.commit()
-        if not due:
-            continue
-        chunks = digest_chunks(due)
-        if dry_run or not tok:
+            if mins > cur_minutes:
+                continue  # 아직 시각 도래 안 함 — 다음 timer 슬랏에서 재시도
+            by_schedule.setdefault(sch, []).append(r)
+
+        for sch, due in by_schedule.items():
+            if sch != "_immediate_" and db.digest_was_sent(conn, target_id, sch, kst_date):
+                continue  # 이미 오늘 그 schedule 로 다이제스트 보냄 — 그 후 들어온 pending 은 내일 발송
+            chunks = digest_chunks(due)
+            if dry_run or not tok:
+                for ch in chunks:
+                    print(f"\n--- [DIGEST → {target_kind}:{target_id} sched={sch}] ---\n{ch}\n")
+                if not tok and not dry_run:
+                    print(f"  [warn] BOT_TOKEN 없음 — 다이제스트 발송 불가 (pending 유지): target={target_id}", file=sys.stderr)
+                continue
+            ok = True
             for ch in chunks:
-                print(f"\n--- [DIGEST → {target_kind}:{target_id}] ---\n{ch}\n")
-            if not tok and not dry_run:
-                print(f"  [warn] BOT_TOKEN 없음 — 다이제스트 발송 불가 (pending 유지): target={target_id}", file=sys.stderr)
-            continue  # dry-run/토큰없음: pending 그대로 둠
-        ok = True
-        for ch in chunks:
-            try:
-                deliver(tok, target_kind=target_kind, target_id=target_id, content=ch)
-                time.sleep(0.5)
-            except CannotDeliver as e:
-                print(f"  [warn] 다이제스트 발송 불가(target={target_id}): {e} → 다음에 재시도", file=sys.stderr)
-                ok = False
-                break
-            except DiscordRestError as e:
-                print(f"  [warn] 다이제스트 발송 실패(target={target_id}): {e} → 다음에 재시도", file=sys.stderr)
-                ok = False
-                break
-        if ok:
-            db.mark_drained(conn, target_id, due)
-            sent += len(due)
-            print(f"  🗞️ 다이제스트 발송: target={target_id}  {len(due)}건")
+                try:
+                    deliver(tok, target_kind=target_kind, target_id=target_id, content=ch)
+                    time.sleep(0.5)
+                except CannotDeliver as e:
+                    print(f"  [warn] 다이제스트 발송 불가(target={target_id}): {e} → 다음에 재시도", file=sys.stderr)
+                    ok = False
+                    break
+                except DiscordRestError as e:
+                    print(f"  [warn] 다이제스트 발송 실패(target={target_id}): {e} → 다음에 재시도", file=sys.stderr)
+                    ok = False
+                    break
+            if ok:
+                db.mark_drained(conn, target_id, due)
+                if sch != "_immediate_":
+                    db.mark_digest_sent(conn, target_id, sch, kst_date)
+                sent += len(due)
+                print(f"  🗞️ 다이제스트 발송: target={target_id} sched={sch}  {len(due)}건")
     return sent
 
 
@@ -313,13 +338,19 @@ def main(argv: Optional[list[str]] = None) -> int:
     p.add_argument("--model", help="Gemini 모델 (기본 GEMINI_MODEL env 또는 gemini-2.5-flash)")
     p.add_argument("--max-notify", type=int, default=12, help="한 slug 당 한 번에 처리할 최대 글 수 (초과분은 스킵)")
     p.add_argument("--no-digest", action="store_true", help="다이제스트 flush 생략")
+    p.add_argument("--no-collected", action="store_true",
+                   help="collected 새 글 처리 생략 — pending 에서 다이제스트 flush 만. notice-notify.timer 가 켜서 호출.")
     p.add_argument("--heartbeat", action="store_true",
                    help="notify_empty=1 인 realtime 구독에 새 글 없으면 '새 공지 없음' 발송 (poll_and_notify 가 폴링 직후 켬)")
     p.add_argument("--dry-run", action="store_true", help="발송/DB 변경 없이 메시지만 출력")
     args = p.parse_args(argv)
 
-    collected = Path(args.collected_dir) if args.collected_dir else latest_collected_dir()
-    new_posts = load_new_posts(collected)
+    if args.no_collected:
+        collected = None
+        new_posts = {}
+    else:
+        collected = Path(args.collected_dir) if args.collected_dir else latest_collected_dir()
+        new_posts = load_new_posts(collected)
     conn = db.connect()
     tok = bot_token() or None
     dry_run = args.dry_run

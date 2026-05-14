@@ -5,9 +5,13 @@ DB 파일: output/bot.sqlite3 (이미 .gitignore 됨).
 
 테이블:
   subscriptions(user_id, slug, url, filter_prompt, schedule, target_kind, target_id, notify_empty, created_at)
-      schedule = 'realtime' (폴링 때마다 바로) | 'HH:MM' (KST, 그 시각에 하루치 다이제스트)
+      schedule = 'HH:MM' (KST, 그 시각 폴링 때 묶어 발송). 사용자 선택 옵션은 봇 /watch 에서 제거됨 →
+                 신규는 모두 서버 폴링 시각(08:20)으로 저장. 옛 'realtime' 행은 _migrate 가 08:20 으로 변환.
+                 컬럼 자체는 유지 — notify.py 의 flush_digests 가 HH:MM 매칭으로 그대로 동작.
       target_kind = 'dm' (target_id = user_id) | 'channel' (target_id = channel_id)
-      notify_empty = 1 이면 폴링 결과 새 글이 없어도 "새 공지 없음" 한 줄을 보냄 (realtime 구독만; 기본 0)
+      notify_empty = 1 이면 폴링 결과 새 글이 없어도 "새 공지 없음" 한 줄을 보냄 (기본 0).
+                 ⚠ notify.py 의 현 구현은 realtime_notify_empty_subs() 가 schedule='realtime' 만 잡으므로
+                 다이제스트 모드에선 실제로 발송 안 됨 — notify.py 수정 시점에 함께 정리 예정.
       UNIQUE(user_id, slug, target_id) → /watch 멱등
   pending(slug, post_id, target_id, summary, found_at)   다이제스트 구독자용 outbox (필터 통과+요약 완료, 아직 미발송)
       UNIQUE(slug, post_id, target_id)
@@ -67,6 +71,17 @@ CREATE TABLE IF NOT EXISTS deliveries (
     PRIMARY KEY (slug, post_id, target_id)
 );
 
+-- 다이제스트 KST 일자별 발송 cap (target_id, schedule HH:MM, kst_date).
+-- flush_digests 가 그 일자에 이미 비웠으면 같은 timer 슬롯이 또 비우지 못하게 막음.
+-- 24×/일 폴링 시에도 schedule 시각에 1회만 다이제스트 발송됨.
+CREATE TABLE IF NOT EXISTS digest_sent (
+    target_id TEXT NOT NULL,
+    schedule  TEXT NOT NULL,
+    kst_date  TEXT NOT NULL,
+    sent_at   TEXT NOT NULL,
+    PRIMARY KEY (target_id, schedule, kst_date)
+);
+
 CREATE TABLE IF NOT EXISTS jobs (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     kind            TEXT NOT NULL CHECK (kind IN ('register','reprobe')),
@@ -100,6 +115,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
     cols = {r[1] for r in conn.execute("PRAGMA table_info(subscriptions)").fetchall()}
     if "notify_empty" not in cols:
         conn.execute("ALTER TABLE subscriptions ADD COLUMN notify_empty INTEGER NOT NULL DEFAULT 0")
+    # /watch 에서 사용자 시간 선택 옵션을 제거하면서 schedule='realtime' 신규 생성은 끊김.
+    # 기존 realtime 구독은 서버 폴링 시각(08:20 KST)으로 일괄 이전 — idempotent.
+    conn.execute("UPDATE subscriptions SET schedule='08:20' WHERE schedule='realtime'")
     conn.commit()
 
 
@@ -250,6 +268,26 @@ def mark_drained(conn: sqlite3.Connection, target_id: str, rows: list[sqlite3.Ro
                 (r["slug"], r["post_id"], target_id, _now_iso()),
             )
             conn.execute("DELETE FROM pending WHERE id=?", (r["id"],))
+        conn.commit()
+    _retry(_do)
+
+
+# --------------------------------------------------------------------------- #
+# digest_sent (KST 일자별 다이제스트 발송 cap)
+# --------------------------------------------------------------------------- #
+def digest_was_sent(conn: sqlite3.Connection, target_id: str, schedule: str, kst_date: str) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM digest_sent WHERE target_id=? AND schedule=? AND kst_date=?",
+        (target_id, schedule, kst_date),
+    ).fetchone() is not None
+
+
+def mark_digest_sent(conn: sqlite3.Connection, target_id: str, schedule: str, kst_date: str) -> None:
+    def _do():
+        conn.execute(
+            "INSERT OR IGNORE INTO digest_sent(target_id,schedule,kst_date,sent_at) VALUES(?,?,?,?)",
+            (target_id, schedule, kst_date, _now_iso()),
+        )
         conn.commit()
     _retry(_do)
 
