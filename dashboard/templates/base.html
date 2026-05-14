@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ko" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}notice-watcher dashboard{% endblock %}</title>
+  <link rel="stylesheet"
+        href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <script src="https://unpkg.com/htmx.org@2.0.3"></script>
+  <link rel="stylesheet" href="{{ request.url_for('static', path='app.css') }}">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <h3 class="brand">📡 notice-watcher</h3>
+      <nav>
+        <ul>
+          <li><a href="/" class="{{ 'active' if active=='triage' else '' }}">📊 Triage</a></li>
+          <li><a href="/jobs" class="{{ 'active' if active=='jobs' else '' }}">📋 Jobs</a></li>
+          <li><a href="/subs" class="{{ 'active' if active=='subs' else '' }}">🔗 Subs</a></li>
+          <li><a href="/reports" class="{{ 'active' if active=='reports' else '' }}">🐛 Reports</a></li>
+          <li><a href="/feedback" class="{{ 'active' if active=='feedback' else '' }}">💬 Feedback</a></li>
+          <li><a href="/usage" class="{{ 'active' if active=='usage' else '' }}">💸 Usage</a></li>
+          <li><a href="/control" class="{{ 'active' if active=='control' else '' }}">🎛 Control</a></li>
+          <li><a href="/settings" class="{{ 'active' if active=='settings' else '' }}">⚙ Settings</a></li>
+        </ul>
+      </nav>
+    </aside>
+
+    <main class="content">
+      <header class="topbar">
+        <div class="snap">
+          <span class="muted">snapshot:</span> <code>{{ snapshot_ts }}</code>
+        </div>
+        <button class="secondary pull-btn"
+                hx-post="/actions/pull"
+                hx-target="#pull-result"
+                hx-swap="innerHTML"
+                hx-indicator="#pull-spinner">
+          🔄 Pull from N100
+        </button>
+        <span id="pull-spinner" class="htmx-indicator">…진행중</span>
+      </header>
+
+      <div id="pull-result" aria-live="polite"></div>
+
+      {% block body %}{% endblock %}
+    </main>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="{{ request.url_for('static', path='app.js') }}"></script>
+</body>
+</html>

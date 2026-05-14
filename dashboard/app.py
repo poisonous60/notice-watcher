@@ -1,0 +1,349 @@
+"""FastAPI app + all routes.
+
+Owner 1인용·localhost 한정·인증 0. 페이지 네비게이션은 일반 링크, HTMX 는 액션(Pull/Fetch) 과
+부분 갱신용으로만 씀.
+"""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any, Optional
+
+from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+
+from bot import db, inspector
+from dashboard import actions as act
+from dashboard import prompts, state
+from dashboard import usage_view
+
+HERE = Path(__file__).resolve().parent
+templates = Jinja2Templates(directory=str(HERE / "templates"))
+
+
+def _is_http_url(value: object) -> bool:
+    """`href={{ url }}` 에 박기 전 안전한 http(s) 스킴인지 확인. `javascript:`·`data:` 등 차단."""
+    if not isinstance(value, str):
+        return False
+    return value.startswith("http://") or value.startswith("https://")
+
+
+templates.env.filters["is_http"] = _is_http_url
+templates.env.globals["is_http_url"] = _is_http_url
+
+app = FastAPI(title="notice-watcher dashboard", docs_url=None, redoc_url=None)
+app.mount("/static", StaticFiles(directory=str(HERE / "static")), name="static")
+
+
+# --------------------------------------------------------------------------- #
+# DI
+# --------------------------------------------------------------------------- #
+def get_conn():
+    """sqlite 커넥션을 yield 한 뒤 finally 로 close — 핸들러에서 예외나도 fd 안 샘."""
+    conn = state.open_conn()
+    try:
+        yield conn
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+
+def require_slug(slug: str) -> str:
+    """경로 path 로 받은 slug 가 안전한지 검사. 어긋나면 404 — 파일시스템 traversal 차단."""
+    if not state.safe_slug(slug):
+        raise HTTPException(status_code=404, detail="invalid slug")
+    return slug
+
+
+# --------------------------------------------------------------------------- #
+# 템플릿 헬퍼 — Starlette 1.0 의 TemplateResponse(request, name, context) 시그니처에 맞춤
+# --------------------------------------------------------------------------- #
+def _render(name: str, request: Request, *, status_code: int = 200, **extra: Any) -> HTMLResponse:
+    ctx: dict[str, Any] = {
+        "snapshot_ts": state.last_pull_str(),
+        "snapshot_present": state.snapshot_exists(),
+    }
+    ctx.update(extra)
+    return templates.TemplateResponse(request, name, ctx, status_code=status_code)
+
+
+def _partial(name: str, request: Request, **extra: Any) -> HTMLResponse:
+    """HTMX 부분 응답 — base 컨텍스트(sidebar/snapshot_ts) 안 씀."""
+    return templates.TemplateResponse(request, name, extra)
+
+
+def _no_snapshot(request: Request) -> HTMLResponse:
+    return _render("no_snapshot.html", request)
+
+
+# --------------------------------------------------------------------------- #
+# Triage (홈)
+# --------------------------------------------------------------------------- #
+@app.get("/", response_class=HTMLResponse)
+async def triage_page(request: Request, conn=Depends(get_conn)):
+    if conn is None:
+        return _no_snapshot(request)
+    paths = state.snapshot_paths()
+    summary = inspector.triage_summary(conn, paths)
+    rows = inspector.recent_jobs(conn, limit=15)
+    quick_prompts = {
+        "report_triage_bulk": prompts.report_triage_bulk(
+            report_ids=[r["id"] for r in db.list_reports(conn, status="open", limit=200)]
+        ) if summary["open_reports"] > 0 else None,
+        "hand_config_triage": prompts.hand_config_triage_queue(
+            failed_slugs=summary["failed_slugs"]
+        ) if summary["failed_slugs"] else None,
+    }
+    return _render("triage.html", request,
+                   summary=summary, recent=rows, quick=quick_prompts, active="triage")
+
+
+# --------------------------------------------------------------------------- #
+# Jobs
+# --------------------------------------------------------------------------- #
+@app.get("/jobs", response_class=HTMLResponse)
+async def jobs_list(request: Request, count: int = Query(50, ge=1, le=200),
+                    status: Optional[str] = None, q: Optional[str] = None,
+                    conn=Depends(get_conn)):
+    if conn is None:
+        return _no_snapshot(request)
+    rows = inspector.recent_jobs(conn, limit=count)
+    if status:
+        rows = [r for r in rows if (r.get("status") or "") == status]
+    if q:
+        ql = q.strip().lower()
+        def _match(r):
+            if ql in (r.get("slug") or "").lower():
+                return True
+            if ql in (r.get("url") or "").lower():
+                return True
+            rb = r.get("requested_by") or {}
+            if isinstance(rb, dict) and ql in str(rb.get("name") or "").lower():
+                return True
+            return False
+        rows = [r for r in rows if _match(r)]
+    return _render("jobs.html", request,
+                   rows=rows, count=count, filter_status=status, q=q, active="jobs")
+
+
+@app.get("/jobs/{job_id}", response_class=HTMLResponse)
+async def job_detail(request: Request, job_id: int, conn=Depends(get_conn)):
+    if conn is None:
+        return _no_snapshot(request)
+    paths = state.snapshot_paths()
+    result = inspector.inspect(conn, paths, job_id=job_id)
+    if result is None:
+        return HTMLResponse("<p>잡 없음.</p>", status_code=404)
+    j = result.latest_job or {}
+    fail_reason = None
+    if j.get("status") in ("error", "failed") or (j.get("result_rc") not in (None, 0)):
+        tail = (j.get("result_tail") or "").strip().splitlines()
+        fail_reason = tail[-1][:200] if tail else f"status={j.get('status')} rc={j.get('result_rc')}"
+    p_handconfig = prompts.hand_config_for_url(
+        url=j.get("url") or "",
+        slug=result.slug,
+        fail_reason=fail_reason,
+        job_id=job_id,
+    )
+    return _render("job_detail.html", request,
+                   result=result, job=j, p_handconfig=p_handconfig, active="jobs")
+
+
+# --------------------------------------------------------------------------- #
+# Subs (slug 기준)
+# --------------------------------------------------------------------------- #
+@app.get("/subs", response_class=HTMLResponse)
+async def subs_list(request: Request, q: Optional[str] = None,
+                    conn=Depends(get_conn)):
+    if conn is None:
+        return _no_snapshot(request)
+    paths = state.snapshot_paths()
+    slugs = state.unique_slugs(conn)
+    rows = []
+    for s in slugs:
+        subs = db.subscriptions_for_slug(conn, s)
+        cfg_path = paths.configs_dir / f"{s}.json"
+        st_path = paths.state_dir / f"{s}.json"
+        failed_marker = paths.state_dir / f"{s}.FAILED.json"
+        broken = 0
+        if st_path.exists():
+            try:
+                d = json.loads(st_path.read_text(encoding="utf-8"))
+                broken = int(d.get("consecutive_breakage", 0) or 0)
+            except (OSError, json.JSONDecodeError):
+                pass
+        # 검색 노출용 user_id 목록 (중복 제거)
+        user_ids = sorted({str(s_row["user_id"]) for s_row in subs})
+        rows.append({
+            "slug": s,
+            "n_subs": len(subs),
+            "has_config": cfg_path.exists(),
+            "has_state": st_path.exists(),
+            "failed": failed_marker.exists(),
+            "broken": broken,
+            "sample_url": (subs[0]["url"] if subs else None),
+            "user_ids": user_ids,
+        })
+    rows.sort(key=lambda r: (-r["broken"], not r["failed"], r["slug"]))
+    if q:
+        ql = q.strip().lower()
+        def _match(r):
+            if ql in r["slug"].lower():
+                return True
+            if ql in (r.get("sample_url") or "").lower():
+                return True
+            if any(ql in u.lower() for u in r["user_ids"]):
+                return True
+            return False
+        rows = [r for r in rows if _match(r)]
+    return _render("subs.html", request, rows=rows, q=q, active="subs")
+
+
+@app.get("/subs/{slug}", response_class=HTMLResponse)
+async def sub_detail(request: Request, slug: str = Depends(require_slug),
+                     conn=Depends(get_conn)):
+    if conn is None:
+        return _no_snapshot(request)
+    paths = state.snapshot_paths()
+    result = inspector.inspect(conn, paths, slug=slug)
+    if result is None:
+        return HTMLResponse(f"<p>slug `{slug}` 없음.</p>", status_code=404)
+    failed_payload = state.failed_payload(slug)
+    sample_url = None
+    if result.subscriptions:
+        sample_url = result.subscriptions[0].get("url")
+    elif result.latest_job:
+        sample_url = result.latest_job.get("url")
+    p_redo = prompts.hand_config_redo_slug(slug=slug, url=sample_url)
+    p_diag = prompts.diagnose_slug(slug=slug)
+    return _render("sub_detail.html", request,
+                   result=result, slug=slug, failed=failed_payload,
+                   p_redo=p_redo, p_diag=p_diag, active="subs")
+
+
+# --------------------------------------------------------------------------- #
+# Reports
+# --------------------------------------------------------------------------- #
+@app.get("/reports", response_class=HTMLResponse)
+async def reports_list(request: Request, status: str = "open",
+                       count: int = Query(50, ge=1, le=500),
+                       conn=Depends(get_conn)):
+    if conn is None:
+        return _no_snapshot(request)
+    s = None if status == "all" else status
+    rows = [dict(r) for r in db.list_reports(conn, status=s, limit=count)]
+    bulk_prompt = prompts.report_triage_bulk(
+        report_ids=[r["id"] for r in rows]) if rows and status == "open" else None
+    return _render("reports.html", request,
+                   rows=rows, filter_status=status, count=count,
+                   bulk_prompt=bulk_prompt, active="reports")
+
+
+@app.get("/reports/{report_id}", response_class=HTMLResponse)
+async def report_detail(request: Request, report_id: int, conn=Depends(get_conn)):
+    if conn is None:
+        return _no_snapshot(request)
+    paths = state.snapshot_paths()
+    result = inspector.inspect(conn, paths, report_id=report_id)
+    if result is None:
+        return HTMLResponse(f"<p>신고 #{report_id} 없음.</p>", status_code=404)
+    rp = result.report or {}
+    p_single = prompts.report_triage_single(
+        report_id=report_id,
+        slug=result.slug,
+        issue=rp.get("issue"),
+        reporter=rp.get("username") or rp.get("user_id"),
+    )
+    return _render("report_detail.html", request,
+                   result=result, report=rp, p_single=p_single, active="reports")
+
+
+# --------------------------------------------------------------------------- #
+# Feedback
+# --------------------------------------------------------------------------- #
+@app.get("/feedback", response_class=HTMLResponse)
+async def feedback_list(request: Request, count: int = Query(50, ge=1, le=500),
+                        conn=Depends(get_conn)):
+    if conn is None:
+        return _no_snapshot(request)
+    rows = [dict(r) for r in db.list_feedback(conn, limit=count)]
+    return _render("feedback.html", request, rows=rows, count=count, active="feedback")
+
+
+# --------------------------------------------------------------------------- #
+# Usage (LLM 호출 기록)
+# --------------------------------------------------------------------------- #
+_USAGE_RANGES = ("today", "7d", "30d", "all")
+
+
+@app.get("/usage", response_class=HTMLResponse)
+async def usage_page(request: Request,
+                     range: str = Query("7d"),  # noqa: A002 (shadow built-in OK — FastAPI 파라미터)
+                     call_site: Optional[str] = None,
+                     limit: int = Query(100, ge=1, le=1000)):
+    rng = range if range in _USAGE_RANGES else "7d"
+    conn = usage_view.open_usage_conn(state.usage_db_path())
+    if conn is None:
+        return _render("usage.html", request, present=False, active="usage")
+    try:
+        since = usage_view.since_iso_for(rng)
+        kpis = usage_view.usage_kpis(conn, since_iso=since, call_site=call_site)
+        matrix = usage_view.usage_matrix(conn, since_iso=since)
+        recent = usage_view.usage_recent(conn, since_iso=since, call_site=call_site, limit=limit)
+        series = usage_view.usage_daily_series(conn, days=14)
+        sites = usage_view.list_call_sites(conn)
+    finally:
+        conn.close()
+    return _render("usage.html", request, present=True,
+                   kpis=kpis, matrix=matrix, recent=recent, series=series,
+                   call_sites=sites, range=rng, ranges=_USAGE_RANGES,
+                   filter_call_site=call_site, limit=limit,
+                   active="usage")
+
+
+# --------------------------------------------------------------------------- #
+# Settings (read-only)
+# --------------------------------------------------------------------------- #
+@app.get("/settings", response_class=HTMLResponse)
+async def settings_page(request: Request):
+    paths = state.snapshot_paths()
+    info = {
+        "snapshot_db": str(paths.db_path),
+        "configs_dir": str(paths.configs_dir),
+        "state_dir": str(paths.state_dir),
+        "last_pull": state.last_pull_str(),
+        "snapshot_present": state.snapshot_exists(),
+        "n_configs": sum(1 for _ in paths.configs_dir.glob("*.json")) if paths.configs_dir.exists() else 0,
+        "n_states": sum(1 for _ in paths.state_dir.glob("*.json")) if paths.state_dir.exists() else 0,
+        "n_failed": len(state.failed_slugs()),
+    }
+    return _render("settings.html", request, info=info, active="settings")
+
+
+# --------------------------------------------------------------------------- #
+# Actions (HTMX)
+# --------------------------------------------------------------------------- #
+@app.post("/actions/pull", response_class=HTMLResponse)
+async def actions_pull(request: Request):
+    res = await act.run_pull()
+    return _partial("_pull_result.html", request, res=res)
+
+
+@app.post("/actions/fetch", response_class=HTMLResponse)
+async def actions_fetch(request: Request, slug: str = Form(...),
+                        n: int = Form(5)):
+    if not state.safe_slug(slug):
+        raise HTTPException(status_code=400, detail="invalid slug")
+    res = await act.run_fetch(slug, n=n)
+    return _partial("_fetch_result.html", request, res=res, slug=slug, n=n)
+
+
+# --------------------------------------------------------------------------- #
+@app.get("/healthz")
+async def healthz():
+    return {"ok": True, "snapshot": state.snapshot_exists()}

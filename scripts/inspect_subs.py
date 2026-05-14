@@ -100,12 +100,35 @@ def cmd_pull() -> int:
     if rc != 0 and not any(s in out for s in ("No such file", "matches no files", "not match")):
         sys.stderr.write(f"[inspect pull] poll_state scp 실패 (rc={rc}): {out}\n")
 
+    # 3) usage.sqlite3 — LLM 호출 기록. WAL 모드라 동일하게 .backup 으로 일관성 있는 사본 생성.
+    #    실패해도 치명적이지 X — 파일 없음/접근 불가면 skip + 경고만.
+    remote_usage_snap = "/tmp/inspect_usage_snap.sqlite3"
+    rc, out = _run([
+        "ssh", DEPLOY_HOST,
+        f"cd {DEPLOY_PATH} && "
+        f"if [ -f output/usage.sqlite3 ]; then "
+        f"sqlite3 output/usage.sqlite3 \".backup '{remote_usage_snap}'\" && echo OK; "
+        f"else echo SKIP_NO_FILE; fi",
+    ])
+    if rc == 0 and "OK" in out:
+        rc2, out2 = _run(["scp", "-q", f"{DEPLOY_HOST}:{remote_usage_snap}", str(SNAPSHOT_DIR / "usage.sqlite3")])
+        if rc2 != 0:
+            sys.stderr.write(f"[inspect pull] usage.sqlite3 scp 실패: {out2}\n")
+        _run(["ssh", DEPLOY_HOST, f"rm -f {remote_usage_snap}"])
+    elif "SKIP_NO_FILE" in out:
+        # 아직 LLM 호출 한 적 없음 — 정상
+        pass
+    else:
+        sys.stderr.write(f"[inspect pull] usage.sqlite3 .backup 실패(skip): {out}\n")
+
     # 요약
     n_db = (SNAPSHOT_DIR / "bot.sqlite3").stat().st_size if (SNAPSHOT_DIR / "bot.sqlite3").exists() else 0
+    n_usage = (SNAPSHOT_DIR / "usage.sqlite3").stat().st_size if (SNAPSHOT_DIR / "usage.sqlite3").exists() else 0
     n_states = sum(1 for _ in (SNAPSHOT_DIR / "poll_state").glob("*.json"))
     n_cfgs = sum(1 for _ in CONFIGS_SNAPSHOT.glob("*.json"))
     print(f"[inspect pull] {DEPLOY_HOST}:{DEPLOY_PATH} → {SNAPSHOT_DIR} + {CONFIGS_SNAPSHOT}")
-    print(f"  bot.sqlite3: {n_db:,} bytes   poll_state: {n_states}개   configs: {n_cfgs}개")
+    print(f"  bot.sqlite3: {n_db:,} bytes   usage.sqlite3: {n_usage:,} bytes   "
+          f"poll_state: {n_states}개   configs: {n_cfgs}개")
     return 0
 
 

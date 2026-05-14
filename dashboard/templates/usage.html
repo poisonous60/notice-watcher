@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% block title %}Usage — notice-watcher{% endblock %}
+{% block body %}
+
+<h2>💸 Usage</h2>
+
+{% if not present %}
+<article style="border-left:3px solid #d32f2f;padding-left:1rem;background:#fff5f5;">
+  <strong>usage 스냅샷 없음.</strong>
+  <p class="muted" style="margin:0.3rem 0 0 0;">
+    아직 N100 에서 LLM 호출이 없거나, <code>Pull from N100</code> 을 하지 않았습니다.
+    상단의 🔄 Pull 버튼을 누르세요. 호출이 누적되면 여기 표시됩니다.
+  </p>
+</article>
+{% else %}
+
+<form action="/usage" method="get" class="topbar" style="border:0;margin-bottom:0.5rem;gap:0.6rem;">
+  <label style="margin:0;">범위
+    <select name="range" onchange="this.form.submit()">
+      {% for k in ranges %}
+      <option value="{{ k }}" {{ 'selected' if range==k else '' }}>
+        {% if k=='today' %}오늘{% elif k=='7d' %}최근 7일{% elif k=='30d' %}최근 30일{% else %}전체{% endif %}
+      </option>
+      {% endfor %}
+    </select>
+  </label>
+  <label style="margin:0;">call_site
+    <select name="call_site" onchange="this.form.submit()">
+      <option value="" {{ 'selected' if not filter_call_site else '' }}>전체</option>
+      {% for cs in call_sites %}
+      <option value="{{ cs }}" {{ 'selected' if filter_call_site==cs else '' }}>{{ cs }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label style="margin:0;">최근 N행
+    <input type="number" name="limit" value="{{ limit }}" min="10" max="1000" style="width:6em;">
+  </label>
+  <button type="submit" class="secondary" style="margin:0;padding:0.4rem 0.9rem;width:auto;">적용</button>
+</form>
+
+<section class="kpi-row" style="display:grid;grid-template-columns:repeat(5,1fr);gap:0.6rem;margin:0.6rem 0;">
+  <div class="kpi"><div class="kpi-label">호출 수</div><div class="kpi-value">{{ "{:,}".format(kpis.n_calls) }}</div></div>
+  <div class="kpi"><div class="kpi-label">총 토큰</div>
+    <div class="kpi-value">{{ "{:,}".format(kpis.total_tokens) }}</div>
+    <div class="kpi-sub">in {{ "{:,}".format(kpis.prompt_tokens) }} · out {{ "{:,}".format(kpis.completion_tokens) }}</div>
+  </div>
+  <div class="kpi"><div class="kpi-label">비용 ($)</div><div class="kpi-value">{{ "%.4f"|format(kpis.cost_usd) }}</div></div>
+  <div class="kpi"><div class="kpi-label">avg latency</div><div class="kpi-value">{{ "%.0f"|format(kpis.avg_latency_ms) }}<small>ms</small></div></div>
+  <div class="kpi"><div class="kpi-label">에러율</div>
+    <div class="kpi-value">{{ "%.1f"|format(kpis.error_rate_pct) }}<small>%</small></div>
+    <div class="kpi-sub">{{ kpis.n_errors }} / {{ kpis.n_calls }}</div>
+  </div>
+</section>
+
+<h3>일별 토큰 추세 (최근 14일)</h3>
+<canvas id="usage-chart" height="80"></canvas>
+
+<h3>call_site × model 매트릭스</h3>
+{% if matrix %}
+<table class="compact striped">
+  <thead>
+    <tr>
+      <th>call_site</th><th>provider</th><th>model</th>
+      <th style="text-align:right;">calls</th>
+      <th style="text-align:right;">in tok</th>
+      <th style="text-align:right;">out tok</th>
+      <th style="text-align:right;">cost $</th>
+      <th style="text-align:right;">avg ms</th>
+      <th style="text-align:right;">err</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in matrix %}
+    <tr>
+      <td class="mono">{{ r.call_site }}</td>
+      <td>{{ r.provider }}</td>
+      <td class="mono">{{ r.model }}</td>
+      <td style="text-align:right;">{{ "{:,}".format(r.n_calls) }}</td>
+      <td style="text-align:right;">{{ "{:,}".format(r.prompt_tokens) }}</td>
+      <td style="text-align:right;">{{ "{:,}".format(r.completion_tokens) }}</td>
+      <td style="text-align:right;">{{ "%.4f"|format(r.cost_usd) }}</td>
+      <td style="text-align:right;">{{ "%.0f"|format(r.avg_latency_ms) }}</td>
+      <td style="text-align:right;">{{ r.n_errors }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">데이터 없음.</p>
+{% endif %}
+
+<h3>최근 호출 ({{ recent | length }})</h3>
+{% if recent %}
+<table class="compact striped">
+  <thead>
+    <tr>
+      <th>ts</th><th>call_site</th><th>slug</th><th>model</th><th>status</th>
+      <th style="text-align:right;">in</th><th style="text-align:right;">out</th>
+      <th style="text-align:right;">ms</th><th style="text-align:right;">$</th>
+      <th>att</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in recent %}
+    <tr>
+      <td class="mono">{{ r.ts[:19].replace('T',' ') }}</td>
+      <td class="mono">{{ r.call_site }}</td>
+      <td class="mono" style="max-width:18em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+        {% if r.slug %}<a href="/subs/{{ r.slug }}" title="{{ r.slug }}">{{ r.slug }}</a>{% endif %}
+      </td>
+      <td class="mono">{{ r.provider }}:{{ r.model }}</td>
+      <td>
+        <span class="badge {{ 'ok' if r.status=='ok' else 'error' }}">{{ r.status }}</span>
+      </td>
+      <td style="text-align:right;">{{ r.prompt_tokens }}</td>
+      <td style="text-align:right;">{{ r.completion_tokens }}</td>
+      <td style="text-align:right;">{{ r.latency_ms }}</td>
+      <td style="text-align:right;">{{ "%.5f"|format(r.cost_usd) if r.cost_usd is not none else "—" }}</td>
+      <td>{{ r.attempt }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">데이터 없음.</p>
+{% endif %}
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script>
+(function () {
+  const series = {{ series | tojson }};
+  const ctx = document.getElementById('usage-chart');
+  if (!ctx) return;
+  const colors = ['#1976d2', '#388e3c', '#f57c00', '#c62828', '#7b1fa2', '#00838f'];
+  const datasets = series.datasets.map((d, i) => ({
+    label: d.label,
+    data: d.data,
+    borderColor: colors[i % colors.length],
+    backgroundColor: colors[i % colors.length] + '33',
+    tension: 0.2,
+    fill: false,
+  }));
+  new Chart(ctx, {
+    type: 'line',
+    data: { labels: series.labels, datasets: datasets },
+    options: {
+      responsive: true,
+      scales: { y: { beginAtZero: true, ticks: { precision: 0 } } },
+      plugins: { legend: { position: 'bottom' } },
+    },
+  });
+})();
+</script>
+
+{% endif %}
+{% endblock %}
