@@ -10,11 +10,12 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
+
+from dashboard.shell import async_run
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -58,33 +59,20 @@ def audit(action: str, *, ok: bool, detail: Any = None) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# subprocess helpers
+# subprocess wrappers — dashboard.shell.async_run 가 Windows 호환 처리
 # --------------------------------------------------------------------------- #
-def _run_blocking(cmd: list[str]) -> dict:
-    p = subprocess.run(cmd, cwd=str(ROOT),
-                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                       text=True, errors="replace")
-    return {"ok": p.returncode == 0, "rc": p.returncode, "output": p.stdout or ""}
-
-
-async def _run(cmd: list[str]) -> dict:
-    """Windows asyncio 기본 event loop 는 subprocess 미지원 (`NotImplementedError`).
-    `to_thread` 로 동기 호출을 워커 스레드에 보내 우회. POSIX 에서도 동일하게 동작."""
-    return await asyncio.to_thread(_run_blocking, cmd)
-
-
 async def run_push(target: str, *, slug: Optional[str] = None) -> dict:
     cmd = [sys.executable, str(PUSH_SCRIPT), target]
     if slug:
         cmd.append(slug)
-    res = await _run(cmd)
+    res = await async_run(cmd, cwd=ROOT)
     audit(f"push.{target}", ok=res["ok"], detail={"rc": res["rc"]})
     return res
 
 
 async def run_remote(action: str, *args: str) -> dict:
     cmd = [sys.executable, str(REMOTE_SCRIPT), action, *args]
-    res = await _run(cmd)
+    res = await async_run(cmd, cwd=ROOT)
     audit(f"remote.{action}", ok=res["ok"], detail={"rc": res["rc"], "args": list(args)})
     return res
 
@@ -143,17 +131,31 @@ def validate_routing(data: dict) -> Optional[str]:
 
 
 async def save_routing(routing: dict) -> dict:
-    """call_site → 'provider:model' dict. 빈 값은 routing 에서 제거."""
+    """call_site → 'provider:model' dict. 빈 값은 routing 에서 제거.
+
+    push 실패 시 로컬 파일을 이전 내용으로 rollback — 로컬/원격 divergence 방지."""
     cleaned = {k: v.strip() for k, v in routing.items() if isinstance(v, str) and v.strip()}
     err = validate_routing(cleaned)
     if err:
         audit("save.routing", ok=False, detail={"err": err})
         return {"ok": False, "rc": -1, "output": err}
     ROUTING_PATH.parent.mkdir(parents=True, exist_ok=True)
+    prev = ROUTING_PATH.read_text(encoding="utf-8") if ROUTING_PATH.exists() else None
     payload = {"_comment": "dashboard /control 저장. mtime 캐시가 다음 LLM 호출에서 재로드.", **cleaned}
     ROUTING_PATH.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     audit("save.routing", ok=True, detail={"keys": sorted(cleaned.keys())})
-    return await run_push("routing")
+    res = await run_push("routing")
+    if not res["ok"]:
+        # push 실패 → 로컬 원복 (다음 save 시 stale state 로 시작하지 않도록)
+        if prev is None:
+            try:
+                ROUTING_PATH.unlink()
+            except OSError:
+                pass
+        else:
+            ROUTING_PATH.write_text(prev, encoding="utf-8")
+        audit("save.routing.rollback", ok=False, detail={"rc": res["rc"]})
+    return res
 
 
 # --------------------------------------------------------------------------- #
@@ -232,17 +234,15 @@ def build_runtime_toml(form_data: dict) -> str:
         if val == default:
             continue  # default 와 같으면 override 불필요
         by_section.setdefault(section, {})[field] = val
-    # TOML 직렬화 — stdlib 에 writer 없어서 손으로
+    # TOML 직렬화 — stdlib writer 없음. int / float 둘 다 str() 으로 충분
+    # (int 는 정수 출력, float 는 `1.0` 같은 dot 포함 출력 → TOML 둘 다 valid).
     lines: list[str] = []
     for section in ("poll", "worker", "chromium_lock", "notify"):
         if section not in by_section:
             continue
         lines.append(f"[{section}]")
         for k, v in by_section[section].items():
-            if isinstance(v, float):
-                lines.append(f"{k} = {v}")
-            else:
-                lines.append(f"{k} = {v}")
+            lines.append(f"{k} = {v}")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n" if lines else ""
 
@@ -267,8 +267,11 @@ async def save_runtime(toml_text: str, *, restart: bool = False) -> dict:
     if not res["ok"]:
         return res
     if restart:
-        for unit in ("bot",):
-            await run_remote("restart-bot") if unit == "bot" else None
+        r2 = await run_remote("restart-bot")
+        res["output"] += "\n--- restart-bot ---\n" + r2["output"]
+        if not r2["ok"]:
+            res["ok"] = False
+            res["rc"] = r2["rc"]
     return res
 
 
@@ -322,26 +325,40 @@ def env_for_display(text: str) -> list[dict]:
 
 
 async def save_env(env_text: str, *, restart: bool = False) -> dict:
-    """env_text 를 그대로 .env.push 로 쓰고 push. (마스킹 복원은 caller 책임 X — UI 가 변경된 값만 보내거나 raw 전송.)"""
-    if "BOT_TOKEN" not in env_text and "GEMINI_API_KEYS" not in env_text:
-        audit("save.env", ok=False, detail={"err": "BOT_TOKEN/GEMINI_API_KEYS 없음 — 부분 텍스트로 보임"})
-        return {"ok": False, "rc": -1, "output": "안전장치: BOT_TOKEN/GEMINI_API_KEYS 가 없습니다. 전체 .env 내용을 붙여넣으세요."}
+    """env_text 를 .env.push 로 쓰고 push. push 끝나면 (성공/실패 무관) 로컬 staging 파일 삭제 — 비밀 누설 방지.
+
+    안전장치: BOT_TOKEN 이 활성 kv (주석 X) 로 존재해야 함. 부분 텍스트 / 주석된 키 차단.
+    """
+    rows = parse_env(env_text)
+    active_keys = {k for kind, k, _ in rows if kind == "kv"}
+    if "BOT_TOKEN" not in active_keys:
+        audit("save.env", ok=False, detail={"err": "BOT_TOKEN active kv missing"})
+        return {"ok": False, "rc": -1, "output": "안전장치: 활성 BOT_TOKEN= 행이 없습니다. 전체 .env 내용을 붙여넣으세요 (주석 처리된 줄은 카운트 안 됨)."}
     ENV_PUSH_PATH.write_text(env_text, encoding="utf-8")
     audit("save.env", ok=True, detail={"size": len(env_text), "restart": restart})
-    res = await run_push("env")
-    if not res["ok"]:
+    try:
+        res = await run_push("env")
+        if res["ok"] and restart:
+            r2 = await run_remote("restart-bot")
+            res["output"] += "\n--- restart-bot ---\n" + r2["output"]
+            if not r2["ok"]:
+                res["ok"] = False
+                res["rc"] = r2["rc"]
         return res
-    if restart:
-        r2 = await run_remote("restart-bot")
-        res["output"] += "\n--- restart-bot ---\n" + r2["output"]
-    return res
+    finally:
+        # push 성공/실패와 무관하게 staging 비밀 파일 제거 — 실패 시 파일에 비밀이 남는 risk 차단.
+        try:
+            ENV_PUSH_PATH.unlink()
+        except OSError:
+            pass
 
 
 # --------------------------------------------------------------------------- #
 # notice-poll.timer
 # --------------------------------------------------------------------------- #
 _ONCAL_RE = re.compile(r"^(OnCalendar\s*=).*$", re.MULTILINE)
-_VALID_ONCAL_RE = re.compile(r"^[\w*:\-,/\s.]+$")  # 단순 안전성 — 진짜 검증은 systemd 가
+# 단순 안전성 — `\s` 는 newline 포함이라 multi-line 통과 risk. horizontal whitespace ([ \t]) 만 허용.
+_VALID_ONCAL_RE = re.compile(r"^[\w*:\-,/ \t.]+$")
 
 
 async def load_timer_remote() -> tuple[bool, str]:
@@ -388,10 +405,10 @@ async def save_timer(oncalendar: str, *, restart: bool = True) -> dict:
     if not res["ok"]:
         return res
     if restart:
-        r2 = await run_remote("status", "poll-timer")  # restart timer 는 status 보고 판단
-        # timer 는 restart 명령 대신 stop + start 하거나 그냥 두면 다음 OnCalendar 적용 시 적용됨.
-        # 안전하게 restart 명령 추가:
-        r3 = await _run([sys.executable, str(REMOTE_SCRIPT), "logs", "poll-timer", "--tail", "10"])
+        # timer 는 restart 명령 대신 stop+start 하거나 그냥 두면 다음 OnCalendar 적용 시 자동 반영.
+        # 여기선 진단 정보만 표시 — daemon-reload 는 push.py 가 이미 호출.
+        r2 = await run_remote("status", "poll-timer")
+        r3 = await run_remote("logs", "poll-timer", "--tail", "10")
         res["output"] += "\n--- status poll-timer ---\n" + r2["output"]
         res["output"] += "\n--- recent timer log ---\n" + r3["output"]
     return res
@@ -430,8 +447,10 @@ async def gather_state(*, load_remote: bool = False) -> dict:
         },
     }
     if load_remote:
-        ok, txt = await load_env_remote()
+        # env + timer SSH 호출 병렬 — 두 round-trip 합산이 페이지 로드 latency 의 대부분
+        env_res, timer_res = await asyncio.gather(load_env_remote(), load_timer_remote())
+        ok, txt = env_res
+        ok2, t2 = timer_res
         state["env"] = {"loaded": ok, "rows": env_for_display(txt) if ok else [], "raw": txt}
-        ok2, t2 = await load_timer_remote()
         state["timer"] = {"loaded": ok2, "oncalendar": parse_oncalendar(t2) or "", "raw": t2}
     return state

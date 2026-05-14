@@ -9,6 +9,9 @@ import json
 from pathlib import Path
 from typing import Any, Optional
 
+import html as _html
+
+import jinja2
 from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -21,7 +24,13 @@ from dashboard import usage_view
 from dashboard import control_actions as ctrl
 
 HERE = Path(__file__).resolve().parent
-templates = Jinja2Templates(directory=str(HERE / "templates"))
+# autoescape 명시: Starlette/FastAPI 버전에 따라 default 가 바뀔 수 있어 직접 Environment 주입.
+# .env / SSH stdout 등 외부 텍스트가 템플릿으로 들어오므로 autoescape OFF 는 즉시 XSS.
+_jinja_env = jinja2.Environment(
+    loader=jinja2.FileSystemLoader(str(HERE / "templates")),
+    autoescape=jinja2.select_autoescape(default_for_string=True, default=True),
+)
+templates = Jinja2Templates(env=_jinja_env)
 
 
 def _is_http_url(value: object) -> bool:
@@ -213,7 +222,7 @@ async def sub_detail(request: Request, slug: str = Depends(require_slug),
     paths = state.snapshot_paths()
     result = inspector.inspect(conn, paths, slug=slug)
     if result is None:
-        return HTMLResponse(f"<p>slug `{slug}` 없음.</p>", status_code=404)
+        return HTMLResponse(f"<p>slug <code>{_html.escape(slug)}</code> 없음.</p>", status_code=404)
     failed_payload = state.failed_payload(slug)
     sample_url = None
     if result.subscriptions:

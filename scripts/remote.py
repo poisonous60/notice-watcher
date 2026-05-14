@@ -94,8 +94,10 @@ def cmd_read(alias: str) -> int:
         print(f"[remote] 알 수 없는 read alias: {alias!r}. 허용: {sorted(READABLE)}", file=sys.stderr)
         return 4
     path = READABLE[alias]
-    # `cat` 만 — 쓰기/실행 권한 X
-    return _ssh(f"cat {path}")
+    # `cat` 만 — 쓰기/실행 권한 X. path 는 DEPLOY_PATH env 가 섞일 수 있어 single-quote 로 감쌈
+    # (shell metachar 차단). path 자체에 single quote 가 있으면 안전 분해.
+    safe_path = "'" + path.replace("'", "'\\''") + "'"
+    return _ssh(f"cat {safe_path}")
 
 
 def list_actions() -> int:
