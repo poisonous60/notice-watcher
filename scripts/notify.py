@@ -1,29 +1,26 @@
 """폴링으로 모인 새 글(output/collected/<ts>/<slug>.new.json) → Gemini 요약 → 필터 → Discord 발송.
 
 호출 경로:
-  - poll_and_notify.py (notice-poll.service, 1회/일) → notify.py (collected 처리 + flush + heartbeat).
+  - poll_and_notify.py (notice-poll.service) → notify.py --no-digest (collected 새 글 즉시 발송).
     collected 처리 후 그 dir 에 .notified 마커 생성 → 이후 호출은 그 dir 스킵 (Gemini 중복 호출 방지).
-  - notice-notify.timer (15분 간격) → notify.py --no-collected (다이제스트 flush 만).
-    사용자 schedule HH:MM 도래 후 다음 슬랏에서 비움. digest_sent 테이블이 일 1회 cap.
+  - notice-notify.timer (15분 간격) → notify.py (재시도용 — 발송 실패로 pending 에 남은 행만 flush).
 
 발송 경로 (slug 별로):
   1. SQLite 구독(bot/db.py: subscriptions) → 봇 토큰으로 REST 직접(DM/채널).
        구독별 filter_prompt(자연어) → Gemini {include,reason} 로 골라냄(없으면 전부 통과).
-       구독별 schedule: 'HH:MM' KST → pending 큐 → flush_digests 가 시각 도래 시 발송.
-       ('realtime' 분기는 _migrate 후 dead path — 모든 구독은 HH:MM. /watch 가 default 로 POLL_SCHEDULE 박음.)
+       모든 구독 schedule='realtime' — 폴링 직후 즉시 발송. 큐 적재 없음(_migrate 가 일괄 변환).
   2. (Phase 1 / 봇 없는 경우) output/notify_targets.json = {"<slug>":"<webhook>"} 또는 NOTIFY_TARGETS_JSON 이 있으면 → webhook 발송 (해당 slug 에 SQLite 구독이 없을 때만; delivered.json 으로 중복 방지).
 
 중복 방지: SQLite deliveries(slug,post_id,target_id) / webhook 은 delivered.json / 다이제스트는 digest_sent(target_id,schedule,kst_date).
 봇 프로세스(bot/main.py)가 떠 있을 필요 없음 — 여기서 토큰으로 REST 직접 친다.
 
 사용:
-    python scripts/notify.py                 # 최신 collected 처리 + 다이제스트 도래분 발송
-    python scripts/notify.py --no-collected  # collected 처리 스킵, flush 만 (notice-notify.timer 가 켬)
+    python scripts/notify.py                 # 최신 collected 처리 + (레거시) pending flush 둘 다 — notice-notify.timer 가 켬
+    python scripts/notify.py --no-collected  # collected 처리 스킵, flush 만
     python scripts/notify.py --dry-run       # 발송/DB 변경 없이 메시지만 출력
     python scripts/notify.py --collected-dir output/collected/20260511_210242
-    python scripts/notify.py --no-digest     # 다이제스트 flush 생략 (이번 collected 분만)
-    python scripts/notify.py --heartbeat     # notify_empty=1 인 구독에 새 글 없으면 '새 공지 없음' 발송
-                                             #   (poll_and_notify 가 폴링 직후 켬; 현재 realtime 구독만 잡음 — 다음 라운드 정리 예정)
+    python scripts/notify.py --no-digest     # flush 생략 (poll_and_notify 가 폴링 직후 이 플래그로 호출)
+    python scripts/notify.py --heartbeat     # notify_empty=1 인 구독에 새 글 없으면 '새 공지 없음' 발송 (poll_and_notify 가 폴링 직후 켬)
 """
 from __future__ import annotations
 
@@ -208,13 +205,13 @@ def digest_chunks(rows: list, *, max_len: int = 1850) -> list[str]:
 
 
 # --------------------------------------------------------------------------- #
-# 다이제스트 flush — 발송 시각(HH:MM) 이 도래했고 그 KST 일자에 아직 안 비웠으면 비움.
+# 다이제스트 flush — 레거시(HH:MM) 경로용 잔재.
 #
-# (target_id, schedule HH:MM, kst_date) 단위 cap (digest_sent 테이블) → 같은 timer slot 또는
-# 24×/일 폴링이라 pending 이 자주 차도, 사용자 schedule 시각에 1회만 발송.
-# 단순: schedule 시각이 *오늘* 의 그 시각 이후면 도래 — 다음날 새 폴링 이전엔 pending 이 또 추가되지 않아
-# 자연스럽게 day-rollover. notify-timer 가 15분 간격으로 돌므로 사용자 schedule 시각의 분 단위는
-# 15분 슬랏(00/15/30/45)으로 round-up 효과 — 그 슬랏 내 첫 timer 가 비워줌.
+# 현 deployment: 모든 구독 schedule='realtime' → 신규 글은 collected 처리 단계에서 이미 발송됨 →
+# pending 테이블엔 채워질 일이 없음. 이 함수는 옛 HH:MM 모드 시절의 pending 잔재가 DB 에 남았을
+# 때 그것을 비우는 안전망 역할만 함. sub.schedule='realtime' 인 행은 `_hhmm_to_minutes` 가 None
+# 반환 → `_immediate_` 묶음 → cap 없이 즉시 발송. HH:MM 행이 들어오면 그 시각 도래 후 비움
+# (digest_sent cap 으로 일 1회 제한).
 # --------------------------------------------------------------------------- #
 def _hhmm_to_minutes(sch: str) -> Optional[int]:
     try:
@@ -440,35 +437,27 @@ def main(argv: Optional[list[str]] = None) -> int:
                     if summary is None:
                         summary = summarize_post(gem(), post)
                     content = format_message(post, summary)
-                    sched = r["schedule"] or "realtime"
-                    if sched == "realtime":
-                        if dry_run:
-                            print(f"\n--- [{target_kind}:{target_id} {slug}] {pid} ---\n{content}\n")
-                            realtime_delivered.add((slug, target_id))
-                            continue
-                        if not tok:
-                            print(f"    ✗ {pid}: BOT_TOKEN 없음 — 발송 불가", file=sys.stderr)
-                            continue
-                        realtime_delivered.add((slug, target_id))  # 새 글이 있었음 → heartbeat('새 공지 없음') 안 보냄 (발송 성공/실패 무관)
-                        try:
-                            deliver(tok, target_kind=target_kind, target_id=target_id, content=content)
-                            db.mark_delivered(conn, slug, pid, target_id)
-                            realtime_sent += 1
-                            print(f"    ✅ {target_kind}:{target_id} {pid}  {(post.get('title') or '')[:40]}")
-                            time.sleep(0.6)
-                        except CannotDeliver as e:
-                            print(f"    ✗ {pid} {target_kind}:{target_id} 발송 불가: {e}", file=sys.stderr)
-                        except DiscordRestError as e:
-                            print(f"    ✗ {pid} {target_kind}:{target_id} 발송 실패: {e}", file=sys.stderr)
-                    else:  # 'HH:MM' — 다이제스트 큐
-                        if dry_run:
-                            print(f"  (digest queue) {target_kind}:{target_id}  {slug}/{pid}  sched={sched}")
-                        else:
-                            db.add_pending(conn, slug=slug, post_id=pid, target_id=target_id,
-                                           summary=summary, title=post.get("title"),
-                                           url=post.get("url"), published_at=post.get("published_at"))
-        # collected 처리 끝 — 마킹 (이후 notify-timer 호출에서 같은 dir 재처리 안 함)
-        if collected and not dry_run and new_posts:
+                    if dry_run:
+                        print(f"\n--- [{target_kind}:{target_id} {slug}] {pid} ---\n{content}\n")
+                        realtime_delivered.add((slug, target_id))
+                        continue
+                    if not tok:
+                        print(f"    ✗ {pid}: BOT_TOKEN 없음 — 발송 불가", file=sys.stderr)
+                        continue
+                    realtime_delivered.add((slug, target_id))  # 새 글이 있었음 → heartbeat('새 공지 없음') 안 보냄 (발송 성공/실패 무관)
+                    try:
+                        deliver(tok, target_kind=target_kind, target_id=target_id, content=content)
+                        db.mark_delivered(conn, slug, pid, target_id)
+                        realtime_sent += 1
+                        print(f"    ✅ {target_kind}:{target_id} {pid}  {(post.get('title') or '')[:40]}")
+                        time.sleep(0.6)
+                    except CannotDeliver as e:
+                        print(f"    ✗ {pid} {target_kind}:{target_id} 발송 불가: {e}", file=sys.stderr)
+                    except DiscordRestError as e:
+                        print(f"    ✗ {pid} {target_kind}:{target_id} 발송 실패: {e}", file=sys.stderr)
+        # collected 처리 끝 — 마킹 (이후 notify-timer 호출에서 같은 dir 재처리 안 함; 새 글 0건이어도 마킹해야
+        # heartbeat/Gemini 가 다음 timer 슬랏마다 같은 dir 로 반복 안 됨).
+        if collected and not dry_run:
             try:
                 (collected / ".notified").touch()
             except OSError as e:  # noqa: BLE001

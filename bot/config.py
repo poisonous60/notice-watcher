@@ -52,3 +52,12 @@ def guild_id() -> int | None:
     load_env()
     v = os.environ.get("GUILD_ID", "").strip()
     return int(v) if v.isdigit() else None
+
+
+def admin_guild_id() -> int | None:
+    """owner 전용 admin 명령(`/admin ...`)을 등록할 private guild. 미설정이면 admin 명령은
+    *어디에도* 등록되지 않음(다른 사용자 autocomplete 노출 방지). owner 가 본인만 들어가 있는
+    private 길드 ID 를 `.env` 에 `ADMIN_GUILD_ID` 로 넣으면 그 길드에서만 보이고 호출 가능."""
+    load_env()
+    v = os.environ.get("ADMIN_GUILD_ID", "").strip()
+    return int(v) if v.isdigit() else None

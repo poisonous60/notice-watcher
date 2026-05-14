@@ -1,26 +1,26 @@
-"""SQLite — 봇 구독 정보 + 다이제스트 대기열 + 발송 기록 + register/re-probe 잡 큐.
+"""SQLite — 봇 구독 정보 + 발송 기록 + register/re-probe 잡 큐.
 
 DB 파일: output/bot.sqlite3 (이미 .gitignore 됨).
 필터 프롬프트·발송 대상·스케줄은 *여기에만* 산다 (configs/ · poll_state/ 엔 절대 안 씀).
 
 테이블:
   subscriptions(user_id, slug, url, filter_prompt, schedule, target_kind, target_id, notify_empty, created_at)
-      schedule = 'HH:MM' (KST, 그 시각 폴링 때 묶어 발송). 사용자 선택 옵션은 봇 /watch 에서 제거됨 →
-                 신규는 모두 서버 폴링 시각(08:20)으로 저장. 옛 'realtime' 행은 _migrate 가 08:20 으로 변환.
-                 컬럼 자체는 유지 — notify.py 의 flush_digests 가 HH:MM 매칭으로 그대로 동작.
+      schedule = 'realtime' (전 행 고정). 폴링 직후 notify.py 가 즉시 발송. 사용자 시각 선택 옵션 없음.
+                 컬럼은 유지 — _migrate 가 HH:MM/그 외 값을 일괄 'realtime' 으로 강제 변환(idempotent).
       target_kind = 'dm' (target_id = user_id) | 'channel' (target_id = channel_id)
       notify_empty = 1 이면 폴링 결과 새 글이 없어도 "새 공지 없음" 한 줄을 보냄 (기본 0).
-                 ⚠ notify.py 의 현 구현은 realtime_notify_empty_subs() 가 schedule='realtime' 만 잡으므로
-                 다이제스트 모드에선 실제로 발송 안 됨 — notify.py 수정 시점에 함께 정리 예정.
+                 realtime_notify_empty_subs() 가 schedule='realtime' AND notify_empty=1 행을 잡음.
       UNIQUE(user_id, slug, target_id) → /watch 멱등
-  pending(slug, post_id, target_id, summary, found_at)   다이제스트 구독자용 outbox (필터 통과+요약 완료, 아직 미발송)
-      UNIQUE(slug, post_id, target_id)
+  pending / digest_sent: 옛 다이제스트(HH:MM) 경로의 잔재 테이블. 현 deployment 에선 비어있고 채워질 일 없음.
+      유지하는 이유: 마이그레이션 직후의 pre-migration pending 행 잔류 대비 + 향후 롤백 여지.
   deliveries(slug, post_id, target_id, sent_at)          이미 보낸 (slug,post_id,target_id) — 다시 안 보냄
       PRIMARY KEY(slug, post_id, target_id)
   jobs(id, kind, url, slug, article_url, via, requested_by, ack_*, sub_payload, status, ...)
       register/re-probe 잡 큐. bot/worker.py 가 직렬로 처리(chromium 단일 직렬). FIFO by id.
       kind = 'register' (사용자 /watch·/preview) | 'reprobe' (poll.py 의 깨짐 감지)
       status = 'pending' → 'running' → 'done' | 'failed'
+  reports(id, user_id, username, slug, issue, created_at, status, resolved_at, resolved_note)
+      사용자 `/report` 가 쌓는 신고. open → resolved. bot/inspector.py 의 진단 + admin 명령에서 사용.
 """
 from __future__ import annotations
 
@@ -71,9 +71,8 @@ CREATE TABLE IF NOT EXISTS deliveries (
     PRIMARY KEY (slug, post_id, target_id)
 );
 
--- 다이제스트 KST 일자별 발송 cap (target_id, schedule HH:MM, kst_date).
--- flush_digests 가 그 일자에 이미 비웠으면 같은 timer 슬롯이 또 비우지 못하게 막음.
--- 24×/일 폴링 시에도 schedule 시각에 1회만 다이제스트 발송됨.
+-- 다이제스트 KST 일자별 발송 cap (target_id, schedule HH:MM, kst_date) — 레거시(HH:MM) 경로 전용.
+-- 현 deployment 의 realtime 구독은 cap 을 기록하지 않음(_immediate_ 묶음 분기). 테이블 사실상 영구 빈 상태.
 CREATE TABLE IF NOT EXISTS digest_sent (
     target_id TEXT NOT NULL,
     schedule  TEXT NOT NULL,
@@ -81,6 +80,24 @@ CREATE TABLE IF NOT EXISTS digest_sent (
     sent_at   TEXT NOT NULL,
     PRIMARY KEY (target_id, schedule, kst_date)
 );
+
+-- 사용자 문제 신고 (`/report`). owner 가 진단·해결. status='open' 인 행이 admin triage 대상.
+-- resolved_at·resolved_note 는 `/admin resolve` 가 채움. username 은 신고 시점 스냅샷(추후 닉네임
+-- 변경에도 누가 신고했는지 추적 가능).
+CREATE TABLE IF NOT EXISTS reports (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id        TEXT NOT NULL,
+    username       TEXT,
+    slug           TEXT NOT NULL,
+    issue          TEXT NOT NULL,
+    created_at     TEXT NOT NULL,
+    status         TEXT NOT NULL DEFAULT 'open'
+                   CHECK (status IN ('open','resolved')),
+    resolved_at    TEXT,
+    resolved_note  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_reports_status ON reports(status, id);
+CREATE INDEX IF NOT EXISTS idx_reports_slug ON reports(slug);
 
 CREATE TABLE IF NOT EXISTS jobs (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -115,9 +132,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
     cols = {r[1] for r in conn.execute("PRAGMA table_info(subscriptions)").fetchall()}
     if "notify_empty" not in cols:
         conn.execute("ALTER TABLE subscriptions ADD COLUMN notify_empty INTEGER NOT NULL DEFAULT 0")
-    # /watch 에서 사용자 시간 선택 옵션을 제거하면서 schedule='realtime' 신규 생성은 끊김.
-    # 기존 realtime 구독은 서버 폴링 시각(08:20 KST)으로 일괄 이전 — idempotent.
-    conn.execute("UPDATE subscriptions SET schedule='08:20' WHERE schedule='realtime'")
+    # 모든 구독은 polling 직후 즉시 발송(realtime). 옛 HH:MM schedule 행도 일괄 이전 — idempotent.
+    conn.execute("UPDATE subscriptions SET schedule='realtime' WHERE schedule!='realtime'")
     conn.commit()
 
 
@@ -411,3 +427,54 @@ def jobs_summary(conn: sqlite3.Connection) -> dict:
         "SELECT status, COUNT(*) as n FROM jobs GROUP BY status"
     ).fetchall()
     return {r["status"]: int(r["n"]) for r in rows}
+
+
+def recent_register_jobs(conn: sqlite3.Connection, limit: int = 20) -> list[sqlite3.Row]:
+    """사용자 `/watch`·`/preview` 가 만든 잡만(=kind='register') 최신 순. inspector.recent_jobs 가 호출."""
+    return conn.execute(
+        "SELECT * FROM jobs WHERE kind='register' ORDER BY id DESC LIMIT ?", (limit,)
+    ).fetchall()
+
+
+# --------------------------------------------------------------------------- #
+# reports (`/report`) — open/resolved 만 사용. admin triage 와 inspector.diagnose 가 enrich.
+# --------------------------------------------------------------------------- #
+def add_report(conn: sqlite3.Connection, *, user_id: str, username: Optional[str],
+               slug: str, issue: str) -> int:
+    def _do():
+        cur = conn.execute(
+            "INSERT INTO reports(user_id,username,slug,issue,created_at,status) "
+            "VALUES(?,?,?,?,?, 'open')",
+            (user_id, username, slug, issue, _now_iso()),
+        )
+        conn.commit()
+        return int(cur.lastrowid)
+    return _retry(_do)
+
+
+def list_reports(conn: sqlite3.Connection, *, status: Optional[str] = "open",
+                 limit: int = 50) -> list[sqlite3.Row]:
+    """status=None 이면 전체. 기본 open 만 최신순."""
+    if status is None:
+        return conn.execute(
+            "SELECT * FROM reports ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+    return conn.execute(
+        "SELECT * FROM reports WHERE status=? ORDER BY id DESC LIMIT ?", (status, limit),
+    ).fetchall()
+
+
+def get_report(conn: sqlite3.Connection, report_id: int) -> Optional[sqlite3.Row]:
+    return conn.execute("SELECT * FROM reports WHERE id=?", (report_id,)).fetchone()
+
+
+def resolve_report(conn: sqlite3.Connection, report_id: int, note: Optional[str]) -> bool:
+    def _do():
+        cur = conn.execute(
+            "UPDATE reports SET status='resolved', resolved_at=?, resolved_note=? "
+            "WHERE id=? AND status='open'",
+            (_now_iso(), note, report_id),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    return _retry(_do)

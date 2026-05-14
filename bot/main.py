@@ -29,8 +29,8 @@ sys.path.insert(0, str(ROOT))
 import discord  # noqa: E402
 from discord import app_commands  # noqa: E402
 
-from bot import db, site_ops, url_gate, worker  # noqa: E402
-from bot.config import bot_token, owner_user_id, guild_id, safe_browsing_api_key  # noqa: E402
+from bot import admin as admin_mod, db, inspector, site_ops, url_gate, worker  # noqa: E402
+from bot.config import admin_guild_id, bot_token, guild_id, owner_user_id, safe_browsing_api_key  # noqa: E402
 from probe.paths import url_to_slug  # noqa: E402
 
 CONFIGS_DIR = site_ops.CONFIGS_DIR
@@ -39,25 +39,7 @@ STATE_DIR = site_ops.STATE_DIR
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("bot")
 
-# 폴링 시각 (deploy/notice-poll.timer OnCalendar 와 동기화). schedule 미지정 시 default.
-# 발송은 별도 notify-timer (15분 슬랏) 가 처리 — 사용자가 임의 HH:MM 골라도 그 시각 도래 후
-# 다음 notify-timer slot 에서 비움 (최대 ~15분 지연).
-POLL_SCHEDULE = "08:20"
-_SCHEDULE_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
-_HOUR_RE = re.compile(r"^([01]?\d|2[0-3])$")
-
-
-def _parse_schedule(raw: Optional[str]) -> Optional[str]:
-    """'HH:MM' | 'HH' → 정규화. 빈값이면 POLL_SCHEDULE. 잘못된 값이면 None."""
-    if not raw or not raw.strip():
-        return POLL_SCHEDULE
-    s = raw.strip()
-    if _SCHEDULE_RE.match(s):
-        h, m = s.split(":")
-        return f"{int(h):02d}:{m}"
-    if _HOUR_RE.match(s):
-        return f"{int(s):02d}:00"
-    return None
+# 모든 구독은 polling 직후 notify.py 가 즉시 발송(schedule='realtime'). 사용자 시간 선택 없음.
 
 START_TS = time.time()
 LAST_ERROR: dict = {"when": None, "text": None}
@@ -130,20 +112,14 @@ def _record_error(where: str, exc: BaseException) -> str:
 @app_commands.describe(
     url="공지/게시판 목록 페이지 URL",
     filter="(선택) 어떤 글만 받을지 자연어로. 예: '점검 공지는 빼고 신규 콘텐츠/이벤트만'. 비우면 새 글 전부.",
-    schedule=f"(선택) 알림 받을 시각 'HH:MM' 또는 'HH' (KST). 기본 {POLL_SCHEDULE} — 폴링 시각.",
     here="(선택) 켜면 이 채널에 발송. 끄면(기본) 내 DM 으로.",
     notify_empty="(선택) 켜면 폴링했는데 새 글이 없을 때도 '새 공지 없음' 한 줄을 보냄. 끄면(기본) 새 글 있을 때만.",
     article_url="(선택) 처음 등록하는 사이트가 자동 분석에 실패할 때, 그 게시판의 실제 글 하나 URL 을 같이 주면 분석 성공률이 올라갑니다.",
 )
 async def watch(interaction: discord.Interaction, url: str, filter: Optional[str] = None,
-                schedule: Optional[str] = None, here: bool = False, notify_empty: bool = False,
+                here: bool = False, notify_empty: bool = False,
                 article_url: Optional[str] = None):
     await interaction.response.defer(thinking=True)
-    sched = _parse_schedule(schedule)
-    if sched is None:
-        await interaction.edit_original_response(
-            content="❌ schedule 형식 오류 — 'HH:MM'(예: 09:00) 또는 'HH'(예: 9) 로 적어주세요.")
-        return
     url = url.strip()
     if not re.match(r"^https?://", url):
         await interaction.edit_original_response(content="❌ http(s):// 로 시작하는 URL 을 주세요.")
@@ -163,14 +139,14 @@ async def watch(interaction: discord.Interaction, url: str, filter: Optional[str
     # 이미 등록된 사이트면 큐 안 거치고 즉시 subscription 추가 + 예시
     if _is_registered(slug):
         db.add_subscription(_conn, user_id=user_id, slug=slug, url=url,
-                            filter_prompt=filter_prompt, schedule=sched,
+                            filter_prompt=filter_prompt, schedule="realtime",
                             target_kind=target_kind, target_id=target_id,
                             notify_empty=notify_empty)
         n = _baseline_count(slug)
         head = (f"✅ 구독 추가 — `{slug}` (이미 등록된 사이트)\n"
                 f"• baseline {n if n is not None else '?'}건\n"
                 f"• 필터: {filter_prompt or '없음(새 글 전부)'}\n"
-                f"• 발송 시각: {sched} KST (폴링 {POLL_SCHEDULE} 이후 시각만 당일 발송, 이전 시각은 다음날)\n"
+                f"• 발송: 폴링 직후 즉시\n"
                 f"• 알림: {where}\n"
                 f"• 새 글 없을 때도 알림: {'예' if notify_empty else '아니오'}")
         await interaction.edit_original_response(content=head + "\n\n📋 예시 알림 만드는 중…")
@@ -193,7 +169,7 @@ async def watch(interaction: discord.Interaction, url: str, filter: Optional[str
     await interaction.edit_original_response(content="📥 큐 추가 중…")
     msg = await interaction.original_response()
     sub_payload = json.dumps({
-        "user_id": user_id, "filter_prompt": filter_prompt, "schedule": sched,
+        "user_id": user_id, "filter_prompt": filter_prompt, "schedule": "realtime",
         "target_kind": target_kind, "target_id": target_id, "notify_empty": bool(notify_empty),
     })
     job_id, inserted = db.enqueue_job(
@@ -287,8 +263,58 @@ async def list_cmd(interaction: discord.Interaction):
     for r in rows:
         where = "DM" if r["target_kind"] == "dm" else f"<#{r['target_id']}>"
         ne = " — 새글없음알림:on" if r["notify_empty"] else ""  # connect() 가 항상 _migrate 하므로 컬럼은 늘 있음
-        lines.append(f"• `{r['slug']}` — 필터: {r['filter_prompt'] or '없음'} — 발송 시각: {r['schedule']} — {where}{ne} — 등록 {r['created_at'][:10]}")
+        lines.append(f"• `{r['slug']}` — 필터: {r['filter_prompt'] or '없음'} — {where}{ne} — 등록 {r['created_at'][:10]}")
     await interaction.response.send_message("\n".join(lines)[:1900], ephemeral=True)
+
+
+async def _report_slug_autocomplete(interaction: discord.Interaction, current: str
+                                     ) -> list[app_commands.Choice[str]]:
+    """`/report` 의 slug 인자 자동완성 — 본인 subscriptions 중 current 로 시작/포함하는 것."""
+    rows = db.list_subscriptions(_conn, user_id=str(interaction.user.id))
+    cur = (current or "").lower()
+    out: list[app_commands.Choice[str]] = []
+    for r in rows:
+        slug = r["slug"]
+        if not cur or cur in slug.lower():
+            out.append(app_commands.Choice(name=slug[:100], value=slug))
+            if len(out) >= 25:  # Discord 상한
+                break
+    return out
+
+
+@tree.command(name="report", description="본인 구독에 문제가 있을 때 신고 — 관리자가 진단·해결합니다.")
+@app_commands.describe(
+    slug="문제 있는 구독의 slug (목록에서 자동완성)",
+    issue="무슨 문제? 자연어로 자유롭게 (예: '아카 공식 탭만 받고 싶은데 일반 게시판 글이 와요')",
+)
+@app_commands.autocomplete(slug=_report_slug_autocomplete)
+async def report_cmd(interaction: discord.Interaction, slug: str, issue: str):
+    user_id = str(interaction.user.id)
+    issue = (issue or "").strip()
+    if not issue:
+        await interaction.response.send_message("❌ issue 설명이 비어있습니다.", ephemeral=True)
+        return
+    # slug 가 본인 구독이 아니면 거부 (자동완성 우회 입력 차단)
+    own = {r["slug"] for r in db.list_subscriptions(_conn, user_id=user_id)}
+    if slug not in own:
+        await interaction.response.send_message(
+            f"❌ `{slug}` 은(는) 본인 구독 목록에 없습니다 — `/list` 로 확인해 주세요.", ephemeral=True)
+        return
+    report_id = db.add_report(_conn, user_id=user_id, username=str(interaction.user),
+                              slug=slug, issue=issue[:1500])
+    await interaction.response.send_message(
+        f"✅ 신고 접수됨 (#{report_id}, `{slug}`). 관리자가 확인 후 조치합니다. 다른 문제가 더 있으면 다시 `/report`.",
+        ephemeral=True)
+    # owner DM — 자동 진단 결과까지 함께. admin.send_chunked_dm 재사용(2000 chars split, 실패 시 False).
+    try:
+        paths = inspector.InspectorPaths.live()
+        result = inspector.inspect(_conn, paths, report_id=report_id)
+        body = inspector.format_inspect_result(result) if result else f"신고 #{report_id} — inspect 실패"
+        oid = owner_user_id()
+        if oid and oid.isdigit():
+            await admin_mod.send_chunked_dm(client, oid, "🚩 새 신고\n\n" + body)
+    except Exception as e:  # noqa: BLE001
+        log.warning("report owner DM 실패: %r", e)
 
 
 @tree.command(name="status", description="봇/폴링 상태")
@@ -326,7 +352,7 @@ async def status(interaction: discord.Interaction):
         f"• uptime: {up // 3600}h {(up % 3600) // 60}m",
         gate_line,
         jq_line,
-        f"• 등록 config: {n_configs}개 / 구독: {cnt['subscriptions']}건 ({cnt['slugs']} slug) / pending(다이제스트 대기): {cnt['pending']}건",
+        f"• 등록 config: {n_configs}개 / 구독: {cnt['subscriptions']}건 ({cnt['slugs']} slug) / pending(레거시 미발송): {cnt['pending']}건",
         f"• 마지막 폴링: {last_poll or '아직 없음'}",
         f"• 깨짐 신호 있는 slug: {', '.join(broken) if broken else '없음'}",
         f"• 자동등록 실패 slug: {', '.join(failed) if failed else '없음'}",
@@ -405,6 +431,20 @@ async def on_ready():
             log.info("synced %d global commands (DM/추후 길드용, 전파 ~1h)", len(synced))
     except Exception as e:  # noqa: BLE001
         _record_error("tree.sync", e)
+
+    # admin 전용 명령(`/admin ...`) — ADMIN_GUILD_ID 설정된 경우만 그 길드에 sync.
+    # 메인 tree 와 분리: 다른 길드/DM autocomplete 에 admin 명령이 노출되지 않게 한다.
+    agid = admin_guild_id()
+    if agid:
+        try:
+            ag = discord.Object(id=agid)
+            atree = admin_mod.build_admin_tree(client, _conn, admin_guild=ag)
+            synced = await atree.sync(guild=ag)
+            log.info("synced %d admin commands to admin guild %s", len(synced), agid)
+        except Exception as e:  # noqa: BLE001
+            _record_error("admin_tree.sync", e)
+    else:
+        log.info("ADMIN_GUILD_ID 미설정 — admin 명령 등록 생략(보안 디폴트)")
 
 
 def main() -> int:

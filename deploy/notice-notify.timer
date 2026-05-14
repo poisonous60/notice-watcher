@@ -1,5 +1,7 @@
-# 15분마다 발송 슬랏 (00/15/30/45 분). schedule HH:MM 도래 후 다음 슬랏에서 비움 — 최대 ~15분 지연.
-# 폴링과 분리: chromium 락 불필요. notify.py 만 호출(--no-collected) → 다이제스트 flush 만.
+# 15분마다 retry 슬랏. 폴링 시점에 poll_and_notify 가 notify.py --no-digest 로 즉시 발송하므로
+# 정상 흐름에선 처리할 게 없음. .notified 마커 작성 실패로 collected dir 가 남아있거나
+# 옛 다이제스트(HH:MM) 시절의 pending 잔재가 있을 때만 실제로 일을 함.
+# 폴링과 분리: chromium 락 불필요. notify.py (인자 없음) → collected + flush_digests 둘 다 시도.
 # 설치: sudo cp deploy/notice-notify.service deploy/notice-notify.timer /etc/systemd/system/
 #       sudo systemctl daemon-reload && sudo systemctl enable --now notice-notify.timer
 [Unit]

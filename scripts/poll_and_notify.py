@@ -1,10 +1,10 @@
 """poll.py + notify.py 를 한 번에 (systemd notice-poll.service 가 호출).
 
 - poll.py 가 chromium 을 띄움 (playwright_html / handwritten 사이트, 재-probe) → chromium_lock 안.
-- 새 글은 collected/<ts>/<slug>.new.json + pending 큐 에 채움.
-- 폴링 직후 notify.py --heartbeat 1회 — 폴링 시각(POLL_SCHEDULE) 도래분 즉시 발송 + notify_empty heartbeat.
-- 추가로 별도 systemd unit (notice-notify.timer, 15분 간격) 이 notify.py --no-collected 로 다이제스트 flush —
-  사용자가 폴링 시각보다 늦은 HH:MM 을 골라도 그 시각 도래 후 다음 15분 슬랏에서 발송. digest_sent cap 으로 중복 방지.
+- 새 글은 collected/<ts>/<slug>.new.json 에 떨어짐.
+- 폴링 직후 notify.py --no-digest 1회 — collected 새 글을 즉시 요약/필터/Discord 발송 (모든 구독 realtime).
+- notice-notify.timer (15분 간격) 는 retry 용도: .notified 마커 작성 실패한 collected dir 나
+  옛 다이제스트(HH:MM) 시절의 pending 잔재만 처리. 정상 흐름에서 할 일 없음.
 - env HEALTHCHECK_PING_URL 있으면 시작/끝에 GET ping (실패해도 무시).
 - 치명적 실패 시 종료코드 != 0.
 
@@ -58,7 +58,14 @@ def main(argv: list[str]) -> int:
         _ping(hc, "/fail")
         return rc
 
-    # notify.py 호출은 notice-notify.timer (15분 간격) 가 담당 — 여기선 안 함.
+    # collected 새 글 즉시 처리 (digest flush 는 notice-notify.timer 15분 슬랏이 마저 담당).
+    print("[poll_and_notify] notify.py --no-digest ...")
+    nrc = subprocess.call([PY, str(ROOT / "scripts" / "notify.py"), "--no-digest", "--heartbeat"], cwd=str(ROOT))
+    if nrc != 0:
+        print(f"[poll_and_notify] notify.py 실패 rc={nrc}", file=sys.stderr)
+        _ping(hc, "/fail")
+        return nrc
+
     _ping(hc)
     return 0
 
