@@ -89,7 +89,9 @@ def cmd_status(alias: str = "bot") -> int:
 
 def cmd_logs(alias: str, tail: int) -> int:
     u = _resolve_unit(alias)
-    return _ssh(f"journalctl --user -u {u} -n {int(tail)} --no-pager")
+    # `--user -u <unit>` 는 systemd 일부 버전에서 user-scope journal 을 못 찾고 "No journal files were found"
+    # 반환 (관찰: N100 Arch). `--user-unit <unit>` 또는 `_SYSTEMD_USER_UNIT=...` 로 명시해야 안정.
+    return _ssh(f"journalctl --user-unit {u} -n {int(tail)} --no-pager")
 
 
 def cmd_daemon_reload() -> int:

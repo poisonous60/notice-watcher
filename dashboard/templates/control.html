@@ -17,23 +17,19 @@
 </p>
 {% endif %}
 
-<div class="control-grid">
-
 <!-- ============ 1. Model routing ============ -->
-<details class="control-section full-span" open>
+<details class="control-section" open>
 <summary>1. Model routing  <span class="muted" style="font-weight:normal;font-size:0.88rem;">— call_site 별 provider:model</span></summary>
 <form hx-post="/control/save/routing" hx-target="#routing-result" hx-swap="innerHTML">
   <p class="muted" style="font-size:0.85rem;margin:0.2rem 0;">
     각 call_site 에 사용할 모델 선택. 비워두면 그 매핑 제거 (→ <code>_default</code> 사용).
-    "<em>custom...</em>" 선택 시 직접 입력 (예: 새 OpenRouter 모델 테스트).
     옵션은 <code>model_prices.json</code> 에서 자동 로드.
   </p>
-  <table class="compact" style="width:100%;">
+  <table class="compact row-grid">
     <thead>
       <tr>
-        <th style="width:18em;">call_site</th>
+        <th>call_site</th>
         <th>모델</th>
-        <th style="width:24em;">custom 입력</th>
       </tr>
     </thead>
     <tbody>
@@ -41,7 +37,6 @@
       {% set current = ctrl.routing.current.get(key, '') %}
       {% set effective = ctrl.routing.effective.get(key, '') %}
       {% set selected = current if current else effective %}
-      {% set is_custom = selected and selected not in ctrl.routing.models %}
       {% set is_override = current != '' %}
       <tr>
         <td class="mono">
@@ -52,23 +47,15 @@
           </span>
         </td>
         <td>
-          <select name="{{ key }}" style="width:100%;margin:0;"
-                  onchange="this.parentElement.parentElement.querySelector('input.routing-custom').style.display = this.value==='__custom__' ? 'block' : 'none'; if (this.value !== '__custom__') this.parentElement.parentElement.querySelector('input.routing-custom').value='';">
+          <select name="{{ key }}" style="width:100%;margin:0;">
             <option value="">— (매핑 제거 → default 사용)</option>
             {% for m in ctrl.routing.models %}
             <option value="{{ m }}" {{ 'selected' if selected==m else '' }}>{{ m }}</option>
             {% endfor %}
-            <option value="__custom__" {{ 'selected' if is_custom else '' }}>custom...</option>
           </select>
           {% if not is_override and effective %}
           <span class="muted" style="font-size:0.78rem;">실제 적용: <code>{{ effective }}</code> (fallback)</span>
           {% endif %}
-        </td>
-        <td>
-          <input type="text" class="routing-custom" data-key="{{ key }}"
-                 value="{{ selected if is_custom else '' }}"
-                 placeholder="provider:model (예: openrouter:anthropic/claude-haiku-4-5)"
-                 style="width:100%;margin:0;font-family:monospace;font-size:0.85rem;display:{{ 'block' if is_custom else 'none' }};">
         </td>
       </tr>
       {% endfor %}
@@ -78,27 +65,10 @@
   <span class="muted">→ N100 mtime 캐시가 다음 호출에서 자동 재로드</span>
 </form>
 <div id="routing-result"></div>
-<script>
-// __custom__ 선택 시 text 입력값이 select.value 를 덮어쓰도록 submit 직전 처리.
-// text input 은 name 없음 (data-key 만) — 단독 submit 안 됨, JS 가 매핑.
-(function () {
-  const form = document.querySelector('form[hx-post="/control/save/routing"]');
-  if (!form) return;
-  form.addEventListener('htmx:configRequest', (e) => {
-    const params = e.detail.parameters;
-    form.querySelectorAll('select').forEach((sel) => {
-      if (sel.value === '__custom__') {
-        const ti = form.querySelector(`input.routing-custom[data-key="${sel.name}"]`);
-        params[sel.name] = (ti && ti.value.trim()) ? ti.value.trim() : '';
-      }
-    });
-  });
-})();
-</script>
 </details>
 
 <!-- ============ 2. Runtime tuning ============ -->
-<details class="control-section full-span">
+<details class="control-section">
 <summary>2. Runtime tuning  <span class="muted" style="font-weight:normal;font-size:0.88rem;">— config.local.toml override</span></summary>
 <form hx-post="/control/save/runtime" hx-target="#runtime-result" hx-swap="innerHTML">
   <p class="muted" style="font-size:0.85rem;margin:0.2rem 0;">
@@ -113,21 +83,21 @@
   {% for section_key, label in sections.items() %}
   {% if section_key in grouped %}
   <h4 style="margin:0.7rem 0 0.3rem 0;">[{{ section_key }}]  <span class="muted" style="font-weight:normal;font-size:0.82rem;">{{ label }}</span></h4>
-  <table class="compact" style="width:100%;">
+  <table class="compact row-grid">
     <thead>
       <tr>
-        <th style="width:16em;">field</th>
-        <th style="width:8em;">type</th>
-        <th style="width:10em;">default</th>
-        <th>현재 override (비우면 default)</th>
+        <th>field</th>
+        <th>override</th>
       </tr>
     </thead>
     <tbody>
       {% for r in grouped[section_key] %}
       <tr>
         <td class="mono">{{ r.field }}<br><span class="muted" style="font-size:0.78rem;font-weight:normal;">{{ r.desc }}</span></td>
-        <td><code>{{ r.type }}</code></td>
-        <td class="mono">{{ r.default }}</td>
+        <td class="meta">
+          <span><code>{{ r.type }}</code></span>
+          <span class="mono">default: {{ r.default }}</span>
+        </td>
         <td>
           <input type="{{ 'number' if r.type=='int' else 'text' }}"
                  name="{{ r.name }}" value="{{ r.current }}"
@@ -154,7 +124,7 @@
 </details>
 
 <!-- ============ 3. Environment ============ -->
-<details class="control-section full-span">
+<details class="control-section">
 <summary>3. Environment (.env)  <span class="muted" style="font-weight:normal;font-size:0.88rem;">— 비밀 포함, 봇 재시작 필요</span></summary>
 {% if not load_remote %}
 <p class="muted">N100 의 <code>.env</code> 를 먼저 로드하세요 (상단 ⬇ 버튼). 로컬에 비밀이 저장되지 않도록 메모리에서만 다룸.</p>
@@ -223,7 +193,7 @@ document.getElementById('env-reveal').addEventListener('change', (e) => {
 </details>
 
 <!-- ============ 5. Remote commands ============ -->
-<details class="control-section full-span" open>
+<details class="control-section" open>
 <summary>5. Remote commands  <span class="muted" style="font-weight:normal;font-size:0.88rem;">— systemctl --user</span></summary>
 <div style="display:flex;flex-wrap:wrap;gap:0.4rem;margin:0.3rem 0;">
   <form hx-post="/control/cmd/poll-now" hx-target="#cmd-result" hx-swap="innerHTML">
@@ -237,8 +207,13 @@ document.getElementById('env-reveal').addEventListener('change', (e) => {
     <button class="secondary" style="margin:0;padding:0.4rem 0.9rem;width:auto;">↺ daemon-reload</button>
   </form>
 </div>
+<p class="muted" style="font-size:0.8rem;margin:0.3rem 0;">
+  <strong>status</strong> = 유닛 현재 상태 (active/inactive/failed). <strong>logs</strong> = 해당 유닛의 systemd journal stdout/stderr 최근 N줄.
+  결과는 아래 박스에 표시됨.
+</p>
 <div style="display:flex;flex-wrap:wrap;gap:0.8rem;margin:0.5rem 0;align-items:center;">
   <form hx-post="/control/cmd/status" hx-target="#cmd-result" hx-swap="innerHTML"
+        hx-indicator="#cmd-spin"
         style="display:inline-flex;align-items:center;gap:0.4rem;margin:0;">
     <span class="muted" style="font-size:0.85rem;">unit:</span>
     <select name="unit" style="margin:0;width:auto;min-width:7em;">
@@ -250,6 +225,7 @@ document.getElementById('env-reveal').addEventListener('change', (e) => {
     <button class="secondary" style="margin:0;padding:0.4rem 0.9rem;width:auto;">⏵ status</button>
   </form>
   <form hx-post="/control/cmd/logs" hx-target="#cmd-result" hx-swap="innerHTML"
+        hx-indicator="#cmd-spin"
         style="display:inline-flex;align-items:center;gap:0.4rem;margin:0;">
     <span class="muted" style="font-size:0.85rem;">unit:</span>
     <select name="unit" style="margin:0;width:auto;min-width:7em;">
@@ -261,8 +237,9 @@ document.getElementById('env-reveal').addEventListener('change', (e) => {
     <input type="number" name="tail" value="100" min="10" max="2000" style="width:5em;margin:0;">
     <button class="secondary" style="margin:0;padding:0.4rem 0.9rem;width:auto;">📜 logs</button>
   </form>
+  <span id="cmd-spin" class="htmx-indicator">…진행중</span>
 </div>
-<div id="cmd-result"></div>
+<div id="cmd-result" style="margin-top:0.5rem;"></div>
 </details>
 
 {% endblock %}
