@@ -22,7 +22,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from probe.paths import output_dir, url_to_slug  # noqa: E402
 from engine.digest import build_digest  # noqa: E402
 from engine import make_adapter, validate_config  # noqa: E402
-from generate import generate_config, default_model  # noqa: E402
+from generate import generate_config  # noqa: E402
+from generate.routing import resolve as _resolve_route  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -78,7 +79,9 @@ def main(argv) -> int:
     print(f"[gen_config] digest 구성: slug={slug}")
     digest = build_digest(slug=slug, url=url)
 
-    print(f"[gen_config] gemini 호출: model={args.model or default_model()}")
+    # generate_config 는 client_for("config_generate") → routing.json. default_model() 은 routing 무시 → 라벨 거짓말 방지.
+    _eff_model = args.model or _resolve_route("config_generate").model
+    print(f"[gen_config] gemini 호출: model={_eff_model}")
     try:
         cfg = generate_config(digest, model=args.model)
     except Exception as e:
