@@ -60,6 +60,79 @@ def _install_resource_block(context) -> None:
         pass
 
 
+def _wait_xhr_quiet(page, *, quiet_ms: int = 500, hard_timeout_ms: int = 2000) -> None:
+    """networkidle 대체 — 마지막 XHR/fetch/document 응답 이후 quiet_ms 새 응답 없으면 종료.
+
+    networkidle 은 광고/트래커 keepalive 로 영영 안 끝나는 사이트 많음 — 이건 *데이터* 응답
+    (xhr/fetch/document) 만 카운트 → 광고 image/script 가 떠들어도 무시. 데이터 XHR 가 끝나면 즉시 종료.
+
+    quiet_ms: 마지막 응답 이후 새 응답 없이 유지돼야 하는 시간 (기본 500ms).
+    hard_timeout_ms: 어떤 경우에도 이 이상 안 기다림 (기본 2000ms).
+    """
+    state = {"last": time.perf_counter(), "started": time.perf_counter()}
+
+    def _on_response(r):
+        try:
+            if r.request.resource_type in ("xhr", "fetch", "document"):
+                state["last"] = time.perf_counter()
+        except Exception:  # noqa: BLE001
+            pass
+
+    page.on("response", _on_response)
+    quiet_s = quiet_ms / 1000.0
+    hard_s = hard_timeout_ms / 1000.0
+    try:
+        while True:
+            now = time.perf_counter()
+            if now - state["started"] > hard_s:
+                break
+            if now - state["last"] > quiet_s:
+                break
+            try:
+                page.wait_for_timeout(50)
+            except Exception:  # noqa: BLE001 — page 닫혔으면 즉시 종료
+                break
+    finally:
+        try:
+            page.remove_listener("response", _on_response)
+        except Exception:  # noqa: BLE001
+            pass
+
+
+_DAEMON_ENDPOINT_FILE = Path(__file__).resolve().parent.parent / "output" / "playwright_daemon" / "endpoint"
+
+
+def _connect_or_launch(p, *, headless: bool):
+    """daemon endpoint 파일 있으면 connect_over_cdp 시도, 실패 또는 없으면 fresh launch.
+
+    daemon 사용 시 chromium cold launch (~2-3s) 회피. 단 daemon 다운/없으면 자동 fallback.
+    반환: browser 객체. 호출자는 어느 path 든 browser.close() 호출.
+      - connect_over_cdp 한 경우: close 가 connection 만 닫음 (daemon chromium 은 살아있음)
+      - launch 한 경우: close 가 chromium 자체 종료
+
+    Playwright 의 connect_over_cdp 는 HTTP endpoint 만 주면 internal 처리 시 trailing-slash 등으로
+    timeout 나는 케이스 있음 (microsoft/playwright#35115). 대신 /json/version 에서 webSocketDebuggerUrl
+    추출해 ws URL 직접 패스하는 게 안정적.
+    """
+    if _DAEMON_ENDPOINT_FILE.exists():
+        try:
+            endpoint = _DAEMON_ENDPOINT_FILE.read_text(encoding="utf-8").strip()
+            if endpoint:
+                import httpx as _httpx
+                ver = _httpx.get(f"{endpoint}/json/version", timeout=2.0).json()
+                ws = ver.get("webSocketDebuggerUrl")
+                if ws:
+                    # mtime touch — daemon 의 idle 타이머 reset
+                    try:
+                        _DAEMON_ENDPOINT_FILE.touch()
+                    except Exception:  # noqa: BLE001
+                        pass
+                    return p.chromium.connect_over_cdp(ws, timeout=3000)
+        except Exception:  # noqa: BLE001 — daemon 죽었거나 endpoint 깨짐 → fallback
+            pass
+    return p.chromium.launch(headless=headless, args=_LAUNCH_ARGS)
+
+
 def fetch_with_capture(
     *,
     url: str,
@@ -69,7 +142,7 @@ def fetch_with_capture(
     headless: bool = True,
     baseline_blocked: bool = False,
     timeout_ms: int = 30000,
-    idle_timeout_ms: int = 2000,
+    idle_timeout_ms: int = 1000,
 ) -> Result:
     """Chromium 띄워 URL 로드, HAR 표준 포맷으로 트래픽 자동 기록.
 
@@ -122,74 +195,83 @@ def fetch_with_capture(
 
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=headless, args=_LAUNCH_ARGS)
-            context_kwargs = {
-                "record_har_path": str(har_path),
-                "record_har_content": "attach",
-                "viewport": {"width": 1280, "height": 800},
-                "locale": "ko-KR",
-                "user_agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/124.0.0.0 Safari/537.36"
-                ),
-            }
-            if storage_state_path and storage_state_path.exists():
-                context_kwargs["storage_state"] = str(storage_state_path)
+            browser = None
+            context = None
+            try:
+                browser = _connect_or_launch(p, headless=headless)
+                context_kwargs = {
+                    "record_har_path": str(har_path),
+                    "record_har_content": "attach",
+                    "viewport": {"width": 1280, "height": 800},
+                    "locale": "ko-KR",
+                    "user_agent": (
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/124.0.0.0 Safari/537.36"
+                    ),
+                }
+                if storage_state_path and storage_state_path.exists():
+                    context_kwargs["storage_state"] = str(storage_state_path)
 
-            context = browser.new_context(**context_kwargs)
-            _install_resource_block(context)
-            if _has_stealth:
-                try:
-                    Stealth().apply_stealth_sync(context)
-                except Exception as e:  # stealth 실패는 치명적 X
-                    pass
-
-            page = context.new_page()
-
-            # 메인 문서 요청 헤더 캡처
-            def _on_request(req):
-                if req.is_navigation_request() and req.url == url:
-                    nonlocal captured_nav_headers
+                context = browser.new_context(**context_kwargs)
+                _install_resource_block(context)
+                if _has_stealth:
                     try:
-                        captured_nav_headers = dict(req.headers)
-                    except Exception:
+                        Stealth().apply_stealth_sync(context)
+                    except Exception:  # stealth 실패는 치명적 X
                         pass
 
-            page.on("request", _on_request)
+                page = context.new_page()
 
-            # 메인 응답 status도 받기
-            main_response = None
+                # 메인 문서 요청 헤더 캡처
+                def _on_request(req):
+                    if req.is_navigation_request() and req.url == url:
+                        nonlocal captured_nav_headers
+                        try:
+                            captured_nav_headers = dict(req.headers)
+                        except Exception:
+                            pass
 
-            def _on_response(resp):
-                nonlocal main_response
-                if main_response is None and resp.request.is_navigation_request():
-                    main_response = resp
+                page.on("request", _on_request)
 
-            page.on("response", _on_response)
+                # 메인 응답 status도 받기
+                main_response = None
 
-            try:
-                response = page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
-                if response is not None:
-                    status = response.status
-                    response_headers = dict(response.headers)
-                    final_url = response.url
-                # networkidle까지 추가 대기 (XHR 캡처용) — 안 오면 idle_timeout_ms 에서 끊고 진행
+                def _on_response(resp):
+                    nonlocal main_response
+                    if main_response is None and resp.request.is_navigation_request():
+                        main_response = resp
+
+                page.on("response", _on_response)
+
                 try:
-                    page.wait_for_load_state("networkidle", timeout=idle_timeout_ms)
-                except Exception:
-                    pass
+                    response = page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+                    if response is not None:
+                        status = response.status
+                        response_headers = dict(response.headers)
+                        final_url = response.url
+                    # 데이터 XHR/fetch 응답 끝날 때까지 대기 — networkidle 보다 빠름 (광고 image 무시)
+                    _wait_xhr_quiet(page, quiet_ms=300, hard_timeout_ms=idle_timeout_ms)
 
-                body = page.content()
-                try:
-                    page.screenshot(path=str(screenshot_path), full_page=False)
-                except Exception:
-                    pass
-            except Exception as e:
-                error = f"{type(e).__name__}: {e}"
-
-            context.close()  # HAR 저장
-            browser.close()
+                    body = page.content()
+                    try:
+                        page.screenshot(path=str(screenshot_path), full_page=False)
+                    except Exception:
+                        pass
+                except Exception as e:
+                    error = f"{type(e).__name__}: {e}"
+            finally:
+                # browser/context leak 방지 — new_context 실패해도 browser.close() 보장
+                if context is not None:
+                    try:
+                        context.close()  # HAR 저장
+                    except Exception:  # noqa: BLE001
+                        pass
+                if browser is not None:
+                    try:
+                        browser.close()
+                    except Exception:  # noqa: BLE001
+                        pass
     except Exception as e:
         error = f"{type(e).__name__}: {e}"
 
@@ -305,7 +387,7 @@ def fetch_article_by_click(
     baseline_blocked: bool = False,
     storage_state_path: Optional[Path] = None,
     timeout_ms: int = 30000,
-    idle_timeout_ms: int = 2000,
+    idle_timeout_ms: int = 1000,
 ) -> tuple["Result", dict]:
     """목록 페이지를 열고 '진짜 글' 로 보이는 링크를 *클릭* 해 그 결과 페이지를 캡처한다.
 
@@ -359,90 +441,97 @@ def fetch_article_by_click(
 
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=headless, args=_LAUNCH_ARGS)
-            ckw: dict = {
-                "record_har_path": str(har_path),
-                "record_har_content": "attach",
-                "viewport": {"width": 1280, "height": 800},
-                "locale": "ko-KR",
-                "user_agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                               "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"),
-            }
-            if storage_state_path and storage_state_path.exists():
-                ckw["storage_state"] = str(storage_state_path)
-            context = browser.new_context(**ckw)
-            # Phase 9b 는 stylesheet 차단 X — 클릭 visibility 검출에 영향 가능. image/font/media 만 차단.
-            def _route_click(route):
-                try:
-                    if route.request.resource_type in ("image", "media", "font"):
-                        route.abort()
-                    else:
-                        route.continue_()
-                except Exception:  # noqa: BLE001
-                    pass
+            browser = None
+            context = None
             try:
-                context.route("**/*", _route_click)
-            except Exception:  # noqa: BLE001
-                pass
-            if _has_stealth:
-                try:
-                    Stealth().apply_stealth_sync(context)
-                except Exception:  # noqa: BLE001
-                    pass
-            page = context.new_page()
-            try:
-                page.goto(list_url, wait_until="domcontentloaded", timeout=timeout_ms)
-                try:
-                    page.wait_for_load_state("networkidle", timeout=idle_timeout_ms)
-                except Exception:  # noqa: BLE001
-                    pass
-                links = page.evaluate(_LINK_JS) or []
-                ranked = sorted(((_score_click_link(l, page_host=page_host), l) for l in links),
-                                key=lambda t: t[0], reverse=True)
-                if not ranked or ranked[0][0] < 3:
-                    meta["note"] = f"클릭할 만한 글 링크 후보 없음 (best={ranked[0][0] if ranked else 'n/a'})"
-                else:
-                    _, link = ranked[0]
-                    meta["clicked_text"], meta["clicked_href"] = link.get("text"), link.get("href")
-                    loc = page.locator(f'a[data-probeclickidx="{int(link["i"])}"]').first
+                browser = _connect_or_launch(p, headless=headless)
+                ckw: dict = {
+                    "record_har_path": str(har_path),
+                    "record_har_content": "attach",
+                    "viewport": {"width": 1280, "height": 800},
+                    "locale": "ko-KR",
+                    "user_agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                                   "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"),
+                }
+                if storage_state_path and storage_state_path.exists():
+                    ckw["storage_state"] = str(storage_state_path)
+                context = browser.new_context(**ckw)
+                # Phase 9b 는 stylesheet 차단 X — 클릭 visibility 검출에 영향 가능. image/font/media 만 차단.
+                def _route_click(route):
                     try:
-                        loc.scroll_into_view_if_needed(timeout=3000)
+                        if route.request.resource_type in ("image", "media", "font"):
+                            route.abort()
+                        else:
+                            route.continue_()
                     except Exception:  # noqa: BLE001
                         pass
-                    clicked = False
+                try:
+                    context.route("**/*", _route_click)
+                except Exception:  # noqa: BLE001
+                    pass
+                if _has_stealth:
                     try:
-                        with page.expect_navigation(wait_until="domcontentloaded", timeout=timeout_ms):
-                            loc.click(timeout=8000)
-                        clicked = True
-                    except Exception:  # noqa: BLE001  — 클라이언트 라우팅이면 풀 네비게이션이 안 올 수 있음
+                        Stealth().apply_stealth_sync(context)
+                    except Exception:  # noqa: BLE001
+                        pass
+                page = context.new_page()
+                try:
+                    page.goto(list_url, wait_until="domcontentloaded", timeout=timeout_ms)
+                    _wait_xhr_quiet(page, quiet_ms=300, hard_timeout_ms=idle_timeout_ms)
+                    links = page.evaluate(_LINK_JS) or []
+                    ranked = sorted(((_score_click_link(l, page_host=page_host), l) for l in links),
+                                    key=lambda t: t[0], reverse=True)
+                    if not ranked or ranked[0][0] < 3:
+                        meta["note"] = f"클릭할 만한 글 링크 후보 없음 (best={ranked[0][0] if ranked else 'n/a'})"
+                    else:
+                        _, link = ranked[0]
+                        meta["clicked_text"], meta["clicked_href"] = link.get("text"), link.get("href")
+                        loc = page.locator(f'a[data-probeclickidx="{int(link["i"])}"]').first
                         try:
-                            loc.click(timeout=8000)
+                            loc.scroll_into_view_if_needed(timeout=3000)
+                        except Exception:  # noqa: BLE001
+                            pass
+                        clicked = False
+                        try:
+                            with page.expect_navigation(wait_until="domcontentloaded", timeout=timeout_ms):
+                                loc.click(timeout=8000)
                             clicked = True
-                        except Exception as e:  # noqa: BLE001
-                            meta["note"] = f"클릭 실패: {type(e).__name__}: {e}"
-                    if clicked:
-                        page.wait_for_timeout(700)           # 새 탭 생성 / 클라이언트 라우팅이 시작될 짬
-                        if len(context.pages) > 1:           # target=_blank 등으로 새 탭이 떴으면 그쪽으로
-                            page = context.pages[-1]
-                        try:
-                            page.wait_for_load_state("domcontentloaded", timeout=timeout_ms)  # 진행 중 네비게이션 완료(이미 끝났으면 즉시)
-                        except Exception:  # noqa: BLE001
-                            pass
-                        page.wait_for_timeout(800)           # 클라이언트 라우팅 후 본문 렌더 짬
-                        try:
-                            page.wait_for_load_state("networkidle", timeout=idle_timeout_ms)
-                        except Exception:  # noqa: BLE001
-                            pass
-                        final_url = page.url
-                        body = page.content()
-                        try:
-                            page.screenshot(path=str(screenshot_path), full_page=False)
-                        except Exception:  # noqa: BLE001
-                            pass
-            except Exception as e:  # noqa: BLE001
-                error = f"{type(e).__name__}: {e}"
-            context.close()                                  # HAR 저장
-            browser.close()
+                        except Exception:  # noqa: BLE001  — 클라이언트 라우팅이면 풀 네비게이션이 안 올 수 있음
+                            try:
+                                loc.click(timeout=8000)
+                                clicked = True
+                            except Exception as e:  # noqa: BLE001
+                                meta["note"] = f"클릭 실패: {type(e).__name__}: {e}"
+                        if clicked:
+                            page.wait_for_timeout(700)           # 새 탭 생성 / 클라이언트 라우팅이 시작될 짬
+                            if len(context.pages) > 1:           # target=_blank 등으로 새 탭이 떴으면 그쪽으로
+                                page = context.pages[-1]
+                            try:
+                                page.wait_for_load_state("domcontentloaded", timeout=timeout_ms)  # 진행 중 네비게이션 완료(이미 끝났으면 즉시)
+                            except Exception:  # noqa: BLE001
+                                pass
+                            page.wait_for_timeout(800)           # 클라이언트 라우팅 후 본문 렌더 짬
+                            _wait_xhr_quiet(page, quiet_ms=300, hard_timeout_ms=idle_timeout_ms)
+                            final_url = page.url
+                            body = page.content()
+                            try:
+                                page.screenshot(path=str(screenshot_path), full_page=False)
+                            except Exception:  # noqa: BLE001
+                                pass
+                except Exception as e:  # noqa: BLE001
+                    error = f"{type(e).__name__}: {e}"
+            finally:
+                # browser/context leak 방지 — new_context 실패해도 browser.close() 보장
+                if context is not None:
+                    try:
+                        context.close()  # HAR 저장
+                    except Exception:  # noqa: BLE001
+                        pass
+                if browser is not None:
+                    try:
+                        browser.close()
+                    except Exception:  # noqa: BLE001
+                        pass
     except Exception as e:  # noqa: BLE001
         error = f"{type(e).__name__}: {e}"
 
