@@ -69,7 +69,7 @@ def fetch_with_capture(
     headless: bool = True,
     baseline_blocked: bool = False,
     timeout_ms: int = 30000,
-    idle_timeout_ms: int = 4000,
+    idle_timeout_ms: int = 2000,
 ) -> Result:
     """Chromium 띄워 URL 로드, HAR 표준 포맷으로 트래픽 자동 기록.
 
@@ -80,9 +80,10 @@ def fetch_with_capture(
       - captured_headers.json : 메인 문서 요청 헤더만
 
     timeout_ms: page.goto(domcontentloaded) 타임아웃 — 페이지 자체가 떠야 하므로 넉넉히(30s).
-    idle_timeout_ms: 그 뒤 networkidle(XHR 다 잠잠해질 때까지) 추가 대기 상한(기본 4s) —
-      광고/트래커가 계속 떠드는 사이트는 networkidle 이 영영 안 와서 이 상한까지 꽉 기다린다(그게 정찰 시간의 큰 몫).
-      4s 면 대다수 사이트의 데이터 XHR 다 뜸. 느린 SPA 의 목록 JSON 놓칠 가능성은 있지만 대시보드 응답성과 트레이드오프.
+    idle_timeout_ms: 그 뒤 networkidle(XHR 다 잠잠해질 때까지) 추가 대기 상한(기본 2s) —
+      광고/트래커가 계속 떠드는 사이트는 networkidle 이 영영 안 와서 이 상한까지 꽉 기다린다(정찰 시간의 큰 몫).
+      대다수 사이트는 networkidle 이 1s 내 도달 → 2s ceiling 영향 없음. 매우 느린 SPA 의
+      데이터 XHR 만 놓칠 가능성 — lite 정찰의 응답성과 트레이드오프.
     """
     if not is_available():
         return Result(
@@ -304,7 +305,7 @@ def fetch_article_by_click(
     baseline_blocked: bool = False,
     storage_state_path: Optional[Path] = None,
     timeout_ms: int = 30000,
-    idle_timeout_ms: int = 4000,
+    idle_timeout_ms: int = 2000,
 ) -> tuple["Result", dict]:
     """목록 페이지를 열고 '진짜 글' 로 보이는 링크를 *클릭* 해 그 결과 페이지를 캡처한다.
 
