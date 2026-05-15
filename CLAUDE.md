@@ -1,7 +1,69 @@
-# CLAUDE.md — notice-watcher 공통 룰
+Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
 
-이 파일 Claude Code 작업 시 항상 *맥락*. 모든 세션 자동 로드.
+**Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
 
+## 1. Think Before Coding
+
+**Don't assume. Don't hide confusion. Surface tradeoffs.**
+
+Before implementing:
+- State your assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them - don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
+
+## 2. Simplicity First
+
+**Minimum code that solves the problem. Nothing speculative.**
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+## 3. Surgical Changes
+
+**Touch only what you must. Clean up only your own mess.**
+
+When editing existing code:
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it - don't delete it.
+
+When your changes create orphans:
+- Remove imports/variables/functions that YOUR changes made unused.
+- Don't remove pre-existing dead code unless asked.
+
+The test: Every changed line should trace directly to the user's request.
+
+## 4. Goal-Driven Execution
+
+**Define success criteria. Loop until verified.**
+
+Transform tasks into verifiable goals:
+- "Add validation" → "Write tests for invalid inputs, then make them pass"
+- "Fix the bug" → "Write a test that reproduces it, then make it pass"
+- "Refactor X" → "Ensure tests pass before and after"
+
+For multi-step tasks, state a brief plan:
+```
+1. [Step] → verify: [check]
+2. [Step] → verify: [check]
+3. [Step] → verify: [check]
+```
+
+Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+
+---
+
+**These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
+
+
+# CLAUDE.md — notice-watcher
 ## 1. 두 머신 모델 — dev box ↔ N100
 
 | 머신 | 역할 | 변경 가능? |
@@ -95,15 +157,13 @@ bash scripts/setup-hooks.sh   # 또는 pwsh scripts/setup-hooks.ps1
 ### 7a. 절대 금지
 - `git push --force` (특히 main)
 - `git rebase` on shared branches
-- `--no-verify` (pre-push 우회)
-- N100 `.env`·`bot.sqlite3` 손-수정
-- N100 직접 `vi`/`nano` 코드 편집
 
 ### 7b. 확인 후 진행
 - N100 `git stash drop` (보존 데이터 손실)
 - `git reset --hard` (특히 N100)
 - `migrate_slug_schema.py --yes` (mapping 미리 dry-run 검토)
 - bot/dashboard restart 도중 (사용자 영향 — 잠시 폴링/대시보드 끊김)
+- `--no-verify` (pre-push 우회)
 
 ### 7c. 자율 허용
 - dev box `git commit && git push`
@@ -121,15 +181,4 @@ bash scripts/setup-hooks.sh   # 또는 pwsh scripts/setup-hooks.ps1
 - `docs/사이트 어댑터 추가 가이드.md` — 손-adapter 추가 절차
 - `docs/크롤링 지침.md` — 정책 (polite_sleep, robots, 우회 금지)
 - `docs/대시보드 가이드.md` — dev 박스 로컬 대시보드
-
-## 9. 이전 사건 메모 — 2026-05-15
-
-세션 종료 직전 발견: N100 *코드/configs 양쪽 동시 작업* 있었음. dev box `git push` 시 N100 같은 파일 modified → `git pull --ff-only` 충돌.
-
-해결:
-- N100 stash -u 보존 (`stash@{0}: n100-local-2026-05-15`)
-- stash 분석 — tracing/bot/scripts 변경 dev push 와 *내용 완전 동일* (양쪽 같은 사람 작업)
-- configs slug migration (14 R + 4 A) *N100 만 진행* → dev box 회수 (commit `9de6977`)
-- N100 reset 후 pull → stash drop
-
-**교훈**: N100 작업 *발견 즉시* (a) stash -u (b) 분석 (c) 회수. 룰 5A·5B·5C 강화 — 다음에 안 일어나게.
+- `docs/디스코드 메시지 톤 가이드.md` — 봇 사용자 향 메시지 톤·문체·포맷 룰 (해요체·이모지 어휘·체크리스트)
