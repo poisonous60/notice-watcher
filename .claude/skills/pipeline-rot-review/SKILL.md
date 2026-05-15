@@ -160,20 +160,6 @@ prompt 가 인용한 *digest 키 이름* 이 실제 probe 휴리스틱 산출 �
 점검 (7 영역, 6종 카테고리)
 ```
 
-## 검토 시각 — 독립 agent 권장
-
-이 SKILL 작성자 (main thread Claude) 가 *직접 invoke* 하면 자기 SKILL 에 우호적 해석 → **false-negative 발생**. 첫 baseline run 에서 검증됨: main thread = "rot 없음 ✅", **독립 agent invoke = 발견 1건 (silent file rot) + ambiguous 7건**.
-
-→ **권장 패턴**: SKILL 호출은 *별도 agent* (`general-purpose` subagent_type 또는 새 세션) 한테 위임. main thread 는 결과 relay 만.
-
-작성자 본인이 invoke 하더라도 fresh context → 독립성 ↑. 단 *같은 모델* 한계 인지 — SKILL.md 우호 해석 risk 잔존.
-
-ambiguous 항목은 **사용자가 직접 검토**. agent debate (Defender/Challenger/Moderator) 같은 multi-agent orchestration 은 도입 X — 이유:
-- **infra 없음** — Claude Code 의 Agent tool 은 main thread 가 manual orchestration 해야 함. SKILL.md 에 "Round 1 spawn..." 박아도 강제력 X (compliance 의존)
-- **단일 reviewer 충분** — 첫 baseline 에서 *독립 agent 1명* 이 silent rot catch. multi-agent 가 추가 가치 X
-- **cost ROI** — debate ~75K tokens/run vs ambiguous list 사용자 직접 검토 cost 0
-- 진짜 multi-agent 인프라 (Anthropic Agent Teams) 활성 후 재고려
-
 ## 검출 로직 한계 (false-negative 인지)
 
 이 SKILL 은 다음을 *못 잡음*:
