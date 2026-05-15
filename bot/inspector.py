@@ -269,6 +269,13 @@ def diagnose(conn: sqlite3.Connection, paths: InspectorPaths, *,
                 findings.append(DiagnoseFinding(
                     "error", "fetch_sim_same_id",
                     f"fetch_list 결과 {len(ids)}건이 모두 같은 post_id={ids[0]!r} — post_id 추출이 깨짐."))
+            # 본문도 시도한 경우(body_chars 키 있음) — 시도 N건 *모두* 0자면 본문 추출 깨짐 신호.
+            bcs = [p.get("body_chars") for p in fetch_sample if isinstance(p.get("body_chars"), int)]
+            if bcs and all(b == 0 for b in bcs):
+                findings.append(DiagnoseFinding(
+                    "warn", "article_body_empty",
+                    f"fetch_article {len(bcs)}건 모두 본문 0자 — 비공개·등급제한·로그인 필요 게시판일 수 있음 "
+                    f"(어댑터가 401/403 시 본문 비워 반환)."))
 
     findings.sort(key=lambda f: (SEVERITY_ORDER.get(f.severity, 9), f.tag))
     return findings
@@ -415,26 +422,37 @@ def format_verify_result(d: dict) -> str:
     return "\n".join(parts)
 
 
-async def fetch_sim(paths: InspectorPaths, slug: str, n: int = 5) -> Optional[list[dict]]:
+async def fetch_sim(paths: InspectorPaths, slug: str, n: int = 5,
+                    body_sample: int = 3) -> Optional[list[dict]]:
     """현재 config 로 adapter.fetch_list 를 돌려 상위 N 개 post 의 {post_id, title, url, category, published_at} 반환.
-    config 없으면 None. 어댑터 예외 시 [] 반환(빈 결과)."""
+    config 없으면 None. 어댑터 예외 시 [] 반환(빈 결과).
+
+    `body_sample` > 0 이면 첫 `body_sample` 건은 fetch_article 도 시도해서 `body_chars` 키 추가
+    (네트워크 1건당 1회 추가 — 본문 추출 깨짐 신호 진단용). 본문 fetch 예외는 body_chars=None 으로."""
     cfg = _config_for(slug, paths)
     if cfg is None:
         return None
     from engine import make_adapter  # 무거우니 lazy
+    out: list[dict] = []
     try:
         async with make_adapter(cfg) as a:
             posts = await a.fetch_list(page=1, page_size=n)
+            for i, p in enumerate(posts[:n]):
+                try:
+                    d = p.to_dict()
+                except Exception:  # noqa: BLE001
+                    d = {"post_id": getattr(p, "post_id", None), "title": getattr(p, "title", None),
+                         "url": getattr(p, "url", None)}
+                row = {k: d.get(k) for k in ("post_id", "title", "url", "category", "published_at")}
+                if i < body_sample:
+                    try:
+                        f = await a.fetch_article(p)
+                        row["body_chars"] = len(f.content_html or "")
+                    except Exception:  # noqa: BLE001
+                        row["body_chars"] = None
+                out.append(row)
     except Exception:  # noqa: BLE001  진단용이라 빈 결과로
-        return []
-    out: list[dict] = []
-    for p in posts[:n]:
-        try:
-            d = p.to_dict()
-        except Exception:  # noqa: BLE001
-            d = {"post_id": getattr(p, "post_id", None), "title": getattr(p, "title", None),
-                 "url": getattr(p, "url", None)}
-        out.append({k: d.get(k) for k in ("post_id", "title", "url", "category", "published_at")})
+        return [] if not out else out
     return out
 
 
@@ -517,7 +535,11 @@ def format_inspect_result(r: InspectResult) -> str:
             lines = ["### fetch_sim (현 config 로 지금 받아본 결과)"]
             for p in r.fetch_sample:
                 t = (p.get("title") or "")[:80]
-                lines.append(f"- `{p.get('post_id')}` · {t}\n  {p.get('url')}")
+                bc = p.get("body_chars")
+                tail = ""
+                if bc is not None:
+                    tail = f"  body={bc}자" if bc > 0 else "  body=**0자** ⚠️"
+                lines.append(f"- `{p.get('post_id')}` · {t}\n  {p.get('url')}{tail}")
             parts.append("\n".join(lines))
 
     return "\n\n".join(parts)

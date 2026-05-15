@@ -163,6 +163,40 @@ def run() -> list[tuple[str, bool, str]]:
         tags = {f.tag for f in findings}
         cases.append(("fetch_sim_same_id", "fetch_sim_same_id" in tags, f"tags={tags}"))
 
+        # 9d) article_body_empty — fetch_sample 의 body_chars 모두 0 (비공개·등급제한 의심)
+        body_empty_sample = [{"post_id": "1", "title": "a", "url": "u1", "body_chars": 0},
+                             {"post_id": "2", "title": "b", "url": "u2", "body_chars": 0},
+                             {"post_id": "3", "title": "c", "url": "u3", "body_chars": 0}]
+        conn = _setup_conn()
+        findings = inspector.diagnose(
+            conn, paths, slug=slug8, subscriptions=[], latest_job=None,
+            config={"kwargs": {}}, state=None, fetch_sample=body_empty_sample)
+        tags = {f.tag for f in findings}
+        cases.append(("article_body_empty", "article_body_empty" in tags, f"tags={tags}"))
+
+        # 9e) body_chars 하나라도 > 0 이면 article_body_empty 안 뜸
+        body_some_sample = [{"post_id": "1", "title": "a", "url": "u1", "body_chars": 0},
+                            {"post_id": "2", "title": "b", "url": "u2", "body_chars": 1234},
+                            {"post_id": "3", "title": "c", "url": "u3", "body_chars": 0}]
+        conn = _setup_conn()
+        findings = inspector.diagnose(
+            conn, paths, slug=slug8, subscriptions=[], latest_job=None,
+            config={"kwargs": {}}, state=None, fetch_sample=body_some_sample)
+        tags = {f.tag for f in findings}
+        cases.append(("article_body_empty_suppressed_when_any_present",
+                      "article_body_empty" not in tags, f"tags={tags}"))
+
+        # 9f) body_chars 모두 None (fetch 예외) 이면 article_body_empty 안 뜸 (판정 불가)
+        body_none_sample = [{"post_id": "1", "title": "a", "url": "u1", "body_chars": None},
+                            {"post_id": "2", "title": "b", "url": "u2", "body_chars": None}]
+        conn = _setup_conn()
+        findings = inspector.diagnose(
+            conn, paths, slug=slug8, subscriptions=[], latest_job=None,
+            config={"kwargs": {}}, state=None, fetch_sample=body_none_sample)
+        tags = {f.tag for f in findings}
+        cases.append(("article_body_empty_skip_when_all_unknown",
+                      "article_body_empty" not in tags, f"tags={tags}"))
+
         # 9b) _latest_register_job_for — json_extract 매칭. user_id 가 username 안에 substring 으로
         # 들어있어도 (예: username = "user_<OWNER_ID>") 다른 사용자의 잡으로 잘못 잡지 않는다.
         slug_x = "j.example.com_x"

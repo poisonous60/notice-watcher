@@ -161,10 +161,14 @@ def _board_shape_check(digest: dict, url: str) -> tuple[bool, str]:
                    f"[신호: {detail}]")
 
 
-def _save_state(slug: str, url: str, config_path: Path, post_ids: list[str]) -> Path:
+def _save_state(slug: str, url: str, config_path: Path, post_ids: list[str],
+                body_empty_at_baseline: Optional[bool] = None) -> Path:
+    """state.json 작성. `body_empty_at_baseline`: 등록 직후 첫 글 1~3건 본문 fetch 결과 —
+    None=확인 안 됨, True=모두 0자(비공개/등급제한 의심), False=하나라도 본문 있음. 봇이 이 플래그로
+    `/preview`·`/watch` 응답에 "본문 추출 안 됨" 경고 표시 (`bot/site_ops.body_empty_at_baseline`)."""
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     p = STATE_DIR / f"{slug}.json"
-    p.write_text(json.dumps({
+    state: dict = {
         "slug": slug,
         "url": url,
         "config_path": str(config_path),
@@ -174,13 +178,46 @@ def _save_state(slug: str, url: str, config_path: Path, post_ids: list[str]) -> 
         "consecutive_breakage": 0,
         "n_baseline": len(post_ids),
         "seen_post_ids": post_ids,
-    }, ensure_ascii=False, indent=2), encoding="utf-8")
+    }
+    if body_empty_at_baseline is not None:
+        state["body_empty_at_baseline"] = bool(body_empty_at_baseline)
+    p.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
     # 등록과 동시에 FAILED 마커 / triage 큐 항목이 남아있으면 제거
     fp = STATE_DIR / f"{slug}.FAILED.json"
     if fp.exists():
         fp.unlink()
     _prune_triage_queue(slug)
     return p
+
+
+def _check_body_at_baseline(cfg: dict, posts: list, sample: int = 3) -> Optional[bool]:
+    """등록 직후 첫 `sample` 건 본문 fetch. 결과:
+      - True : 모두 0자 (비공개·등급제한·로그인 필요 게시판일 가능성 — 어댑터가 401/403 시 본문 비워 반환)
+      - False: 하나라도 본문 있음 (정상)
+      - None : 모두 예외 또는 posts 비어 — 판정 불가
+    상위 호출에서 state.json `body_empty_at_baseline` 키로 저장 → 봇 응답에 경고 표시."""
+    if not posts:
+        return None
+    from engine import make_adapter
+
+    async def _run() -> list[int]:
+        chars: list[int] = []
+        async with make_adapter(cfg) as a:
+            for p in posts[:sample]:
+                try:
+                    f = await a.fetch_article(p)
+                    chars.append(len(f.content_html or ""))
+                except Exception:  # noqa: BLE001  진단용 — 예외는 unknown 으로 버림
+                    pass
+        return chars
+
+    try:
+        chars = asyncio.run(_run())
+    except Exception:  # noqa: BLE001
+        return None
+    if not chars:
+        return None
+    return all(c == 0 for c in chars)
 
 
 def _prune_triage_queue(slug: str) -> None:
@@ -547,8 +584,11 @@ def _try_known_platform(url: str, slug: str, *, out: Optional[str], force: bool)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     post_ids = [str(pp.post_id) for pp in posts]
-    sp = _save_state(slug, url, out_path, post_ids)
+    body_empty = _check_body_at_baseline(cfg, posts)
+    sp = _save_state(slug, url, out_path, post_ids, body_empty_at_baseline=body_empty)
     print(f"[register] ✅ 등록 완료 (알려진 플랫폼: {name}) — baseline {len(post_ids)}건  config={out_path}  state={sp}")
+    if body_empty is True:
+        print(f"[register] ⚠️ 본문 추출 안 됨 (등급/로그인 필요 가능) — 알림은 제목·URL 만 옵니다.")
     for pp in posts[:3]:
         print(f"    {pp.post_id}  {pp.published_at}  {(pp.title or '')[:60]}")
     return 0
@@ -605,9 +645,12 @@ def _main_inner(argv) -> int:
         posts = asyncio.run(_baseline())
         post_ids = [str(p.post_id) for p in posts]
         url0 = cfg.get("_source_url") or ((cfg.get("list") or {}).get("url_template") or "").format(board=cfg.get("board", ""))
+        body_empty = _check_body_at_baseline(cfg, posts)
         # _save_state 가 같은 slug 의 .FAILED.json 마커도 치워 줌 (안 그러면 봇 _is_registered 가 계속 False).
-        sp = _save_state(stem, url0, cfg_path, post_ids)
+        sp = _save_state(stem, url0, cfg_path, post_ids, body_empty_at_baseline=body_empty)
         print(f"[register --config] ✅ 등록 완료 — baseline {len(post_ids)}건, state={sp}")
+        if body_empty is True:
+            print(f"[register --config] ⚠️ 본문 추출 안 됨 (등급/로그인 필요 가능) — 알림은 제목·URL 만 옵니다.")
         for p in posts[:3]:
             print(f"    {p.post_id}  {p.published_at}  {(p.title or '')[:60]}")
         return 0
@@ -719,11 +762,20 @@ def _main_inner(argv) -> int:
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    state_path = _save_state(slug, url, out_path, rep.all_post_ids)
+    # 일반 파이프라인은 validate 단계에서 이미 fetch_article 시도 — rep.article_bodies 가 결과.
+    # 모두 0 자면 body_empty True (validate 가 "전부 접근제한" soft-OK 로 통과시킨 케이스).
+    if rep.article_bodies:
+        bvals = list(rep.article_bodies.values())
+        body_empty = all(v == 0 for v in bvals) if bvals else None
+    else:
+        body_empty = None
+    state_path = _save_state(slug, url, out_path, rep.all_post_ids, body_empty_at_baseline=body_empty)
 
     print(f"\n[register] ✅ 등록 완료")
     print(f"  config: {out_path}  (strategy={cfg.get('strategy')}, site={cfg.get('site')}, board={cfg.get('board')})")
     print(f"  state : {state_path}  (baseline {len(rep.all_post_ids)}건 — 이 글들은 '새 글' 아님)")
+    if body_empty is True:
+        print(f"  ⚠️ 본문 추출 안 됨 (등급/로그인 필요 가능) — 알림은 제목·URL 만 옵니다.")
     if rep.soft_failures():
         print(f"  경고: " + "; ".join(f"{c.name}({c.detail})" for c in rep.soft_failures()))
     for sp in rep.sample_posts[:3]:

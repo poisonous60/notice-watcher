@@ -60,6 +60,7 @@ def _now_iso() -> str:
 # site_ops 의 헬퍼를 짧은 alias 로 — 기존 호출부 호환
 _is_registered = site_ops.is_registered
 _baseline_count = site_ops.baseline_count
+_body_warning = site_ops.body_warning
 
 
 # --------------------------------------------------------------------------- #
@@ -150,7 +151,8 @@ async def watch(interaction: discord.Interaction, url: str, filter: Optional[str
                 f"• 필터: {filter_prompt or '없음(새 글 전부)'}\n"
                 f"• 발송: 폴링 직후 즉시\n"
                 f"• 알림: {where}\n"
-                f"• 새 글 없을 때도 알림: {'예' if notify_empty else '아니오'}")
+                f"• 새 글 없을 때도 알림: {'예' if notify_empty else '아니오'}"
+                f"{_body_warning(slug)}")
         await interaction.edit_original_response(content=head + "\n\n📋 예시 알림 만드는 중…")
         example = await site_ops.make_example(slug)
         if example:
@@ -212,10 +214,11 @@ async def preview(interaction: discord.Interaction, url: str, article_url: Optio
         # 등록된 사이트 — 즉시 예시만
         await interaction.edit_original_response(content="⏳ 최신 글 가져와 요약 중…")
         example = await site_ops.make_example(slug)
+        warn = _body_warning(slug)
         if example:
-            await interaction.edit_original_response(content="📋 **이 게시판 알림 예시:**\n" + example)
+            await interaction.edit_original_response(content="📋 **이 게시판 알림 예시:**\n" + example + warn)
         else:
-            await interaction.edit_original_response(content="⚠️ 예시를 만들지 못했어요(목록이 비었거나 본문 추출 실패).")
+            await interaction.edit_original_response(content="⚠️ 예시를 만들지 못했어요(목록이 비었거나 본문 추출 실패)." + warn)
         return
 
     # 신규 사이트 — URL 게이트 → 큐 enqueue

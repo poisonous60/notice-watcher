@@ -18,6 +18,7 @@ from bot.runtime_config import settings
 from bot.site_ops import (
     append_triage_queue,
     baseline_count,
+    body_warning,
     blocking_register,
     edit_channel_message,
     is_registered,
@@ -202,6 +203,7 @@ async def _post_register_success(client, conn, job) -> None:
             notify_empty=bool(sub.get("notify_empty", False)),
         )
     n = baseline_count(slug)
+    warn = body_warning(slug)
     if sub:
         where = "이 채널" if sub["target_kind"] == "channel" else "내 DM"
         head = (f"✅ 등록 완료 — `{slug}`\n"
@@ -209,9 +211,10 @@ async def _post_register_success(client, conn, job) -> None:
                 f"• 필터: {sub.get('filter_prompt') or '없음(새 글 전부)'}\n"
                 f"• 발송: 폴링 직후 즉시\n"
                 f"• 알림: {where}\n"
-                f"• 새 글 없을 때도 알림: {'예' if sub.get('notify_empty') else '아니오'}")
+                f"• 새 글 없을 때도 알림: {'예' if sub.get('notify_empty') else '아니오'}"
+                f"{warn}")
     else:
-        head = f"✅ 등록 완료 — `{slug}` (baseline {n if n is not None else '?'}건)"
+        head = f"✅ 등록 완료 — `{slug}` (baseline {n if n is not None else '?'}건){warn}"
     await edit_channel_message(client, job["ack_channel_id"], job["ack_message_id"],
                                head + "\n\n📋 예시 알림 만드는 중…")
     example = await make_example(slug)

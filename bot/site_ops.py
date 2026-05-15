@@ -64,6 +64,25 @@ def baseline_count(slug: str) -> Optional[int]:
         return None
 
 
+def body_empty_at_baseline(slug: str) -> Optional[bool]:
+    """등록 직후 첫 글 본문이 모두 0자였나(`register.py::_check_body_at_baseline` 결과).
+    None=확인 안 됨(state 옛 버전 또는 fetch 예외), True=빔(비공개/등급제한 의심), False=정상.
+    `/preview`·`/watch`·worker ack 메시지가 이 플래그로 경고 표시."""
+    st = STATE_DIR / f"{slug}.json"
+    try:
+        v = json.loads(st.read_text(encoding="utf-8")).get("body_empty_at_baseline")
+        return v if isinstance(v, bool) else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def body_warning(slug: str) -> str:
+    """`/preview`·`/watch`·worker 응답에 합쳐 쓸 본문-빔 경고 문구. 빔 아니면 빈 문자열."""
+    if body_empty_at_baseline(slug) is True:
+        return "\n⚠️ 본문 추출 안 됨 (등급/로그인 필요 가능) — 알림은 제목·URL 만 옵니다."
+    return ""
+
+
 # --------------------------------------------------------------------------- #
 # register.py subprocess (chromium 락 안에서; 호출자는 워커 스레드에서 to_thread 로 부른다)
 # --------------------------------------------------------------------------- #
