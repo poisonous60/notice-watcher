@@ -47,7 +47,7 @@ STATE_DIR = ROOT / "output" / "poll_state"
 LOCK_PATH = ROOT / "output" / ".replay.lock"
 
 # slug = engine.slug 가 보장하는 형식. URL/파일시스템 안전 문자만.
-_SLUG_RE = re.compile(r"^[A-Za-z0-9._\-]{1,200}$")
+_SLUG_RE = re.compile(r"^[A-Za-z0-9._%\-]{1,200}$")  # engine.slug 형식 — `%` 포함
 # Discord snowflake — 17~19자리지만 미래 확장 대비 32자리까지 허용.
 _ID_RE = re.compile(r"^[0-9]{1,32}$")
 

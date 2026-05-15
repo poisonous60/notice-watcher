@@ -106,7 +106,7 @@
       <td class="mono">{{ r.ts[:19].replace('T',' ') }}</td>
       <td class="mono">{{ r.call_site }}</td>
       <td class="mono" style="max-width:18em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
-        {% if r.slug %}<a href="/subs/{{ r.slug }}" title="{{ r.slug }}">{{ r.slug }}</a>{% endif %}
+        {% if r.slug %}<a href="/subs/{{ r.slug | urlencode }}" title="{{ r.slug }}">{{ r.slug }}</a>{% endif %}
       </td>
       <td class="mono">{{ r.provider }}:{{ r.model }}</td>
       <td>

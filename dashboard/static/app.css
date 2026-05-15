@@ -456,3 +456,22 @@ table.row-grid td.meta {
   color: var(--nw-primary-fg);
   border-color: var(--nw-primary);
 }
+
+/* /users detail — 액션 버튼 그룹. 1열 nowrap + 컴팩트 패딩으로 행 높이 늘지 않게. */
+.action-cell {
+  display: flex;
+  gap: 0.25rem;
+  flex-wrap: nowrap;
+  align-items: center;
+  white-space: nowrap;
+}
+.action-cell form { display: inline-block; margin: 0; line-height: 1; }
+.action-cell button {
+  margin: 0;
+  padding: 0.1rem 0.45rem;
+  width: auto;
+  min-height: 0;
+  line-height: 1.2;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}

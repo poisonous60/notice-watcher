@@ -26,7 +26,7 @@
   <tbody id="subs-rows">
     {% for r in rows %}
     <tr>
-      <td class="mono"><a href="/subs/{{ r.slug }}">{{ r.slug }}</a></td>
+      <td class="mono"><a href="/subs/{{ r.slug | urlencode }}">{{ r.slug }}</a></td>
       <td>{{ r.n_subs }}</td>
       <td>{{ '✓' if r.has_config else '—' }}</td>
       <td>{{ '✓' if r.has_state else '—' }}</td>

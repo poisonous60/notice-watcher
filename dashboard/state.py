@@ -19,8 +19,9 @@ SNAPSHOT_DIR = ROOT / "output" / "snapshot"
 CONFIGS_SNAPSHOT = ROOT / "configs.snapshot"
 
 # slug 형식: `<platform>_<board-id>_<hash>` 또는 `host_<host-dashed>_<seg>_<hash>` (docs/운영 메모.md §6).
-# 점·언더스코어·하이픈·영숫자만 — 어떤 URL 경계나 path 구분자도 금지. 100자 cap 은 engine.slug 에서 보장.
-_SLUG_RE = re.compile(r"^[A-Za-z0-9._\-]{1,200}$")
+# 허용 문자 = `engine.slug._SANITIZE_RE` 와 동일: 영숫자·점·언더스코어·하이픈·`%`(percent-encoded
+# UTF-8 segment, 예: `_%EA%B3%B5_`). 100자 cap 은 engine.slug 에서 보장.
+_SLUG_RE = re.compile(r"^[A-Za-z0-9._%\-]{1,200}$")
 
 
 def safe_slug(slug: str) -> bool:

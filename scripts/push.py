@@ -35,7 +35,7 @@ DEPLOY_HOST = os.environ.get("DEPLOY_HOST", "aaaa@<lan-ip>")
 DEPLOY_PATH = os.environ.get("DEPLOY_PATH", "~/notice-watcher")
 
 
-_SLUG_RE = re.compile(r"^[A-Za-z0-9._\-]{1,200}$")
+_SLUG_RE = re.compile(r"^[A-Za-z0-9._%\-]{1,200}$")  # engine.slug 형식 — `%` 포함
 
 
 def _safe_slug(s: str) -> bool:

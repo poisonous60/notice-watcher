@@ -43,7 +43,7 @@ if not _DEPLOY_PATH_RE.match(DEPLOY_PATH_RAW):
     raise SystemExit(f"[remote] DEPLOY_PATH unsafe characters: {DEPLOY_PATH_RAW!r}")
 
 # 자유 입력 인자 validation — interpolation 전 거름.
-_SLUG_RE = re.compile(r"^[A-Za-z0-9._\-]{1,200}$")            # engine.slug 가 보장하는 형식
+_SLUG_RE = re.compile(r"^[A-Za-z0-9._%\-]{1,200}$")           # engine.slug 형식 — `%` 포함(URL-encoded UTF-8 seg)
 _TARGET_ID_RE = re.compile(r"^[0-9]{1,32}$")                    # Discord snowflake (현재 19자리, 미래 여유)
 _POST_ID_RE = re.compile(r"^[\w\-./:%]{1,128}$")               # poll.py 의 _STABLE_ID_RE 와 동일
 _BASE64_RE = re.compile(r"^[A-Za-z0-9+/=]{1,200000}$")         # base64 문자셋만; ≤200KB 페이로드

@@ -43,7 +43,7 @@
     <tr>
       <td><a href="/jobs/{{ r.id }}">#{{ r.id }}</a></td>
       <td class="mono">
-        {% if r.slug %}<a href="/subs/{{ r.slug }}">{{ r.slug }}</a>{% endif %}
+        {% if r.slug %}<a href="/subs/{{ r.slug | urlencode }}">{{ r.slug }}</a>{% endif %}
       </td>
       <td>
         {% set s = r.status or "" %}

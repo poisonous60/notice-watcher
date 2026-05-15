@@ -21,44 +21,40 @@
 {% if user.dm_subs %}
 <table class="compact striped">
   <thead><tr>
-    <th>slug</th><th>URL</th><th>filter prompt</th><th>created</th><th style="white-space:nowrap;">deliveries</th><th>액션</th>
+    <th>slug</th><th>URL</th><th>filter prompt</th><th>created</th><th>액션</th>
   </tr></thead>
   <tbody>
     {% for s in user.dm_subs %}
     <tr>
-      <td class="mono"><a href="/subs/{{ s.slug }}">{{ s.slug }}</a></td>
+      <td class="mono"><a href="/subs/{{ s.slug | urlencode }}">{{ s.slug }}</a></td>
       <td class="mono" style="max-width:24em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
         <span title="{{ s.url }}">{{ s.url }}</span>
       </td>
       <td class="muted" style="font-size:0.85rem;">{{ s.filter_prompt or '' }}</td>
       <td class="muted" style="font-size:0.8rem;">{{ (s.created_at or '')[:19] }}</td>
-      <td>
+      <td class="action-cell">
         <button type="button" class="secondary outline"
-                hx-get="/users/{{ user.user_id }}/deliveries?slug={{ s.slug }}"
-                hx-target="#deliv-{{ s.slug }}"
-                hx-swap="innerHTML"
-                style="font-size:0.78rem;">expand</button>
-      </td>
-      <td style="white-space:nowrap;">
-        <form style="display:inline;" data-confirm="이 slug 에 즉시 poll-now 실행?"
+                hx-get="/users/{{ user.user_id }}/deliveries?slug={{ s.slug | urlencode }}"
+                hx-target="#deliv-{{ loop.index }}"
+                hx-swap="innerHTML" title="발송 이력 (M2 per-post replay)">expand</button>
+        <form data-confirm="이 slug 에 즉시 poll-now 실행? (M1: 사이트 새 글 검사 — 새 글 있으면 *모든* 구독자에게 발송됨)"
               hx-post="/users/{{ user.user_id }}/poll-now-slug"
               hx-target="#user-action-result" hx-swap="innerHTML">
           <input type="hidden" name="slugs" value="{{ s.slug }}">
-          <button type="submit" class="secondary outline" style="font-size:0.78rem;" title="M1 — 이 slug 즉시 polling">M1 poll</button>
+          <button type="submit" class="secondary outline" title="M1 — 이 slug 즉시 polling">M1 poll</button>
         </form>
-        <form style="display:inline;"
-              data-confirm="이 (user,slug) 의 deliveries 전부 삭제 + seen 비움 + poll-now + only-target 발송. 진행?"
+        <form data-confirm="M3 bulk: 이 (user,slug) deliveries 전부 삭제 + seen 통째 비움 + poll-now + only-target. → 이 user 만, 사이트 첫페이지의 모든 글 재발송됨. 진행?"
               hx-post="/users/{{ user.user_id }}/replay"
               hx-target="#user-action-result" hx-swap="innerHTML">
           <input type="hidden" name="slug" value="{{ s.slug }}">
           <input type="hidden" name="target_kind" value="dm">
           <input type="hidden" name="target_id" value="{{ s.target_id }}">
-          <button type="submit" class="secondary outline" style="font-size:0.78rem;color:#a00;" title="M3 — 첫페이지 강제 재발송">M3 bulk</button>
+          <button type="submit" class="secondary outline" style="color:#a00;" title="M3 — 이 user 첫페이지 강제 재발송">M3 bulk</button>
         </form>
       </td>
     </tr>
     <tr>
-      <td colspan="6" id="deliv-{{ s.slug }}" style="padding:0;"></td>
+      <td colspan="5" id="deliv-{{ loop.index }}" style="padding:0;"></td>
     </tr>
     {% endfor %}
   </tbody>
@@ -80,25 +76,24 @@
   <tbody>
     {% for s in user.channel_subs %}
     <tr>
-      <td class="mono"><a href="/subs/{{ s.slug }}">{{ s.slug }}</a></td>
+      <td class="mono"><a href="/subs/{{ s.slug | urlencode }}">{{ s.slug }}</a></td>
       <td class="mono">{{ s.target_id }}</td>
       <td class="muted" style="font-size:0.85rem;">{{ s.filter_prompt or '' }}</td>
       <td class="muted" style="font-size:0.8rem;">{{ (s.created_at or '')[:19] }}</td>
-      <td style="white-space:nowrap;">
-        <form style="display:inline;" data-confirm="이 slug 에 즉시 poll-now 실행?"
+      <td class="action-cell">
+        <form data-confirm="이 slug 에 즉시 poll-now 실행? (M1: 사이트 새 글 검사 — 새 글 있으면 *모든* 구독자에게 발송됨)"
               hx-post="/users/{{ user.user_id }}/poll-now-slug"
               hx-target="#user-action-result" hx-swap="innerHTML">
           <input type="hidden" name="slugs" value="{{ s.slug }}">
-          <button type="submit" class="secondary outline" style="font-size:0.78rem;">M1 poll</button>
+          <button type="submit" class="secondary outline" title="M1 — 이 slug 즉시 polling">M1 poll</button>
         </form>
-        <form style="display:inline;"
-              data-confirm="⚠ 채널 #{{ s.target_id }} 전체에 첫페이지 재발송됨. 진행?"
+        <form data-confirm="⚠ 채널 #{{ s.target_id }} 전체에 첫페이지 모든 글 재발송됨 (user 격리 X). 진행?"
               hx-post="/users/{{ user.user_id }}/replay"
               hx-target="#user-action-result" hx-swap="innerHTML">
           <input type="hidden" name="slug" value="{{ s.slug }}">
           <input type="hidden" name="target_kind" value="channel">
           <input type="hidden" name="target_id" value="{{ s.target_id }}">
-          <button type="submit" class="secondary outline" style="font-size:0.78rem;color:#a00;">M3 bulk</button>
+          <button type="submit" class="secondary outline" style="color:#a00;" title="M3 — 채널 전체 강제 재발송">M3 bulk</button>
         </form>
       </td>
     </tr>
@@ -133,7 +128,7 @@
         {% if r.status == 'open' %}<span class="badge warn">open</span>
         {% else %}<span class="badge ok">resolved</span>{% endif %}
       </td>
-      <td class="mono"><a href="/subs/{{ r.slug }}">{{ r.slug }}</a></td>
+      <td class="mono"><a href="/subs/{{ r.slug | urlencode }}">{{ r.slug }}</a></td>
       <td>{{ (r.issue or '')[:120] }}</td>
       <td class="muted" style="font-size:0.8rem;">{{ (r.created_at or '')[:19] }}</td>
     </tr>
