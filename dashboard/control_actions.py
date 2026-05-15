@@ -298,6 +298,11 @@ RUNTIME_FIELDS: list[tuple[str, str, type, object, str]] = [
     ("chromium_lock", "poll_timeout",                  float, 1800.0, "폴링 chromium lock 타임아웃 (초)"),
     ("chromium_lock", "register_subprocess_timeout",   float, 600.0,  "register 서브프로세스 타임아웃 (초)"),
     ("notify", "delivered_cap",      int,   5000,   "delivered id 보관 상한"),
+    ("rate_limit", "per_user_per_hour",   int, 10,  "시간당 동일 사용자 register 잡 enqueue 상한 (≤0=끔)"),
+    ("rate_limit", "per_user_per_day",    int, 30,  "24h 동일 사용자 register 잡 enqueue 상한 (≤0=끔)"),
+    ("rate_limit", "queue_depth_cap",     int, 100, "워커 큐 pending 잡 전역 상한 (≤0=끔)"),
+    ("prune", "probe_failed_max_age_days",       int, 30, "scripts/prune_probe.py: .FAILED 동반 probe artifact prune age (일, ≤0=끔)"),
+    ("prune", "probe_unregistered_max_age_days", int, 90, "scripts/prune_probe.py: orphan probe artifact prune age (일, ≤0=끔)"),
 ]
 
 
@@ -351,7 +356,7 @@ def build_runtime_toml(form_data: dict) -> str:
     # TOML 직렬화 — stdlib writer 없음. int / float 둘 다 str() 으로 충분
     # (int 는 정수 출력, float 는 `1.0` 같은 dot 포함 출력 → TOML 둘 다 valid).
     lines: list[str] = []
-    for section in ("poll", "worker", "chromium_lock", "notify"):
+    for section in ("poll", "worker", "chromium_lock", "notify", "rate_limit", "prune"):
         if section not in by_section:
             continue
         lines.append(f"[{section}]")
