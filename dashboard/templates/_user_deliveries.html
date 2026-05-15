@@ -1,0 +1,39 @@
+{#
+  Partial — `/users/{id}/deliveries?slug=X` 가 반환. user_detail.html 의 DM 구독 섹션에서
+  expand 버튼이 호출. **DM 컨텍스트 전용** — `target_kind` 를 hidden 으로 `dm` 박는다.
+  채널 deliveries 표시를 원하면 새 partial 추가 + 호출 위치를 channel 구독 섹션에서도 트리거
+  (현재는 DM 만 정밀 replay 제공; 채널은 user_detail 의 M3 bulk 만).
+#}
+{% if rows %}
+<table class="compact" style="margin:0.3rem 0;background:rgba(0,0,0,0.02);">
+  <thead><tr>
+    <th>post_id</th><th>sent_at</th><th>seen?</th><th>액션 (M2)</th>
+  </tr></thead>
+  <tbody>
+    {% for r in rows %}
+    <tr>
+      <td class="mono" style="font-size:0.78rem;">{{ r.post_id }}</td>
+      <td class="muted" style="font-size:0.78rem;">{{ (r.sent_at or '')[:19] }}</td>
+      <td>
+        {% if r.post_id in seen %}<span class="badge ok">in seen</span>
+        {% else %}<span class="badge warn" title="seen cap 에서 evict — 재현 불가 가능">evicted</span>{% endif %}
+      </td>
+      <td>
+        <form style="display:inline;"
+              data-confirm="이 post 만 (slug={{ slug }} post={{ r.post_id }} target={{ r.target_id }}) 재발송. 진행?"
+              hx-post="/users/{{ user_id }}/replay"
+              hx-target="#user-action-result" hx-swap="innerHTML">
+          <input type="hidden" name="slug" value="{{ slug }}">
+          <input type="hidden" name="target_kind" value="dm">
+          <input type="hidden" name="target_id" value="{{ r.target_id }}">
+          <input type="hidden" name="post_id" value="{{ r.post_id }}">
+          <button type="submit" class="secondary outline" style="font-size:0.75rem;">M2 replay</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted" style="margin:0.4rem 0;font-size:0.85rem;">발송 이력 없음.</p>
+{% endif %}

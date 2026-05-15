@@ -1,19 +1,25 @@
 """N100 원격 명령 실행 CLI. allowlist 강제 — 임의 명령 X.
 
 사용:
-    python scripts/remote.py poll-now              # 폴링 즉시 1회 실행
-    python scripts/remote.py restart-bot           # Discord 봇 재시작
-    python scripts/remote.py status [unit]         # systemctl status
-    python scripts/remote.py logs bot --tail 200   # journalctl
+    python scripts/remote.py poll-now                                       # 폴링 즉시 1회 실행
+    python scripts/remote.py restart-bot                                    # Discord 봇 재시작
+    python scripts/remote.py status [unit]                                  # systemctl status
+    python scripts/remote.py logs bot --tail 200                            # journalctl
     python scripts/remote.py logs poll --tail 100
-    python scripts/remote.py daemon-reload         # 유닛 변경 후
-    python scripts/remote.py read routing          # 원격 파일 cat (allowlist)
-    python scripts/remote.py list                  # 허용 명령 출력
+    python scripts/remote.py daemon-reload                                  # 유닛 변경 후
+    python scripts/remote.py read routing                                   # 원격 파일 cat (allowlist)
+    python scripts/remote.py poll-now-slug s1,s2                            # 부분 poll-now (slug 일부만)
+    python scripts/remote.py replay-deliveries <slug> <kind> <id> [post]    # M2/M3 replay (lock 잡고 직렬)
+    python scripts/remote.py notify-target <slug> <kind> <id>               # collected → 그 target 만 발송
+    python scripts/remote.py announce-scoped <base64-json>                  # 좁힌 공지 발송
+    python scripts/remote.py list                                           # 허용 명령 출력
 
 dashboard 가 subprocess 로 호출. stdout 그대로 캡처해 토스트/박스에 표시.
 
 설계:
 - 명령은 ACTIONS dict 의 enum (SSH command injection 차단). 사용자 인자는 정해진 알리아스만 매핑.
+- 자유 입력(slug, target_id, post_id, base64 payload) 은 정규식으로 거른 뒤에만 SSH command 에 interpolation.
+- 모든 verb 의 N100 측 실행 = `cd $DEPLOY_PATH && python scripts/<helper>.py …` — 인자는 항상 끝에 append, base64 같은 큰 페이로드도 shell escape 안전 (base64 문자셋 [A-Za-z0-9+/=] 는 metachar 없음).
 - DEPLOY_HOST 는 env 로만 받음 (인자로 호스트 받으면 위험).
 - 결과 코드: SSH 종료 코드 그대로 전파 (0=성공). stdout 만 print.
 """
@@ -35,6 +41,38 @@ DEPLOY_PATH_RAW = os.environ.get("DEPLOY_PATH", "~/notice-watcher")
 _DEPLOY_PATH_RE = re.compile(r"^[A-Za-z0-9_./~$-]+$")
 if not _DEPLOY_PATH_RE.match(DEPLOY_PATH_RAW):
     raise SystemExit(f"[remote] DEPLOY_PATH unsafe characters: {DEPLOY_PATH_RAW!r}")
+
+# 자유 입력 인자 validation — interpolation 전 거름.
+_SLUG_RE = re.compile(r"^[A-Za-z0-9._\-]{1,200}$")            # engine.slug 가 보장하는 형식
+_TARGET_ID_RE = re.compile(r"^[0-9]{1,32}$")                    # Discord snowflake (현재 19자리, 미래 여유)
+_POST_ID_RE = re.compile(r"^[\w\-./:%]{1,128}$")               # poll.py 의 _STABLE_ID_RE 와 동일
+_BASE64_RE = re.compile(r"^[A-Za-z0-9+/=]{1,200000}$")         # base64 문자셋만; ≤200KB 페이로드
+_TARGET_KIND = ("dm", "channel")
+
+
+def _require(value: str, pattern: re.Pattern[str], *, name: str) -> str:
+    if not isinstance(value, str) or not pattern.match(value):
+        print(f"[remote] invalid {name}: {value!r}", file=sys.stderr)
+        sys.exit(4)
+    return value
+
+
+def _require_slugs_csv(csv: str) -> str:
+    """`s1,s2,s3` 형식 — 각 slug 가 _SLUG_RE 통과해야 함."""
+    parts = [s for s in csv.split(",") if s]
+    if not parts:
+        print(f"[remote] empty slug list: {csv!r}", file=sys.stderr)
+        sys.exit(4)
+    for s in parts:
+        _require(s, _SLUG_RE, name="slug")
+    return ",".join(parts)
+
+
+def _require_kind(kind: str) -> str:
+    if kind not in _TARGET_KIND:
+        print(f"[remote] invalid target_kind: {kind!r}. 허용: {_TARGET_KIND}", file=sys.stderr)
+        sys.exit(4)
+    return kind
 
 
 # unit alias → 실제 systemd 유닛명
@@ -98,6 +136,60 @@ def cmd_daemon_reload() -> int:
     return _ssh("systemctl --user daemon-reload")
 
 
+def _remote_python_cmd(*args: str) -> str:
+    """`cd $DEPLOY_PATH && python <args>` 한 줄. args 는 *모두 사전 검증된* 토큰이어야 함.
+
+    quote 안 함 — DEPLOY_PATH 는 모듈 로드 시점에 _DEPLOY_PATH_RE 로 검증되었고, 호출자가 넘긴
+    args 는 _require*() 정규식을 통과한 토큰 (slug/snowflake/base64/`--flag` 형태)이라 shell
+    metachar 가 없다. 임의 사용자 입력을 quote 없이 넘기는 일은 없어야 함.
+    """
+    return f"cd {DEPLOY_PATH_RAW} && python " + " ".join(args)
+
+
+def cmd_poll_now_slug(slugs_csv: str) -> int:
+    csv = _require_slugs_csv(slugs_csv)
+    return _ssh(_remote_python_cmd("scripts/poll.py", "--sites", csv))
+
+
+def cmd_replay_deliveries(slug: str, target_kind: str, target_id: str,
+                          post_id: Optional[str]) -> int:
+    _require(slug, _SLUG_RE, name="slug")
+    _require_kind(target_kind)
+    _require(target_id, _TARGET_ID_RE, name="target_id")
+    args = ["scripts/replay.py",
+            "--slug", slug,
+            "--target-kind", target_kind,
+            "--target-id", target_id]
+    if post_id:
+        _require(post_id, _POST_ID_RE, name="post_id")
+        args += ["--post-id", post_id]
+    return _ssh(_remote_python_cmd(*args))
+
+
+def cmd_notify_target(slug: str, target_kind: str, target_id: str) -> int:
+    _require(slug, _SLUG_RE, name="slug")
+    _require_kind(target_kind)
+    _require(target_id, _TARGET_ID_RE, name="target_id")
+    # notify.py 가 collected dir 의 *.new.json 중 그 slug 의 글을 그 target 에게만 발송.
+    # poll-now 를 별도로 부르고 싶으면 replay-deliveries / poll-now-slug 를 먼저.
+    return _ssh(_remote_python_cmd(
+        "scripts/notify.py",
+        "--only-target-kind", target_kind,
+        "--only-target-id", target_id,
+        "--no-digest",
+    ))
+
+
+def cmd_announce_scoped(b64: str) -> int:
+    """base64-인코딩된 JSON 페이로드를 받아 N100 의 `scripts/announce.py --base64` 로 전달.
+
+    페이로드 검증은 announce.py 가 함 (title/message 길이, recipients 형식 등). 여기선
+    base64 문자셋만 검증 → SSH 명령 안전 interpolation 보장.
+    """
+    _require(b64, _BASE64_RE, name="base64-payload")
+    return _ssh(_remote_python_cmd("scripts/announce.py", "--base64", b64))
+
+
 def cmd_read(alias: str) -> int:
     if alias not in READABLE:
         print(f"[remote] 알 수 없는 read alias: {alias!r}. 허용: {sorted(READABLE)}", file=sys.stderr)
@@ -110,15 +202,20 @@ def cmd_read(alias: str) -> int:
 
 def list_actions() -> int:
     print("commands:")
-    print("  poll-now                    notice-poll.service 즉시 실행")
-    print("  restart-bot                 notice-bot.service 재시작")
-    print("  status [unit]               systemctl --user status (default: bot)")
-    print("  logs <unit> [--tail N]      journalctl --user -u")
-    print("  daemon-reload               systemctl --user daemon-reload")
-    print("  read <alias>                원격 파일 cat (allowlist)")
+    print("  poll-now                                       notice-poll.service 즉시 실행")
+    print("  restart-bot                                    notice-bot.service 재시작")
+    print("  status [unit]                                  systemctl --user status (default: bot)")
+    print("  logs <unit> [--tail N]                         journalctl --user -u")
+    print("  daemon-reload                                  systemctl --user daemon-reload")
+    print("  read <alias>                                   원격 파일 cat (allowlist)")
+    print("  poll-now-slug <s1,s2,...>                      부분 poll-now (slug 일부)")
+    print("  replay-deliveries <slug> <kind> <id> [post]    M2/M3 replay (lock+직렬)")
+    print("  notify-target <slug> <kind> <id>               collected → 그 target 만 발송")
+    print("  announce-scoped <base64-json>                  좁힌 공지 발송")
     print()
     print(f"unit aliases: {', '.join(sorted(UNITS))}")
     print(f"read aliases: {', '.join(sorted(READABLE))}")
+    print(f"target kinds: {', '.join(_TARGET_KIND)}")
     return 0
 
 
@@ -132,6 +229,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     sub.add_parser("daemon-reload")
     sp = sub.add_parser("read"); sp.add_argument("alias")
     sub.add_parser("list")
+    sp = sub.add_parser("poll-now-slug"); sp.add_argument("slugs", help="콤마 구분 slug 리스트")
+    sp = sub.add_parser("replay-deliveries")
+    sp.add_argument("slug"); sp.add_argument("target_kind"); sp.add_argument("target_id")
+    sp.add_argument("post_id", nargs="?", default=None)
+    sp = sub.add_parser("notify-target")
+    sp.add_argument("slug"); sp.add_argument("target_kind"); sp.add_argument("target_id")
+    sp = sub.add_parser("announce-scoped"); sp.add_argument("base64_payload")
     args = p.parse_args(argv)
     if args.cmd == "list":
         return list_actions()
@@ -147,6 +251,14 @@ def main(argv: Optional[list[str]] = None) -> int:
         return cmd_daemon_reload()
     if args.cmd == "read":
         return cmd_read(args.alias)
+    if args.cmd == "poll-now-slug":
+        return cmd_poll_now_slug(args.slugs)
+    if args.cmd == "replay-deliveries":
+        return cmd_replay_deliveries(args.slug, args.target_kind, args.target_id, args.post_id)
+    if args.cmd == "notify-target":
+        return cmd_notify_target(args.slug, args.target_kind, args.target_id)
+    if args.cmd == "announce-scoped":
+        return cmd_announce_scoped(args.base64_payload)
     print(f"[remote] unknown cmd {args.cmd!r}", file=sys.stderr)
     return 4
 

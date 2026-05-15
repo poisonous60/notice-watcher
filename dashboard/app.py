@@ -21,6 +21,7 @@ from bot import db, inspector
 from dashboard import actions as act
 from dashboard import prompts, state
 from dashboard import usage_view
+from dashboard import user_view
 from dashboard import control_actions as ctrl
 
 HERE = Path(__file__).resolve().parent
@@ -234,6 +235,216 @@ async def sub_detail(request: Request, slug: str = Depends(require_slug),
     return _render("sub_detail.html", request,
                    result=result, slug=slug, failed=failed_payload,
                    p_redo=p_redo, p_diag=p_diag, active="subs")
+
+
+# --------------------------------------------------------------------------- #
+# Users (person-entity 페이지)
+# --------------------------------------------------------------------------- #
+# 자유 입력 user_id / target_id 검증 — Discord snowflake 형식만 허용.
+import re as _re
+_USER_ID_RE = _re.compile(r"^[0-9]{1,32}$")
+
+
+def require_user_id(user_id: str) -> str:
+    if not _USER_ID_RE.match(user_id or ""):
+        raise HTTPException(status_code=404, detail="invalid user_id")
+    return user_id
+
+
+_SORT_DIRECTIONS = ("asc", "desc")
+
+
+@app.get("/users", response_class=HTMLResponse)
+async def users_list(request: Request,
+                     q: Optional[str] = None,
+                     slug: Optional[str] = None,
+                     open_report: int = Query(0),
+                     has_feedback: int = Query(0),
+                     has_channel: int = Query(0),
+                     sort: str = Query("last_active"),
+                     direction: str = Query("desc"),
+                     conn=Depends(get_conn)):
+    if conn is None:
+        return _no_snapshot(request)
+    if slug and not state.safe_slug(slug):
+        raise HTTPException(status_code=400, detail="invalid slug")
+    if direction not in _SORT_DIRECTIONS:
+        direction = "desc"
+    rows = user_view.collect(
+        conn,
+        q=q, slug_filter=slug,
+        chip_open_report=bool(open_report),
+        chip_has_feedback=bool(has_feedback),
+        chip_has_channel=bool(has_channel),
+        sort=sort, direction=direction,
+    )
+    # slug autocomplete dropdown 옵션
+    all_slugs = state.unique_slugs(conn)
+    return _render("users.html", request,
+                   rows=rows, q=q, slug_filter=slug,
+                   open_report=bool(open_report),
+                   has_feedback=bool(has_feedback),
+                   has_channel=bool(has_channel),
+                   sort=sort, direction=direction,
+                   all_slugs=all_slugs, active="users")
+
+
+@app.get("/users/{user_id}", response_class=HTMLResponse)
+async def user_detail(request: Request,
+                      user_id: str = Depends(require_user_id),
+                      conn=Depends(get_conn)):
+    if conn is None:
+        return _no_snapshot(request)
+    u = user_view.detail(conn, user_id)
+    if u is None:
+        return HTMLResponse(
+            f"<p>user <code>{_html.escape(user_id)}</code> 없음.</p>",
+            status_code=404,
+        )
+    # seen_post_ids 경고는 expand 시 partial(`/users/{id}/deliveries`)이 알아서 계산 — 여기서 풀스캔 안 함.
+    return _render("user_detail.html", request, user=u, active="users")
+
+
+@app.get("/users/{user_id}/deliveries", response_class=HTMLResponse)
+async def user_deliveries_inline(request: Request,
+                                 user_id: str = Depends(require_user_id),
+                                 slug: str = Query(...),
+                                 conn=Depends(get_conn)):
+    """HTMX expandable — 한 (user, slug) 의 deliveries 최근 50."""
+    if conn is None:
+        return HTMLResponse("(snapshot 없음)", status_code=503)
+    if not state.safe_slug(slug):
+        raise HTTPException(status_code=400, detail="invalid slug")
+    paths = state.snapshot_paths()
+    rows = user_view.deliveries_inline(conn, target_id=user_id, slug=slug, limit=50)
+    seen = user_view.seen_post_ids(paths.state_dir, slug)
+    return _partial("_user_deliveries.html", request,
+                    rows=rows, slug=slug, user_id=user_id, seen=seen)
+
+
+# --- /users 액션 (HTMX POST) --- #
+@app.post("/users/{user_id}/poll-now-slug", response_class=HTMLResponse)
+async def users_action_poll(request: Request,
+                            user_id: str = Depends(require_user_id),
+                            slugs: str = Form(...)):
+    # 콤마 구분. dashboard 단에서 1차 검증, remote.py 가 2차.
+    parts = [s.strip() for s in slugs.split(",") if s.strip()]
+    if not parts or not all(state.safe_slug(s) for s in parts):
+        raise HTTPException(status_code=400, detail="invalid slugs")
+    res = await ctrl.users_poll_now_slug(",".join(parts))
+    return _partial("_control_result.html", request, res=res, title=f"poll-now-slug(user={user_id})")
+
+
+@app.post("/users/{user_id}/replay", response_class=HTMLResponse)
+async def users_action_replay(request: Request,
+                              user_id: str = Depends(require_user_id),  # noqa: ARG001 (audit log 용도)
+                              slug: str = Form(...),
+                              target_kind: str = Form(...),
+                              target_id: str = Form(...),
+                              post_id: Optional[str] = Form(None)):
+    if not state.safe_slug(slug):
+        raise HTTPException(status_code=400, detail="invalid slug")
+    if target_kind not in ("dm", "channel"):
+        raise HTTPException(status_code=400, detail="invalid target_kind")
+    if not _USER_ID_RE.match(target_id or ""):
+        raise HTTPException(status_code=400, detail="invalid target_id")
+    pid = (post_id or "").strip() or None
+    res = await ctrl.users_replay(slug, target_kind, target_id, pid)
+    title = f"replay({slug},{target_kind}:{target_id}" + (f",post={pid})" if pid else ",bulk)")
+    return _partial("_control_result.html", request, res=res, title=title)
+
+
+@app.post("/users/{user_id}/notify-target", response_class=HTMLResponse)
+async def users_action_notify_target(request: Request,
+                                     user_id: str = Depends(require_user_id),  # noqa: ARG001
+                                     slug: str = Form(...),
+                                     target_kind: str = Form(...),
+                                     target_id: str = Form(...)):
+    if not state.safe_slug(slug):
+        raise HTTPException(status_code=400, detail="invalid slug")
+    if target_kind not in ("dm", "channel"):
+        raise HTTPException(status_code=400, detail="invalid target_kind")
+    if not _USER_ID_RE.match(target_id or ""):
+        raise HTTPException(status_code=400, detail="invalid target_id")
+    res = await ctrl.users_notify_target(slug, target_kind, target_id)
+    return _partial("_control_result.html", request, res=res,
+                    title=f"notify-target({slug},{target_kind}:{target_id})")
+
+
+_ANN_TITLE_MAX = 200
+_ANN_MSG_MAX = 1900
+
+
+@app.post("/users/announce", response_class=HTMLResponse)
+async def users_action_announce(request: Request,
+                                title: str = Form(...),
+                                message: str = Form(...),
+                                recipients_json: str = Form(...),
+                                conn=Depends(get_conn)):
+    """Scoped announce. recipients_json = JSON `[[kind,id],...]`.
+
+    검증:
+      - title / message 길이
+      - recipients 가 list 이고 각 항목 [kind,id], kind ∈ {dm,channel}, id 가 snowflake
+    """
+    if conn is None:
+        return _no_snapshot(request)
+    title_s = (title or "").strip()
+    msg_s = (message or "").strip()
+    if not title_s or len(title_s) > _ANN_TITLE_MAX:
+        raise HTTPException(status_code=400, detail="invalid title")
+    if not msg_s or len(msg_s) > _ANN_MSG_MAX:
+        raise HTTPException(status_code=400, detail="invalid message")
+    try:
+        recipients = json.loads(recipients_json)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="invalid recipients JSON")
+    if not isinstance(recipients, list) or not recipients:
+        raise HTTPException(status_code=400, detail="recipients empty")
+    cleaned: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in recipients:
+        if not (isinstance(item, list) and len(item) == 2):
+            raise HTTPException(status_code=400, detail="bad recipient shape")
+        kind, rid = item
+        if kind not in ("dm", "channel"):
+            raise HTTPException(status_code=400, detail=f"bad kind: {kind!r}")
+        if not isinstance(rid, str) or not _USER_ID_RE.match(rid):
+            raise HTTPException(status_code=400, detail=f"bad id: {rid!r}")
+        key = (kind, rid)
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(key)
+    res = await ctrl.users_announce(title_s, msg_s, sent_by="dashboard",
+                                    recipients=cleaned)
+    return _partial("_control_result.html", request, res=res,
+                    title=f"announce(n={len(cleaned)})")
+
+
+@app.get("/users/announce/resolve-slugs", response_class=HTMLResponse)
+async def users_announce_resolve_slugs(request: Request,
+                                       slugs: str = Query(...),
+                                       conn=Depends(get_conn)):
+    """폼 모달 안 'slug 들의 모든 구독자 추가' — slug csv → resolved recipients JSON.
+
+    HTMX 가 GET 으로 호출, JSON 응답을 input value 에 prefill.
+    """
+    if conn is None:
+        return HTMLResponse("[]", media_type="application/json")
+    parts = [s.strip() for s in slugs.split(",") if s.strip()]
+    if not parts or not all(state.safe_slug(s) for s in parts):
+        return HTMLResponse("[]", media_type="application/json", status_code=400)
+    seen: set[tuple[str, str]] = set()
+    out: list[list[str]] = []
+    for slug in parts:
+        for r in db.subscriptions_for_slug(conn, slug):
+            key = (r["target_kind"], r["target_id"])
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append([r["target_kind"], r["target_id"]])
+    return HTMLResponse(json.dumps(out), media_type="application/json")
 
 
 # --------------------------------------------------------------------------- #

@@ -77,6 +77,57 @@ async def run_remote(action: str, *args: str) -> dict:
     return res
 
 
+# --------------------------------------------------------------------------- #
+# /users 페이지 액션 — remote.py 의 새 verb 들을 호출.
+# 인자 검증은 remote.py 가 정규식으로 한 번 더 거름 (중복 방어 — XSS/injection 가드).
+# --------------------------------------------------------------------------- #
+async def users_poll_now_slug(slugs_csv: str) -> dict:
+    """M1 — 일부 slug 즉시 poll-now."""
+    res = await run_remote("poll-now-slug", slugs_csv)
+    audit("users.poll_now_slug", ok=res["ok"], detail={"slugs": slugs_csv, "rc": res["rc"]})
+    return res
+
+
+async def users_replay(slug: str, target_kind: str, target_id: str,
+                       post_id: str | None = None) -> dict:
+    """M2 (post_id 있음) / M3 (없음) — replay.py 가 lock+직렬 실행."""
+    args = [slug, target_kind, target_id] + ([post_id] if post_id else [])
+    res = await run_remote("replay-deliveries", *args)
+    audit("users.replay", ok=res["ok"],
+          detail={"slug": slug, "kind": target_kind, "id": target_id,
+                  "post": post_id, "bulk": post_id is None, "rc": res["rc"]})
+    return res
+
+
+async def users_notify_target(slug: str, target_kind: str, target_id: str) -> dict:
+    """현 collected dir 의 새 글을 그 target 만 발송. (poll-now 동반 안 됨 — 이미 polling 된 상태 가정)."""
+    res = await run_remote("notify-target", slug, target_kind, target_id)
+    audit("users.notify_target", ok=res["ok"],
+          detail={"slug": slug, "kind": target_kind, "id": target_id, "rc": res["rc"]})
+    return res
+
+
+async def users_announce(title: str, message: str, sent_by: str,
+                         recipients: list[tuple[str, str]]) -> dict:
+    """Scoped announce — title/message/recipients 를 JSON 으로 직렬화→base64→N100 announce.py 에 전달.
+
+    recipients = [(kind, id), ...]. 빈 list 면 fail-fast (announce.py 에서 validation).
+    """
+    import base64
+    import json
+    payload = {
+        "title": title, "message": message, "sent_by": sent_by,
+        "recipients": [list(r) for r in recipients],
+    }
+    raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    b64 = base64.b64encode(raw).decode("ascii")
+    res = await run_remote("announce-scoped", b64)
+    audit("users.announce", ok=res["ok"],
+          detail={"title": title[:80], "n_recipients": len(recipients),
+                  "size_b64": len(b64), "rc": res["rc"]})
+    return res
+
+
 _ACTIVE_RE = re.compile(r"^\s*Active:\s*(\S+)\s*(?:\(([^)]+)\))?", re.MULTILINE)
 
 

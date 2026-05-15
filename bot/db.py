@@ -141,6 +141,7 @@ CREATE TABLE IF NOT EXISTS announce_prefs (
 );
 
 -- 공지 발송 audit. 같은 글 재전송 dedup 안 함 — 운영자 의도된 재전송 허용.
+-- recipient_targets: scoped announce 만 채움 — JSON `[[kind,id], ...]`. NULL = full broadcast(legacy `/admin announce`).
 CREATE TABLE IF NOT EXISTS announcements (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     title           TEXT NOT NULL,
@@ -150,9 +151,12 @@ CREATE TABLE IF NOT EXISTS announcements (
     dm_sent         INTEGER NOT NULL DEFAULT 0,
     dm_failed       INTEGER NOT NULL DEFAULT 0,
     channel_sent    INTEGER NOT NULL DEFAULT 0,
-    channel_failed  INTEGER NOT NULL DEFAULT 0
+    channel_failed  INTEGER NOT NULL DEFAULT 0,
+    recipient_targets TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_announce_sent_at ON announcements(sent_at DESC);
+-- deliveries 의 target 기준 조회/삭제(scoped replay 용) 가속.
+CREATE INDEX IF NOT EXISTS idx_deliveries_target ON deliveries(target_id, slug);
 
 -- 자유 의견(`/feedback`). slug/status 없음 — owner 가 읽기만. message 는 5900자 cap(클라이언트 강제).
 CREATE TABLE IF NOT EXISTS feedback (
@@ -172,11 +176,17 @@ def _now_iso() -> str:
 
 def _migrate(conn: sqlite3.Connection) -> None:
     """이미 존재하는 옛 DB 에 빠진 컬럼 추가 (SQLite 는 ADD COLUMN IF NOT EXISTS 가 없음)."""
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(subscriptions)").fetchall()}
-    if "notify_empty" not in cols:
+    sub_cols = {r[1] for r in conn.execute("PRAGMA table_info(subscriptions)").fetchall()}
+    if "notify_empty" not in sub_cols:
         conn.execute("ALTER TABLE subscriptions ADD COLUMN notify_empty INTEGER NOT NULL DEFAULT 0")
     # 모든 구독은 polling 직후 즉시 발송(realtime). 옛 HH:MM schedule 행도 일괄 이전 — idempotent.
     conn.execute("UPDATE subscriptions SET schedule='realtime' WHERE schedule!='realtime'")
+    # scoped announce 용 recipient_targets 컬럼 (옛 DB 에 추가).
+    ann_cols = {r[1] for r in conn.execute("PRAGMA table_info(announcements)").fetchall()}
+    if "recipient_targets" not in ann_cols:
+        conn.execute("ALTER TABLE announcements ADD COLUMN recipient_targets TEXT")
+    # deliveries 의 target_id 기준 lookup/삭제 인덱스 (옛 DB 에 추가).
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_deliveries_target ON deliveries(target_id, slug)")
     conn.commit()
 
 
@@ -281,6 +291,52 @@ def mark_delivered(conn: sqlite3.Connection, slug: str, post_id: str, target_id:
         )
         conn.commit()
     _retry(_do)
+
+
+def deliveries_for_target(conn: sqlite3.Connection, target_id: str, *,
+                          slug: Optional[str] = None, limit: int = 50) -> list[sqlite3.Row]:
+    """user×slug detail 의 발송 이력 표시·재발송 후보 list."""
+    if slug is None:
+        return conn.execute(
+            "SELECT slug, post_id, target_id, sent_at FROM deliveries "
+            "WHERE target_id=? ORDER BY sent_at DESC LIMIT ?",
+            (target_id, limit),
+        ).fetchall()
+    return conn.execute(
+        "SELECT slug, post_id, target_id, sent_at FROM deliveries "
+        "WHERE target_id=? AND slug=? ORDER BY sent_at DESC LIMIT ?",
+        (target_id, slug, limit),
+    ).fetchall()
+
+
+def deliveries_count_for_target(conn: sqlite3.Connection, target_id: str) -> int:
+    return int(conn.execute(
+        "SELECT COUNT(*) FROM deliveries WHERE target_id=?", (target_id,)
+    ).fetchone()[0])
+
+
+def delete_delivery(conn: sqlite3.Connection, *, slug: str, post_id: str, target_id: str) -> int:
+    """M2 — (slug, post_id, target_id) 한 행 삭제. 반환 = 삭제된 row 수 (0 또는 1)."""
+    def _do():
+        cur = conn.execute(
+            "DELETE FROM deliveries WHERE slug=? AND post_id=? AND target_id=?",
+            (slug, str(post_id), target_id),
+        )
+        conn.commit()
+        return cur.rowcount
+    return _retry(_do)
+
+
+def delete_deliveries_for_target(conn: sqlite3.Connection, *, slug: str, target_id: str) -> int:
+    """M3 — (slug, target_id) 의 모든 deliveries 삭제. 반환 = 삭제된 row 수."""
+    def _do():
+        cur = conn.execute(
+            "DELETE FROM deliveries WHERE slug=? AND target_id=?",
+            (slug, target_id),
+        )
+        conn.commit()
+        return cur.rowcount
+    return _retry(_do)
 
 
 # --------------------------------------------------------------------------- #
@@ -579,11 +635,13 @@ def announce_recipients_channel(conn: sqlite3.Connection) -> list[str]:
 # announcements — 발송 audit.
 # --------------------------------------------------------------------------- #
 def add_announcement(conn: sqlite3.Connection, *, title: str, message: str,
-                     sent_by: str) -> int:
+                     sent_by: str, recipient_targets: Optional[str] = None) -> int:
+    """`recipient_targets` = JSON `[[kind,id], ...]` 문자열 또는 None(=broadcast)."""
     def _do():
         cur = conn.execute(
-            "INSERT INTO announcements(title,message,sent_by,sent_at) VALUES(?,?,?,?)",
-            (title, message, sent_by, _now_iso()),
+            "INSERT INTO announcements(title,message,sent_by,sent_at,recipient_targets) "
+            "VALUES(?,?,?,?,?)",
+            (title, message, sent_by, _now_iso(), recipient_targets),
         )
         conn.commit()
         return int(cur.lastrowid)
@@ -628,3 +686,159 @@ def list_feedback(conn: sqlite3.Connection, limit: int = 20) -> list[sqlite3.Row
     return conn.execute(
         "SELECT * FROM feedback ORDER BY id DESC LIMIT ?", (limit,)
     ).fetchall()
+
+
+def feedback_for_user(conn: sqlite3.Connection, user_id: str,
+                      limit: int = 50) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM feedback WHERE user_id=? ORDER BY id DESC LIMIT ?",
+        (user_id, limit),
+    ).fetchall()
+
+
+def reports_for_user(conn: sqlite3.Connection, user_id: str,
+                     limit: int = 50) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM reports WHERE user_id=? ORDER BY id DESC LIMIT ?",
+        (user_id, limit),
+    ).fetchall()
+
+
+def jobs_for_user(conn: sqlite3.Connection, user_id: str,
+                  limit: int = 50) -> list[sqlite3.Row]:
+    """jobs.requested_by JSON 의 `$.id` 가 user_id 인 것. `json_extract` 로 NULL safe.
+
+    requested_by 는 `bot/main.py` 가 `{"id": "...", "name": "..."}` JSON 으로 저장 — `poll-reprobe`
+    잡 같은 시스템 enqueue 는 NULL → 이 쿼리에서 자동 제외 (json_extract NULL = NULL → 비교 false).
+    """
+    return conn.execute(
+        "SELECT * FROM jobs WHERE json_extract(requested_by, '$.id')=? "
+        "ORDER BY id DESC LIMIT ?",
+        (user_id, limit),
+    ).fetchall()
+
+
+# --------------------------------------------------------------------------- #
+# /users 페이지 — person-entity 집계
+# --------------------------------------------------------------------------- #
+def list_users(conn: sqlite3.Connection) -> list[dict]:
+    """user_id 별 집계 1행. set = subscriptions ∪ feedback ∪ reports ∪ jobs.requested_by.id.
+
+    username = 가장 최근 (feedback / reports / jobs) 중 latest non-null. 없으면 None.
+    last_active = MAX(created_at) across subscriptions/feedback/reports/jobs.
+    sources = ['watch','feedback','report','job'] 중 그 user 가 해당하는 set.
+
+    페이지네이션·필터는 dashboard 단에서 메모리상으로 — 사용자 수가 작아(수십~수백) 풀스캔 OK.
+    """
+    # 우선 distinct user_id 집합 + 그 user 가 어떤 source 에 있었는지 표시.
+    rows = conn.execute(
+        """
+        WITH u AS (
+            SELECT user_id, 'watch' AS src, created_at FROM subscriptions
+            UNION ALL
+            SELECT user_id, 'feedback' AS src, created_at FROM feedback
+            UNION ALL
+            SELECT user_id, 'report' AS src, created_at FROM reports
+            UNION ALL
+            SELECT json_extract(requested_by, '$.id') AS user_id, 'job' AS src, created_at
+              FROM jobs
+             WHERE requested_by IS NOT NULL
+               AND json_extract(requested_by, '$.id') IS NOT NULL
+        )
+        SELECT user_id,
+               GROUP_CONCAT(DISTINCT src) AS sources,
+               MIN(created_at)            AS first_seen,
+               MAX(created_at)            AS last_active
+          FROM u
+         WHERE user_id IS NOT NULL AND user_id != ''
+         GROUP BY user_id
+        """
+    ).fetchall()
+    # subscription counts (DM / channel 분리)
+    sub_counts = {}
+    for r in conn.execute(
+        "SELECT user_id, "
+        "       SUM(CASE WHEN target_kind='dm' THEN 1 ELSE 0 END)      AS dm,"
+        "       SUM(CASE WHEN target_kind='channel' THEN 1 ELSE 0 END) AS ch "
+        "FROM subscriptions GROUP BY user_id"
+    ).fetchall():
+        sub_counts[r["user_id"]] = (int(r["dm"] or 0), int(r["ch"] or 0))
+    # feedback / reports counts
+    fb_counts = {r["user_id"]: int(r["n"]) for r in conn.execute(
+        "SELECT user_id, COUNT(*) AS n FROM feedback GROUP BY user_id"
+    ).fetchall()}
+    rep_total = {r["user_id"]: int(r["n"]) for r in conn.execute(
+        "SELECT user_id, COUNT(*) AS n FROM reports GROUP BY user_id"
+    ).fetchall()}
+    rep_open = {r["user_id"]: int(r["n"]) for r in conn.execute(
+        "SELECT user_id, COUNT(*) AS n FROM reports WHERE status='open' GROUP BY user_id"
+    ).fetchall()}
+    # username = 가장 최근 (feedback/reports/jobs) 의 비어있지 않은 값
+    names: dict[str, str] = {}
+    for r in conn.execute(
+        "SELECT user_id, username FROM feedback "
+        "WHERE username IS NOT NULL AND username != '' ORDER BY id DESC"
+    ).fetchall():
+        names.setdefault(r["user_id"], r["username"])
+    for r in conn.execute(
+        "SELECT user_id, username FROM reports "
+        "WHERE username IS NOT NULL AND username != '' ORDER BY id DESC"
+    ).fetchall():
+        names.setdefault(r["user_id"], r["username"])
+    for r in conn.execute(
+        "SELECT json_extract(requested_by, '$.id') AS uid, "
+        "       json_extract(requested_by, '$.name') AS uname "
+        "FROM jobs WHERE requested_by IS NOT NULL ORDER BY id DESC"
+    ).fetchall():
+        if r["uid"] and r["uname"]:
+            names.setdefault(r["uid"], r["uname"])
+
+    # deliveries: target_id 가 DM 이면 user_id 와 같음 → user 별 deliveries 합산.
+    # DM target_id 는 user_id 와 동일하므로 deliveries.target_id ∈ user set 인 행만 카운트.
+    deliv_count: dict[str, int] = {}
+    deliv_last: dict[str, str] = {}
+    for r in conn.execute(
+        "SELECT target_id, COUNT(*) AS n, MAX(sent_at) AS last_sent "
+        "FROM deliveries GROUP BY target_id"
+    ).fetchall():
+        deliv_count[r["target_id"]] = int(r["n"])
+        deliv_last[r["target_id"]] = r["last_sent"]
+
+    out: list[dict] = []
+    for r in rows:
+        uid = r["user_id"]
+        dm, ch = sub_counts.get(uid, (0, 0))
+        out.append({
+            "user_id":          uid,
+            "username":         names.get(uid),
+            "sources":          sorted((r["sources"] or "").split(",")) if r["sources"] else [],
+            "n_dm_subs":        dm,
+            "n_channel_subs":   ch,
+            "n_subs":           dm + ch,
+            "n_feedback":       fb_counts.get(uid, 0),
+            "n_reports_open":   rep_open.get(uid, 0),
+            "n_reports_total":  rep_total.get(uid, 0),
+            "first_seen":       r["first_seen"],
+            "last_active":      r["last_active"],
+            "total_deliveries": deliv_count.get(uid, 0),
+            "last_delivery_at": deliv_last.get(uid),
+        })
+    return out
+
+
+def get_user(conn: sqlite3.Connection, user_id: str) -> Optional[dict]:
+    """단일 user 상세 — None 이면 그 user_id 는 set 에 없음."""
+    summary = next((u for u in list_users(conn) if u["user_id"] == user_id), None)
+    if summary is None:
+        return None
+    summary["subscriptions"] = [dict(r) for r in conn.execute(
+        "SELECT * FROM subscriptions WHERE user_id=? ORDER BY target_kind, created_at",
+        (user_id,),
+    ).fetchall()]
+    summary["feedback"] = [dict(r) for r in feedback_for_user(conn, user_id)]
+    summary["reports"] = [dict(r) for r in reports_for_user(conn, user_id)]
+    summary["jobs"] = [dict(r) for r in jobs_for_user(conn, user_id)]
+    # 최근 deliveries — DM target_id 만 (= user_id). channel 발송은 user 단위로 의미 X.
+    summary["recent_deliveries"] = [dict(r) for r in deliveries_for_target(
+        conn, user_id, limit=50)]
+    return summary

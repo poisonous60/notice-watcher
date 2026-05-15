@@ -1,0 +1,261 @@
+{% extends "base.html" %}
+{% block title %}user {{ user.user_id }} — notice-watcher{% endblock %}
+{% block body %}
+
+<p style="margin-bottom:0.4rem;"><a href="/users">← Users</a></p>
+
+<h2 style="display:flex;align-items:center;gap:0.5rem;">
+  👤 <code class="mono">{{ user.user_id }}</code>
+  {% if user.username %}<small class="muted">— {{ user.username }}</small>{% else %}<small class="muted">— <em>username 미수집</em></small>{% endif %}
+</h2>
+<p class="muted" style="font-size:0.85rem;">
+  sources: {{ user.sources | join(', ') or '—' }}  ·
+  first seen: <code>{{ (user.first_seen or '')[:19] }}</code>  ·
+  last active: <code>{{ (user.last_active or '')[:19] }}</code>  ·
+  total deliveries: {{ user.total_deliveries }}
+</p>
+<button type="button" id="open-announce-user" class="primary" style="font-size:0.9rem;">📢 이 user 에게 공지</button>
+
+<!-- DM 구독 섹션 -->
+<h3 style="margin-top:1rem;">📬 DM 구독 ({{ user.dm_subs | length }})</h3>
+{% if user.dm_subs %}
+<table class="compact striped">
+  <thead><tr>
+    <th>slug</th><th>URL</th><th>filter prompt</th><th>created</th><th style="white-space:nowrap;">deliveries</th><th>액션</th>
+  </tr></thead>
+  <tbody>
+    {% for s in user.dm_subs %}
+    <tr>
+      <td class="mono"><a href="/subs/{{ s.slug }}">{{ s.slug }}</a></td>
+      <td class="mono" style="max-width:24em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+        <span title="{{ s.url }}">{{ s.url }}</span>
+      </td>
+      <td class="muted" style="font-size:0.85rem;">{{ s.filter_prompt or '' }}</td>
+      <td class="muted" style="font-size:0.8rem;">{{ (s.created_at or '')[:19] }}</td>
+      <td>
+        <button type="button" class="secondary outline"
+                hx-get="/users/{{ user.user_id }}/deliveries?slug={{ s.slug }}"
+                hx-target="#deliv-{{ s.slug }}"
+                hx-swap="innerHTML"
+                style="font-size:0.78rem;">expand</button>
+      </td>
+      <td style="white-space:nowrap;">
+        <form style="display:inline;" data-confirm="이 slug 에 즉시 poll-now 실행?"
+              hx-post="/users/{{ user.user_id }}/poll-now-slug"
+              hx-target="#user-action-result" hx-swap="innerHTML">
+          <input type="hidden" name="slugs" value="{{ s.slug }}">
+          <button type="submit" class="secondary outline" style="font-size:0.78rem;" title="M1 — 이 slug 즉시 polling">M1 poll</button>
+        </form>
+        <form style="display:inline;"
+              data-confirm="이 (user,slug) 의 deliveries 전부 삭제 + seen 비움 + poll-now + only-target 발송. 진행?"
+              hx-post="/users/{{ user.user_id }}/replay"
+              hx-target="#user-action-result" hx-swap="innerHTML">
+          <input type="hidden" name="slug" value="{{ s.slug }}">
+          <input type="hidden" name="target_kind" value="dm">
+          <input type="hidden" name="target_id" value="{{ s.target_id }}">
+          <button type="submit" class="secondary outline" style="font-size:0.78rem;color:#a00;" title="M3 — 첫페이지 강제 재발송">M3 bulk</button>
+        </form>
+      </td>
+    </tr>
+    <tr>
+      <td colspan="6" id="deliv-{{ s.slug }}" style="padding:0;"></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">DM 구독 없음.</p>
+{% endif %}
+
+<!-- 채널 구독 섹션 -->
+{% if user.channel_subs %}
+<h3 style="margin-top:1rem;">📺 채널 구독 ({{ user.channel_subs | length }})</h3>
+<p style="background:#fff3cd;padding:0.4rem 0.6rem;border-left:3px solid #f0ad4e;font-size:0.85rem;margin:0.3rem 0;">
+  ⚠ 채널 발송은 <em>채널 전체 멤버</em>가 받습니다. M2/M3 replay 도 채널에 전체 발송 — user 격리 없음.
+</p>
+<table class="compact striped">
+  <thead><tr>
+    <th>slug</th><th>channel_id</th><th>filter</th><th>created</th><th>액션</th>
+  </tr></thead>
+  <tbody>
+    {% for s in user.channel_subs %}
+    <tr>
+      <td class="mono"><a href="/subs/{{ s.slug }}">{{ s.slug }}</a></td>
+      <td class="mono">{{ s.target_id }}</td>
+      <td class="muted" style="font-size:0.85rem;">{{ s.filter_prompt or '' }}</td>
+      <td class="muted" style="font-size:0.8rem;">{{ (s.created_at or '')[:19] }}</td>
+      <td style="white-space:nowrap;">
+        <form style="display:inline;" data-confirm="이 slug 에 즉시 poll-now 실행?"
+              hx-post="/users/{{ user.user_id }}/poll-now-slug"
+              hx-target="#user-action-result" hx-swap="innerHTML">
+          <input type="hidden" name="slugs" value="{{ s.slug }}">
+          <button type="submit" class="secondary outline" style="font-size:0.78rem;">M1 poll</button>
+        </form>
+        <form style="display:inline;"
+              data-confirm="⚠ 채널 #{{ s.target_id }} 전체에 첫페이지 재발송됨. 진행?"
+              hx-post="/users/{{ user.user_id }}/replay"
+              hx-target="#user-action-result" hx-swap="innerHTML">
+          <input type="hidden" name="slug" value="{{ s.slug }}">
+          <input type="hidden" name="target_kind" value="channel">
+          <input type="hidden" name="target_id" value="{{ s.target_id }}">
+          <button type="submit" class="secondary outline" style="font-size:0.78rem;color:#a00;">M3 bulk</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+<!-- Feedback -->
+<h3 style="margin-top:1rem;">💬 Feedback ({{ user.feedback | length }})</h3>
+{% if user.feedback %}
+{% for f in user.feedback %}
+<article style="margin:0.3rem 0;padding:0.4rem 0.6rem;background:var(--pico-card-background-color,#f8f8f8);border-left:3px solid var(--pico-primary,#06c);">
+  <small class="muted">#{{ f.id }} · {{ (f.created_at or '')[:19] }} · {{ f.username or '<no name>' }}</small>
+  <pre style="white-space:pre-wrap;margin:0.2rem 0;font-size:0.9rem;">{{ f.message }}</pre>
+</article>
+{% endfor %}
+{% else %}
+<p class="muted">없음.</p>
+{% endif %}
+
+<!-- Reports -->
+<h3 style="margin-top:1rem;">🐛 Reports ({{ user.reports | length }})</h3>
+{% if user.reports %}
+<table class="compact striped">
+  <thead><tr><th>id</th><th>status</th><th>slug</th><th>issue</th><th>created</th></tr></thead>
+  <tbody>
+    {% for r in user.reports %}
+    <tr>
+      <td><a href="/reports/{{ r.id }}">#{{ r.id }}</a></td>
+      <td>
+        {% if r.status == 'open' %}<span class="badge warn">open</span>
+        {% else %}<span class="badge ok">resolved</span>{% endif %}
+      </td>
+      <td class="mono"><a href="/subs/{{ r.slug }}">{{ r.slug }}</a></td>
+      <td>{{ (r.issue or '')[:120] }}</td>
+      <td class="muted" style="font-size:0.8rem;">{{ (r.created_at or '')[:19] }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">없음.</p>
+{% endif %}
+
+<!-- Jobs (this user 가 requested) -->
+<h3 style="margin-top:1rem;">📋 Jobs ({{ user.jobs | length }})</h3>
+{% if user.jobs %}
+<table class="compact striped">
+  <thead><tr><th>id</th><th>kind</th><th>via</th><th>slug</th><th>status</th><th>created</th></tr></thead>
+  <tbody>
+    {% for j in user.jobs %}
+    <tr>
+      <td><a href="/jobs/{{ j.id }}">#{{ j.id }}</a></td>
+      <td>{{ j.kind }}</td>
+      <td>{{ j.via or '' }}</td>
+      <td class="mono">{{ j.slug }}</td>
+      <td>{{ j.status }}</td>
+      <td class="muted" style="font-size:0.8rem;">{{ (j.created_at or '')[:19] }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">없음.</p>
+{% endif %}
+
+<!-- Recent deliveries -->
+<h3 style="margin-top:1rem;">📦 Recent deliveries ({{ user.recent_deliveries | length }})</h3>
+{% if user.recent_deliveries %}
+<table class="compact striped">
+  <thead><tr><th>slug</th><th>post_id</th><th>sent_at</th></tr></thead>
+  <tbody>
+    {% for d in user.recent_deliveries %}
+    <tr>
+      <td class="mono">{{ d.slug }}</td>
+      <td class="mono">{{ d.post_id }}</td>
+      <td class="muted" style="font-size:0.8rem;">{{ (d.sent_at or '')[:19] }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">없음.</p>
+{% endif %}
+
+<h3 style="margin-top:1rem;">📤 액션 결과</h3>
+<div id="user-action-result" aria-live="polite"></div>
+
+<!-- 공지 모달 (단일 user prefill). user_id 는 data-attribute 로만 전달 — JS 문자열 interpolation 회피. -->
+<dialog id="announce-modal" data-user-id="{{ user.user_id }}">
+  <article style="min-width:30em;max-width:48em;">
+    <header style="display:flex;justify-content:space-between;align-items:center;">
+      <strong>📢 이 user 에게 공지</strong>
+      <a href="#" id="close-announce" aria-label="닫기" style="text-decoration:none;">✕</a>
+    </header>
+    <form id="announce-form"
+          hx-post="/users/announce"
+          hx-target="#announce-result"
+          hx-swap="innerHTML">
+      <label>제목 <input type="text" name="title" maxlength="200" required></label>
+      <label>본문 <textarea name="message" rows="5" maxlength="1900" required></textarea></label>
+      <p class="muted" style="font-size:0.85rem;">
+        Recipients: <code>dm:{{ user.user_id }}</code> (이 user)
+        {% if user.channel_subs %}
+        + 이 user 가 등록한 채널 자동 포함 가능 (아래 체크):
+        {% for s in user.channel_subs %}
+          <label style="display:block;font-size:0.85rem;">
+            <input type="checkbox" class="add-channel" data-channel-id="{{ s.target_id }}"> channel #{{ s.target_id }} ({{ s.slug }})
+          </label>
+        {% endfor %}
+        {% endif %}
+      </p>
+      <input type="hidden" name="recipients_json" id="recipients-json" value="[]">
+      <footer style="display:flex;gap:0.5rem;justify-content:flex-end;margin-top:0.6rem;">
+        <button type="button" id="cancel-announce" class="secondary">취소</button>
+        <button type="submit">발송</button>
+      </footer>
+    </form>
+    <div id="announce-result" aria-live="polite"></div>
+  </article>
+</dialog>
+
+<script>
+(function () {
+  // 액션 확인 dialog — `data-confirm` 가 있는 form 은 submit 전에 confirm 띄움.
+  document.body.addEventListener('htmx:confirm', function (ev) {
+    var form = ev.detail.elt.closest('form');
+    if (form && form.dataset.confirm) {
+      ev.preventDefault();
+      if (window.confirm(form.dataset.confirm)) {
+        ev.detail.issueRequest();
+      }
+    }
+  });
+
+  // 공지 모달 — user_id 는 data-attribute 에서 읽음 (JS string interpolation 회피).
+  var modal = document.getElementById('announce-modal');
+  var hidden = document.getElementById('recipients-json');
+  var userId = modal.getAttribute('data-user-id');
+  function updateRecipients() {
+    var arr = [['dm', userId]];
+    document.querySelectorAll('.add-channel:checked').forEach(function (cb) {
+      arr.push(['channel', cb.getAttribute('data-channel-id')]);
+    });
+    hidden.value = JSON.stringify(arr);
+  }
+  document.getElementById('open-announce-user').addEventListener('click', function () {
+    updateRecipients();
+    modal.showModal();
+  });
+  document.querySelectorAll('.add-channel').forEach(function (cb) {
+    cb.addEventListener('change', updateRecipients);
+  });
+  document.getElementById('cancel-announce').addEventListener('click', function () { modal.close(); });
+  document.getElementById('close-announce').addEventListener('click', function (ev) { ev.preventDefault(); modal.close(); });
+})();
+</script>
+
+{% endblock %}

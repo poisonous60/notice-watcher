@@ -231,12 +231,16 @@ def _hhmm_to_minutes(sch: str) -> Optional[int]:
     return None
 
 
-def flush_digests(conn, tok: Optional[str], *, dry_run: bool) -> int:
+def flush_digests(conn, tok: Optional[str], *, dry_run: bool,
+                  only_target_kind: Optional[str] = None,
+                  only_target_id: Optional[str] = None) -> int:
     now_kst = datetime.now(KST)
     cur_minutes = now_kst.hour * 60 + now_kst.minute
     kst_date = now_kst.strftime("%Y-%m-%d")
     sent = 0
     for target_id in db.pending_target_ids(conn):
+        if only_target_id and target_id != only_target_id:
+            continue
         rows = db.pending_for_target(conn, target_id)
         # target_id 의 schedule 별로 묶음. 한 사용자가 한 사이트당 한 구독이지만 여러 사이트(slug)별 schedule 가
         # 같다고 가정할 수 없음 — 그러나 (user, slug) 구독은 schedule 하나뿐이고, 같은 target_id 면 사용자도 같음.
@@ -299,7 +303,9 @@ def flush_digests(conn, tok: Optional[str], *, dry_run: bool) -> int:
 # heartbeat — "새 공지 없음" 알림 (notify_empty=1 인 realtime 구독)
 # --------------------------------------------------------------------------- #
 def send_heartbeats(conn, tok: Optional[str], collected_dir: Optional[Path],
-                    delivered_pairs: set[tuple[str, str]], *, dry_run: bool) -> int:
+                    delivered_pairs: set[tuple[str, str]], *, dry_run: bool,
+                    only_target_kind: Optional[str] = None,
+                    only_target_id: Optional[str] = None) -> int:
     """이번 폴링에서 그 slug 로 새로 알릴 글이 없었으면 notify_empty 구독에게 '새 공지 없음' 한 줄.
 
     delivered_pairs = 이번 run 에 realtime 발송이 일어난 (slug, target_id) 집합.
@@ -319,6 +325,9 @@ def send_heartbeats(conn, tok: Optional[str], collected_dir: Optional[Path],
     when = datetime.now(KST).strftime("%Y-%m-%d %H:%M")
     sent = 0
     for r in db.realtime_notify_empty_subs(conn):
+        if only_target_id and (r["target_id"] != only_target_id
+                               or (only_target_kind and r["target_kind"] != only_target_kind)):
+            continue
         slug = r["slug"]
         site = by_slug.get(slug)
         if not site or site.get("status") != "ok":
@@ -357,6 +366,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     p.add_argument("--heartbeat", action="store_true",
                    help="notify_empty=1 인 realtime 구독에 새 글 없으면 '새 공지 없음' 발송 (poll_and_notify 가 폴링 직후 켬)")
     p.add_argument("--dry-run", action="store_true", help="발송/DB 변경 없이 메시지만 출력")
+    # --only-target-* : dashboard /users 의 replay (M2/M3) 가 켬. 한 (target_kind, target_id) 외엔 구독 루프에서 skip.
+    # 둘 다 지정해야 활성(편의상 한쪽만 들어오면 효과 없음). digest flush·heartbeat 도 같은 필터 적용.
+    p.add_argument("--only-target-kind", choices=("dm", "channel"),
+                   help="이 target_kind 의 구독자에게만 발송 (replay 디버그). --only-target-id 와 함께 사용.")
+    p.add_argument("--only-target-id",
+                   help="이 target_id 의 구독자에게만 발송 (replay 디버그). --only-target-kind 와 함께 사용.")
     args = p.parse_args(argv)
 
     if args.no_collected:
@@ -387,7 +402,16 @@ def main(argv: Optional[list[str]] = None) -> int:
     try:
         for slug, posts in new_posts.items():
             subs = db.subscriptions_for_slug(conn, slug)
+            # --only-target-* (M2/M3 replay) 활성이면 그 (kind,id) 외 구독자 skip.
+            # 둘 다 지정해야 활성 — 한쪽만 들어오면 효과 없음.
+            if args.only_target_kind and args.only_target_id:
+                subs = [r for r in subs
+                        if r["target_kind"] == args.only_target_kind
+                        and r["target_id"] == args.only_target_id]
             webhook = targets.get(slug)
+            # only-target replay 중엔 webhook fallback 도 건너뜀 — replay 는 SQLite 구독자만 대상.
+            if args.only_target_kind and args.only_target_id:
+                webhook = None
             if not subs and not webhook:
                 continue
             # 한 번에 너무 많으면 앞쪽(최신) max_notify 개만; 나머지는 처리됨 처리
@@ -468,10 +492,14 @@ def main(argv: Optional[list[str]] = None) -> int:
                 print(f"  [warn] .notified 마커 생성 실패({collected}): {e}", file=sys.stderr)
         # --- 다이제스트 flush --- (digest_sent/hb_sent 는 try 밖에서 0 초기화됨)
         if not args.no_digest:
-            digest_sent = flush_digests(conn, tok, dry_run=dry_run)
+            digest_sent = flush_digests(conn, tok, dry_run=dry_run,
+                                        only_target_kind=args.only_target_kind,
+                                        only_target_id=args.only_target_id)
         # --- heartbeat ('새 공지 없음') ---
         if args.heartbeat:
-            hb_sent = send_heartbeats(conn, tok, collected, realtime_delivered, dry_run=dry_run)
+            hb_sent = send_heartbeats(conn, tok, collected, realtime_delivered, dry_run=dry_run,
+                                      only_target_kind=args.only_target_kind,
+                                      only_target_id=args.only_target_id)
     finally:
         save_delivered(delivered_path, delivered_file)
         conn.close()

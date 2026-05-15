@@ -160,4 +160,61 @@
 <p class="muted">이 페이지의 snapshot 정보는 read-only 입니다. 실제 N100 의 <code>.env</code>·서비스 상태는
 SSH 로 확인하세요 (<code>docs/운영 메모.md</code> §7 참고).</p>
 
+<h3 style="margin-top:1.5rem;">👥 Users 페이지 표시 컬럼</h3>
+<p class="muted" style="font-size:0.85rem;">
+  /users 목록의 컬럼 가시성. <strong>localStorage</strong> 만 사용 — 브라우저별 분리,
+  privacy 모드에선 유지 안 됨. /users 페이지 내 details 토글과 동일한 키(<code>dashboard.users.cols</code>).
+</p>
+<div id="user-col-toggles" style="display:flex;gap:0.5rem;flex-wrap:wrap;padding:0.4rem 0;">
+  {% for col, label in [
+    ('user_id','user_id'), ('username','username'), ('sources','sources'),
+    ('n_dm_subs','DM subs'), ('n_channel_subs','ch subs'), ('n_subs','total subs'),
+    ('n_feedback','feedback'), ('n_reports_open','open rep'), ('n_reports_total','total rep'),
+    ('first_seen','first seen'), ('last_active','last active'),
+    ('total_deliveries','total deliv'), ('last_delivery_at','last deliv at')
+  ] %}
+    <label style="font-size:0.85rem;">
+      <input type="checkbox" data-user-col="{{ col }}"> {{ label }}
+    </label>
+  {% endfor %}
+  <button type="button" id="user-col-reset" class="secondary outline" style="font-size:0.8rem;">기본값</button>
+</div>
+<script>
+(function () {
+  var KEY = 'dashboard.users.cols';
+  var DEFAULT = ['user_id','username','n_subs','last_active'];
+  function loadCols() {
+    try {
+      var raw = localStorage.getItem(KEY);
+      if (!raw) return DEFAULT.slice();
+      var arr = JSON.parse(raw);
+      return Array.isArray(arr) ? arr : DEFAULT.slice();
+    } catch (e) { return DEFAULT.slice(); }
+  }
+  function saveCols(arr) {
+    try { localStorage.setItem(KEY, JSON.stringify(arr)); } catch (e) {}
+  }
+  function syncUI(arr) {
+    var v = new Set(arr);
+    document.querySelectorAll('#user-col-toggles input[data-user-col]').forEach(function (cb) {
+      cb.checked = v.has(cb.getAttribute('data-user-col'));
+    });
+  }
+  syncUI(loadCols());
+  document.querySelectorAll('#user-col-toggles input[data-user-col]').forEach(function (cb) {
+    cb.addEventListener('change', function () {
+      var c = cb.getAttribute('data-user-col');
+      var cur = loadCols();
+      if (cb.checked && cur.indexOf(c) < 0) cur.push(c);
+      if (!cb.checked) cur = cur.filter(function (x) { return x !== c; });
+      saveCols(cur);
+    });
+  });
+  document.getElementById('user-col-reset').addEventListener('click', function () {
+    saveCols(DEFAULT.slice());
+    syncUI(DEFAULT);
+  });
+})();
+</script>
+
 {% endblock %}
