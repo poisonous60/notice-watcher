@@ -122,7 +122,10 @@ async def _process_job(client, conn, job, dm_owner) -> None:
             await edit_channel_message(client, job["ack_channel_id"], job["ack_message_id"],
                                        f"🔧 사이트 분석 중… — `{slug}`")
 
-        rc, tail = await asyncio.to_thread(blocking_register, url, article_url)
+        # reprobe 면 recognizer 우회 — 깨진 사이트를 같은 fast-path 로 무한 재진입하는 거 차단.
+        rc, tail = await asyncio.to_thread(
+            blocking_register, url, article_url, no_recognize=(kind == "reprobe"),
+        )
         ok = (rc == 0) and is_registered(slug)
         db.mark_job_finished(conn, job_id, ok=ok, rc=rc, tail=tail)
         log.info("잡 #%d 종료 — rc=%d ok=%s", job_id, rc, ok)

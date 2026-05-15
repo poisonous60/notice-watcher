@@ -221,8 +221,18 @@ def diagnose(conn: sqlite3.Connection, paths: InspectorPaths, *,
         findings.append(DiagnoseFinding("error", "breakage_signal",
                                         f"consecutive_breakage={cb} — 폴링이 연속해서 깨짐 신호 감지."))
 
+    # 3b) body_empty_drift — poll.py 가 K회 연속 모든 새 글 본문 0자 감지 시 state 에 박는 streak.
+    ok_state = (state or {}).get("ok") or {}
+    streak = ok_state.get("body_empty_streak")
+    if isinstance(streak, int) and streak >= 3:
+        first_at = ok_state.get("body_empty_drift_first_at") or "?"
+        findings.append(DiagnoseFinding(
+            "error", "body_empty_drift",
+            f"최근 {streak}회 연속 폴링에서 새 글 본문이 전부 0자 (first_at={first_at}) — "
+            f"등록 후 사이트가 등급제한/로그인월 추가됐을 가능성. 알림은 제목·URL 만 발송 중."))
+
     # 4) stale_poll — 마지막 폴링 24h 초과
-    lp = ((state or {}).get("ok") or {}).get("last_poll_at")
+    lp = ok_state.get("last_poll_at")
     if lp:
         try:
             t = datetime.fromisoformat(lp.replace("Z", "+00:00"))

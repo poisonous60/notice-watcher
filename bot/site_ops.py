@@ -104,18 +104,24 @@ def body_warning(slug: str) -> str:
 # --------------------------------------------------------------------------- #
 # register.py subprocess (chromium 락 안에서; 호출자는 워커 스레드에서 to_thread 로 부른다)
 # --------------------------------------------------------------------------- #
-def blocking_register(url: str, article_url: Optional[str] = None) -> tuple[int, str]:
+def blocking_register(url: str, article_url: Optional[str] = None,
+                      *, no_recognize: bool = False) -> tuple[int, str]:
     """register.py 를 chromium 락 안에서 실행. (rc, last_~4000 chars of stdout/stderr).
     timeout 들은 settings.chromium_lock 에서 (config.toml).
 
     부모 trace (worker 의 probe trace) 가 있으면 env 로 trace_id 를 register.py 에 전달 →
     register.py 의 inner spans 이 같은 trace_id 안에 append.
+
+    `no_recognize=True` 면 register.py 에 `--no-recognize` 전달 — recognizer 가 깨진 사이트를
+    같은 fast-path 로 다시 박는 무한 루프 방지용 (reprobe 시 worker 가 켬).
     """
     import os
     from engine.tracing import env_for_child
     cmd = [PY, "-u", str(REGISTER_PY), url]
     if article_url:
         cmd += ["--article-url", article_url]
+    if no_recognize:
+        cmd.append("--no-recognize")
     child_env = {**os.environ, **env_for_child()}
     try:
         with chromium_lock(timeout=settings.chromium_lock.bot_timeout):

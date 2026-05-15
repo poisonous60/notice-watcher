@@ -105,7 +105,9 @@ async def validate_built_config(
     digest: Optional[dict] = None,
     fetch_articles: int = 1,
     list_page_size: int = 30,
+    existing_posts: Optional[list[NoticePost]] = None,
 ) -> ValidationReport:
+    """existing_posts 주면 fetch_list 재호출 안 함 (caller 가 이미 받은 결과 재사용)."""
     rep = ValidationReport()
     try:
         adapter = make_adapter(cfg)
@@ -117,7 +119,10 @@ async def validate_built_config(
     posts: list[NoticePost] = []
     try:
         async with adapter as a:
-            posts = await a.fetch_list(page=1, page_size=list_page_size)
+            if existing_posts is not None:
+                posts = existing_posts
+            else:
+                posts = await a.fetch_list(page=1, page_size=list_page_size)
             rep.n_posts = len(posts)
             rep.all_post_ids = [str(p.post_id) for p in posts]
             rep.sample_posts = [p.to_dict() for p in posts[:5]]

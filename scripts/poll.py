@@ -146,13 +146,19 @@ async def _fetch_one(state: dict, *, page_size: int, max_new_articles: int, lurk
                                                        "n_new": len(new_posts),
                                                        "cap": max_new_articles}):
                     fetched: list[NoticePost] = []
+                    body_fetched = 0
+                    body_empty = 0
                     for i, p in enumerate(new_posts[:max_new_articles]):
                         if i > 0:
                             await a.polite_sleep()
                         with tr.span("body_fetch",
                                      attrs={"slug": slug, "post_id": str(p.post_id)}) as bsp:
                             try:
-                                fetched.append(await a.fetch_article(p))
+                                full = await a.fetch_article(p)
+                                fetched.append(full)
+                                body_fetched += 1
+                                if not (full.content_html or "").strip():
+                                    body_empty += 1
                             except Exception as e:
                                 bsp.set_attr("err_short", f"{type(e).__name__}")
                                 p2 = NoticePost(**{**p.to_dict(),
@@ -161,6 +167,8 @@ async def _fetch_one(state: dict, *, page_size: int, max_new_articles: int, lurk
                                 fetched.append(p2)
                     fetched.extend(new_posts[max_new_articles:])
                     out["new_posts"] = [p.to_dict() for p in fetched]
+                    out["body_fetched"] = body_fetched
+                    out["body_empty"] = body_empty
             out["status"] = "lurking" if lurking else "ok"
             out["_new_seen"] = _cap_seen(seen | cur_ids, keep=cur_ids)  # 호출 측이 state 에 반영
             return out
@@ -271,6 +279,26 @@ async def _process_site(st: dict, *, page_size: int, max_new_articles: int,
             if res["new_posts"]:
                 (run_dir / f"{slug}.new.json").write_text(
                     json.dumps(res["new_posts"], ensure_ascii=False, indent=2), encoding="utf-8")
+
+            # body drift 감지 — 새 글 본문 fetch 결과 전부 빈 것이 K회 연속이면
+            # 사이트가 등록 후 등급제한/로그인월 추가됐을 가능성. 직접 DM 못 부르니까
+            # state 에 streak 마커 + last_status 로 dashboard 가 surface.
+            body_fetched = int(res.get("body_fetched", 0))
+            body_empty = int(res.get("body_empty", 0))
+            if body_fetched > 0:
+                if body_empty == body_fetched:
+                    st["body_empty_streak"] = int(st.get("body_empty_streak", 0)) + 1
+                    lines.append(f"  ⚠ 본문 fetch {body_fetched}건 전부 0자 (streak {st['body_empty_streak']})")
+                else:
+                    st["body_empty_streak"] = 0
+                    st.pop("body_empty_drift_first_at", None)
+            # 새 글 없는 사이클(body_fetched=0)은 streak 갱신·리셋 X — 마지막 신호 보존.
+            # streak ≥ 3 이면 last_status 를 drift 로 유지 (line 269 의 "ok" override).
+            if int(st.get("body_empty_streak", 0)) >= 3:
+                st["last_status"] = "body_empty_drift"
+                if not st.get("body_empty_drift_first_at"):
+                    st["body_empty_drift_first_at"] = _now_iso()
+                lines.append("  → body_empty_drift — 등록 후 본문 비공개화 의심. dashboard /admin/triage 확인.")
 
     # 상태 파일 저장 (사이트별 독립 파일 — 동시성 안전).
     # _state_path 는 안 지움 — task 예외 핸들러도 같은 경로로 minimal write 가능하게.

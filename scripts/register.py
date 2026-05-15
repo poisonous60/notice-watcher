@@ -620,6 +620,22 @@ def _try_known_platform(url: str, slug: str, *, out: Optional[str], force: bool)
         print(f"[register] 알려진 플랫폼({name})으로 인식했지만 글 0건 — 잘못 인식한 듯, 일반 파이프라인으로 폴백.")
         return None
 
+    # 목록 일관성 검증 — recognizer 가 사이드바/광고/추천 영역을 우연히 N건 잡았을 때 silent 통과 방지.
+    # post_id 안정성/유니크/title 비어있지 않음/published_at ISO 만 검사 (본문은 _check_body_at_baseline 별도).
+    # digest=None → probe 교차검증(층위2) skip, fetch_articles=0 → 본문 fetch skip.
+    # existing_posts=posts → fetch_list 재호출 안 함 (rate-limit·중복 트래픽 회피).
+    from generate.validate import validate_built_config
+    try:
+        rep = asyncio.run(validate_built_config(cfg, digest=None, fetch_articles=0,
+                                                  existing_posts=posts))
+    except Exception as e:  # noqa: BLE001
+        print(f"[register] known({name}) 검증 중 예외 — 폴백: {type(e).__name__}: {e}")
+        return None
+    if not rep.ok:
+        fails = "; ".join(f"{c.name}({c.detail})" for c in rep.hard_failures())
+        print(f"[register] known({name}) 인식했지만 목록 검증 실패 — 폴백: {fails}")
+        return None
+
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     post_ids = [str(pp.post_id) for pp in posts]
