@@ -41,7 +41,8 @@ from probe.paths import output_dir, url_to_slug  # noqa: E402
 from engine.digest import build_digest  # noqa: E402
 from engine.recognizers import recognize as recognize_platform  # noqa: E402
 from engine.tracing import start_trace, current_trace, env_for_child  # noqa: E402
-from generate import generate_config_validated, GenerationError, default_model  # noqa: E402
+from generate import generate_config_validated, GenerationError  # noqa: E402
+from generate.routing import resolve as _resolve_route  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIGS_DIR = ROOT / "configs"
@@ -54,13 +55,17 @@ def _now_iso() -> str:
 
 def _run_probe(url: str, *, lite: bool) -> None:
     import os
+    print("[PHASE] probe", flush=True)
     print(f"[register] {'lite' if lite else 'full'} probe: {url}")
     cmd = [sys.executable, str(ROOT / "scripts" / "probe.py"), url, "--no-paid", "--no-crawl4ai"]
     if lite:
         cmd.append("--lite")
-    child_env = {**os.environ, **env_for_child()}
     tr = current_trace()
     with tr.span("probe_subprocess", attrs={"url": url, "lite": lite}):
+        # env_for_child 는 span enter *후* 호출 — _current_span_id 가 probe_subprocess 인 상태로 잡혀야
+        # probe.py 의 phase spans 가 probe_subprocess 자식으로 nested. 밖에서 잡으면 parent_span=""
+        # → phase 들이 형제로 떠 dashboard 에서 collapse 불가.
+        child_env = {**os.environ, **env_for_child()}
         rc = subprocess.call(cmd, env=child_env)
     if rc != 0:
         raise SystemExit(f"probe 실패 (rc={rc})")
@@ -640,6 +645,7 @@ def _try_known_platform(url: str, slug: str, *, out: Optional[str], force: bool)
     out_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     post_ids = [str(pp.post_id) for pp in posts]
     body_empty = _check_body_at_baseline(cfg, posts)
+    print("[PHASE] baseline", flush=True)
     sp = _save_state(slug, url, out_path, post_ids, body_empty_at_baseline=body_empty)
     print(f"[register] ✅ 등록 완료 (알려진 플랫폼: {name}) — baseline {len(post_ids)}건  config={out_path}  state={sp}")
     if body_empty is True:
@@ -724,6 +730,7 @@ def _main_inner(argv) -> int:
             if (args.article_url or "").strip():
                 print("[register] 알림: --article-url 은 알려진 플랫폼으로 인식되면 무시됩니다(probe 를 건너뛰므로). 인식 안 되면 아래 probe 경로에서 그대로 적용됨.")
             tr = current_trace()
+            print("[PHASE] recognize", flush=True)
             with tr.span("known_platform_try", attrs={"slug": slug, "url": url}) as sp:
                 rc = _try_known_platform(url, slug, out=args.out, force=args.force)
                 sp.set_attr("matched", rc is not None)
@@ -733,6 +740,7 @@ def _main_inner(argv) -> int:
         if not (args.reuse_probe and out_dir.exists() and (out_dir / "diagnosis.json").exists()):
             _run_probe(url, lite=not args.full_probe)
 
+    print("[PHASE] digest", flush=True)
     print(f"[register] digest 구성: slug={slug}")
     tr = current_trace()
     with tr.span("build_digest", attrs={"slug": slug}):
@@ -761,6 +769,7 @@ def _main_inner(argv) -> int:
     if article_url_hint and not article_url_hint.startswith(("http://", "https://")):
         print(f"[register] ⚠ --article-url 은 http(s):// URL 이어야 함 — 무시: {article_url_hint!r}")
         article_url_hint = None
+    print("[PHASE] preflight", flush=True)
     with current_trace().span("preflight",
                               attrs={"slug": slug,
                                      "article_url_hint": bool(article_url_hint),
@@ -781,10 +790,20 @@ def _main_inner(argv) -> int:
         print(f"[register] 주의: {out_path} 이미 존재 — 덮어쓰려면 --force. 새 결과는 {out_path}.new 로 저장.")
         out_path = out_path.with_suffix(out_path.suffix + ".new")
 
-    print(f"[register] gemini 생성+검증 (모델={args.model or default_model()}, 최대 {args.max_attempts}회):")
+    # 실제 호출은 client_for("config_generate"/"config_retry") → routing.json 거침.
+    # default_model() 은 routing 무시하고 GEMINI_MODEL env / hard-coded fallback 만 봐서 라벨 거짓말 — routing 거친 effective model 표시.
+    _eff_model_init = args.model or _resolve_route("config_generate").model
+    _eff_model_retry = args.model or _resolve_route("config_retry").model
+    if _eff_model_init == _eff_model_retry:
+        _model_label = _eff_model_init
+    else:
+        _model_label = f"{_eff_model_init} → {_eff_model_retry}"
+    print(f"[PHASE] generate max={args.max_attempts}", flush=True)
+    print(f"[register] gemini 생성+검증 (모델={_model_label}, 최대 {args.max_attempts}회):")
     gem_span_cm = current_trace().span("gemini_gen_validate",
                                         attrs={"slug": slug,
-                                               "model": args.model or default_model(),
+                                               "model_attempt1": _eff_model_init,
+                                               "model_retry": _eff_model_retry,
                                                "max_attempts": args.max_attempts})
     gem_span_cm.__enter__()
     _gem_closed = False
@@ -827,6 +846,7 @@ def _main_inner(argv) -> int:
         body_empty = all(v == 0 for v in bvals) if bvals else None
     else:
         body_empty = None
+    print("[PHASE] baseline", flush=True)
     state_path = _save_state(slug, url, out_path, rep.all_post_ids, body_empty_at_baseline=body_empty)
 
     print(f"\n[register] ✅ 등록 완료")
