@@ -16,7 +16,7 @@ config 는 "무엇을 어떻게 긁을지"만 정한다. polite delay / robots /
 ## config 최상위 키
 version(int, 1), site(str), board(str — url_template 의 {board} 로도 쓰임), strategy,
 headers(dict — digest 의 static_ok_request_headers / captured_headers 를 참고해 User-Agent 등 채움),
-timeout(number, 기본 15), polite_sleep({min,max} — robots crawl_delay 가 명시돼 있으면 그 값 이상으로; 없으면 생략),
+timeout(number, 기본 15), polite_sleep({min,max} — 자세한 결정은 §digest 읽는 법 의 robots.crawl_delay 항목 참고; 없으면 생략),
 list({...}), article({...}).
 
 ## list 키

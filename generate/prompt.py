@@ -18,10 +18,11 @@ _ROOT = Path(__file__).resolve().parent.parent
 _CONFIGS_DIR = _ROOT / "configs"
 
 # few-shot 으로 쓸 예제 config 들 (M1 에서 손으로 작성, 원본 어댑터와 결과 일치 검증됨).
+# ※ config rename/제거 시 갱신 필수 — _load_examples 가 missing file 발견 시 raise 함 (silent skip X).
 _EXAMPLE_CONFIG_FILES = [
-    "skku_cse_1582.json",      # httpx_html, concat, pick:first_matching, 페이지네이션 offset
-    "dcinside_endfield.json",  # httpx_html, fallback chain, template, attr+match, notice 처리, polite_sleep 하한
-    "endfield_official.json",  # httpx_json, list_path, success_when, unixtime_to_iso, article re_extract
+    "skku_cse_1582.json",                          # httpx_html, concat, pick:first_matching, 페이지네이션 offset
+    "dcinside_endfield.json",                      # httpx_html, fallback chain, template, attr+match, notice 처리, polite_sleep 하한
+    "host_web-news-gryphl_api_53675aad.json",      # httpx_json, list_path, success_when, unixtime_to_iso, article re_extract (구 endfield_official.json — commit 9de6977 slug schema rename)
 ]
 
 
@@ -38,11 +39,13 @@ def _load_examples() -> str:
     for fn in _EXAMPLE_CONFIG_FILES:
         p = _CONFIGS_DIR / fn
         if not p.exists():
-            continue
-        try:
-            cfg = json.loads(p.read_text(encoding="utf-8"))
-        except Exception:
-            continue
+            # silent skip 금지 — few-shot 누락은 LLM 한테 silent rot.
+            # rename/제거 됐으면 _EXAMPLE_CONFIG_FILES 갱신 필수.
+            raise FileNotFoundError(
+                f"few-shot config 누락: {p}. _EXAMPLE_CONFIG_FILES 갱신 필요 "
+                f"(config 가 rename/제거됐을 가능성)."
+            )
+        cfg = json.loads(p.read_text(encoding="utf-8"))
         blocks.append(f"### 예제: {cfg.get('site')} ({cfg.get('strategy')})\n```json\n{json.dumps(cfg, ensure_ascii=False, indent=2)}\n```")
     return "\n\n".join(blocks)
 
