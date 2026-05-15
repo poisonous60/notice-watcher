@@ -39,6 +39,13 @@ per_user_per_hour = 10       # 시간당 동일 사용자 register 잡 enqueue �
 per_user_per_day = 30        # 24h 동일 사용자 register 잡 enqueue 상한
 queue_depth_cap = 100        # 워커 큐 pending 잡 전역 상한 — 초과 시 새 enqueue reject (전 사용자 폭주 시 봇 자체 보호)
 
+[register]
+# scripts/register.py 가 LLM(gemini)으로 config 생성 시도할 횟수.
+# 한 번 실패당 입력+출력 토큰 한 round = 비용 발생. 4회 실패 시 .FAILED.json 로 떨어짐.
+# 줄이면 비용↓ 성공률↓, 늘리면 비용↑ 성공률↑(diminishing return — 보통 1~2회에 성공하거나 안 되거나).
+# CLI 의 --max-attempts 가 이 값을 override.
+max_attempts = 4
+
 [prune]
 # scripts/prune_probe.py (cron 으로 호출) 가 output/probe/<slug>/ 디스크 정리할 기준.
 # .FAILED.json 동반 + age 초과면 그 사이트 어차피 처리 안 됨 → 산출물 prune.

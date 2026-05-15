@@ -665,7 +665,10 @@ def _main_inner(argv) -> int:
     p.add_argument("--csv", nargs="?", const=str(ROOT / "output" / "registered_sites.csv"),
                    help="--list 와 함께: 사이트 목록을 CSV 로도 저장 (값 생략 시 output/registered_sites.csv)")
     p.add_argument("--out", help="config 저장 경로 (기본: configs/<slug>.json)")
-    p.add_argument("--max-attempts", type=int, default=4, help="gemini 생성+검증 시도 횟수 (한 라운드 안에서 검증 피드백 재시도)")
+    from bot.runtime_config import settings as _rt_settings
+    p.add_argument("--max-attempts", type=int, default=_rt_settings.register.max_attempts,
+                   help=f"gemini 생성+검증 시도 횟수 (한 라운드 안에서 검증 피드백 재시도). "
+                        f"기본값은 config.toml [register].max_attempts (현재 {_rt_settings.register.max_attempts}).")
     p.add_argument("--reuse-probe", action="store_true", help="probe 산출물 있으면 재사용")
     p.add_argument("--full-probe", action="store_true", help="lite 대신 처음부터 full probe (외부 Jina/Crawl4AI·유료 서비스까지 — 보통 불필요, 느림)")
     p.add_argument("--no-escalate", action="store_true",

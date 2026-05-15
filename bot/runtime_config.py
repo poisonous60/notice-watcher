@@ -75,6 +75,12 @@ class PruneSection:
 
 
 @dataclass
+class RegisterSection:
+    """`scripts/register.py` 의 LLM 생성+검증 라운드 동작."""
+    max_attempts: int = 4    # gemini 생성+검증 시도 횟수. CLI --max-attempts 가 override.
+
+
+@dataclass
 class Settings:
     poll: PollSection = field(default_factory=PollSection)
     worker: WorkerSection = field(default_factory=WorkerSection)
@@ -82,11 +88,12 @@ class Settings:
     notify: NotifySection = field(default_factory=NotifySection)
     rate_limit: RateLimitSection = field(default_factory=RateLimitSection)
     prune: PruneSection = field(default_factory=PruneSection)
+    register: RegisterSection = field(default_factory=RegisterSection)
     # 로딩 정보 — 디버깅용
     sources: list[str] = field(default_factory=list)
 
 
-_SECTIONS = ("poll", "worker", "chromium_lock", "notify", "rate_limit", "prune")
+_SECTIONS = ("poll", "worker", "chromium_lock", "notify", "rate_limit", "prune", "register")
 
 
 def _coerce(value: Any, annotation: Any) -> Any:
