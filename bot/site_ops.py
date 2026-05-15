@@ -69,15 +69,23 @@ def baseline_count(slug: str) -> Optional[int]:
 # --------------------------------------------------------------------------- #
 def blocking_register(url: str, article_url: Optional[str] = None) -> tuple[int, str]:
     """register.py 를 chromium 락 안에서 실행. (rc, last_~4000 chars of stdout/stderr).
-    timeout 들은 settings.chromium_lock 에서 (config.toml)."""
+    timeout 들은 settings.chromium_lock 에서 (config.toml).
+
+    부모 trace (worker 의 probe trace) 가 있으면 env 로 trace_id 를 register.py 에 전달 →
+    register.py 의 inner spans 이 같은 trace_id 안에 append.
+    """
+    import os
+    from engine.tracing import env_for_child
     cmd = [PY, "-u", str(REGISTER_PY), url]
     if article_url:
         cmd += ["--article-url", article_url]
+    child_env = {**os.environ, **env_for_child()}
     try:
         with chromium_lock(timeout=settings.chromium_lock.bot_timeout):
             proc = subprocess.Popen(cmd, cwd=str(ROOT),
                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                    text=True, errors="replace", bufsize=1)
+                                    text=True, errors="replace", bufsize=1,
+                                    env=child_env)
             timed_out = threading.Event()
 
             def _kill_on_timeout() -> None:

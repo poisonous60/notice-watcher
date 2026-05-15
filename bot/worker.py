@@ -74,13 +74,27 @@ async def _loop(client, conn, dm_owner: Callable[..., Awaitable[None]]) -> None:
 
 
 async def _process_job(client, conn, job, dm_owner) -> None:
+    import sys as _sys
+    from engine.tracing import start_trace
     job_id = int(job["id"])
     kind = job["kind"]
     url = job["url"]
     slug = job["slug"]
     article_url = job["article_url"]
     log.info("잡 #%d 시작 — kind=%s slug=%s url=%s", job_id, kind, slug, url)
+    # probe trace 시작 — register.py subprocess 가 env 로 trace_id 받아 inner spans 추가.
+    # job kind "register" → trace kind "probe", job kind "reprobe" → trace kind "probe_reprobe".
+    trace_kind = "probe_reprobe" if kind == "reprobe" else "probe"
+    trace_attrs = {
+        "job_id": job_id, "job_kind": kind, "slug": slug, "url": url,
+        "via": (job["via"] or ""),
+        "article_url": article_url or "",
+    }
+    trace_cm = start_trace(trace_kind, attrs=trace_attrs)
+    _job_exc: Optional[BaseException] = None
     try:
+        # __enter__ 는 try 안 — 만약 raise 하면 finally 가 안 부서지고 __exit__ skip.
+        trace_cm.__enter__()
         # 동시에 두 사용자가 같은 신규 사이트를 enqueue 한 경우 — 두 번째 잡은 register subprocess 스킵.
         if kind == "register" and is_registered(slug):
             log.info("잡 #%d 이미 등록된 사이트 — register subprocess 스킵", job_id)
@@ -119,6 +133,7 @@ async def _process_job(client, conn, job, dm_owner) -> None:
     except Exception as e:  # noqa: BLE001
         # 잡 처리 중 예상 못한 예외 — running 상태로 멈추지 않도록 failed 로 finalize.
         # mark_job_finished 가 status='running' 조건이라 이미 done/failed 인 잡은 안 건드림.
+        _job_exc = e
         log.exception("잡 #%d 처리 중 예외: %r", job_id, e)
         try:
             db.mark_job_finished(conn, job_id, ok=False, rc=-99, tail=f"worker exception: {e!r}")
@@ -129,6 +144,18 @@ async def _process_job(client, conn, job, dm_owner) -> None:
                 await edit_channel_message(
                     client, job["ack_channel_id"], job["ack_message_id"],
                     f"⚠️ 처리 중 예상치 못한 오류 — `{slug}`. 관리자에게 보고됨.")
+            except Exception:  # noqa: BLE001
+                pass
+    finally:
+        # except 가 swallow 한 예외 정보는 sys.exc_info() 에 없음 — 저장해둔 _job_exc 사용.
+        if _job_exc is not None:
+            try:
+                trace_cm.__exit__(type(_job_exc), _job_exc, _job_exc.__traceback__)
+            except Exception:  # noqa: BLE001
+                pass
+        else:
+            try:
+                trace_cm.__exit__(None, None, None)
             except Exception:  # noqa: BLE001
                 pass
 

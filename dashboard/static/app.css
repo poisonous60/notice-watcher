@@ -475,3 +475,184 @@ table.row-grid td.meta {
   font-size: 0.72rem;
   white-space: nowrap;
 }
+
+/* /timings — gantt span 색. fill 은 rect 에 적용 (CSS class 가 g 에 붙음). */
+.span-poll    rect { fill: #4c7cf0; }
+.span-notify  rect { fill: #2ea043; }
+.span-llm     rect { fill: #9c5cf0; }
+.span-probe   rect { fill: #f0883e; }
+.span-lock    rect { fill: #888888; }
+.span-subp    rect { fill: #6cb4ff; }
+.span-default rect { fill: #999999; }
+.span-err     rect { fill: #c0392b; }
+
+/* /timings detail — HTML 기반 gantt + floating tooltip. */
+.gantt-canvas .gantt-bar {
+  position: absolute;
+  height: 18px;
+  border-radius: 2px;
+  box-sizing: border-box;
+  border: 0.5px solid rgba(0,0,0,0.15);
+  overflow: hidden;
+  cursor: default;
+  transition: filter 0.08s;
+}
+.gantt-canvas .gantt-bar:hover {
+  filter: brightness(1.18);
+  outline: 1px solid rgba(0,0,0,0.4);
+  z-index: 5;
+}
+.gantt-canvas .gantt-label {
+  display: block;
+  color: #fff;
+  padding: 1px 4px;
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* span 색 — HTML div 용. fill 대신 background. */
+.gantt-bar.span-poll    { background: #4c7cf0; }
+.gantt-bar.span-notify  { background: #2ea043; }
+.gantt-bar.span-llm     { background: #9c5cf0; }
+.gantt-bar.span-probe   { background: #f0883e; }
+.gantt-bar.span-lock    { background: #888888; }
+.gantt-bar.span-subp    { background: #6cb4ff; }
+.gantt-bar.span-default { background: #999999; }
+.gantt-bar.span-err     { background: #c0392b; }
+
+/* Floating tooltip — single instance, JS positions it. */
+.gantt-tip {
+  position: fixed;
+  z-index: 9999;
+  pointer-events: none;
+  max-width: 32em;
+  background: #1a1a1a;
+  color: #f4f4f4;
+  border: 1px solid #444;
+  border-radius: 6px;
+  padding: 0.5rem 0.7rem;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+  transition: opacity 0.08s;
+  opacity: 1;
+}
+.gantt-tip[aria-hidden="true"] {
+  opacity: 0;
+  visibility: hidden;
+}
+.gantt-tip .muted { color: #9aa0a6; }
+.gantt-tip-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.3rem;
+  border-bottom: 1px solid #333;
+  padding-bottom: 0.25rem;
+}
+.gantt-tip-dur {
+  color: #ffd96a;
+  white-space: nowrap;
+}
+.gantt-tip-err {
+  color: #ff7062;
+  margin: 0.2rem 0;
+}
+.gantt-tip-attrs {
+  font-size: 11px;
+}
+
+/* /timings detail — 2-pane gantt: 좌 name 트리, 우 time bars. */
+.gantt-wrap {
+  display: flex;
+  border: 1px solid var(--pico-card-border-color, #ddd);
+  background: #fcfcfc;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+}
+.gantt-names {
+  position: relative;
+  flex: 0 0 280px;
+  background: #f4f5f7;
+  border-right: 1px solid #ddd;
+  overflow: hidden;
+}
+.gantt-name {
+  position: absolute;
+  left: 0; right: 0;
+  height: 18px;
+  line-height: 18px;
+  padding-right: 4px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  font-size: 11px;
+  color: #333;
+}
+.gantt-name-marker {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+.gantt-name-marker.span-poll    { background: #4c7cf0; }
+.gantt-name-marker.span-notify  { background: #2ea043; }
+.gantt-name-marker.span-llm     { background: #9c5cf0; }
+.gantt-name-marker.span-probe   { background: #f0883e; }
+.gantt-name-marker.span-lock    { background: #888888; }
+.gantt-name-marker.span-subp    { background: #6cb4ff; }
+.gantt-name-marker.span-default { background: #999999; }
+.gantt-name-marker.span-err     { background: #c0392b; }
+
+.gantt-time-wrap {
+  flex: 1 1 auto;
+  overflow-x: auto;
+}
+.gantt-canvas {
+  position: relative;
+}
+.gantt-tick {
+  position: absolute;
+  top: 0;
+  width: 1px;
+  background: #eee;
+}
+.gantt-tick-label {
+  position: absolute;
+  color: #777;
+}
+
+/* gantt collapse toggle. */
+.gantt-toggle {
+  display: inline-block;
+  width: 12px;
+  text-align: center;
+  cursor: pointer;
+  color: #555;
+  user-select: none;
+  font-size: 10px;
+}
+.gantt-toggle.gantt-toggle-leaf {
+  cursor: default;
+  color: transparent;
+}
+.gantt-toggle:hover:not(.gantt-toggle-leaf) {
+  color: #000;
+}
+
+/* /timings detail — bar 클릭 시 spans 표 row flash. */
+.gantt-canvas .gantt-bar { cursor: pointer; }
+@keyframes span-row-flash-anim {
+  0%   { background: #fff7a0; }
+  100% { background: transparent; }
+}
+#spans-table tr.span-row-flash > td {
+  animation: span-row-flash-anim 1.6s ease-out;
+}

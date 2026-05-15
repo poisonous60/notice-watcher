@@ -40,6 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from probe.paths import output_dir, url_to_slug  # noqa: E402
 from engine.digest import build_digest  # noqa: E402
 from engine.recognizers import recognize as recognize_platform  # noqa: E402
+from engine.tracing import start_trace, current_trace, env_for_child  # noqa: E402
 from generate import generate_config_validated, GenerationError, default_model  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -52,11 +53,15 @@ def _now_iso() -> str:
 
 
 def _run_probe(url: str, *, lite: bool) -> None:
+    import os
     print(f"[register] {'lite' if lite else 'full'} probe: {url}")
     cmd = [sys.executable, str(ROOT / "scripts" / "probe.py"), url, "--no-paid", "--no-crawl4ai"]
     if lite:
         cmd.append("--lite")
-    rc = subprocess.call(cmd)
+    child_env = {**os.environ, **env_for_child()}
+    tr = current_trace()
+    with tr.span("probe_subprocess", attrs={"url": url, "lite": lite}):
+        rc = subprocess.call(cmd, env=child_env)
     if rc != 0:
         raise SystemExit(f"probe 실패 (rc={rc})")
 
@@ -503,6 +508,13 @@ def _try_known_platform(url: str, slug: str, *, out: Optional[str], force: bool)
 
 
 def main(argv) -> int:
+    # parent process (bot worker) 가 env 로 trace_id 전달 → start_trace 가 같은 trace 안에서
+    # inner spans 추가. CLI 단독 호출이면 새 root trace 생성 (kind="probe").
+    with start_trace("probe", attrs={"cli_argv": " ".join(argv[:6])}):
+        return _main_inner(argv)
+
+
+def _main_inner(argv) -> int:
     p = argparse.ArgumentParser(description="사이트 등록 (URL → config + baseline). --list 로 등록 현황 조회.")
     p.add_argument("url", nargs="?", help="목록 URL")
     p.add_argument("--slug", help="이미 probe 한 slug (url 대신; 그땐 probe 안 돌림)")
@@ -563,7 +575,10 @@ def main(argv) -> int:
         if not args.no_recognize:
             if (args.article_url or "").strip():
                 print("[register] 알림: --article-url 은 알려진 플랫폼으로 인식되면 무시됩니다(probe 를 건너뛰므로). 인식 안 되면 아래 probe 경로에서 그대로 적용됨.")
-            rc = _try_known_platform(url, slug, out=args.out, force=args.force)
+            tr = current_trace()
+            with tr.span("known_platform_try", attrs={"slug": slug, "url": url}) as sp:
+                rc = _try_known_platform(url, slug, out=args.out, force=args.force)
+                sp.set_attr("matched", rc is not None)
             if rc is not None:
                 return rc
         out_dir = output_dir(slug)
@@ -571,7 +586,9 @@ def main(argv) -> int:
             _run_probe(url, lite=not args.full_probe)
 
     print(f"[register] digest 구성: slug={slug}")
-    digest = build_digest(slug=slug, url=url)
+    tr = current_trace()
+    with tr.span("build_digest", attrs={"slug": slug}):
+        digest = build_digest(slug=slug, url=url)
     url = url or digest.get("url") or ""
 
     ok_policy, msgs = _policy_check(digest, url)
@@ -588,16 +605,20 @@ def main(argv) -> int:
     if article_url_hint and not article_url_hint.startswith(("http://", "https://")):
         print(f"[register] ⚠ --article-url 은 http(s):// URL 이어야 함 — 무시: {article_url_hint!r}")
         article_url_hint = None
-    if article_url_hint:
-        print(f"[register] --article-url 힌트: {article_url_hint} — first_article_url 교정 + 그 글페이지 render+HAR re-probe")
-        _set_first_article_url(slug, article_url_hint)
-        n_api = _reprobe_article(slug, article_url_hint)
-        digest = build_digest(slug=slug, url=url)
-        hint = _article_hint_text(article_url_hint, n_api)
-        lh = _list_strategy_hint(digest)        # 목록이 JS-gated 면 httpx_json/playwright_html 전환 hint 도 함께
-        digest["escalation_hint"] = (hint + "\n\n" + lh) if lh else hint
-    else:
-        digest = _preflight(slug, url, digest, no_escalate=args.no_escalate)
+    with current_trace().span("preflight",
+                              attrs={"slug": slug,
+                                     "article_url_hint": bool(article_url_hint),
+                                     "no_escalate": bool(args.no_escalate)}):
+        if article_url_hint:
+            print(f"[register] --article-url 힌트: {article_url_hint} — first_article_url 교정 + 그 글페이지 render+HAR re-probe")
+            _set_first_article_url(slug, article_url_hint)
+            n_api = _reprobe_article(slug, article_url_hint)
+            digest = build_digest(slug=slug, url=url)
+            hint = _article_hint_text(article_url_hint, n_api)
+            lh = _list_strategy_hint(digest)        # 목록이 JS-gated 면 httpx_json/playwright_html 전환 hint 도 함께
+            digest["escalation_hint"] = (hint + "\n\n" + lh) if lh else hint
+        else:
+            digest = _preflight(slug, url, digest, no_escalate=args.no_escalate)
 
     out_path = Path(args.out) if args.out else (CONFIGS_DIR / f"{slug}.json")
     if out_path.exists() and not args.force:
@@ -605,6 +626,12 @@ def main(argv) -> int:
         out_path = out_path.with_suffix(out_path.suffix + ".new")
 
     print(f"[register] gemini 생성+검증 (모델={args.model or default_model()}, 최대 {args.max_attempts}회):")
+    gem_span_cm = current_trace().span("gemini_gen_validate",
+                                        attrs={"slug": slug,
+                                               "model": args.model or default_model(),
+                                               "max_attempts": args.max_attempts})
+    gem_span_cm.__enter__()
+    _gem_closed = False
     try:
         cfg, rep = _gen(digest, max_attempts=args.max_attempts, model=args.model)
     except GenerationError as e:
@@ -620,7 +647,20 @@ def main(argv) -> int:
         print("  → docs/config 자동생성 실패 케이스.md 에서 .FAILED.json 의 last_feedback([FAIL] <체크명>) 로 케이스 판별 → 보통 손작성 config(register.py --config)로 해결, 안 되면 손어댑터(docs/사이트 어댑터 추가 가이드.md).")
         print("  (probe 가 '첫 글'을 잘못 집은 게 의심되면: register.py \"<목록URL>\" --article-url \"<실제 글 하나 URL>\" 로 재시도.)")
         print(f"  마지막 실패 사유:\n{getattr(e, 'last_feedback', e)}")
+        try:
+            gem_span_cm.__exit__(type(e), e, e.__traceback__)
+            _gem_closed = True
+        except Exception:  # noqa: BLE001
+            _gem_closed = True
         return 1
+    finally:
+        # 아직 안 닫혔으면 — 정상 종료(exc=None) 또는 GenerationError 외의 예외 — 항상 닫는다.
+        if not _gem_closed:
+            exc_t, exc_v, exc_tb = sys.exc_info()
+            try:
+                gem_span_cm.__exit__(exc_t, exc_v, exc_tb)
+            except Exception:  # noqa: BLE001
+                pass
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

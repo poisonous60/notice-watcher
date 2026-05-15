@@ -47,6 +47,8 @@ _SLUG_RE = re.compile(r"^[A-Za-z0-9._%\-]{1,200}$")           # engine.slug 형�
 _TARGET_ID_RE = re.compile(r"^[0-9]{1,32}$")                    # Discord snowflake (현재 19자리, 미래 여유)
 _POST_ID_RE = re.compile(r"^[\w\-./:%]{1,128}$")               # poll.py 의 _STABLE_ID_RE 와 동일
 _BASE64_RE = re.compile(r"^[A-Za-z0-9+/=]{1,200000}$")         # base64 문자셋만; ≤200KB 페이로드
+_TRACE_ID_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")          # tracing.valid_trace_id 와 동일 — path-traversal 차단
+_TRACE_KIND_RE = re.compile(r"^[a-z0-9_]{1,32}$")
 _TARGET_KIND = ("dm", "channel")
 
 
@@ -96,8 +98,31 @@ READABLE: dict[str, str] = {
 }
 
 
+_TRACE_ENV_KEYS = ("TRACE_ENABLED", "TRACE_ID", "TRACE_KIND", "TRACE_PARENT_SPAN")
+_TRACE_ENV_VAL_RE = re.compile(r"^[A-Za-z0-9_\-]{0,64}$")  # injection 방지 — 값에도 영숫자만.
+
+
+def _trace_env_prefix() -> str:
+    """dev박스의 TRACE_* env 를 SSH command line 안 `export` 로 변환.
+
+    inline `KEY=VAL cmd1 && cmd2` 는 cmd2 까지 안 닿음 (chain 안의 새 process). 그래서
+    `export KEY=VAL; ...` 형태로 prepend 해 chain 전체에 적용. 값은 `_TRACE_ENV_VAL_RE`
+    통과 해야만 — 임의 문자 (`;rm -rf ~`) injection 차단.
+    """
+    parts: list[str] = []
+    for k in _TRACE_ENV_KEYS:
+        v = os.environ.get(k, "")
+        if not v:
+            continue
+        if not _TRACE_ENV_VAL_RE.match(v):
+            continue
+        parts.append(f"export {k}={v};")
+    return (" ".join(parts) + " ") if parts else ""
+
+
 def _ssh(remote_cmd: str) -> int:
-    p = subprocess.run(["ssh", DEPLOY_HOST, remote_cmd], capture_output=True, text=True, errors="replace")
+    full = _trace_env_prefix() + remote_cmd
+    p = subprocess.run(["ssh", DEPLOY_HOST, full], capture_output=True, text=True, errors="replace")
     if p.stdout:
         sys.stdout.write(p.stdout)
     if p.stderr:
@@ -184,6 +209,29 @@ def cmd_notify_target(slug: str, target_kind: str, target_id: str) -> int:
     ))
 
 
+def cmd_trace_index(kind: str) -> int:
+    """`output/traces/index.<kind>.jsonl` cat. kind allowlist 강제."""
+    _require(kind, _TRACE_KIND_RE, name="trace-kind")
+    # tail 으로 마지막 N 줄만 — index 가 커져도 cat 부담 X.
+    return _ssh(
+        f"tail -n 5000 {DEPLOY_PATH_RAW}/output/traces/index.{kind}.jsonl 2>/dev/null || true"
+    )
+
+
+def cmd_trace_index_all() -> int:
+    """모든 kind 의 index 를 합쳐 cat. 작은 박스라 cat 부담 X."""
+    return _ssh(
+        f"for f in {DEPLOY_PATH_RAW}/output/traces/index.*.jsonl; do "
+        f"[ -f \"$f\" ] && tail -n 5000 \"$f\"; done"
+    )
+
+
+def cmd_trace_fetch(trace_id: str) -> int:
+    """단일 trace 의 JSONL cat — path-traversal 차단을 위해 trace_id allowlist."""
+    _require(trace_id, _TRACE_ID_RE, name="trace-id")
+    return _ssh(f"cat {DEPLOY_PATH_RAW}/output/traces/{trace_id}.jsonl")
+
+
 def cmd_announce_scoped(b64: str) -> int:
     """base64-인코딩된 JSON 페이로드를 받아 N100 의 `scripts/announce.py --base64` 로 전달.
 
@@ -216,6 +264,9 @@ def list_actions() -> int:
     print("  replay-deliveries <slug> <kind> <id> [post]    M2/M3 replay (lock+직렬)")
     print("  notify-target <slug> <kind> <id>               collected → 그 target 만 발송")
     print("  announce-scoped <base64-json>                  좁힌 공지 발송")
+    print("  trace-index <kind>                             output/traces/index.<kind>.jsonl tail")
+    print("  trace-index-all                                모든 kind index 합본")
+    print("  trace-fetch <trace_id>                         output/traces/<trace_id>.jsonl cat")
     print()
     print(f"unit aliases: {', '.join(sorted(UNITS))}")
     print(f"read aliases: {', '.join(sorted(READABLE))}")
@@ -240,6 +291,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     sp = sub.add_parser("notify-target")
     sp.add_argument("slug"); sp.add_argument("target_kind"); sp.add_argument("target_id")
     sp = sub.add_parser("announce-scoped"); sp.add_argument("base64_payload")
+    sp = sub.add_parser("trace-index"); sp.add_argument("kind", help="poll|notify|notify_idle|probe ...")
+    sub.add_parser("trace-index-all")
+    sp = sub.add_parser("trace-fetch"); sp.add_argument("trace_id")
     args = p.parse_args(argv)
     if args.cmd == "list":
         return list_actions()
@@ -263,6 +317,12 @@ def main(argv: Optional[list[str]] = None) -> int:
         return cmd_notify_target(args.slug, args.target_kind, args.target_id)
     if args.cmd == "announce-scoped":
         return cmd_announce_scoped(args.base64_payload)
+    if args.cmd == "trace-index":
+        return cmd_trace_index(args.kind)
+    if args.cmd == "trace-index-all":
+        return cmd_trace_index_all()
+    if args.cmd == "trace-fetch":
+        return cmd_trace_fetch(args.trace_id)
     print(f"[remote] unknown cmd {args.cmd!r}", file=sys.stderr)
     return 4
 

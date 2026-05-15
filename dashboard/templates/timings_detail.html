@@ -1,0 +1,282 @@
+{% extends "base.html" %}
+{% block title %}⏱ trace {{ trace.trace_id }} — notice-watcher{% endblock %}
+{% block body %}
+
+<p style="margin-bottom:0.4rem;"><a href="/timings">← Timings</a></p>
+
+<h2 style="display:flex;align-items:center;gap:0.5rem;">
+  ⏱ <code class="mono">{{ trace.trace_id }}</code>
+  <small class="muted">— {{ trace.kind }}</small>
+</h2>
+<p class="muted" style="font-size:0.85rem;">
+  spans: {{ trace.spans | length }}  ·
+  start: <code>{{ start_str }}</code>  ·
+  duration: <code>{{ '%.3f'|format(gantt.duration_ms / 1000) }} s</code>
+  {% if trace.ok is sameas false %} · <span class="badge err">failed</span> {{ trace.err or '' }}{% endif %}
+</p>
+
+<details>
+  <summary>trace attrs</summary>
+  <pre style="font-size:0.8rem;background:#f7f7f7;padding:0.4rem 0.6rem;">{{ trace.attrs | tojson(indent=2) }}</pre>
+</details>
+
+<h3 style="margin-top:1rem;display:flex;gap:0.6rem;align-items:center;">
+  Gantt
+  <button type="button" class="secondary outline" id="gantt-expand-all"
+          style="font-size:0.8rem;padding:0.1rem 0.5rem;">모두 펴기</button>
+  <button type="button" class="secondary outline" id="gantt-collapse-all"
+          style="font-size:0.8rem;padding:0.1rem 0.5rem;">모두 접기</button>
+</h3>
+<div class="gantt-wrap" id="gantt-wrap" data-row-height="22">
+  {# 좌측: span 이름 트리 (depth indent + collapse triangle). 우측: 시간축 + bars. #}
+  <div class="gantt-names" id="gantt-names" style="height:{{ gantt.total_height + 24 }}px;">
+    {% for b in gantt.bars %}
+      <div class="gantt-name"
+           data-span-id="{{ b.span_id }}"
+           data-parent-id="{{ b.parent_id or '' }}"
+           data-depth="{{ b.depth }}"
+           data-children="{{ b.children_ids | join(',') }}"
+           style="top:{{ b.y + 2 }}px;padding-left:{{ b.depth * 14 + 6 }}px;">
+        {% if b.children_ids %}
+          <span class="gantt-toggle" data-collapsed="0" title="접기/펴기">▾</span>
+        {% else %}
+          <span class="gantt-toggle gantt-toggle-leaf"></span>
+        {% endif %}
+        <span class="gantt-name-marker {{ b.color_class }}"></span>{{ b.name }}
+      </div>
+    {% endfor %}
+  </div>
+  <div class="gantt-time-wrap">
+    <div class="gantt-canvas" id="gantt-canvas"
+         style="width:{{ gantt.total_width }}px;height:{{ gantt.total_height + 24 }}px;">
+      {% for t in gantt.ticks %}
+        <div class="gantt-tick"
+             style="left:{{ '%.1f'|format(t.x) }}px;bottom:24px;"></div>
+        <div class="gantt-tick-label"
+             style="left:{{ '%.1f'|format(t.x + 2) }}px;top:{{ gantt.total_height + 2 }}px;">
+          {{ t.label }}
+        </div>
+      {% endfor %}
+      {% for b in gantt.bars %}
+        <div class="gantt-bar {{ b.color_class }}"
+             data-span-id="{{ b.span_id }}"
+             style="left:{{ '%.1f'|format(b.x) }}px;top:{{ b.y + 2 }}px;width:{{ '%.1f'|format(b.width) }}px;"
+             data-name="{{ b.name }}"
+             data-duration="{{ b.duration_str }}"
+             data-ok="{{ '1' if b.ok else '0' }}"
+             data-depth="{{ b.depth }}"
+             {% if b.err %}data-err="{{ b.err }}"{% endif %}
+             data-attrs='{{ b.attrs | tojson }}'>
+          {% if b.width > 60 %}<span class="gantt-label">{{ b.name }}</span>{% endif %}
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  // collapse/expand 트리 — span_id 기준으로 name+bar 한 쌍씩 묶음.
+  var wrap = document.getElementById('gantt-wrap');
+  var namesEl = document.getElementById('gantt-names');
+  var canvas = document.getElementById('gantt-canvas');
+  if (!wrap || !namesEl || !canvas) return;
+  var ROW = parseInt(wrap.getAttribute('data-row-height'), 10) || 22;
+
+  // span_id → {name, bar, childrenIds[], parentId, collapsed}
+  var nodes = {};
+  var rootIds = [];
+  var nameEls = namesEl.querySelectorAll('.gantt-name');
+  for (var i = 0; i < nameEls.length; i++) {
+    var n = nameEls[i];
+    var id = n.getAttribute('data-span-id');
+    var kidsStr = n.getAttribute('data-children') || '';
+    nodes[id] = {
+      name: n,
+      bar: canvas.querySelector('.gantt-bar[data-span-id="' + id + '"]'),
+      children: kidsStr ? kidsStr.split(',') : [],
+      parent: n.getAttribute('data-parent-id') || '',
+      collapsed: false,
+    };
+  }
+  // root = parent 가 비어있거나 nodes 에 없는 것.
+  Object.keys(nodes).forEach(function (id) {
+    var p = nodes[id].parent;
+    if (!p || !nodes[p]) rootIds.push(id);
+  });
+
+  function relayout() {
+    var visible = [];
+    function walk(id) {
+      var node = nodes[id];
+      if (!node) return;
+      visible.push(id);
+      if (node.collapsed) return;
+      node.children.forEach(walk);
+    }
+    rootIds.forEach(walk);
+    // 모든 row 일단 hide → visible 만 보이게 + y 재할당.
+    Object.keys(nodes).forEach(function (id) {
+      nodes[id].name.style.display = 'none';
+      if (nodes[id].bar) nodes[id].bar.style.display = 'none';
+    });
+    visible.forEach(function (id, idx) {
+      var top = idx * ROW + 2;
+      var n = nodes[id];
+      n.name.style.display = '';
+      n.name.style.top = top + 'px';
+      if (n.bar) {
+        n.bar.style.display = '';
+        n.bar.style.top = top + 'px';
+      }
+    });
+    var newH = visible.length * ROW + 24;
+    namesEl.style.height = newH + 'px';
+    canvas.style.height = newH + 'px';
+  }
+
+  // 토글 클릭 → 그 노드의 collapsed flip.
+  namesEl.addEventListener('click', function (ev) {
+    var toggle = ev.target.closest('.gantt-toggle');
+    if (!toggle || toggle.classList.contains('gantt-toggle-leaf')) return;
+    var nameEl = toggle.closest('.gantt-name');
+    var id = nameEl && nameEl.getAttribute('data-span-id');
+    if (!id || !nodes[id]) return;
+    nodes[id].collapsed = !nodes[id].collapsed;
+    toggle.textContent = nodes[id].collapsed ? '▸' : '▾';
+    toggle.setAttribute('data-collapsed', nodes[id].collapsed ? '1' : '0');
+    relayout();
+  });
+
+  document.getElementById('gantt-expand-all').addEventListener('click', function () {
+    Object.keys(nodes).forEach(function (id) {
+      nodes[id].collapsed = false;
+      var t = nodes[id].name.querySelector('.gantt-toggle');
+      if (t && !t.classList.contains('gantt-toggle-leaf')) {
+        t.textContent = '▾';
+        t.setAttribute('data-collapsed', '0');
+      }
+    });
+    relayout();
+  });
+  document.getElementById('gantt-collapse-all').addEventListener('click', function () {
+    Object.keys(nodes).forEach(function (id) {
+      if (nodes[id].children.length > 0) {
+        nodes[id].collapsed = true;
+        var t = nodes[id].name.querySelector('.gantt-toggle');
+        if (t) {
+          t.textContent = '▸';
+          t.setAttribute('data-collapsed', '1');
+        }
+      }
+    });
+    relayout();
+  });
+})();
+</script>
+
+{# Floating tooltip — single instance, moved by JS on hover. #}
+<div id="gantt-tip" class="gantt-tip" role="tooltip" aria-hidden="true"></div>
+
+<script>
+(function () {
+  var canvas = document.getElementById('gantt-canvas');
+  var tip = document.getElementById('gantt-tip');
+  if (!canvas || !tip) return;
+
+  function fmtAttrs(attrsJson) {
+    var attrs;
+    try { attrs = JSON.parse(attrsJson || '{}'); } catch (e) { return ''; }
+    var lines = [];
+    Object.keys(attrs).forEach(function (k) {
+      var v = attrs[k];
+      var s = (typeof v === 'object') ? JSON.stringify(v) : String(v);
+      if (s.length > 80) s = s.slice(0, 77) + '…';
+      lines.push('<span class="muted">' + escapeHtml(k) + '</span> = ' + escapeHtml(s));
+    });
+    return lines.join('<br>');
+  }
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]);
+    });
+  }
+  function showTip(bar, ev) {
+    var name = bar.getAttribute('data-name') || '';
+    var dur = bar.getAttribute('data-duration') || '';
+    var ok = bar.getAttribute('data-ok') === '1';
+    var err = bar.getAttribute('data-err') || '';
+    var attrsHtml = fmtAttrs(bar.getAttribute('data-attrs'));
+    var html = '<div class="gantt-tip-head"><strong>' + escapeHtml(name) + '</strong>'
+             + ' <span class="gantt-tip-dur">' + escapeHtml(dur) + '</span></div>';
+    if (!ok) {
+      html += '<div class="gantt-tip-err">⚠ ' + escapeHtml(err || 'failed') + '</div>';
+    }
+    if (attrsHtml) html += '<div class="gantt-tip-attrs">' + attrsHtml + '</div>';
+    tip.innerHTML = html;
+    tip.setAttribute('aria-hidden', 'false');
+    positionTip(ev);
+  }
+  function hideTip() {
+    tip.setAttribute('aria-hidden', 'true');
+  }
+  function positionTip(ev) {
+    // 마우스 우하단 14px 떨어진 위치. 우/하 화면 끝 가까우면 반대편으로 flip.
+    var pad = 14;
+    var w = tip.offsetWidth, h = tip.offsetHeight;
+    var x = ev.clientX + pad;
+    var y = ev.clientY + pad;
+    if (x + w + 8 > window.innerWidth)  x = ev.clientX - pad - w;
+    if (y + h + 8 > window.innerHeight) y = ev.clientY - pad - h;
+    tip.style.left = Math.max(4, x) + 'px';
+    tip.style.top  = Math.max(4, y) + 'px';
+  }
+  canvas.addEventListener('mouseover', function (ev) {
+    var bar = ev.target.closest && ev.target.closest('.gantt-bar');
+    if (!bar) return;
+    showTip(bar, ev);
+  });
+  canvas.addEventListener('mousemove', function (ev) {
+    if (tip.getAttribute('aria-hidden') === 'false') positionTip(ev);
+  });
+  canvas.addEventListener('mouseout', function (ev) {
+    var to = ev.relatedTarget;
+    if (to && to.closest && to.closest('.gantt-bar')) return;  // bar 간 이동
+    hideTip();
+  });
+
+  // bar 클릭 → 아래 Spans 표의 해당 row 로 스크롤 + 잠깐 강조.
+  canvas.addEventListener('click', function (ev) {
+    var bar = ev.target.closest && ev.target.closest('.gantt-bar');
+    if (!bar) return;
+    var id = bar.getAttribute('data-span-id');
+    if (!id) return;
+    var row = document.getElementById('span-row-' + id);
+    if (!row) return;
+    row.scrollIntoView({behavior: 'smooth', block: 'center'});
+    row.classList.remove('span-row-flash');
+    // reflow trigger — 다시 같은 row 클릭해도 애니메이션 재실행.
+    void row.offsetWidth;
+    row.classList.add('span-row-flash');
+  });
+})();
+</script>
+
+<h3 style="margin-top:1rem;">Spans</h3>
+<table class="compact striped" id="spans-table">
+  <thead><tr><th>name</th><th>duration</th><th>ok</th><th>attrs</th></tr></thead>
+  <tbody>
+    {% for s in trace.spans %}
+    <tr id="span-row-{{ s.span_id }}">
+      <td class="mono">{{ s.name }}</td>
+      <td class="mono">{% if s.duration_ms is not none %}{{ '%.3f'|format(s.duration_ms / 1000) }} s{% else %}—{% endif %}</td>
+      <td>{% if s.ok %}●{% else %}<span style="color:#c00;">✗</span>{% endif %}</td>
+      <td class="muted" style="font-size:0.8rem;">
+        {% for k, v in s.attrs.items() %}<code>{{ k }}</code>=<code>{{ v }}</code>  {% endfor %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% endblock %}

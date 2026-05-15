@@ -41,7 +41,15 @@
               hx-post="/users/{{ user.user_id }}/poll-now-slug"
               hx-target="#user-action-result" hx-swap="innerHTML">
           <input type="hidden" name="slugs" value="{{ s.slug }}">
-          <button type="submit" class="secondary outline" title="M1 — 이 slug 즉시 polling">M1 poll</button>
+          <button type="submit" class="secondary outline" title="M1 — 이 slug 즉시 polling (전체 구독자)">M1 poll</button>
+        </form>
+        <form data-confirm="M1 단독: poll → 이 user 한 명에게만 발송. .notified 마커로 다른 구독자 자동 fan-out 차단. 진행?"
+              hx-post="/users/{{ user.user_id }}/m1-solo"
+              hx-target="#user-action-result" hx-swap="innerHTML">
+          <input type="hidden" name="slug" value="{{ s.slug }}">
+          <input type="hidden" name="target_kind" value="dm">
+          <input type="hidden" name="target_id" value="{{ s.target_id }}">
+          <button type="submit" class="secondary outline" title="M1 단독 — poll 후 이 user 만 발송">M1 단독</button>
         </form>
         <form data-confirm="M3 bulk: 이 (user,slug) deliveries 전부 삭제 + seen 통째 비움 + poll-now + only-target. → 이 user 만, 사이트 첫페이지의 모든 글 재발송됨. 진행?"
               hx-post="/users/{{ user.user_id }}/replay"
@@ -85,7 +93,15 @@
               hx-post="/users/{{ user.user_id }}/poll-now-slug"
               hx-target="#user-action-result" hx-swap="innerHTML">
           <input type="hidden" name="slugs" value="{{ s.slug }}">
-          <button type="submit" class="secondary outline" title="M1 — 이 slug 즉시 polling">M1 poll</button>
+          <button type="submit" class="secondary outline" title="M1 — 이 slug 즉시 polling (전체 구독자)">M1 poll</button>
+        </form>
+        <form data-confirm="M1 단독: poll → 이 채널 #{{ s.target_id }} 에만 발송. .notified 마커로 다른 채널/DM 차단. 진행?"
+              hx-post="/users/{{ user.user_id }}/m1-solo"
+              hx-target="#user-action-result" hx-swap="innerHTML">
+          <input type="hidden" name="slug" value="{{ s.slug }}">
+          <input type="hidden" name="target_kind" value="channel">
+          <input type="hidden" name="target_id" value="{{ s.target_id }}">
+          <button type="submit" class="secondary outline" title="M1 단독 — poll 후 이 채널만 발송">M1 단독</button>
         </form>
         <form data-confirm="⚠ 채널 #{{ s.target_id }} 전체에 첫페이지 모든 글 재발송됨 (user 격리 X). 진행?"
               hx-post="/users/{{ user.user_id }}/replay"

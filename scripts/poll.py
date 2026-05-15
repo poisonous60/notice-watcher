@@ -35,6 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from engine import load_config, make_adapter  # noqa: E402
 from engine.base_compat import NoticePost  # noqa: E402
+from engine.tracing import start_trace, current_trace  # noqa: E402
 from bot import db as bot_db  # noqa: E402
 from bot.runtime_config import settings  # noqa: E402
 
@@ -122,9 +123,12 @@ async def _fetch_one(state: dict, *, page_size: int, max_new_articles: int, lurk
 
     seen = set(state.get("seen_post_ids") or [])
     had_baseline = int(state.get("n_baseline", 0) or 0) > 0  # 등록 시점에 글이 있었나 — 0건 판정 기준
+    tr = current_trace()
     try:
         async with make_adapter(cfg) as a:
-            posts = await a.fetch_list(page=1, page_size=page_size)
+            with tr.span("fetch_list", attrs={"slug": slug, "page_size": page_size}) as sp:
+                posts = await a.fetch_list(page=1, page_size=page_size)
+                sp.set_attr("n_posts", len(posts))
             out["n_posts"] = len(posts)
             broken, why = _looks_broken(posts) if had_baseline else (False, "")
             if broken:
@@ -137,20 +141,26 @@ async def _fetch_one(state: dict, *, page_size: int, max_new_articles: int, lurk
             out["n_new"] = len(new_posts)
             # 구독자 0 (lurking) 이면 본문 fetch / collected 저장 / 알림 모두 건너뜀.
             # fetch_list 자체는 위에서 이미 했으니 seen 갱신 + 깨짐 판정·자가복구는 그대로 적용됨.
-            if not lurking:
-                # 새 글 본문 fetch (상한, polite_sleep)
-                fetched: list[NoticePost] = []
-                for i, p in enumerate(new_posts[:max_new_articles]):
-                    if i > 0:
-                        await a.polite_sleep()
-                    try:
-                        fetched.append(await a.fetch_article(p))
-                    except Exception as e:
-                        p2 = NoticePost(**{**p.to_dict(), "raw": {**(p.raw or {}), "fetch_error": f"{type(e).__name__}: {e}"}})
-                        fetched.append(p2)
-                # 상한 넘은 새 글은 본문 없이
-                fetched.extend(new_posts[max_new_articles:])
-                out["new_posts"] = [p.to_dict() for p in fetched]
+            if not lurking and new_posts:
+                with tr.span("body_fetch_all", attrs={"slug": slug,
+                                                       "n_new": len(new_posts),
+                                                       "cap": max_new_articles}):
+                    fetched: list[NoticePost] = []
+                    for i, p in enumerate(new_posts[:max_new_articles]):
+                        if i > 0:
+                            await a.polite_sleep()
+                        with tr.span("body_fetch",
+                                     attrs={"slug": slug, "post_id": str(p.post_id)}) as bsp:
+                            try:
+                                fetched.append(await a.fetch_article(p))
+                            except Exception as e:
+                                bsp.set_attr("err_short", f"{type(e).__name__}")
+                                p2 = NoticePost(**{**p.to_dict(),
+                                                   "raw": {**(p.raw or {}),
+                                                           "fetch_error": f"{type(e).__name__}: {e}"}})
+                                fetched.append(p2)
+                    fetched.extend(new_posts[max_new_articles:])
+                    out["new_posts"] = [p.to_dict() for p in fetched]
             out["status"] = "lurking" if lurking else "ok"
             out["_new_seen"] = _cap_seen(seen | cur_ids, keep=cur_ids)  # 호출 측이 state 에 반영
             return out
@@ -218,8 +228,16 @@ async def _process_site(st: dict, *, page_size: int, max_new_articles: int,
         f"=== {slug} ===  {st.get('url')} [{tag or '?'}{' (chromium)' if chromium else ''}]"
         + ("  [lurking — 구독자 0]" if lurking else "")
     ]
-    async with sem:
-        res = await _fetch_one(st, page_size=page_size, max_new_articles=max_new_articles, lurking=lurking)
+    tr = current_trace()
+    with tr.span("poll.site", attrs={"slug": slug, "strategy": strategy,
+                                       "adapter": adapter, "chromium": chromium,
+                                       "lurking": lurking}) as ssp:
+        async with sem:
+            res = await _fetch_one(st, page_size=page_size,
+                                    max_new_articles=max_new_articles, lurking=lurking)
+        ssp.set_attr("n_posts", res.get("n_posts", 0))
+        ssp.set_attr("n_new", res.get("n_new", 0))
+        ssp.set_attr("broken", bool(res.get("broken")))
     st["last_poll_at"] = _now_iso()
 
     if res["broken"]:
@@ -268,6 +286,17 @@ async def _process_site(st: dict, *, page_size: int, max_new_articles: int,
 
 
 async def run(args) -> int:
+    trace_attrs = {
+        "sites_filter": args.sites or "(all)",
+        "page_size": args.page_size,
+        "max_new_articles": args.max_new_articles,
+        "all_lurking_off": bool(args.all),
+    }
+    with start_trace("poll", attrs=trace_attrs) as tr:  # noqa: F841 (contextvar 설정용)
+        return await _run_inner(args)
+
+
+async def _run_inner(args) -> int:
     states = _load_states(set(args.sites) if args.sites else None)
     if not states:
         print(f"등록된 사이트 없음 ({STATE_DIR}). 먼저 `python scripts/register.py \"<URL>\"`.")

@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}⏱ Timings — notice-watcher{% endblock %}
+{% block body %}
+
+<h2>⏱ Timings</h2>
+<p class="muted" style="font-size:0.85rem;">
+  N100 의 <code>output/traces/index.&lt;kind&gt;.jsonl</code> 을 SSH 로 가져와 표시. 행 클릭 → gantt 상세.
+  <code>TRACE_ENABLED=1</code> 환경변수가 N100 systemd 유닛에 있어야 trace 가 쌓입니다.
+</p>
+
+{% if not ok %}
+<article style="border-left:3px solid #c00;padding:0.5rem 0.8rem;">
+  <strong>index 가져오기 실패</strong>
+  <pre style="white-space:pre-wrap;font-size:0.85rem;">{{ err or '(stderr 없음)' }}</pre>
+</article>
+{% endif %}
+
+<form method="get" action="/timings" style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:end;margin:0.5rem 0;">
+  <label style="display:flex;flex-direction:column;font-size:0.85rem;">
+    kind
+    <select name="kind">
+      <option value="" {% if not selected_kind %}selected{% endif %}>(모두)</option>
+      {% for k in known_kinds %}
+        <option value="{{ k }}" {% if k == selected_kind %}selected{% endif %}>{{ k }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label style="display:flex;flex-direction:column;font-size:0.85rem;">
+    slug/attr 검색
+    <input type="text" name="q" value="{{ q or '' }}" placeholder="cse-skku..." style="min-width:14em;">
+  </label>
+  <label style="display:flex;align-items:center;gap:0.3rem;font-size:0.85rem;">
+    <input type="checkbox" name="failed" value="1" {% if only_failed %}checked{% endif %}> failed only
+  </label>
+  <label style="display:flex;align-items:center;gap:0.3rem;font-size:0.85rem;">
+    <input type="checkbox" name="idle" value="1" {% if include_idle %}checked{% endif %}> notify_idle 포함
+  </label>
+  <label style="display:flex;flex-direction:column;font-size:0.85rem;">
+    limit
+    <input type="number" name="limit" value="{{ limit }}" min="10" max="500" style="width:5em;">
+  </label>
+  <button type="submit">적용</button>
+</form>
+
+{% if entries %}
+<table class="compact striped">
+  <thead><tr>
+    <th>ok</th><th>kind</th><th>started</th><th>duration</th><th>spans</th><th>attrs</th><th>trace_id</th>
+  </tr></thead>
+  <tbody>
+    {% for e in entries %}
+    <tr>
+      <td>
+        {% if not e.ended %}<span class="badge warn">running</span>
+        {% elif e.ok is none %}<span class="badge">?</span>
+        {% elif e.ok %}<span class="badge ok">●</span>
+        {% else %}<span class="badge err">✗</span>{% endif %}
+      </td>
+      <td class="mono">{{ e.kind }}</td>
+      <td class="muted" style="font-size:0.8rem;">{{ e.t_start_str }}</td>
+      <td class="mono">{% if e.duration_ms is not none %}{{ '%.2f'|format(e.duration_ms / 1000) }} s{% else %}—{% endif %}</td>
+      <td class="mono">{{ e.n_spans or '—' }}</td>
+      <td class="muted" style="font-size:0.8rem;max-width:30em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+        {{ e.attrs_short }}
+      </td>
+      <td class="mono"><a href="/timings/{{ e.trace_id }}">{{ e.trace_id }}</a></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% elif ok %}
+<p class="muted">표시할 trace 가 없습니다. 필터를 풀어보세요.</p>
+{% endif %}
+
+{% endblock %}

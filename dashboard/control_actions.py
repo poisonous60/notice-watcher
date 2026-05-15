@@ -107,6 +107,30 @@ async def users_notify_target(slug: str, target_kind: str, target_id: str) -> di
     return res
 
 
+async def users_m1_solo(slug: str, target_kind: str, target_id: str) -> dict:
+    """M1 단독 — `poll-now-slug` 한 뒤 곧바로 `notify-target` 으로 그 target 만 발송.
+
+    poll → collected/<ts>/<slug>.new.json → notify-target 이 처리 후 `.notified` 마커 작성 →
+    이후 notice-poll.timer / notice-notify.timer tick 에서 같은 dir 재처리 안 됨 → 다른
+    구독자 자동 fan-out 차단. poll 실패 시 notify 단계 skip.
+    """
+    r1 = await run_remote("poll-now-slug", slug)
+    audit("users.m1_solo.poll", ok=r1["ok"], detail={"slug": slug, "rc": r1["rc"]})
+    if not r1["ok"]:
+        return r1
+    r2 = await run_remote("notify-target", slug, target_kind, target_id)
+    audit("users.m1_solo.notify", ok=r2["ok"],
+          detail={"slug": slug, "kind": target_kind, "id": target_id, "rc": r2["rc"]})
+    combined = {
+        "ok": r2["ok"],
+        "rc": r2["rc"],
+        "output": (r1.get("output") or "")
+                  + "\n--- notify-target ---\n"
+                  + (r2.get("output") or ""),
+    }
+    return combined
+
+
 async def users_announce(title: str, message: str, sent_by: str,
                          recipients: list[tuple[str, str]]) -> dict:
     """Scoped announce — title/message/recipients 를 JSON 으로 직렬화→base64→N100 announce.py 에 전달.

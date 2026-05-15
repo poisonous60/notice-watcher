@@ -45,6 +45,7 @@ from bot import db  # noqa: E402
 from bot.config import bot_token  # noqa: E402
 from bot.discord_rest import deliver, post_webhook, CannotDeliver, DiscordRestError  # noqa: E402
 from bot.runtime_config import settings  # noqa: E402
+from engine.tracing import start_trace, current_trace  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 COLLECTED_DIR = ROOT / "output" / "collected"
@@ -143,15 +144,22 @@ def summarize_post(client: GeminiClient, post: dict, *, slug: Optional[str] = No
     if len(body) < 30:
         return body or title or "(내용 없음)"
     user_text = render_prompt("notify_summary.user", title=title, body=body)
-    try:
-        resp = client.generate(system_instruction=SUMMARY_SYSTEM, user_text=user_text,
-                               temperature=0.3, json_mode=False,
-                               call_site="notify_summarize", slug=slug)
-        s = resp.text.strip()
-        return s or (body[:400] + ("…" if len(body) > 400 else ""))
-    except LLMError as e:
-        print(f"  [warn] Gemini 요약 실패({post.get('post_id')}), 본문 발췌로 폴백: {e}", file=sys.stderr)
-        return body[:400] + ("…" if len(body) > 400 else "")
+    tr = current_trace()
+    with tr.span("summarize_gemini",
+                 attrs={"slug": slug, "post_id": str(post.get("post_id")),
+                        "body_chars": len(body)}) as sp:
+        try:
+            resp = client.generate(system_instruction=SUMMARY_SYSTEM, user_text=user_text,
+                                   temperature=0.3, json_mode=False,
+                                   call_site="notify_summarize", slug=slug)
+            sp.set_attr("model", getattr(resp, "model", None))
+            s = resp.text.strip()
+            return s or (body[:400] + ("…" if len(body) > 400 else ""))
+        except LLMError as e:
+            sp.set_attr("fallback", "body_excerpt")
+            sp.set_attr("err_short", type(e).__name__)
+            print(f"  [warn] Gemini 요약 실패({post.get('post_id')}), 본문 발췌로 폴백: {e}", file=sys.stderr)
+            return body[:400] + ("…" if len(body) > 400 else "")
 
 
 def filter_pass(client: GeminiClient, filter_prompt: str, post: dict, summary: str,
@@ -160,15 +168,23 @@ def filter_pass(client: GeminiClient, filter_prompt: str, post: dict, summary: s
     cat = post.get("category") or ""
     user_text = render_prompt("notify_filter.user", filter_prompt=filter_prompt,
                               title=title, category=cat, summary=summary)
-    try:
-        resp = client.generate(system_instruction=FILTER_SYSTEM, user_text=user_text,
-                               temperature=0.0, json_mode=True,
-                               call_site="notify_filter", slug=slug)
-        res = parse_json(resp.text)
-        return bool(res.get("include", True)) if isinstance(res, dict) else True
-    except (LLMError, Exception) as e:  # noqa: BLE001
-        print(f"  [warn] 필터 판단 실패({post.get('post_id')}) → 통과시킴: {e}", file=sys.stderr)
-        return True  # fail-open
+    tr = current_trace()
+    with tr.span("filter_gemini",
+                 attrs={"slug": slug, "post_id": str(post.get("post_id"))}) as sp:
+        try:
+            resp = client.generate(system_instruction=FILTER_SYSTEM, user_text=user_text,
+                                   temperature=0.0, json_mode=True,
+                                   call_site="notify_filter", slug=slug)
+            sp.set_attr("model", getattr(resp, "model", None))
+            res = parse_json(resp.text)
+            passed = bool(res.get("include", True)) if isinstance(res, dict) else True
+            sp.set_attr("passed", passed)
+            return passed
+        except (LLMError, Exception) as e:  # noqa: BLE001
+            sp.set_attr("err_short", type(e).__name__)
+            sp.set_attr("fallback", "pass_through")
+            print(f"  [warn] 필터 판단 실패({post.get('post_id')}) → 통과시킴: {e}", file=sys.stderr)
+            return True  # fail-open
 
 
 def format_message(post: dict, summary: str) -> str:
@@ -399,6 +415,19 @@ def main(argv: Optional[list[str]] = None) -> int:
     digest_sent = 0
     hb_sent = 0
     realtime_delivered: set[tuple[str, str]] = set()  # 이번 run 에 realtime 발송을 시도한 (slug, target_id) — 성공/실패 무관(새 글이 있었다는 뜻)
+    # 새 글 0건 + digest/heartbeat 도 비활성이면 'idle' run — 빈 trace 가 /timings 를 도배하지 않게
+    # kind 분리. dashboard 가 기본 hide.
+    idle = not new_posts and (args.no_collected or args.no_digest) and not args.heartbeat
+    trace_kind = "notify_idle" if idle else "notify"
+    trace_attrs = {
+        "n_slugs": len(new_posts), "no_digest": bool(args.no_digest),
+        "no_collected": bool(args.no_collected), "heartbeat": bool(args.heartbeat),
+        "dry_run": bool(dry_run),
+        "only_target_kind": args.only_target_kind or "",
+        "only_target_id": args.only_target_id or "",
+    }
+    trace_cm = start_trace(trace_kind, attrs=trace_attrs)
+    trace_cm.__enter__()  # try 밖에서 — __enter__ 실패 시 __exit__ 호출 안 함.
     try:
         for slug, posts in new_posts.items():
             subs = db.subscriptions_for_slug(conn, slug)
@@ -473,16 +502,25 @@ def main(argv: Optional[list[str]] = None) -> int:
                         print(f"    ✗ {pid}: BOT_TOKEN 없음 — 발송 불가", file=sys.stderr)
                         continue
                     realtime_delivered.add((slug, target_id))  # 새 글이 있었음 → heartbeat('새 공지 없음') 안 보냄 (발송 성공/실패 무관)
-                    try:
-                        deliver(tok, target_kind=target_kind, target_id=target_id, content=content)
-                        db.mark_delivered(conn, slug, pid, target_id)
-                        realtime_sent += 1
-                        print(f"    ✅ {target_kind}:{target_id} {pid}  {(post.get('title') or '')[:40]}")
-                        time.sleep(0.6)
-                    except CannotDeliver as e:
-                        print(f"    ✗ {pid} {target_kind}:{target_id} 발송 불가: {e}", file=sys.stderr)
-                    except DiscordRestError as e:
-                        print(f"    ✗ {pid} {target_kind}:{target_id} 발송 실패: {e}", file=sys.stderr)
+                    with current_trace().span("discord_deliver",
+                                              attrs={"slug": slug, "post_id": pid,
+                                                     "target_kind": target_kind,
+                                                     "target_id": target_id}) as dsp:
+                        try:
+                            deliver(tok, target_kind=target_kind, target_id=target_id, content=content)
+                            db.mark_delivered(conn, slug, pid, target_id)
+                            realtime_sent += 1
+                            dsp.set_attr("ok", True)
+                            print(f"    ✅ {target_kind}:{target_id} {pid}  {(post.get('title') or '')[:40]}")
+                            time.sleep(0.6)
+                        except CannotDeliver as e:
+                            dsp.set_attr("ok", False)
+                            dsp.set_attr("err_short", "CannotDeliver")
+                            print(f"    ✗ {pid} {target_kind}:{target_id} 발송 불가: {e}", file=sys.stderr)
+                        except DiscordRestError as e:
+                            dsp.set_attr("ok", False)
+                            dsp.set_attr("err_short", "DiscordRestError")
+                            print(f"    ✗ {pid} {target_kind}:{target_id} 발송 실패: {e}", file=sys.stderr)
         # collected 처리 끝 — 마킹 (이후 notify-timer 호출에서 같은 dir 재처리 안 함; 새 글 0건이어도 마킹해야
         # heartbeat/Gemini 가 다음 timer 슬랏마다 같은 dir 로 반복 안 됨).
         if collected and not dry_run:
@@ -503,6 +541,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     finally:
         save_delivered(delivered_path, delivered_file)
         conn.close()
+        # 예외 정보 보존 — exc_info 가 (None,None,None) 이면 정상 종료.
+        try:
+            trace_cm.__exit__(*sys.exc_info())
+        except Exception:  # noqa: BLE001
+            pass
     print(f"[notify] 완료 — realtime {realtime_sent}건"
           + (f", digest {digest_sent}건" if not args.no_digest else "")
           + (f", heartbeat {hb_sent}건" if args.heartbeat else "")

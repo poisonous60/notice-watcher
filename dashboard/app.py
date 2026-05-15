@@ -23,6 +23,7 @@ from dashboard import prompts, state
 from dashboard import usage_view
 from dashboard import user_view
 from dashboard import control_actions as ctrl
+from dashboard import tracing_view
 
 HERE = Path(__file__).resolve().parent
 # autoescape 명시: Starlette/FastAPI 버전에 따라 default 가 바뀔 수 있어 직접 Environment 주입.
@@ -371,6 +372,23 @@ async def users_action_notify_target(request: Request,
                     title=f"notify-target({slug},{target_kind}:{target_id})")
 
 
+@app.post("/users/{user_id}/m1-solo", response_class=HTMLResponse)
+async def users_action_m1_solo(request: Request,
+                               user_id: str = Depends(require_user_id),  # noqa: ARG001
+                               slug: str = Form(...),
+                               target_kind: str = Form(...),
+                               target_id: str = Form(...)):
+    if not state.safe_slug(slug):
+        raise HTTPException(status_code=400, detail="invalid slug")
+    if target_kind not in ("dm", "channel"):
+        raise HTTPException(status_code=400, detail="invalid target_kind")
+    if not _USER_ID_RE.match(target_id or ""):
+        raise HTTPException(status_code=400, detail="invalid target_id")
+    res = await ctrl.users_m1_solo(slug, target_kind, target_id)
+    return _partial("_control_result.html", request, res=res,
+                    title=f"m1-solo({slug},{target_kind}:{target_id})")
+
+
 _ANN_TITLE_MAX = 200
 _ANN_MSG_MAX = 1900
 
@@ -445,6 +463,79 @@ async def users_announce_resolve_slugs(request: Request,
             seen.add(key)
             out.append([r["target_kind"], r["target_id"]])
     return HTMLResponse(json.dumps(out), media_type="application/json")
+
+
+# --------------------------------------------------------------------------- #
+# Timings — workflow trace gantt
+# --------------------------------------------------------------------------- #
+from datetime import datetime as _dt
+
+
+def _ts_str(t: float) -> str:
+    try:
+        return _dt.fromtimestamp(float(t)).strftime("%Y-%m-%d %H:%M:%S")
+    except (TypeError, ValueError, OSError):
+        return "—"
+
+
+def _attrs_short(attrs: dict) -> str:
+    if not attrs:
+        return ""
+    parts = []
+    for k, v in attrs.items():
+        s = str(v)
+        if len(s) > 40:
+            s = s[:37] + "…"
+        parts.append(f"{k}={s}")
+        if sum(len(p) for p in parts) > 140:
+            break
+    return "  ".join(parts)
+
+
+@app.get("/timings", response_class=HTMLResponse)
+async def timings_index(request: Request,
+                        kind: Optional[str] = Query(None),
+                        q: Optional[str] = Query(None),
+                        failed: Optional[str] = Query(None),
+                        idle: Optional[str] = Query(None),
+                        limit: int = Query(100, ge=10, le=500)):
+    ok, entries, err = await tracing_view.fetch_index_all()
+    selected_kinds = {kind} if kind else None
+    entries = tracing_view.filter_sort_entries(
+        entries, kinds=selected_kinds, only_failed=bool(failed),
+        include_idle=bool(idle), slug_q=q, limit=limit,
+    )
+    # 표시용 변환.
+    rows = []
+    for e in entries:
+        rows.append({
+            "trace_id": e.trace_id, "kind": e.kind, "attrs": e.attrs,
+            "t_start_str": _ts_str(e.t_start_wall),
+            "duration_ms": e.duration_ms, "n_spans": e.n_spans,
+            "ok": e.ok, "ended": e.ended,
+            "attrs_short": _attrs_short(e.attrs),
+        })
+    return _render("timings.html", request,
+                   active="timings", entries=rows, ok=ok, err=err,
+                   known_kinds=tracing_view.KNOWN_KINDS,
+                   selected_kind=kind or "", q=q or "",
+                   only_failed=bool(failed), include_idle=bool(idle),
+                   limit=limit)
+
+
+@app.get("/timings/{trace_id}", response_class=HTMLResponse)
+async def timings_detail(request: Request, trace_id: str):
+    # path-traversal 방어 — engine.tracing.valid_trace_id 와 일치.
+    from engine.tracing import valid_trace_id as _vti
+    if not _vti(trace_id):
+        raise HTTPException(status_code=404, detail="invalid trace_id")
+    detail = await tracing_view.load_trace_detail(trace_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="trace not found")
+    gantt = tracing_view.build_gantt(detail)
+    return _render("timings_detail.html", request,
+                   active="timings", trace=detail, gantt=gantt,
+                   start_str=_ts_str(detail.t_start_wall))
 
 
 # --------------------------------------------------------------------------- #
