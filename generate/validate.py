@@ -16,6 +16,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from engine import make_adapter, NoticePost
+from engine.tracing import current_trace
 
 
 _STABLE_ID_RE = re.compile(r"^[\w\-./:%]{1,64}$")  # 공백 없는 정수/문자열 ID. 'title with spaces' 같은 실수 차단.
@@ -109,8 +110,10 @@ async def validate_built_config(
 ) -> ValidationReport:
     """existing_posts 주면 fetch_list 재호출 안 함 (caller 가 이미 받은 결과 재사용)."""
     rep = ValidationReport()
+    tr = current_trace()
     try:
-        adapter = make_adapter(cfg)
+        with tr.span("validate_build_adapter", attrs={"strategy": cfg.get("strategy")}):
+            adapter = make_adapter(cfg)
     except Exception as e:
         rep.error = f"make_adapter 실패: {type(e).__name__}: {e}"
         rep.add("build_adapter", False, hard=True, detail=rep.error)
@@ -122,7 +125,8 @@ async def validate_built_config(
             if existing_posts is not None:
                 posts = existing_posts
             else:
-                posts = await a.fetch_list(page=1, page_size=list_page_size)
+                with tr.span("validate_fetch_list", attrs={"page_size": list_page_size}):
+                    posts = await a.fetch_list(page=1, page_size=list_page_size)
             rep.n_posts = len(posts)
             rep.all_post_ids = [str(p.post_id) for p in posts]
             rep.sample_posts = [p.to_dict() for p in posts[:5]]
@@ -136,7 +140,8 @@ async def validate_built_config(
                 verdict_added = False
                 for p in posts[:budget]:
                     try:
-                        full = await a.fetch_article(p)
+                        with tr.span("validate_fetch_article", attrs={"post_id": str(p.post_id)}):
+                            full = await a.fetch_article(p)
                     except Exception as e:
                         rep.add(f"fetch_article[{p.post_id}]", False, hard=False, detail=f"{type(e).__name__}: {e}")
                         continue

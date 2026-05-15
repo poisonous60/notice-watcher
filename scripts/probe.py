@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+import contextvars as _cv
 import re
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -14,6 +15,7 @@ from pathlib import Path
 # 프로젝트 루트를 sys.path에 추가 (scripts/에서 패키지 import 가능하게)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from engine.tracing import start_trace, current_trace
 from probe.baseline import baseline_check, is_baseline_blocked
 from probe.diagnose import diagnose
 from probe.environment import capture as capture_environment, gdpi_advice
@@ -75,6 +77,12 @@ def main(argv: list[str]) -> int:
     args = parse_args(argv)
     url: str = args.url
     slug = url_to_slug(url)
+    with start_trace("probe", attrs={"url": url, "slug": slug, "lite": bool(args.lite)}):
+        return _run(args, url, slug)
+
+
+def _run(args: argparse.Namespace, url: str, slug: str) -> int:
+    tr = current_trace()
     out_dir = output_dir(slug)
     print(f"[probe] URL = {url}")
     print(f"[probe] slug = {slug}")
@@ -90,7 +98,8 @@ def main(argv: list[str]) -> int:
         else:
             polite_sleep(1.0, 2.0)
 
-    env = capture_environment(out_dir)
+    with tr.span("env_capture"):
+        env = capture_environment(out_dir)
     print(f"[env] platform={env['platform']}  outbound_ip_local={env['outbound_ip_local']}")
     print(f"[env] GoodbyeDPI: running={env['goodbyedpi_running']} ({env['goodbyedpi_info']})\n")
 
@@ -98,8 +107,9 @@ def main(argv: list[str]) -> int:
 
     # ---- Phase 0: baseline ----
     print("[Phase 0] baseline ping ...")
-    baseline = baseline_check(url)
-    blocked = is_baseline_blocked(baseline)
+    with tr.span("phase0_baseline"):
+        baseline = baseline_check(url)
+        blocked = is_baseline_blocked(baseline)
     for r in baseline.values():
         print(f"  {r.strategy} {r.url} → {r.status} {r.classification.value}")
 
@@ -115,14 +125,18 @@ def main(argv: list[str]) -> int:
     if _do_headless:
         print("\n[Phase 2] Playwright headless w/ HAR capture ... (Phase 1 과 병렬 시작)")
         _phase2_ex = ThreadPoolExecutor(max_workers=1)
-        _phase2_future = _phase2_ex.submit(
-            fetch_with_capture,
-            url=url,
-            out_dir=out_dir,
-            target="list",
-            headless=not args.headful_debug,
-            baseline_blocked=blocked,
-        )
+
+        def _traced_phase2():
+            with current_trace().span("phase2_headless_har_capture", attrs={"target": "list"}):
+                return fetch_with_capture(
+                    url=url,
+                    out_dir=out_dir,
+                    target="list",
+                    headless=not args.headful_debug,
+                    baseline_blocked=blocked,
+                )
+
+        _phase2_future = _phase2_ex.submit(_cv.copy_context().run, _traced_phase2)
     elif args.no_headless:
         print("\n[Phase 2] skipped — --no-headless")
     elif not headless_available():
@@ -144,10 +158,11 @@ def main(argv: list[str]) -> int:
         )
 
     static_results: list[Result] = []
-    with ThreadPoolExecutor(max_workers=max(1, len(presets))) as _ex:
-        for preset_name, r in _ex.map(_do_preset, presets.items()):
-            static_results.append(r)
-            print(f"  S1.{preset_name:<3} {r.status} {r.classification.value}")
+    with tr.span("phase1_static_get", attrs={"presets": ",".join(presets.keys())}):
+        with ThreadPoolExecutor(max_workers=max(1, len(presets))) as _ex:
+            for preset_name, r in _ex.map(_do_preset, presets.items()):
+                static_results.append(r)
+                print(f"  S1.{preset_name:<3} {r.status} {r.classification.value}")
 
     # H_user (--extra-header)
     if args.extra_header:
@@ -193,16 +208,17 @@ def main(argv: list[str]) -> int:
     captured = load_captured_headers(out_dir, target="list") if headless is not None else {}
     if captured:
         print("\n[Phase 3] static retry with captured headers (S1.Hcap) ...")
-        _polite()
-        captured_retry = fetch_static(
-            strategy="S1.Hcap",
-            target="list",
-            url=url,
-            headers=merge_captured(captured),
-            out_dir=out_dir,
-            body_name="s1.Hcap",
-            baseline_blocked=blocked,
-        )
+        with tr.span("phase3_hcap_static_retry"):
+            _polite()
+            captured_retry = fetch_static(
+                strategy="S1.Hcap",
+                target="list",
+                url=url,
+                headers=merge_captured(captured),
+                out_dir=out_dir,
+                body_name="s1.Hcap",
+                baseline_blocked=blocked,
+            )
         print(f"  S1.Hcap    {captured_retry.status} {captured_retry.classification.value}")
         all_results.append(captured_retry)
 
@@ -221,31 +237,32 @@ def main(argv: list[str]) -> int:
         else:
             why = "LOGIN_REQUIRED detected" if needs_login else "--login forced"
             print(f"\n[Phase 4] {why} → headful trigger ...")
-            state_p = state_file(slug)
-            s5 = ensure_login_and_fetch(
-                url=url, slug=slug, state_path=state_p, out_dir=out_dir,
-            )
-            all_results.append(s5)
-            print(f"  S5         {s5.status} {s5.classification.value}")
-
-            # S1L: 로그인 후 쿠키만 주입해 정적 재시도 (어댑터가 가벼운 httpx로 가능한지)
-            cookies = cookies_from_state(state_p, url)
-            if cookies:
-                _polite()
-                s1l = fetch_static(
-                    strategy="S1L",
-                    target="list",
-                    url=url,
-                    headers=presets["H3"],
-                    cookies=cookies,
-                    out_dir=out_dir,
-                    body_name="s1L",
-                    baseline_blocked=blocked,
+            with tr.span("phase4_login_headful", attrs={"why": why}):
+                state_p = state_file(slug)
+                s5 = ensure_login_and_fetch(
+                    url=url, slug=slug, state_path=state_p, out_dir=out_dir,
                 )
-                all_results.append(s1l)
-                print(f"  S1L        {s1l.status} {s1l.classification.value}")
-            else:
-                print("  S1L 스킵: state.json에서 도메인 쿠키를 추출하지 못함")
+                all_results.append(s5)
+                print(f"  S5         {s5.status} {s5.classification.value}")
+
+                # S1L: 로그인 후 쿠키만 주입해 정적 재시도 (어댑터가 가벼운 httpx로 가능한지)
+                cookies = cookies_from_state(state_p, url)
+                if cookies:
+                    _polite()
+                    s1l = fetch_static(
+                        strategy="S1L",
+                        target="list",
+                        url=url,
+                        headers=presets["H3"],
+                        cookies=cookies,
+                        out_dir=out_dir,
+                        body_name="s1L",
+                        baseline_blocked=blocked,
+                    )
+                    all_results.append(s1l)
+                    print(f"  S1L        {s1l.status} {s1l.classification.value}")
+                else:
+                    print("  S1L 스킵: state.json에서 도메인 쿠키를 추출하지 못함")
 
     # ---- Phase 5: external + paid ----
     external_results: list[Result] = []
@@ -254,28 +271,33 @@ def main(argv: list[str]) -> int:
         print("\n[Phase 5] skipped (lite) — Jina/Firecrawl/Crawl4AI/유료 스킵")
     else:
         print("\n[Phase 5] external & paid services ...")
-        polite_sleep(0.5, 1.0)
-        jina = try_jina(url=url, out_dir=out_dir, baseline_blocked=blocked)
-        external_results.append(jina)
-        print(f"  Jina       {jina.status} {jina.classification.value}")
+        with tr.span("phase5_external_paid"):
+            with tr.span("phase5_jina"):
+                polite_sleep(0.5, 1.0)
+                jina = try_jina(url=url, out_dir=out_dir, baseline_blocked=blocked)
+            external_results.append(jina)
+            print(f"  Jina       {jina.status} {jina.classification.value}")
 
-        if args.firecrawl:
-            polite_sleep(0.5, 1.0)
-            fc = try_firecrawl(url=url, out_dir=out_dir, project_root=PROJECT_ROOT, baseline_blocked=blocked)
-            external_results.append(fc)
-            print(f"  Firecrawl  {fc.status} {fc.classification.value}  {' '.join(fc.notable[:2])}")
+            if args.firecrawl:
+                with tr.span("phase5_firecrawl"):
+                    polite_sleep(0.5, 1.0)
+                    fc = try_firecrawl(url=url, out_dir=out_dir, project_root=PROJECT_ROOT, baseline_blocked=blocked)
+                external_results.append(fc)
+                print(f"  Firecrawl  {fc.status} {fc.classification.value}  {' '.join(fc.notable[:2])}")
 
-        if not args.no_crawl4ai:
-            polite_sleep(0.5, 1.0)
-            c4 = try_crawl4ai(url=url, out_dir=out_dir, baseline_blocked=blocked)
-            external_results.append(c4)
-            print(f"  Crawl4AI   {c4.status} {c4.classification.value}  {' '.join(c4.notable[:2])}")
+            if not args.no_crawl4ai:
+                with tr.span("phase5_crawl4ai"):
+                    polite_sleep(0.5, 1.0)
+                    c4 = try_crawl4ai(url=url, out_dir=out_dir, baseline_blocked=blocked)
+                external_results.append(c4)
+                print(f"  Crawl4AI   {c4.status} {c4.classification.value}  {' '.join(c4.notable[:2])}")
 
-        if not args.no_paid:
-            keys = PaidKeys.from_env_and_args(args)
-            paid_results = try_all_paid(url=url, keys=keys, out_dir=out_dir)
-            for r in paid_results:
-                print(f"  {r.strategy:<10} {r.status} {r.classification.value}  {' '.join(r.notable[:2])}")
+            if not args.no_paid:
+                with tr.span("phase5_paid"):
+                    keys = PaidKeys.from_env_and_args(args)
+                    paid_results = try_all_paid(url=url, keys=keys, out_dir=out_dir)
+                for r in paid_results:
+                    print(f"  {r.strategy:<10} {r.status} {r.classification.value}  {' '.join(r.notable[:2])}")
 
     all_results.extend(external_results)
     all_results.extend(paid_results)
@@ -296,50 +318,59 @@ def main(argv: list[str]) -> int:
     # with-block 으로 묶어 — Phase 7~9b 어디서 raise 해도 __exit__ 가 shutdown(wait=True) 보장.
     # 두 future 는 with 마지막에 회수, 각자 try/except 로 한쪽 실패가 다른쪽 회수를 막지 못하게.
     with ThreadPoolExecutor(max_workers=2) as _phase6_ex:
-        _feeds_fut = _phase6_ex.submit(discover_feeds, page_url=url, page_html=page_html, out_dir=out_dir)
-        _robots_fut = _phase6_ex.submit(read_robots, page_url=url, out_dir=out_dir)
+        def _traced_feeds():
+            with current_trace().span("phase6_discover_feeds"):
+                return discover_feeds(page_url=url, page_html=page_html, out_dir=out_dir)
+
+        def _traced_robots():
+            with current_trace().span("phase6_read_robots"):
+                return read_robots(page_url=url, out_dir=out_dir)
+
+        _feeds_fut = _phase6_ex.submit(_cv.copy_context().run, _traced_feeds)
+        _robots_fut = _phase6_ex.submit(_cv.copy_context().run, _traced_robots)
 
         # ---- Hydration & Phase 7: list candidates ----
         print("\n[Phase 7] list candidates ...")
-        hydration_blob = extract_hydration(page_html)
-        (out_dir / "hydration.json").write_text(
-            __import__("json").dumps(
-                {k: (v if isinstance(v, dict) and "_parse_error" in v else "<json>") for k, v in hydration_blob.items()},
-                ensure_ascii=False, indent=2,
-            ),
-            encoding="utf-8",
-        )
-        hydration_lists: list[dict] = []
-        for key, blob in hydration_blob.items():
-            if isinstance(blob, dict):
-                hits = find_list_in_json(blob)
-                for h in hits:
-                    h["root"] = key
-                    hydration_lists.append(h)
+        with tr.span("phase7_list_candidates"):
+            hydration_blob = extract_hydration(page_html)
+            (out_dir / "hydration.json").write_text(
+                __import__("json").dumps(
+                    {k: (v if isinstance(v, dict) and "_parse_error" in v else "<json>") for k, v in hydration_blob.items()},
+                    ensure_ascii=False, indent=2,
+                ),
+                encoding="utf-8",
+            )
+            hydration_lists: list[dict] = []
+            for key, blob in hydration_blob.items():
+                if isinstance(blob, dict):
+                    hits = find_list_in_json(blob)
+                    for h in hits:
+                        h["root"] = key
+                        hydration_lists.append(h)
 
-        html_lists = html_repeating_patterns(page_html, base_url=url)
-        inline_js_lists = extract_inline_data(page_html)
+            html_lists = html_repeating_patterns(page_html, base_url=url)
+            inline_js_lists = extract_inline_data(page_html)
 
-        har_path = out_dir / "traffic.har"
-        if not har_path.exists():
-            har_path = out_dir / "traffic.list.har"
-        json_api_lists = traffic_api_candidates(har_path, page_url=url) if har_path.exists() else []
+            har_path = out_dir / "traffic.har"
+            if not har_path.exists():
+                har_path = out_dir / "traffic.list.har"
+            json_api_lists = traffic_api_candidates(har_path, page_url=url) if har_path.exists() else []
 
-        first_article_url = pick_first_article_url(
-            html_candidates=html_lists,
-            json_api_candidates=json_api_lists,
-            hydration_candidates=hydration_lists,
-            base_url=url,
-            page_html=page_html,
-        )
-        write_list_candidates(
-            out_dir,
-            html_candidates=html_lists,
-            json_api_candidates=json_api_lists,
-            hydration_candidates=hydration_lists,
-            first_article_url=first_article_url,
-            inline_js_candidates=inline_js_lists,
-        )
+            first_article_url = pick_first_article_url(
+                html_candidates=html_lists,
+                json_api_candidates=json_api_lists,
+                hydration_candidates=hydration_lists,
+                base_url=url,
+                page_html=page_html,
+            )
+            write_list_candidates(
+                out_dir,
+                html_candidates=html_lists,
+                json_api_candidates=json_api_lists,
+                hydration_candidates=hydration_lists,
+                first_article_url=first_article_url,
+                inline_js_candidates=inline_js_lists,
+            )
         print(f"  HTML 반복 패턴: {len(html_lists)}건")
         print(f"  JSON API 후보: {len(json_api_lists)}건 (관련도순)")
         print(f"  Hydration 후보: {len(hydration_lists)}건")
@@ -350,7 +381,8 @@ def main(argv: list[str]) -> int:
         # lite 에서도 replay 는 돈다(JSON API 후보를 httpx 로 재현해 standalone 동작 확인 — httpx_json config 에 필수 정보).
         if not args.no_replay and json_api_lists:
             print("\n[Phase 8] replay candidate APIs ...")
-            replays = replay_all(json_api_lists, out_dir)
+            with tr.span("phase8_replay", attrs={"n_apis": len(json_api_lists)}):
+                replays = replay_all(json_api_lists, out_dir)
             for r in replays:
                 print(f"  {r.strategy} {r.url[:70]} → {r.status} {r.classification.value}")
                 all_results.append(r)
@@ -359,27 +391,28 @@ def main(argv: list[str]) -> int:
         article_result: Result | None = None
         if first_article_url:
             print("\n[Phase 9] article entry probe ...")
-            # 목록이 정적 OK였다면 정적으로, 아니면 headless로
-            static_ok = next((r for r in static_results if r.classification == Classification.OK), None)
-            if static_ok is not None:
-                _polite()
-                article_result = fetch_static(
-                    strategy=f"S1.{static_ok.strategy.split('.')[-1]}.article",
-                    target="article",
-                    url=first_article_url,
-                    headers=presets[static_ok.strategy.split(".")[-1]] if static_ok.strategy.split(".")[-1] in presets else presets["H3"],
-                    out_dir=out_dir,
-                    body_name="article",
-                    baseline_blocked=blocked,
-                )
-            elif headless is not None and headless_available():
-                article_result = fetch_with_capture(
-                    url=first_article_url,
-                    out_dir=out_dir,
-                    target="article",
-                    headless=not args.headful_debug,
-                    baseline_blocked=blocked,
-                )
+            with tr.span("phase9_article_entry"):
+                # 목록이 정적 OK였다면 정적으로, 아니면 headless로
+                static_ok = next((r for r in static_results if r.classification == Classification.OK), None)
+                if static_ok is not None:
+                    _polite()
+                    article_result = fetch_static(
+                        strategy=f"S1.{static_ok.strategy.split('.')[-1]}.article",
+                        target="article",
+                        url=first_article_url,
+                        headers=presets[static_ok.strategy.split(".")[-1]] if static_ok.strategy.split(".")[-1] in presets else presets["H3"],
+                        out_dir=out_dir,
+                        body_name="article",
+                        baseline_blocked=blocked,
+                    )
+                elif headless is not None and headless_available():
+                    article_result = fetch_with_capture(
+                        url=first_article_url,
+                        out_dir=out_dir,
+                        target="article",
+                        headless=not args.headful_debug,
+                        baseline_blocked=blocked,
+                    )
             if article_result is not None:
                 all_results.append(article_result)
                 print(f"  {article_result.strategy} {article_result.status} {article_result.classification.value}")
@@ -402,60 +435,63 @@ def main(argv: list[str]) -> int:
                 do_click = False
         if do_click:
             print("\n[Phase 9b] article-by-click probe (목록에서 글 링크 클릭 → 최종 페이지/URL/HAR 캡처) ...")
-            try:
-                click_result, click_meta = fetch_article_by_click(
-                    list_url=url, out_dir=out_dir,
-                    headless=not args.headful_debug, baseline_blocked=blocked,
-                )
-                all_results.append(click_result)
-                _note = click_meta.get("note")
-                print(f"  {click_result.strategy} {click_result.status} {click_result.classification.value}  "
-                      f"resolved={click_meta.get('resolved_url')}" + (f"  ({_note})" if _note else ""))
-            except Exception as e:  # noqa: BLE001
-                print(f"  article-by-click 실패: {type(e).__name__}: {e}")
+            with tr.span("phase9b_article_by_click"):
+                try:
+                    click_result, click_meta = fetch_article_by_click(
+                        list_url=url, out_dir=out_dir,
+                        headless=not args.headful_debug, baseline_blocked=blocked,
+                    )
+                    all_results.append(click_result)
+                    _note = click_meta.get("note")
+                    print(f"  {click_result.strategy} {click_result.status} {click_result.classification.value}  "
+                          f"resolved={click_meta.get('resolved_url')}" + (f"  ({_note})" if _note else ""))
+                except Exception as e:  # noqa: BLE001
+                    print(f"  article-by-click 실패: {type(e).__name__}: {e}")
 
         # ---- Phase 6 join — 각 future 개별 try/except 로 한쪽 실패가 다른쪽 회수를 막지 못하게 ----
-        try:
-            feeds = _feeds_fut.result()
-        except Exception as _e_feeds:  # noqa: BLE001 — discover_feeds 의 ContractError 등
-            print(f"  [Phase 6 feeds] fail: {type(_e_feeds).__name__}: {_e_feeds}")
-            feeds = {"page_url": url, "candidates": []}
-        try:
-            robots_info = _robots_fut.result()
-        except Exception as _e_robots:  # noqa: BLE001
-            print(f"  [Phase 6 robots] fail: {type(_e_robots).__name__}: {_e_robots}")
-            robots_info = {"url": "", "status": None, "crawl_delay": None, "disallow": []}
+        with tr.span("phase6_join"):
+            try:
+                feeds = _feeds_fut.result()
+            except Exception as _e_feeds:  # noqa: BLE001 — discover_feeds 의 ContractError 등
+                print(f"  [Phase 6 feeds] fail: {type(_e_feeds).__name__}: {_e_feeds}")
+                feeds = {"page_url": url, "candidates": []}
+            try:
+                robots_info = _robots_fut.result()
+            except Exception as _e_robots:  # noqa: BLE001
+                print(f"  [Phase 6 robots] fail: {type(_e_robots).__name__}: {_e_robots}")
+                robots_info = {"url": "", "status": None, "crawl_delay": None, "disallow": []}
         print(f"\n[Phase 6 result] feeds: {len(feeds.get('candidates') or [])} candidates · "
               f"robots: status={robots_info.get('status')} crawl_delay={robots_info.get('crawl_delay')}")
 
     # ---- Phase 10: diagnose + summary ----
     print("\n[Phase 10] diagnose + write summary ...")
-    diag = diagnose(
-        slug=slug,
-        url=url,
-        baseline=baseline,
-        static_results=static_results,
-        headless=headless,
-        captured_retry=captured_retry,
-        s1l=s1l,
-        external_results=external_results,
-        paid_results=paid_results,
-        list_candidates_path=out_dir / "list_candidates.json",
-        article_result=article_result,
-        robots_info=robots_info,
-    )
-    # GoodbyeDPI 비교 안내를 진단 노트에 추가
-    diag.notes.extend(gdpi_advice(env))
+    with tr.span("phase10_diagnose_summary"):
+        diag = diagnose(
+            slug=slug,
+            url=url,
+            baseline=baseline,
+            static_results=static_results,
+            headless=headless,
+            captured_retry=captured_retry,
+            s1l=s1l,
+            external_results=external_results,
+            paid_results=paid_results,
+            list_candidates_path=out_dir / "list_candidates.json",
+            article_result=article_result,
+            robots_info=robots_info,
+        )
+        # GoodbyeDPI 비교 안내를 진단 노트에 추가
+        diag.notes.extend(gdpi_advice(env))
 
-    write_summary(
-        out_dir=out_dir,
-        slug=slug,
-        url=url,
-        baseline=baseline,
-        all_results=all_results,
-        diagnosis=diag,
-        environment=env,
-    )
+        write_summary(
+            out_dir=out_dir,
+            slug=slug,
+            url=url,
+            baseline=baseline,
+            all_results=all_results,
+            diagnosis=diag,
+            environment=env,
+        )
     print(f"\n[probe] done. see: {out_dir}")
     return 0
 

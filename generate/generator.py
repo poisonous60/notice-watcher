@@ -11,6 +11,7 @@ from typing import Callable, Optional
 from urllib.parse import urlsplit
 
 from engine import validate_config, ConfigError
+from engine.tracing import current_trace
 from .gemini import GeminiClient, GeminiError, _parse_json_loose
 from .llm_base import LLMClient, LLMError
 from .prices import compute_cost
@@ -95,68 +96,73 @@ async def generate_config_validated(
     override = f"gemini:{model}" if model else None
     prev_cfg: Optional[dict] = None
     prev_feedback: str = ""
+    tr = current_trace()
 
     for i in range(1, max_attempts + 1):
-        if i == 1:
-            prompt_text = build_user_prompt(digest)
-        else:
-            prompt_text = build_retry_prompt(digest, prev_cfg or {}, prev_feedback)
+        with tr.span("gemini_attempt", attrs={"attempt": i, "max_attempts": max_attempts}):
+            if i == 1:
+                prompt_text = build_user_prompt(digest)
+            else:
+                prompt_text = build_retry_prompt(digest, prev_cfg or {}, prev_feedback)
 
-        # i==1 은 신규 생성, i>=2 는 retry 라운드 (다른 모델 라우팅 가능하도록 call_site 분리).
-        call_site = "config_generate" if i == 1 else "config_retry"
-        cli = client or client_for(call_site, override=override)
-        try:
-            cfg = _generate_raw(digest, client=cli, prompt_text=prompt_text, temperature=temperature,
-                                call_site=call_site, attempt=i)
-        except GenerationError as e:
-            msg = f"생성 실패: {e}"
-            if on_attempt:
-                on_attempt(i, None, None, False, msg)
-            prev_cfg, prev_feedback = (prev_cfg or {}), (prev_feedback + f"\n(직전 시도 생성 실패: {e})")
-            if i < max_attempts:
-                await asyncio.sleep(inter_attempt_sleep)
-            continue
+            # i==1 은 신규 생성, i>=2 는 retry 라운드 (다른 모델 라우팅 가능하도록 call_site 분리).
+            call_site = "config_generate" if i == 1 else "config_retry"
+            cli = client or client_for(call_site, override=override)
+            try:
+                with tr.span("gemini_call", attrs={"attempt": i, "call_site": call_site}):
+                    cfg = _generate_raw(digest, client=cli, prompt_text=prompt_text, temperature=temperature,
+                                        call_site=call_site, attempt=i)
+            except GenerationError as e:
+                msg = f"생성 실패: {e}"
+                if on_attempt:
+                    on_attempt(i, None, None, False, msg)
+                prev_cfg, prev_feedback = (prev_cfg or {}), (prev_feedback + f"\n(직전 시도 생성 실패: {e})")
+                if i < max_attempts:
+                    await asyncio.sleep(inter_attempt_sleep)
+                continue
 
-        # 스키마 검증
-        try:
-            validate_config(cfg)
-        except ConfigError as e:
-            msg = f"스키마 검증 실패: {e}"
+            # 스키마 검증
+            try:
+                with tr.span("schema_validate", attrs={"attempt": i}):
+                    validate_config(cfg)
+            except ConfigError as e:
+                msg = f"스키마 검증 실패: {e}"
+                if on_attempt:
+                    on_attempt(i, cfg, None, False, msg)
+                prev_cfg = cfg
+                prev_feedback = f"config 가 스키마 검증에 실패했다. 반드시 고쳐라:\n{e}"
+                if i < max_attempts:
+                    await asyncio.sleep(inter_attempt_sleep)
+                continue
+
+            # 실행 검증 (3층위)
+            try:
+                with tr.span("validate_built_config", attrs={"attempt": i, "fetch_articles": fetch_articles}):
+                    rep = await validate_built_config(cfg, digest=digest, fetch_articles=fetch_articles)
+            except Exception as e:  # validate 자체 예외(드뭄)
+                msg = f"검증 중 예외: {type(e).__name__}: {e}"
+                if on_attempt:
+                    on_attempt(i, cfg, None, False, msg)
+                prev_cfg = cfg
+                prev_feedback = f"이 config 를 실행하다 예외가 났다: {type(e).__name__}: {e}"
+                if i < max_attempts:
+                    await asyncio.sleep(inter_attempt_sleep)
+                continue
+
+            if rep.ok:
+                warn = rep.soft_failures()
+                msg = f"통과 ({rep.n_posts}건" + (f", 경고 {len(warn)}" if warn else "") + ")"
+                if on_attempt:
+                    on_attempt(i, cfg, rep, True, msg)
+                return cfg, rep
+
+            msg = "하드 실패: " + "; ".join(f"{c.name}({c.detail})" for c in rep.hard_failures())
             if on_attempt:
-                on_attempt(i, cfg, None, False, msg)
+                on_attempt(i, cfg, rep, False, msg)
             prev_cfg = cfg
-            prev_feedback = f"config 가 스키마 검증에 실패했다. 반드시 고쳐라:\n{e}"
+            prev_feedback = rep.feedback_text()
             if i < max_attempts:
                 await asyncio.sleep(inter_attempt_sleep)
-            continue
-
-        # 실행 검증 (3층위)
-        try:
-            rep = await validate_built_config(cfg, digest=digest, fetch_articles=fetch_articles)
-        except Exception as e:  # validate 자체 예외(드뭄)
-            msg = f"검증 중 예외: {type(e).__name__}: {e}"
-            if on_attempt:
-                on_attempt(i, cfg, None, False, msg)
-            prev_cfg = cfg
-            prev_feedback = f"이 config 를 실행하다 예외가 났다: {type(e).__name__}: {e}"
-            if i < max_attempts:
-                await asyncio.sleep(inter_attempt_sleep)
-            continue
-
-        if rep.ok:
-            warn = rep.soft_failures()
-            msg = f"통과 ({rep.n_posts}건" + (f", 경고 {len(warn)}" if warn else "") + ")"
-            if on_attempt:
-                on_attempt(i, cfg, rep, True, msg)
-            return cfg, rep
-
-        msg = "하드 실패: " + "; ".join(f"{c.name}({c.detail})" for c in rep.hard_failures())
-        if on_attempt:
-            on_attempt(i, cfg, rep, False, msg)
-        prev_cfg = cfg
-        prev_feedback = rep.feedback_text()
-        if i < max_attempts:
-            await asyncio.sleep(inter_attempt_sleep)
 
     err = GenerationError(f"{max_attempts}회 시도 모두 실패. 마지막 피드백:\n{prev_feedback}")
     err.last_config = prev_cfg  # type: ignore[attr-defined]
