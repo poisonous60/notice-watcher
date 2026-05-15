@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 # 프로젝트 루트를 sys.path에 추가 (scripts/에서 패키지 import 가능하게)
@@ -82,6 +83,13 @@ def main(argv: list[str]) -> int:
         print("[probe] LITE mode — 외부(Jina/Firecrawl/Crawl4AI)·유료·login 만 스킵 (headless/replay 는 수행)")
     print()
 
+    def _polite() -> None:
+        # lite 정찰은 한 사이트 5~6번 두드리고 끝 — 봇탐지 회피 의미 약하니 sleep 짧게.
+        if args.lite:
+            polite_sleep(0.2, 0.4)
+        else:
+            polite_sleep(1.0, 2.0)
+
     env = capture_environment(out_dir)
     print(f"[env] platform={env['platform']}  outbound_ip_local={env['outbound_ip_local']}")
     print(f"[env] GoodbyeDPI: running={env['goodbyedpi_running']} ({env['goodbyedpi_info']})\n")
@@ -100,11 +108,11 @@ def main(argv: list[str]) -> int:
     if args.lite:
         presets = {k: v for k, v in presets.items() if k in ("H2", "H3", "H4")}
     print(f"\n[Phase 1] static GET ({'/'.join(presets)}) ...")
-    static_results: list[Result] = []
-    for preset_name, headers in presets.items():
-        polite_sleep(1.0, 2.0)
-        # extra header 주입은 매 시도에 동일하게 (추가 행 H_user는 별도)
-        r = fetch_static(
+    # 같은 URL 을 헤더만 바꿔 N번 두드리는 거라 순차 실행 + sleep 의 가치가 낮음 → 병렬.
+    # 결과 순서는 presets dict 순서 유지 (ThreadPoolExecutor.map).
+    def _do_preset(item: tuple[str, dict]) -> tuple[str, Result]:
+        preset_name, headers = item
+        return preset_name, fetch_static(
             strategy=f"S1.{preset_name}",
             target="list",
             url=url,
@@ -113,12 +121,16 @@ def main(argv: list[str]) -> int:
             body_name=f"s1.{preset_name}",
             baseline_blocked=blocked,
         )
-        static_results.append(r)
-        print(f"  S1.{preset_name:<3} {r.status} {r.classification.value}")
+
+    static_results: list[Result] = []
+    with ThreadPoolExecutor(max_workers=max(1, len(presets))) as _ex:
+        for preset_name, r in _ex.map(_do_preset, presets.items()):
+            static_results.append(r)
+            print(f"  S1.{preset_name:<3} {r.status} {r.classification.value}")
 
     # H_user (--extra-header)
     if args.extra_header:
-        polite_sleep(1.0, 2.0)
+        _polite()
         h = dict(presets["H3"])
         for kv in args.extra_header:
             if "=" in kv:
@@ -161,7 +173,7 @@ def main(argv: list[str]) -> int:
     captured = load_captured_headers(out_dir, target="list") if headless is not None else {}
     if captured:
         print("\n[Phase 3] static retry with captured headers (S1.Hcap) ...")
-        polite_sleep(1.0, 2.0)
+        _polite()
         captured_retry = fetch_static(
             strategy="S1.Hcap",
             target="list",
@@ -199,7 +211,7 @@ def main(argv: list[str]) -> int:
             # S1L: 로그인 후 쿠키만 주입해 정적 재시도 (어댑터가 가벼운 httpx로 가능한지)
             cookies = cookies_from_state(state_p, url)
             if cookies:
-                polite_sleep(1.0, 2.0)
+                _polite()
                 s1l = fetch_static(
                     strategy="S1L",
                     target="list",
@@ -326,7 +338,7 @@ def main(argv: list[str]) -> int:
         # 목록이 정적 OK였다면 정적으로, 아니면 headless로
         static_ok = next((r for r in static_results if r.classification == Classification.OK), None)
         if static_ok is not None:
-            polite_sleep(1.0, 2.0)
+            _polite()
             article_result = fetch_static(
                 strategy=f"S1.{static_ok.strategy.split('.')[-1]}.article",
                 target="article",
