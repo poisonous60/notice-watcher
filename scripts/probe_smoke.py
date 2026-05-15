@@ -73,8 +73,12 @@ class Spec:
 REPS: list[Spec] = [
     Spec(name="skku",
          url="https://cse.skku.edu/cse/notice.do?mode=list&srCategoryId1=1582&srSearchKey=&srSearchVal="),
-    Spec(name="endfield",
-         url="https://endfield.gryphline.com/ko-kr/news"),
+    # httpx_json fixture: SPA 페이지 로드 시 클라이언트가 JSON feed API 를 XHR 로 호출 →
+    # probe HAR 가 그 호출을 캡처 → traffic_json_api_candidates 점수화 휴리스틱이 광고/SDK 와
+    # 구분하여 진짜 feed API 를 1위로 골라야 함. (이전 endfield 는 Next.js prerender 라
+    # XHR 안 함 → fixture 부적절했음, commit 99f4f0b 의 잘못된 가정. 2026-05-15 trickcal 로 교체.)
+    Spec(name="trickcal",
+         url="https://game.naver.com/lounge/Trickcal/board/3"),
     Spec(name="arca",
          url="https://arca.live/b/akendfield"),
     Spec(name="mabinogi",
@@ -327,8 +331,10 @@ def stage2_digest_integrity(rep: Spec) -> Result:
             return Result(2, rep.name, "FAIL", "article_sample.url=None (first_article_url 키 rename 회귀 의심)")
         extras["article_sample_url"] = "ok"
 
-    if rep.name == "endfield":
-        # httpx_json: traffic JSON API 후보가 있어야 하고, 첫 후보 relevance_score>0
+    if rep.name == "trickcal":
+        # httpx_json: traffic JSON API 후보가 있어야 하고, 첫 후보 relevance_score>0.
+        # SPA (Naver lounge) → 클라이언트가 comm-api.game.naver.com/.../feed 을 XHR 로 호출 →
+        # HAR 캡처 → 점수화 휴리스틱이 광고/SDK 와 구분해 feed API 를 1위로.
         cands = lc.get("traffic_json_api_candidates") or []
         if not cands:
             return Result(2, rep.name, "FAIL", "traffic_json_api_candidates 비어있음 (점수화 회귀 의심)")
@@ -624,7 +630,7 @@ def render_json(results: list[Result], *, elapsed: float) -> str:
 def main(argv: Optional[list[str]] = None) -> int:
     p = argparse.ArgumentParser(description="probe 산출물·digest·config 회귀 smoke test")
     p.add_argument("--verbose", action="store_true", help="FAIL detail / extras 길게")
-    p.add_argument("--slug", action="append", help="특정 REPS 이름만 (반복 가능): skku/endfield/arca/mabinogi")
+    p.add_argument("--slug", action="append", help="특정 REPS 이름만 (반복 가능): skku/trickcal/arca/mabinogi")
     p.add_argument("--stage", type=int, action="append", choices=[1, 2, 3, 5],
                    help="특정 stage 만 실행 (반복 가능)")
     p.add_argument("--json", action="store_true", help="머신리더블 JSON 출력")
