@@ -2,6 +2,12 @@
 {% block title %}Usage — notice-watcher{% endblock %}
 {% block body %}
 
+{# 환율은 정확할 필요 X — 감 잡기용 표기 #}
+{% set krw_rate = 1500 %}
+{% macro krw(usd) -%}
+  <small class="muted">≈ {{ "{:,}".format((usd * krw_rate) | round | int) }}원</small>
+{%- endmacro %}
+
 <h2>💸 Usage</h2>
 
 {% if not present %}
@@ -44,7 +50,10 @@
     <div class="kpi-value">{{ "{:,}".format(kpis.total_tokens) }}</div>
     <div class="kpi-sub">in {{ "{:,}".format(kpis.prompt_tokens) }} · out {{ "{:,}".format(kpis.completion_tokens) }}</div>
   </div>
-  <div class="kpi"><div class="kpi-label">비용 ($)</div><div class="kpi-value">{{ "%.4f"|format(kpis.cost_usd) }}</div></div>
+  <div class="kpi"><div class="kpi-label">비용 ($)</div>
+    <div class="kpi-value">{{ "%.4f"|format(kpis.cost_usd) }}</div>
+    <div class="kpi-sub">{{ krw(kpis.cost_usd) }}</div>
+  </div>
   <div class="kpi"><div class="kpi-label">avg latency</div><div class="kpi-value">{{ "%.0f"|format(kpis.avg_latency_ms) }}<small>ms</small></div></div>
   <div class="kpi"><div class="kpi-label">에러율</div>
     <div class="kpi-value">{{ "%.1f"|format(kpis.error_rate_pct) }}<small>%</small></div>
@@ -78,7 +87,7 @@
       <td style="text-align:right;">{{ "{:,}".format(r.n_calls) }}</td>
       <td style="text-align:right;">{{ "{:,}".format(r.prompt_tokens) }}</td>
       <td style="text-align:right;">{{ "{:,}".format(r.completion_tokens) }}</td>
-      <td style="text-align:right;">{{ "%.4f"|format(r.cost_usd) }}</td>
+      <td style="text-align:right;">{{ "%.4f"|format(r.cost_usd) }} {{ krw(r.cost_usd) }}</td>
       <td style="text-align:right;">{{ "%.0f"|format(r.avg_latency_ms) }}</td>
       <td style="text-align:right;">{{ r.n_errors }}</td>
     </tr>
@@ -115,7 +124,9 @@
       <td style="text-align:right;">{{ r.prompt_tokens }}</td>
       <td style="text-align:right;">{{ r.completion_tokens }}</td>
       <td style="text-align:right;">{{ r.latency_ms }}</td>
-      <td style="text-align:right;">{{ "%.5f"|format(r.cost_usd) if r.cost_usd is not none else "—" }}</td>
+      <td style="text-align:right;">
+        {% if r.cost_usd is not none %}{{ "%.5f"|format(r.cost_usd) }} {{ krw(r.cost_usd) }}{% else %}—{% endif %}
+      </td>
       <td>{{ r.attempt }}</td>
     </tr>
     {% endfor %}
