@@ -4,6 +4,7 @@ description: >-
   prompts/config_writer.* + retry + user + schema + few-shot + probe heuristics + cases 7 영역의 누적 rot 진단 — 죽은 룰,
   중복, 모순, 과spec, 휴리스틱-prompt cross-ref, case 어휘 drift 6종 검출. 사용자가 "rot 점검", "프롬프트 누더기 점검",
   "/pipeline-rot-review" 라고 할 때. read-only — Claude 가 발견 보고 후 사용자 승인 받고 적용. 자동 수정 X.
+  ambiguous 항목은 사용자에게 list 로 위임 (debate 강제 X — 단일 reviewer 충분).
   이 프로젝트 (`poisonous60/notice-watcher` 의 dev박스 clone) 전용. hand-config 의 *additive* prompt 변경과
   분리 — 이 SKILL 은 *curative* (제거/병합/정리). 자세히는 `docs/자가개선 인프라 계획.md` §1b 와 부록 C.
 ---
@@ -107,10 +108,9 @@ prompt 가 인용한 *digest 키 이름* 이 실제 probe 휴리스틱 산출 �
 
 1. 7 영역 + cases 파일 모두 Read (또는 Grep 으로 키 단위 추출)
 2. 각 검출 카테고리 적용 (6종)
-3. 발견 list 작성 — 위치 + 종류 + 권장 한 줄. **ambiguous (사람 판단 필요) 는 별도 list**.
-4. 사용자에게 보고 (출력 형식 ↓)
-5. **ambiguous 1건+ 있으면 → ↓ '## Ambiguous — agent debate 처리' 절차 자동 진행** (사용자 명시 거부 안 했으면). 사용자가 "debate skip" 또는 "내가 본다" 라고 하면 skip
-6. consensus 결과 + 발견 (확정) → 사용자 승인 시 — Claude 가 prompt 수정 (SKILL 자체 자동 수정 X, 별도 Edit 호출)
+3. 발견 list 작성 — 위치 + 종류 + 권장 한 줄. **ambiguous (사람 판단 필요) 는 별도 list 로 분리**.
+4. 사용자에게 보고 (출력 형식 ↓) — 확정 발견 + ambiguous list 둘 다
+5. 사용자 승인 시 — Claude 가 prompt 수정 (SKILL 자체 자동 수정 X, 별도 Edit 호출). ambiguous 는 사용자가 직접 검토
 
 ## 출력 형식 (idempotent)
 
@@ -160,148 +160,19 @@ prompt 가 인용한 *digest 키 이름* 이 실제 probe 휴리스틱 산출 �
 점검 (7 영역, 6종 카테고리)
 ```
 
-## Ambiguous — agent debate 처리
+## 검토 시각 — 독립 agent 권장
 
-검출 6종 중 [중복]·[모순]·[과spec]·[case 어휘 drift] 는 *판단 모호* 케이스가 자주 나옴. SKILL 작성자 (main thread Claude) 가 직접 판단하면 **자기 SKILL 에 우호적 해석 → false-negative 발생**. 첫 baseline run 에서 이 패턴 검증됨 (main thread = "rot 없음 ✅", independent agent = "발견 1건 + ambiguous 7건").
+이 SKILL 작성자 (main thread Claude) 가 *직접 invoke* 하면 자기 SKILL 에 우호적 해석 → **false-negative 발생**. 첫 baseline run 에서 검증됨: main thread = "rot 없음 ✅", **독립 agent invoke = 발견 1건 (silent file rot) + ambiguous 7건**.
 
-→ **DebateCV 패턴** ([arxiv 2507.19090](https://arxiv.org/html/2507.19090v4)) 적용: Defender + Challenger 병렬 round + Moderator 판정. main thread = pure relay (판단 X).
+→ **권장 패턴**: SKILL 호출은 *별도 agent* (`general-purpose` subagent_type 또는 새 세션) 한테 위임. main thread 는 결과 relay 만.
 
-### 설계 원칙 (Anthropic 권장)
+작성자 본인이 invoke 하더라도 fresh context → 독립성 ↑. 단 *같은 모델* 한계 인지 — SKILL.md 우호 해석 risk 잔존.
 
-- **Tool heterogeneity per agent** — Defender 와 Challenger 가 다른 정보 source 접근 (같은 결론 다른 경로)
-- **Quantitative judge scoring** — Moderator 가 항목별 yes/no/unsure (3점 척도). 모호 = unsure 강제 — confident-wrong persuasion 위험 회피
-- **Round cap 2** (plateau) — 더 가도 효용 ↓
-- **No consensus 항목 = 사용자에게 명시 위임** (debate 강제 결론 X)
-
-### Round 1 — Defender + Challenger 병렬 spawn
-
-main thread 가 Agent tool 로 둘 동시 호출 (single message, 두 tool call):
-
-#### Defender prompt (status quo 변호)
-
-```
-notice-watcher repo (e:\260301\소프트웨어특강1\notice-watcher) 의 prompt/cases/probe rot 검출 ambiguous 항목 N건. 각 항목 *rot 아님* 입장에서 한 줄 논거.
-
-너는 "현 상태 변호사" 역할. 각 항목이 *의도된 분기*, *의미 있는 중복*, *근거 있는 조건* 인지 한 줄로 변호. 무리하게 변호 X — 진짜 약하면 "변호 어려움" 표시.
-
-도구: Read, Grep on prompts/, configs/, generate/, cases/. (.claude/skills/pipeline-rot-review/SKILL.md 는 *Read 금지* — fresh judgment).
-
-ambiguous 항목 list:
-{{ambiguous_list_with_locations_and_descriptions}}
-
-출력 형식 (각 항목 1줄):
-[항목 N] 변호 / 변호 어려움 — <이유 한 줄>
-```
-
-#### Challenger prompt (curative reformer)
-
-```
-notice-watcher repo (e:\260301\소프트웨어특강1\notice-watcher) 의 prompt/cases/probe rot 검출 ambiguous 항목 N건. 각 항목 *rot 임* 입장에서 한 줄 논거.
-
-너는 "curative 개혁자" 역할. 각 항목이 *진짜 누더기*, *불필요 중복*, *과spec* 인지 한 줄로 공격. 무리하게 공격 X — 진짜 의도된 분기면 "공격 어려움" 표시.
-
-도구: Read, Grep, Bash. git log + docs/ + commit history 검색 권장 (Defender 와 다른 source). (.claude/skills/pipeline-rot-review/SKILL.md 는 *Read 금지* — fresh judgment).
-
-ambiguous 항목 list:
-{{ambiguous_list_with_locations_and_descriptions}}
-
-출력 형식 (각 항목 1줄):
-[항목 N] 공격 / 공격 어려움 — <이유 한 줄>
-```
-
-### Round 2 — 상호 반박 (병렬)
-
-Round 1 결과 받음 → main thread 가 두 agent 한테 *상대 응답* 박아서 다시 spawn (single message 두 tool call):
-
-#### Defender Round 2
-
-```
-이전 Round 1 너의 변호:
-{{defender_round1}}
-
-Challenger 반박:
-{{challenger_round1}}
-
-각 항목별 재반론 (1줄). Challenger 논거가 강하면 "양보" 표시.
-
-출력 (각 항목 1줄):
-[항목 N] 재변호 / 양보 — <이유>
-```
-
-#### Challenger Round 2
-
-```
-이전 Round 1 너의 공격:
-{{challenger_round1}}
-
-Defender 변호:
-{{defender_round1}}
-
-각 항목별 재반박 (1줄). Defender 논거가 강하면 "양보" 표시.
-
-출력 (각 항목 1줄):
-[항목 N] 재공격 / 양보 — <이유>
-```
-
-### Moderator — 판정
-
-main thread 가 Round 1+2 양측 응답 모두 박아서 Moderator agent spawn:
-
-```
-notice-watcher repo 의 ambiguous 항목 N건 debate. 두 agent (Defender = status quo 변호, Challenger = curative 개혁) 가 2 round 진행. 각 항목별 *evidential strength* 가중해 판정해라.
-
-너는 "판사" 역할. 작성자 (main thread Claude) 와 SKILL 자체에 *bias 0*. SKILL 정의도 안 봄 (.claude/skills/pipeline-rot-review/SKILL.md Read 금지 — fresh).
-
-ambiguous 항목 list:
-{{ambiguous_list}}
-
-Defender Round 1:
-{{defender_round1}}
-Defender Round 2:
-{{defender_round2}}
-Challenger Round 1:
-{{challenger_round1}}
-Challenger Round 2:
-{{challenger_round2}}
-
-도구: Read, Grep, Bash. 양측이 인용한 파일/위치 직접 verify 가능.
-
-각 항목 판정 (3점 척도, *모호하면 무조건 unsure*):
-- yes (rot — 수정 권장)
-- no (의도된 분기 — 유지)
-- unsure (양측 논거 비등 또는 evidence 부족 — 사용자 위임)
-
-출력 형식 (각 항목 1줄):
-[항목 N] yes/no/unsure — <한 줄 이유>
-```
-
-### 결과 종합 (main thread)
-
-main thread 가 Moderator 출력 받아서 정리:
-
-```
-Debate 결과 (DebateCV 패턴, Defender + Challenger × 2 round + Moderator):
-
-확정 발견 (yes 판정):
-- [항목 N] <설명>
-
-확정 무시 (no 판정 — 의도된 분기):
-- [항목 N] <설명>
-
-사용자 위임 (unsure):
-- [항목 N] <설명>
-```
-
-unsure 항목만 사용자에게 결정 위임 — 부담 ↓.
-
-### Cost 추정
-
-- Round 1: 2 agents × ~10K tokens = 20K
-- Round 2: 2 agents × ~15K (자기 + 상대 응답 input) = 30K
-- Moderator: 1 agent × ~25K (양측 모두 input) = 25K
-- 총 ~75K tokens per debate run
-
-ambiguous 0건이면 debate skip (cost 0).
+ambiguous 항목은 **사용자가 직접 검토**. agent debate (Defender/Challenger/Moderator) 같은 multi-agent orchestration 은 도입 X — 이유:
+- **infra 없음** — Claude Code 의 Agent tool 은 main thread 가 manual orchestration 해야 함. SKILL.md 에 "Round 1 spawn..." 박아도 강제력 X (compliance 의존)
+- **단일 reviewer 충분** — 첫 baseline 에서 *독립 agent 1명* 이 silent rot catch. multi-agent 가 추가 가치 X
+- **cost ROI** — debate ~75K tokens/run vs ambiguous list 사용자 직접 검토 cost 0
+- 진짜 multi-agent 인프라 (Anthropic Agent Teams) 활성 후 재고려
 
 ## 검출 로직 한계 (false-negative 인지)
 
@@ -312,9 +183,9 @@ ambiguous 0건이면 debate skip (cost 0).
 3. **cases 부족 시 false-negative** — 9 cases 만으로는 과spec/case 어휘 drift 판단 빈약. 50+ 누적 후 신뢰도 ↑
 4. **schema-prompt 모순** — schema 는 strict 한데 prompt 는 lax 한 경우 — 코드 실행 안 하니 못 잡음
 5. **cross-ref 의 indirect path** — prompt 가 "list_candidates 의 traffic JSON API 후보" 처럼 *natural language 로* 키를 묘사하면 grep 매칭 X. backtick 인용 형태만 검출
-6. **debate plateau / misleading consensus** — Anthropic 권장 ([shipyard 분석](https://shipyard.build/blog/claude-code-multi-agent/), [Nature 2026](https://www.nature.com/articles/s41598-026-42705-7)): 2+ round 에서 효용 plateau. confident-wrong agent 가 valid 논거 잠재 가능. 회피책: tool heterogeneity (Defender ↔ Challenger 다른 source) + Moderator 의 *3점 척도 강제* (모호 = unsure, 강제 결론 X)
+6. **작성자 self-invoke bias** — SKILL 작성자 (main thread Claude) 가 직접 invoke 시 자기 SKILL 우호 해석. 회피: 별도 agent (`general-purpose` subagent_type) 또는 새 세션에서 invoke (위 '검토 시각' 섹션)
 
-→ **사용자 검토 권장**. SKILL 은 *후보 보고*, debate 자동 처리, 최종 (unsure) 판단·적용은 사용자.
+→ **사용자 검토 권장**. SKILL 은 *후보 보고*, ambiguous 판단·적용은 사용자.
 
 ## 원칙
 
