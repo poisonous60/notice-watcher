@@ -120,10 +120,19 @@ async def _process_job(client, conn, job, dm_owner) -> None:
         else:
             if kind == "register":
                 req_by = json.loads(job["requested_by"]) if job["requested_by"] else None
-                append_triage_queue(url, slug, job["via"], req_by, tail)
-                err = _format_register_error(rc, tail)
-                await edit_channel_message(client, job["ack_channel_id"], job["ack_message_id"],
-                                           f"⚠️ 자동 등록 실패 — `{slug}`\n{err}")
+                # rc=3 (register.py 의 _board_shape_check 가 게시판 아님 단정) — triage 큐 오염 막기 위해 안 쌓는다.
+                # 사용자에겐 게시판/공지 페이지 URL 을 달라고 친절히 안내.
+                if rc == 3:
+                    await edit_channel_message(
+                        client, job["ack_channel_id"], job["ack_message_id"],
+                        f"⚠️ 등록 거부 — `{slug}`\n"
+                        "이 URL 은 게시판 형식이 아닌 것 같아요(반복되는 글 링크/목록 API/피드가 안 보임). "
+                        "게시판/공지 *목록* 페이지 URL 을 주세요.")
+                else:
+                    append_triage_queue(url, slug, job["via"], req_by, tail)
+                    err = _format_register_error(rc, tail)
+                    await edit_channel_message(client, job["ack_channel_id"], job["ack_message_id"],
+                                               f"⚠️ 자동 등록 실패 — `{slug}`\n{err}")
             else:
                 # re-probe 실패 — OWNER 에게만 알림
                 await dm_owner(

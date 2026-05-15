@@ -114,6 +114,53 @@ def _policy_check(digest: dict, url: str) -> tuple[bool, list[str]]:
     return True, msgs
 
 
+def _board_shape_check(digest: dict, url: str) -> tuple[bool, str]:
+    """probe digest 만으로 '게시판 형식 같은가' 판정 — gemini 부르기 전에.
+    어떤 board 신호도 같은 호스트로 안 잡히면 '게시판 아님' 단정 (rc=3 로 거부).
+    신호 (어느 하나라도 있으면 통과):
+      - list_candidates.traffic_json_api_candidates (목록 JSON API 후보)
+      - list_candidates.inline_js_data_candidates (SPA 인라인 데이터)
+      - list_candidates.hydration_list_candidates (Next/Nuxt 하이드레이션)
+      - list_candidates.html_repeating_patterns 중 같은 호스트 글 링크 가진 것 (href_pattern_guess / sample_url)
+      - list_candidates.first_article_url 가 같은 호스트
+      - article_sample.clicked_resolved_url 가 같은 호스트 (클릭 진입 성공)
+      - feed_candidates 비어있지 않음 (RSS/Atom)
+    """
+    host = (urlsplit(url).netloc or "").lower()
+    if not host:
+        return True, ""
+    lc = digest.get("list_candidates") or {}
+    ah = digest.get("article_sample") or {}
+
+    def _same_host(u: Optional[str]) -> bool:
+        if not u:
+            return False
+        try:
+            return (urlsplit(u).netloc or "").lower() == host
+        except ValueError:
+            return False
+
+    n_json = len(lc.get("traffic_json_api_candidates") or [])
+    n_inline = len(lc.get("inline_js_data_candidates") or [])
+    n_hyd = len(lc.get("hydration_list_candidates") or [])
+    n_feed = len(digest.get("feed_candidates") or [])
+    n_html_same = sum(
+        1 for p in (lc.get("html_repeating_patterns") or [])
+        if _same_host(p.get("href_pattern_guess")) or _same_host(p.get("sample_url"))
+    )
+    fau_same = _same_host(lc.get("first_article_url"))
+    clicked_same = _same_host(ah.get("clicked_resolved_url"))
+
+    if (n_json + n_inline + n_hyd + n_feed + n_html_same) >= 1 or fau_same or clicked_same:
+        return True, ""
+
+    detail = (f"traffic_json={n_json} inline_js={n_inline} hydration={n_hyd} feed={n_feed} "
+              f"html_same_host={n_html_same} first_article_same_host={fau_same} clicked_same_host={clicked_same}")
+    return False, ("게시판 형식이 아닌 것 같다 — probe 가 같은 호스트로 가는 반복되는 글 링크/목록 API/피드를 하나도 못 찾았다. "
+                   "게시판/공지 목록 페이지(글 행이 반복되는 페이지)의 URL 을 주세요. "
+                   f"[신호: {detail}]")
+
+
 def _save_state(slug: str, url: str, config_path: Path, post_ids: list[str]) -> Path:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     p = STATE_DIR / f"{slug}.json"
@@ -597,6 +644,14 @@ def _main_inner(argv) -> int:
     if not ok_policy:
         print("[register] ❌ 등록 거부 (위 사유).")
         return 2
+
+    # board-shape 게이트 — gemini 부르기 전에 한 번 더. probe 가 같은 호스트로 가는 반복 글 링크/목록 API/피드를
+    # 하나도 못 찾았으면 그냥 일반 페이지(랜딩/문서/단일 글) — gemini 4회 돌릴 가치 없음 + triage 큐 오염 방지.
+    ok_board, board_msg = _board_shape_check(digest, url)
+    if not ok_board:
+        print(f"[register] {board_msg}")
+        print("[register] ❌ 등록 거부 — 게시판 형식 아님.")
+        return 3
 
     # preflight: gemini 부르기 전에 정보 수집을 끝낸다 (옛 escalation 의 "N회 실패 후" 대신 "처음부터").
     #   --article-url 가 있으면 그 글 URL 로 first_article_url 교정 + re-probe + 강한 hint (probe 의 '첫 글' 휴리스틱이

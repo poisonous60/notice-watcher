@@ -2,10 +2,11 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 9 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 10 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
+| [`host_syosetu-colomo-_root_2ff18e94`](host_syosetu-colomo-_root_2ff18e94.md) | 🚫 거부 (게시판 형식 아님 — 사전 게이트 추가) | 2026-05-15 | F | schema, row_required_selector | https://syosetu.colomo.dev/ |
 | [`host_nte-perfectworl_kr_c8f4855a`](host_nte-perfectworl_kr_c8f4855a.md) | 🔧 손 config (작동중, baseline 3, httpx_html) | 2026-05-15 |  | article_body_len | https://nte.perfectworld.com/kr/article/news/index.html |
 | [`www.reddit.com_r_CosmicPrincessKaguya`](www.reddit.com_r_CosmicPrincessKaguya.md) | 🧩 손어댑터 (작동중, baseline 19, handwritten/RedditAdapter, flair="Fan Art") | 2026-05-12 |  |  | https://www.reddit.com/r/CosmicPrincessKaguya/ |
 | [`m.cafe.daum.net_umamusume-kor_Z4os_boardType`](m.cafe.daum.net_umamusume-kor_Z4os_boardType.md) | 🧩 손어댑터 (작동중, baseline 20, handwritten/DaumCafeAdapter) | 2026-05-12 |  | posts_nonempty | https://m.cafe.daum.net/umamusume-kor/Z4os?boardType= |
@@ -23,16 +24,18 @@
 | layer | count |
 |---|---|
 | (미기재) | 9 |
+| F | 1 |
 
 ### config_strategy 분포
 
 | strategy | count |
 |---|---|
+| (미기재) | 1 |
 | handwritten | 3 |
 | httpx_html | 2 |
 | httpx_json | 4 |
 
 ### 최근 90일 (≥ 2026-02-14)
 
-케이스 9 건.
+케이스 10 건.
 
