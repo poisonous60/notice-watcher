@@ -13,7 +13,7 @@ import html as _html
 
 import jinja2
 from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -723,6 +723,8 @@ async def settings_page(request: Request):
 @app.post("/actions/pull", response_class=HTMLResponse)
 async def actions_pull(request: Request):
     res = await act.run_pull()
+    if res.get("ok"):
+        return Response(status_code=204, headers={"HX-Refresh": "true"})
     return _partial("_pull_result.html", request, res=res)
 
 
