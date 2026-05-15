@@ -137,13 +137,17 @@ def cmd_daemon_reload() -> int:
 
 
 def _remote_python_cmd(*args: str) -> str:
-    """`cd $DEPLOY_PATH && python <args>` 한 줄. args 는 *모두 사전 검증된* 토큰이어야 함.
+    """`cd $DEPLOY_PATH && .venv/bin/python <args>` 한 줄. args 는 *모두 사전 검증된* 토큰이어야 함.
+
+    venv 의 python 을 명시 사용 — 시스템 python 엔 httpx/discord 등 의존성 없음. systemd 유닛은
+    `ExecStart=.venv/bin/python …` 로 떠 있어 문제 없지만 ad-hoc SSH 호출은 `$PATH` 의 system
+    python 으로 떨어져 ModuleNotFoundError 가 남.
 
     quote 안 함 — DEPLOY_PATH 는 모듈 로드 시점에 _DEPLOY_PATH_RE 로 검증되었고, 호출자가 넘긴
     args 는 _require*() 정규식을 통과한 토큰 (slug/snowflake/base64/`--flag` 형태)이라 shell
     metachar 가 없다. 임의 사용자 입력을 quote 없이 넘기는 일은 없어야 함.
     """
-    return f"cd {DEPLOY_PATH_RAW} && python " + " ".join(args)
+    return f"cd {DEPLOY_PATH_RAW} && .venv/bin/python " + " ".join(args)
 
 
 def cmd_poll_now_slug(slugs_csv: str) -> int:
