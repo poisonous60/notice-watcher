@@ -46,17 +46,20 @@ def _ping(client: httpx.Client, url: str, target_label: str) -> Result:
 
 
 def baseline_check(target_url: str) -> dict[str, Result]:
-    """B1 (/) + B2 (/robots.txt). 같은 client로 가볍게."""
+    """B1 (/) + B2 (/robots.txt). 정찰용 1회 ping — 두 GET 병렬."""
     parts = urlsplit(target_url)
     root = f"{parts.scheme}://{parts.netloc}/"
     robots = f"{parts.scheme}://{parts.netloc}/robots.txt"
 
     headers = preset_h2_chrome_min()
-    with httpx.Client(headers=headers, timeout=10.0, follow_redirects=True) as client:
-        b1 = _ping(client, root, "B1")
-        time.sleep(2.0)
-        b2 = _ping(client, robots, "B2")
-
+    from concurrent.futures import ThreadPoolExecutor as _TPE
+    # 각 ping 이 자기 httpx.Client (스레드별 독립) — httpx.Client 는 스레드 안전성 보장 없음.
+    def _do(target: tuple[str, str]) -> Result:
+        u, label = target
+        with httpx.Client(headers=headers, timeout=10.0, follow_redirects=True) as client:
+            return _ping(client, u, label)
+    with _TPE(max_workers=2) as ex:
+        b1, b2 = list(ex.map(_do, [(root, "B1"), (robots, "B2")]))
     return {"B1": b1, "B2": b2}
 
 

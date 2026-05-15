@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import re
-import time
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 
@@ -37,23 +36,31 @@ def discover_feeds(*, page_url: str, page_html: str, out_dir: Path) -> dict:
     parts = urlsplit(page_url)
     base = f"{parts.scheme}://{parts.netloc}"
     headers = preset_h2_chrome_min()
-    with httpx.Client(headers=headers, timeout=10.0, follow_redirects=True) as client:
-        for path in _FEED_PATHS:
-            url = urljoin(base, path)
-            try:
+
+    # 6 well-known feed path 동시 fetch — probe 는 일회성 정찰이라 host 폴라이트 0.5s 의미 약함.
+    def _try(path: str) -> dict | None:
+        url = urljoin(base, path)
+        try:
+            with httpx.Client(headers=headers, timeout=10.0, follow_redirects=True) as client:
                 r = client.get(url)
-                if r.status_code == 200 and ("xml" in (r.headers.get("content-type", "")).lower()
-                                             or r.text.lstrip().startswith("<?xml")):
-                    candidates.append({
-                        "source": "well-known-path",
-                        "url": url,
-                        "status": r.status_code,
-                        "content_type": r.headers.get("content-type"),
-                        "size": len(r.text),
-                    })
-            except Exception:
-                continue
-            time.sleep(0.5)
+            if r.status_code == 200 and ("xml" in (r.headers.get("content-type", "")).lower()
+                                         or r.text.lstrip().startswith("<?xml")):
+                return {
+                    "source": "well-known-path",
+                    "url": url,
+                    "status": r.status_code,
+                    "content_type": r.headers.get("content-type"),
+                    "size": len(r.text),
+                }
+        except Exception:
+            return None
+        return None
+
+    from concurrent.futures import ThreadPoolExecutor as _TPE
+    with _TPE(max_workers=len(_FEED_PATHS)) as _ex:
+        for hit in _ex.map(_try, _FEED_PATHS):
+            if hit is not None:
+                candidates.append(hit)
 
     out = {"page_url": page_url, "candidates": candidates}
     validate_payload("feed_candidates.json", out, allow_extra=False)

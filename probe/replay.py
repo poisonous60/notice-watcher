@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
@@ -67,10 +68,12 @@ def replay_request(*, candidate: dict, out_dir: Path, idx: int) -> Result:
 
 
 def replay_all(candidates: list[dict], out_dir: Path) -> list[Result]:
-    results: list[Result] = []
-    for i, c in enumerate(candidates[:5]):  # 너무 많이 호출 방지
-        results.append(replay_request(candidate=c, out_dir=out_dir, idx=i))
-        time.sleep(2.0)
+    # 후보 5개 max — 각자 다른 endpoint 라 병렬. 정찰 1회 호출 → 봇탐지 회피 sleep 불필요.
+    todo = list(enumerate(candidates[:5]))
+    if not todo:
+        return []
+    with ThreadPoolExecutor(max_workers=len(todo)) as ex:
+        results = list(ex.map(lambda it: replay_request(candidate=it[1], out_dir=out_dir, idx=it[0]), todo))
     summary = [r.to_dict() for r in results]
     (out_dir / "replay.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"

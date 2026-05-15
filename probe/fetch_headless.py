@@ -24,6 +24,42 @@ def is_available() -> bool:
         return False
 
 
+# chromium 콜드 launch 가속 — 백그라운드 networking·번역·확장프로그램 등 끔.
+# automation bit 도 함께 끔(`--disable-blink-features=AutomationControlled`) — stealth 와 보완.
+_LAUNCH_ARGS = [
+    "--disable-blink-features=AutomationControlled",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-default-apps",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "--disable-background-networking",
+    "--disable-component-update",
+    "--disable-features=TranslateUI",
+    "--disable-translate",
+]
+
+
+# HAR 의 XHR/fetch 후보 발견만 필요 — image/font/media/stylesheet 는 차단해서 페이지 로드 + networkidle 가속.
+# stylesheet 차단은 visual 렌더만 영향, JS engine 실행과 XHR 발사는 무관 (대부분 SPA 에서 안전).
+_BLOCKED_RESOURCE_TYPES = {"image", "media", "font", "stylesheet"}
+
+
+def _install_resource_block(context) -> None:
+    def _route(route):
+        try:
+            if route.request.resource_type in _BLOCKED_RESOURCE_TYPES:
+                route.abort()
+            else:
+                route.continue_()
+        except Exception:  # noqa: BLE001 — route 이미 종결됐을 수 있음
+            pass
+    try:
+        context.route("**/*", _route)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def fetch_with_capture(
     *,
     url: str,
@@ -85,7 +121,7 @@ def fetch_with_capture(
 
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=headless)
+            browser = p.chromium.launch(headless=headless, args=_LAUNCH_ARGS)
             context_kwargs = {
                 "record_har_path": str(har_path),
                 "record_har_content": "attach",
@@ -101,6 +137,7 @@ def fetch_with_capture(
                 context_kwargs["storage_state"] = str(storage_state_path)
 
             context = browser.new_context(**context_kwargs)
+            _install_resource_block(context)
             if _has_stealth:
                 try:
                     Stealth().apply_stealth_sync(context)
@@ -321,7 +358,7 @@ def fetch_article_by_click(
 
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=headless)
+            browser = p.chromium.launch(headless=headless, args=_LAUNCH_ARGS)
             ckw: dict = {
                 "record_har_path": str(har_path),
                 "record_har_content": "attach",
@@ -333,6 +370,19 @@ def fetch_article_by_click(
             if storage_state_path and storage_state_path.exists():
                 ckw["storage_state"] = str(storage_state_path)
             context = browser.new_context(**ckw)
+            # Phase 9b 는 stylesheet 차단 X — 클릭 visibility 검출에 영향 가능. image/font/media 만 차단.
+            def _route_click(route):
+                try:
+                    if route.request.resource_type in ("image", "media", "font"):
+                        route.abort()
+                    else:
+                        route.continue_()
+                except Exception:  # noqa: BLE001
+                    pass
+            try:
+                context.route("**/*", _route_click)
+            except Exception:  # noqa: BLE001
+                pass
             if _has_stealth:
                 try:
                     Stealth().apply_stealth_sync(context)
