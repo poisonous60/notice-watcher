@@ -23,6 +23,7 @@ from probe.discover import discover_feeds, read_robots
 from probe.extract import (
     html_repeating_patterns,
     pick_first_article_url,
+    list_row_external_host,
     runtime_id_candidates,
     traffic_api_candidates,
     write_list_candidates,
@@ -365,6 +366,10 @@ def _run(args: argparse.Namespace, url: str, slug: str) -> int:
                 base_url=url,
                 page_html=page_html,
             )
+            row_external_host = list_row_external_host(
+                html_candidates=html_lists,
+                base_url=url,
+            )
             write_list_candidates(
                 out_dir,
                 html_candidates=html_lists,
@@ -373,6 +378,7 @@ def _run(args: argparse.Namespace, url: str, slug: str) -> int:
                 first_article_url=first_article_url,
                 inline_js_candidates=inline_js_lists,
                 runtime_ids=runtime_ids,
+                row_external_host=row_external_host,
             )
         print(f"  HTML 반복 패턴: {len(html_lists)}건")
         print(f"  JSON API 후보: {len(json_api_lists)}건 (관련도순)")

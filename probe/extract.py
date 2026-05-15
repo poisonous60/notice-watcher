@@ -481,6 +481,65 @@ def pick_first_article_url(
     return None
 
 
+@heuristic
+def list_row_external_host(
+    html_candidates: list[dict],
+    *,
+    base_url: str,
+) -> Optional[dict]:
+    """list row 후보들의 sample_url host 가 base_url host 와 다른 비율.
+
+    검색결과 페이지(Google Scholar, 뉴스 aggregator 등)는 각 row 의 url 이 *외부 도메인*. 그런 페이지의
+    article body 통합 추출은 불가 — config 작성자(LLM)가 이 신호를 보고 article 섹션을 생략하거나
+    `article.skip_status:[200]` 으로 본문 fetch 시도 자체를 짧게 끊을 수 있다. validate.py 의 retry
+    feedback 도 이 신호와 별개로 post.url host 직접 분석해 동일 hint 박음.
+
+    필터: child_count ≥ 5 (의미 있는 반복 패턴) + sample_url 이 http(s) + sibling-page 패턴 제외
+    (href_common_prefix 가 base_url 의 path 와 시작 일치 = pagination/sidebar 링크).
+
+    출력: {base_host, total_count, external_count, external_ratio, sample_external_urls} 또는 None.
+    None = 의미 있는 row 후보 0건.
+    """
+    from urllib.parse import urlsplit
+    base_host = urlsplit(base_url or "").netloc
+    if not base_host:
+        return None
+    base_path = (urlsplit(base_url or "").path or "/").rstrip("/") or "/"
+    total = 0
+    external = 0
+    ext_samples: list[str] = []
+    for c in html_candidates or []:
+        if int(c.get("child_count") or 0) < 5:
+            continue
+        u = c.get("sample_url")
+        if not u or not isinstance(u, str) or not u.startswith(("http://", "https://")):
+            continue
+        if c.get("href_is_js"):
+            continue
+        sp = urlsplit(u)
+        if sp.netloc == base_host:
+            href_prefix = str(c.get("href_common_prefix") or "")
+            if href_prefix.startswith(base_path) or href_prefix.startswith("/scholar?") or href_prefix.startswith("?"):
+                continue
+            cand_path = (sp.path or "/").rstrip("/") or "/"
+            if cand_path == base_path:
+                continue
+        total += 1
+        if sp.netloc and sp.netloc != base_host:
+            external += 1
+            if len(ext_samples) < 5:
+                ext_samples.append(u)
+    if total == 0:
+        return None
+    return {
+        "base_host": base_host,
+        "total_count": total,
+        "external_count": external,
+        "external_ratio": round(external / total, 3),
+        "sample_external_urls": ext_samples,
+    }
+
+
 # runtime_id_candidates: 사이트가 HTML 안에 *고정값으로 박아둔* ID/슬러그 후보.
 # URL path 만으론 안 보이지만 (예: cafe.naver.com/<slug> 는 cafe_id 가 없음) 페이지 HTML 안에 박혀
 # 있는 ID — `g_sClubId="31104609"`, `<meta property="og:url" content=".../boards/1018">`,
@@ -639,6 +698,7 @@ def write_list_candidates(
     first_article_url: Optional[str],
     inline_js_candidates: Optional[list[dict]] = None,
     runtime_ids: Optional[list[dict]] = None,
+    row_external_host: Optional[dict] = None,
 ) -> None:
     payload = {
         "html_repeating_patterns": html_candidates,
@@ -651,6 +711,9 @@ def write_list_candidates(
         # 페이지 HTML 안에 박힌 ID/슬러그 후보 — URL 에 없지만 사이트가 명시한 cafe_id/board_id 등.
         "runtime_id_candidates": runtime_ids or [],
         "first_article_url": first_article_url,
+        # list row 들의 sample_url host 가 base host 와 다른 비율 — 검색결과/aggregator 검출.
+        # None = 의미 있는 row 후보 0건; dict = {base_host, total_count, external_count, external_ratio, sample_external_urls}.
+        "row_external_host": row_external_host,
     }
     validate_payload("list_candidates.json", payload, allow_extra=False)
     (out_dir / "list_candidates.json").write_text(

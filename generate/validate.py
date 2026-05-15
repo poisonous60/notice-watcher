@@ -83,6 +83,29 @@ def _norm_url(u: Optional[str]) -> str:
     return u.split("#", 1)[0].rstrip("/").lower()
 
 
+def _external_host_hint(post_url: Optional[str], cfg: dict) -> Optional[str]:
+    """post.url host 가 list URL host (= cfg.site 또는 list.url_template 호스트) 와 다르면 hint 반환.
+
+    검색결과/aggregator 페이지(Google Scholar, 뉴스 모음 등) 의 row url 은 외부 도메인 — article body
+    통합 추출 불가. retry feedback 에 박혀 LLM 이 다음 attempt 에서 `article.skip_status:[200]` 박거나
+    article 섹션 생략하도록 유도. probe 의 list_candidates.row_external_host 신호와 평행 (D-layer)."""
+    if not post_url:
+        return None
+    from urllib.parse import urlsplit
+    post_host = urlsplit(post_url).netloc
+    if not post_host:
+        return None
+    list_url_tpl = ((cfg.get("list") or {}).get("url_template") or "")
+    list_host = urlsplit(list_url_tpl).netloc or str(cfg.get("site") or "")
+    if not list_host:
+        return None
+    if post_host == list_host:
+        return None
+    return (f"post.url host={post_host!r} 가 list host={list_host!r} 와 다름 — 검색결과/aggregator 가능성. "
+            f"article body 통합 추출 X. article.skip_status:[200] 박아 본문 fetch 즉시 skip 또는 "
+            f"article 섹션 생략. 알림은 list.fields 의 title/url/author/summary 로 충분.")
+
+
 def _expected_count_hint(digest: Optional[dict]) -> Optional[int]:
     if not digest:
         return None
@@ -151,8 +174,13 @@ async def validate_built_config(
                         continue  # 접근제한 글 — 다음 글로
                     real_seen += 1
                     ok = blen >= 100
-                    rep.add("article_body_len", ok, hard=True,
-                            detail=f"post_id={p.post_id} {blen}자" + ("" if ok else " (<100 — content selector 의심)"))
+                    detail = f"post_id={p.post_id} {blen}자"
+                    if not ok:
+                        ext_hint = _external_host_hint(p.url, cfg)
+                        detail += " (<100 — content selector 의심)"
+                        if ext_hint:
+                            detail += f" / {ext_hint}"
+                    rep.add("article_body_len", ok, hard=True, detail=detail)
                     ch = full.content_html or ""
                     if "<nav" in ch and "<footer" in ch:
                         rep.add("article_body_chrome", False, hard=False,

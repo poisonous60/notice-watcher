@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "site": "scholar.google.com",
+  "board": "scholar",
+  "strategy": "httpx_html",
+  "_source_url": "https://scholar.google.com/scholar?hl=ko&as_sdt=0%2C5&q=harness&btnG=",
+  "_note": "Google Scholar 'harness' 검색결과. row 의 url 이 외부 도메인 (taylorfrancis pdf, books.google, bharatpedia 등) — article body 통합 추출 불가. article 섹션 생략, list.fields 의 title/url/author/summary(abstract) 만 폴링. probe heuristic list_row_external_host 가 외부 비율 1.0 으로 검출하는 패턴.",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8"
+  },
+  "timeout": 30.0,
+  "polite_sleep": {"min": 15, "max": 30},
+  "list": {
+    "url_template": "https://scholar.google.com/scholar?q=harness&hl=ko&as_sdt=0,5",
+    "pagination": {"kind": "query_param", "page_param": "start", "page_unit": 10},
+    "row_selector": "#gs_res_ccl_mid > div.gs_r.gs_or.gs_scl",
+    "fields": {
+      "post_id": [{"from": "attr", "selector": ":self", "attr": "data-aid"}],
+      "title": [{"from": "css", "selector": "h3.gs_rt > a", "text": true, "transform": [["collapse_ws"]]}],
+      "url": [{"from": "attr", "selector": "h3.gs_rt > a", "attr": "href"}],
+      "author": [{"from": "css", "selector": "div.gs_a", "text": true, "transform": [["collapse_ws"]]}],
+      "summary": [{"from": "css", "selector": "div.gs_rs", "text": true, "transform": [["collapse_ws"]]}]
+    }
+  }
+}

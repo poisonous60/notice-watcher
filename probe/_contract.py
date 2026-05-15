@@ -143,6 +143,11 @@ _ARTIFACTS: dict[str, ArtifactContract] = {
                            note="HTML 안 *런타임 ID/슬러그* 후보 — URL path 에 없지만 사이트가 페이지에 명시한 cafe_id/board_id/community_id 등. "
                                 "각 dict: {name, value, source: 'js_var'|'next_data'|'meta_og_url', context}. config 작성자가 이 값을 "
                                 "kwargs / url_template / handwritten adapter 매개변수에 *고정값* 으로 박을 수 있음."),
+            _ContractField("row_external_host", type_hint="dict|null", required=False,
+                           note="list row 후보들의 sample_url host 가 base_url host 와 다른 비율 — 검색결과/aggregator 검출 신호. "
+                                "None=의미 있는 row 후보 0건. dict={base_host, total_count, external_count, external_ratio, sample_external_urls}. "
+                                "external_ratio≥0.8 이면 검색결과/aggregator 일 가능성 — article body 통합 추출 불가, "
+                                "config 작성자는 article 섹션 생략 또는 article.skip_status:[200] 박아 본문 fetch 시도 짧게 끊을 것."),
         ),
     ),
 
