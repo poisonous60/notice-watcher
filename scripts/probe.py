@@ -107,6 +107,25 @@ def main(argv: list[str]) -> int:
     presets = all_presets(url)
     if args.lite:
         presets = {k: v for k, v in presets.items() if k in ("H2", "H3", "H4")}
+    # Phase 2 (Playwright headless) 는 Phase 1 과 결과 의존성 없음 — 동시 시작해 wall-clock 단축.
+    # Phase 3+ 부터가 Phase 2 산출물(captured_headers / traffic.har / page_html) 의존이라 그 전에 join.
+    _phase2_ex: ThreadPoolExecutor | None = None
+    _phase2_future = None
+    _do_headless = not args.no_headless and headless_available()
+    if _do_headless:
+        print("\n[Phase 2] Playwright headless w/ HAR capture ... (Phase 1 과 병렬 시작)")
+        _phase2_ex = ThreadPoolExecutor(max_workers=1)
+        _phase2_future = _phase2_ex.submit(
+            fetch_with_capture,
+            url=url,
+            out_dir=out_dir,
+            target="list",
+            headless=not args.headful_debug,
+            baseline_blocked=blocked,
+        )
+    elif not headless_available():
+        print("\n[Phase 2] skipped — playwright not installed")
+
     print(f"\n[Phase 1] static GET ({'/'.join(presets)}) ...")
     # 같은 URL 을 헤더만 바꿔 N번 두드리는 거라 순차 실행 + sleep 의 가치가 낮음 → 병렬.
     # 결과 순서는 presets dict 순서 유지 (ThreadPoolExecutor.map).
@@ -150,23 +169,15 @@ def main(argv: list[str]) -> int:
 
     all_results.extend(static_results)
 
-    # ---- Phase 2: headless w/ HAR ----
-    # lite 모드에서도 headless 는 항상 돈다(설치돼 있으면) — HAR 가 JSON API 발견·렌더 DOM·통과헤더 확보의 핵심.
-    # lite 의 "경량"은 외부(Jina/Firecrawl/Crawl4AI)·유료·login 을 건너뛰는 것.
+    # ---- Phase 2 join: 위에서 병렬로 띄운 headless 결과 회수. lite 모드도 headless 는 항상 돈다 ----
+    # (HAR 가 JSON API 발견·렌더 DOM·통과헤더 확보의 핵심. lite 의 "경량"은 외부·유료·login 스킵임)
     headless: Result | None = None
-    if not args.no_headless and headless_available():
-        print("\n[Phase 2] Playwright headless w/ HAR capture ...")
-        headless = fetch_with_capture(
-            url=url,
-            out_dir=out_dir,
-            target="list",
-            headless=not args.headful_debug,
-            baseline_blocked=blocked,
-        )
-        print(f"  S4         {headless.status} {headless.classification.value}  {' '.join(headless.notable[:3])}")
+    if _phase2_future is not None:
+        headless = _phase2_future.result()
+        print(f"\n[Phase 2 result] S4 {headless.status} {headless.classification.value}  {' '.join(headless.notable[:3])}")
         all_results.append(headless)
-    elif not headless_available():
-        print("\n[Phase 2] skipped — playwright not installed")
+    if _phase2_ex is not None:
+        _phase2_ex.shutdown()
 
     # ---- Phase 3: S1.Hcap (캡처 헤더로 정적 재시도) ----
     captured_retry: Result | None = None
