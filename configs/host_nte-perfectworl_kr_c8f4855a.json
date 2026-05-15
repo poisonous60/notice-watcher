@@ -1,0 +1,88 @@
+{
+  "version": 1,
+  "_source_url": "https://nte.perfectworld.com/kr/article/news/index.html",
+  "_note": "Perfect World <이환(NTE)> 한국 공식 뉴스 게시판. 자동 생성된 article.url_template 이 {post_id_year}{post_id_month}{post_id_day} placeholder 를 못 채워 404 → 제거하고 list 에서 추출한 post.url 을 그대로 사용.",
+  "site": "nte.perfectworld.com",
+  "board": "news",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept-Language": "ko-KR",
+    "upgrade-insecure-requests": "1"
+  },
+  "timeout": 15.0,
+  "list": {
+    "url_template": "https://nte.perfectworld.com/kr/article/news/index.html",
+    "row_selector": "div.listNews > a",
+    "row_required_selector": "div.listItem h2.title",
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": ":self",
+          "attr": "href",
+          "transform": [["regex_extract", "\\/(\\d+)\\.html$"]]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "div.listItem h2.title",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": ":self",
+          "attr": "href",
+          "transform": [["urljoin", "https://nte.perfectworld.com"]]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "div.listItem p.date",
+          "text": true,
+          "transform": [["date_only_to_iso", "+09:00"]]
+        }
+      ],
+      "category": [
+        {
+          "from": "css",
+          "selector": "div.listItem p.type",
+          "text": true
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "div.articleContent",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "h1.articleTitle",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "p.articleDate",
+          "text": true,
+          "transform": [["iso8601", ["%Y.%m.%d"], "+09:00"]]
+        }
+      ]
+    }
+  }
+}
