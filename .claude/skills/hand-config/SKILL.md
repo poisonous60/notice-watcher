@@ -88,7 +88,7 @@ description: >-
 
 ## 자율 개선 시 자가 점검 (가이드라인, 권장)
 
-probe/prompt/schema/코드 손대기 전 다음 다섯 질문에 답해보면 누더기 위험 줄어든다. case 파일 본문 또는 commit msg 본문에 한 줄 메모로 적어둠 — 강제 X.
+probe/prompt/schema/코드 손대기 전 다음 여섯 질문에 답해보면 누더기 위험 줄어든다. case 파일 본문 또는 commit msg 본문에 한 줄 메모로 적어둠 — 강제 X.
 
 1. **어느 자리?** — 픽스를 다음 6 자리 중 하나에 매핑:
    - **(E) schema 거부** — `engine/config_schema.py` 의 validate 룰 강화. config 파일만 보고도 잡힘.
@@ -114,7 +114,14 @@ probe/prompt/schema/코드 손대기 전 다음 다섯 질문에 답해보면 �
    - `python scripts/cases_index.py` 실행해 INDEX.md 갱신.
    - commit msg prefix 권장: `[fix-layer: E|D|C|B|A|F|none] <slug>` + 본문에 5-질문 답 요약.
 
-위 다섯 답이 없어도 commit 막지 X — 그저 *생각해보면 좋은* 질문. 진짜 검증은 reviewer subagent + pre-push hook.
+6. **새 패턴이면 smoke_test fixture 추가했나?** — 다음 둘 중 하나에 해당하면 fixture 동시 추가 의무 (안 하면 회귀 catch 영구 부재):
+   - **새 strategy 도입 (F-layer)**: `engine/strategies/<new>.py` 신규 추가 시 → `scripts/probe_smoke.py` 의 `REPS` 에 그 패턴을 *진짜로 보여주는* 새 entry (`Spec(name=..., url=...)`) 추가 + 그 URL probe (`python scripts/probe.py "<url>"`) → `output/probe/<new-slug>/` 산출 + `_stage2_check_digest` 안에 `if rep.name == "<new>": ...` slug-specific 검증 분기 추가.
+     ※ fixture URL 선택 주의 — *진짜로 그 패턴을 보여주는* URL 인지 직접 probe 결과로 확인. 예: httpx_json fixture 면 `traffic_json_api_candidates >= 1 + score > 0` 실제로 나오는지. (이 SKILL 의 6-질문 추가 trigger = 2026-05-15 `probe_smoke.py` 의 **REPS fixture URL** `endfield.gryphline.com/ko-kr/news` 잘못 박힘 사례 — Next.js prerender 사이트라 클라이언트 XHR 안 함 → SPA+XHR 패턴 fixture 로 부적절했음. *adapters/endfield.py 와 무관* — adapter 자체는 별도 도메인 `web-news.gryphline.com/api/bulletin` 직접 hit 라 정상 동작).
+   - **새 휴리스틱 도입 (C-layer)**: `probe/extract.py` 또는 `probe/_heuristic.py` 에 새 `@heuristic(...)` 데코레이터 함수 추가 시 → `tests/probe_heuristics/test_<heuristic_name>.py` (또는 그 휴리스틱 이름 들어간 fixture/test 파일) 동시 추가. stage 5 가 자동 picked-up 인데 fixture 없으면 의미 없음.
+
+   기존 strategy/heuristic 수정만이면 skip — 기존 fixture 가 catch.
+
+위 여섯 답이 없어도 commit 막지 X — 그저 *생각해보면 좋은* 질문. 진짜 검증은 reviewer subagent (8 항목 검증, 7·8 항목이 위 6번을 강제) + pre-push hook.
 
 ## 자가 review (commit 직전 — 권장)
 

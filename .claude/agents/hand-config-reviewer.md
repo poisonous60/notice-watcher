@@ -31,9 +31,9 @@ fix-layer 6 자리:
 
 원칙: **위에서부터 차례로** (E > D > C > B > A > F). 싸고 hard 한 쪽 우선.
 
-# 검증 항목 (6 개)
+# 검증 항목 (8 개)
 
-다음 6 항목을 각각 PASS/FAIL 판정. 하나라도 FAIL 이면 전체 FAIL.
+다음 8 항목을 각각 PASS/FAIL 판정. 하나라도 FAIL 이면 전체 FAIL.
 
 1. **case 파일 존재 + 필수 frontmatter** — `docs/cases/<slug>.md` 가 변경에 포함됐고, frontmatter 의 필수 4 필드 (`slug`, `url`, `status`, `date`) 가 채워져 있나? slug = `output/poll_state/<slug>` 형식.
 
@@ -58,6 +58,20 @@ fix-layer 6 자리:
 5. **외부 검증 결과** — main thread 가 prompt 로 박은 `probe_smoke` 출력에 `FAIL` 표시 또는 exit-code ≠ 0 있나? 있으면 FAIL.
 
 6. **`docs/cases/INDEX.md` 동기화** — 신규/갱신된 case 파일이 있으면, `docs/cases/INDEX.md` 의 표에 그 slug 가 있나? (main thread 가 `python scripts/cases_index.py` 를 실행했어야 함.) INDEX.md 가 prompt 에 있으면 *내용*으로 확인, 없으면 `Read` 로 직접.
+
+7. **새 strategy → REPS fixture 의무** — diff 에 `engine/strategies/<new>.py` 신규 파일 추가됐다면 (= 새 probe strategy 패턴 도입):
+   - `scripts/probe_smoke.py` 의 `REPS: list[Spec] = [...]` 에 그 패턴을 대표하는 새 entry (`Spec(name=..., url=...)`) 가 함께 추가되었나
+   - 그 새 entry 의 slug 에 대응하는 `output/probe/<slug>/` 산출물이 디스크에 있나 (`Glob` 으로 확인)
+   - `probe_smoke.py` 의 stage 2 `_stage2_check_digest` 안에 새 `if rep.name == "<new>": ...` slug-specific 검증 분기가 추가되었나
+   셋 중 하나라도 빠지면 FAIL — 이유: 새 strategy 회귀 catch fixture 영구 부재 (이번 endfield 같은 "잘못 박힘" 의 *예방*).
+
+   strategies/ 변경 없으면 PASS.
+
+8. **새 휴리스틱 → tests/probe_heuristics/ fixture 의무** — diff 에 `probe/extract.py` 또는 `probe/_heuristic.py` 에서 새 `@heuristic(...)` 데코레이터 함수가 추가됐다면:
+   - `tests/probe_heuristics/test_<heuristic_name>.py` 또는 그 휴리스틱 이름이 들어간 fixture/test 파일이 함께 추가되었나 (`Glob 'tests/probe_heuristics/*<name>*'` 로 확인)
+   없으면 FAIL — 이유: 휴리스틱 회귀 catch 안 됨 (stage 5 가 자동 picked-up 인데 fixture 없으면 의미 없음).
+
+   probe/ 변경 없거나 기존 함수 수정만이면 PASS.
 
 # 출력 형식
 
