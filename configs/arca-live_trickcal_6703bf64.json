@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "site": "arca.live",
+  "board": "trickcal",
+  "strategy": "handwritten",
+  "adapter": "ArcaLiveAdapter",
+  "kwargs": {
+    "channel": "trickcal",
+    "include_notices": true
+  },
+  "_source_url": "https://arca.live/b/trickcal",
+  "_note": "아카라이브 — known-platform 자동 인식. Cloudflare 보호 + JS 렌더라 손어댑터 ArcaLiveAdapter(playwright-stealth) 사용. 특정 카테고리 탭만 받고 싶으면 kwargs 에 category 추가.",
+  "_recognized_platform": "arca-live"
+}

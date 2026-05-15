@@ -1,0 +1,155 @@
+{
+  "version": 1,
+  "site": "inven.co.kr",
+  "board": "2304",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept-Language": "ko-KR",
+    "Upgrade-Insecure-Requests": "1"
+  },
+  "timeout": 15.0,
+  "list": {
+    "url_template": "https://www.inven.co.kr/board/maple/{board}",
+    "pagination": {
+      "kind": "query_param",
+      "page_param": "p"
+    },
+    "row_selector": "tbody > tr:not(.notice)",
+    "row_required_selector": "td.num span",
+    "include_notices": false,
+    "fields": {
+      "post_id": [
+        {
+          "from": "css",
+          "selector": "td.num span",
+          "text": true
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "td.tit a.subject-link",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "td.tit a.subject-link",
+          "attr": "href"
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "td.date",
+          "text": true,
+          "transform": [
+            [
+              "iso8601",
+              [
+                "%m-%d %H:%M",
+                "%Y-%m-%d %H:%M"
+              ],
+              "+09:00"
+            ]
+          ]
+        }
+      ],
+      "author": [
+        {
+          "from": "css",
+          "selector": "td.user span.layerNickName",
+          "text": true
+        }
+      ],
+      "category": [
+        {
+          "from": "css",
+          "selector": "td.tit span.category",
+          "text": true,
+          "transform": [
+            [
+              "strip_brackets"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "div.articleContent div.contentBody",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "div.articleSubject div.articleTitle h1",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "div.articleHead div.articleInfo div.articleDate",
+          "text": true,
+          "transform": [
+            [
+              "replace",
+              " ",
+              "T"
+            ],
+            [
+              "append",
+              "+09:00"
+            ]
+          ]
+        }
+      ],
+      "author": [
+        {
+          "from": "css",
+          "selector": "div.articleHead div.articleInfo div.articleWriter span",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "css",
+          "selector": "div.articleHeadMenu div.topmenuInfo div.articleCategory",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "strip_brackets"
+            ]
+          ]
+        }
+      ]
+    }
+  }
+}
