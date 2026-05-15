@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "site": "cafe.naver.com",
+  "board": "cafe-slug-gutterlife/menu0",
+  "strategy": "handwritten",
+  "adapter": "NaverCafeAdapter",
+  "kwargs": {
+    "cafe_slug": "gutterlife",
+    "menu_id": 0,
+    "include_notices": false,
+    "timeout": 15.0
+  },
+  "_slug_board": "gutterlife_all",
+  "_source_url": "https://cafe.naver.com/gutterlife",
+  "_note": "네이버 카페 홈 URL (cafe.naver.com/<slug>) — cafe_id 는 어댑터가 카페 홈 HTML 의 g_sClubId 에서 해소. menu_id=0 = 전체글(모든 게시판 합본). 비공개 카페면 본문 API 가 401/403 → 본문 비워 반환.",
+  "_recognized_platform": "naver-cafe"
+}

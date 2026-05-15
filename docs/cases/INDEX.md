@@ -2,10 +2,11 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 11 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 12 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
+| [`naver-cafe_gutterlife_all_e0009e69`](cafe.naver.com_home.md) | ✅ 자동 (recognizer 확장 — cafe 홈 URL 인식, NaverCafeAdapter 가 cafe_slug→cafe_id 런타임 해소) | 2026-05-16 | F | posts_nonempty | https://cafe.naver.com/gutterlife |
 | [`naver-cafe_31104609_1_c9b1f633`](naver-cafe_31104609_1_c9b1f633.md) | 🚫 등록 거부 (등록은 OK, 본문 추출 불가 — 정책상 우회 X) + 시스템 차원 후속 완료 | 2026-05-16 | F | body_empty_at_baseline, article_api_401_403 | https://cafe.naver.com/f-e/cafes/31104609/menus/1?viewType=L |
 | [`host_syosetu-colomo-_root_2ff18e94`](host_syosetu-colomo-_root_2ff18e94.md) | 🚫 거부 (게시판 형식 아님 — 사전 게이트 추가) | 2026-05-15 | F | schema, row_required_selector | https://syosetu.colomo.dev/ |
 | [`host_nte-perfectworl_kr_c8f4855a`](host_nte-perfectworl_kr_c8f4855a.md) | 🔧 손 config (작동중, baseline 3, httpx_html) | 2026-05-15 |  | article_body_len | https://nte.perfectworld.com/kr/article/news/index.html |
@@ -25,18 +26,18 @@
 | layer | count |
 |---|---|
 | (미기재) | 9 |
-| F | 2 |
+| F | 3 |
 
 ### config_strategy 분포
 
 | strategy | count |
 |---|---|
 | (미기재) | 1 |
-| handwritten | 4 |
+| handwritten | 5 |
 | httpx_html | 2 |
 | httpx_json | 4 |
 
 ### 최근 90일 (≥ 2026-02-14)
 
-케이스 11 건.
+케이스 12 건.
 

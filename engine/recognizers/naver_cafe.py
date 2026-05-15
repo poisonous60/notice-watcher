@@ -27,6 +27,33 @@ def _cfg(cafe_id: int, menu_id: int, url: str) -> dict:
     }
 
 
+# 카페 홈 URL (예: cafe.naver.com/gutterlife) — cafe_id 는 URL 에 없음 → 어댑터가 홈 HTML 에서 g_sClubId 스크랩.
+# menu_id=0 = "전체글" (모든 게시판 합본). sticky 공지 API 가 menu_id=0 에선 빈 배열 → include_notices=False.
+_HOME_NOTE = ("네이버 카페 홈 URL (cafe.naver.com/<slug>) — cafe_id 는 어댑터가 카페 홈 HTML 의 g_sClubId 에서 "
+              "해소. menu_id=0 = 전체글(모든 게시판 합본). 비공개 카페면 본문 API 가 401/403 → 본문 비워 반환.")
+
+
+def _cfg_home(cafe_slug: str, url: str) -> dict:
+    return {
+        "version": 1, "site": "cafe.naver.com", "board": f"cafe-slug-{cafe_slug}/menu0",
+        "strategy": "handwritten", "adapter": "NaverCafeAdapter",
+        "kwargs": {"cafe_slug": cafe_slug, "menu_id": 0, "include_notices": False, "timeout": 15.0},
+        "_slug_board": f"{cafe_slug}_all",
+        "_source_url": url, "_note": _HOME_NOTE,
+    }
+
+
+# 예약 segment (홈으로 오인하지 말 것).
+_RESERVED_HOME_SEGS = {"f-e", "ca-fe", "cafes"}
+
+
+def _home(m: "re.Match", url: str) -> Optional[dict]:
+    cafe_slug = m.group(1)
+    if cafe_slug.lower() in _RESERVED_HOME_SEGS:
+        return None
+    return _cfg_home(cafe_slug, url)
+
+
 # https://cafe.naver.com/f-e/cafes/30291108/menus/6?viewType=L  (신 UI 메뉴 URL)
 def _menu(m: "re.Match", url: str) -> Optional[dict]:
     return _cfg(int(m.group(1)), int(m.group(2)), url)
@@ -55,4 +82,6 @@ PATTERNS = [
     (re.compile(r"//(?:m\.)?cafe\.naver\.com/[A-Za-z0-9_-]+/cafes/(\d+)/menus/(\d+)\b", re.I), _menu),
     (re.compile(r"//(?:m\.)?cafe\.naver\.com/[A-Za-z0-9_-]+/cafes/(\d+)/articles/\d+\b", re.I), _article),
     (re.compile(r"//(?:m\.)?cafe\.naver\.com/ArticleList\.nhn\b", re.I), _legacy),
+    # 카페 홈 — 다른 패턴 매칭 실패한 뒤 폴백. path 가 정확히 `/<slug>` 또는 `/<slug>/` 만.
+    (re.compile(r"//(?:m\.)?cafe\.naver\.com/([A-Za-z0-9_-]+)/?(?:\?|#|$)", re.I), _home),
 ]

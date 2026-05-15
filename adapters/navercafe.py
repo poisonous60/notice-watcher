@@ -4,6 +4,7 @@ probe 결과:
 - 정적 SSR 게시판 페이지(`cafe.naver.com/f-e/cafes/{cafeId}/menus/{menuId}?viewType=L`)는
   1페이지 HTML이 SEO용으로 들어 있지만, page 파라미터(`&page=2` 등)는 무시됨 → 페이징은 JSON API 사용.
 - 목록 JSON API: `apis.naver.com/cafe-web/cafe-boardlist-api/v1/cafes/{cafeId}/menus/{menuId}/articles?page=&pageSize=&sortBy=TIME&viewType=L`
+  menuId=0 은 카페 "전체글" (모든 게시판 합본).
 - 카페 sticky 공지 API: `apis.naver.com/cafe-web/cafe-boardlist-api/v1/cafes/{cafeId}/notices/menus/{menuId}`
 - 본문 JSON API: `article.cafe.naver.com/gw/v4/cafes/{cafeId}/articles/{articleId}?menuId=&boardType=L&useCafeId=true&requestFrom=A`
 - 헤더는 `User-Agent` + `Referer: https://cafe.naver.com/` 면 200.
@@ -13,9 +14,14 @@ probe 결과:
     async with NaverCafeAdapter(cafe_id=30291108, menu_id=6) as a:
         posts = await a.fetch_list(page=1)
         full = await a.fetch_article(posts[0])
+
+    # cafe_id 모르고 cafe 홈 URL(`cafe.naver.com/<slug>`) 만 있을 때:
+    async with NaverCafeAdapter(cafe_slug="gutterlife", menu_id=0) as a:
+        posts = await a.fetch_list(page=1)
 """
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 from urllib.parse import urlencode
@@ -56,25 +62,53 @@ class NaverCafeAdapter(BaseAdapter):
         "Origin": "https://cafe.naver.com",
     }
 
+    CAFE_HOME_URL = "https://cafe.naver.com/{cafe_slug}"
+    _CAFE_ID_RE = re.compile(r"g_sClubId\s*=\s*[\"\']?(\d+)")
+
     def __init__(
         self,
         *,
-        cafe_id: int,
+        cafe_id: Optional[int] = None,
+        cafe_slug: Optional[str] = None,
         menu_id: int,
         include_notices: bool = True,
         timeout: float = 15.0,
     ):
-        self.cafe_id = int(cafe_id)
+        # cafe_id 직접 또는 cafe_slug → 런타임에 해소. 둘 다 없으면 에러.
+        if cafe_id is None and not cafe_slug:
+            raise ValueError("NaverCafeAdapter: cafe_id 또는 cafe_slug 중 하나 필요")
+        self.cafe_id: Optional[int] = int(cafe_id) if cafe_id is not None else None
+        self.cafe_slug: Optional[str] = str(cafe_slug) if cafe_slug else None
         self.menu_id = int(menu_id)
-        self.board = f"cafe{self.cafe_id}/menu{self.menu_id}"
+        # board 키는 cafe_id 가 정해진 뒤에만 안정적 → 임시는 slug 기반, 해소 후 갱신.
+        self.board = (
+            f"cafe{self.cafe_id}/menu{self.menu_id}" if self.cafe_id is not None
+            else f"cafe-slug-{self.cafe_slug}/menu{self.menu_id}"
+        )
         self.include_notices = include_notices
         self._timeout = timeout
         self._client: Optional[httpx.AsyncClient] = None
+
+    async def _resolve_cafe_id(self) -> None:
+        """cafe_slug → cafe_id 해소: 카페 홈 HTML 에서 `g_sClubId` 스크랩. 실패 시 ValueError."""
+        if self.cafe_id is not None or not self.cafe_slug:
+            return
+        url = self.CAFE_HOME_URL.format(cafe_slug=self.cafe_slug)
+        assert self._client is not None
+        r = await self._client.get(url, headers={**self.HEADERS, "Accept": "text/html,*/*"})
+        if r.status_code != 200:
+            raise ValueError(f"cafe_slug={self.cafe_slug!r} 홈 페이지 응답 {r.status_code}")
+        m = self._CAFE_ID_RE.search(r.text)
+        if not m:
+            raise ValueError(f"cafe_slug={self.cafe_slug!r} 홈에서 g_sClubId 못 찾음 — 비공개 카페 가능성")
+        self.cafe_id = int(m.group(1))
+        self.board = f"cafe{self.cafe_id}/menu{self.menu_id}"
 
     async def __aenter__(self) -> "NaverCafeAdapter":
         self._client = httpx.AsyncClient(
             headers=self.HEADERS, timeout=self._timeout, follow_redirects=True
         )
+        await self._resolve_cafe_id()
         return self
 
     async def __aexit__(self, *exc) -> None:
