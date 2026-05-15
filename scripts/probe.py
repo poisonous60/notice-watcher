@@ -123,6 +123,8 @@ def main(argv: list[str]) -> int:
             headless=not args.headful_debug,
             baseline_blocked=blocked,
         )
+    elif args.no_headless:
+        print("\n[Phase 2] skipped — --no-headless")
     elif not headless_available():
         print("\n[Phase 2] skipped — playwright not installed")
 
@@ -171,13 +173,20 @@ def main(argv: list[str]) -> int:
 
     # ---- Phase 2 join: 위에서 병렬로 띄운 headless 결과 회수. lite 모드도 headless 는 항상 돈다 ----
     # (HAR 가 JSON API 발견·렌더 DOM·통과헤더 확보의 핵심. lite 의 "경량"은 외부·유료·login 스킵임)
+    # try/finally 로 shutdown 보장 — Phase 1 raise 해도 워커 누출 X.
     headless: Result | None = None
-    if _phase2_future is not None:
-        headless = _phase2_future.result()
-        print(f"\n[Phase 2 result] S4 {headless.status} {headless.classification.value}  {' '.join(headless.notable[:3])}")
-        all_results.append(headless)
-    if _phase2_ex is not None:
-        _phase2_ex.shutdown()
+    try:
+        if _phase2_future is not None:
+            try:
+                headless = _phase2_future.result()
+            except Exception as _e_p2:  # noqa: BLE001
+                print(f"\n[Phase 2 result] fail: {type(_e_p2).__name__}: {_e_p2}")
+            else:
+                print(f"\n[Phase 2 result] S4 {headless.status} {headless.classification.value}  {' '.join(headless.notable[:3])}")
+                all_results.append(headless)
+    finally:
+        if _phase2_ex is not None:
+            _phase2_ex.shutdown(wait=True)
 
     # ---- Phase 3: S1.Hcap (캡처 헤더로 정적 재시도) ----
     captured_retry: Result | None = None
@@ -271,8 +280,9 @@ def main(argv: list[str]) -> int:
     all_results.extend(external_results)
     all_results.extend(paid_results)
 
-    # ---- Phase 6: discovery ----
-    print("\n[Phase 6] feed/robots discovery ...")
+    # ---- Phase 6: discovery (백그라운드) ----
+    # discover_feeds(6 path 동시 GET) + read_robots — 양쪽 모두 HTTP 라 1~3s.
+    # Phase 7~9b 와 결과 의존성 없음 (Phase 10 diagnose 만 소비). 백그라운드로 띄우고 Phase 10 직전 join.
     page_html = ""
     if headless is not None and headless.body_path:
         page_html = Path(headless.body_path).read_text(encoding="utf-8", errors="replace")
@@ -281,125 +291,142 @@ def main(argv: list[str]) -> int:
             if r.classification == Classification.OK and r.body_path:
                 page_html = Path(r.body_path).read_text(encoding="utf-8", errors="replace")
                 break
-    feeds = discover_feeds(page_url=url, page_html=page_html, out_dir=out_dir)
-    robots_info = read_robots(page_url=url, out_dir=out_dir)
-    print(f"  feeds: {len(feeds.get('candidates') or [])} candidates")
-    print(f"  robots: status={robots_info.get('status')} crawl_delay={robots_info.get('crawl_delay')}")
 
-    # ---- Hydration & Phase 7: list candidates ----
-    print("\n[Phase 7] list candidates ...")
-    hydration_blob = extract_hydration(page_html)
-    (out_dir / "hydration.json").write_text(
-        __import__("json").dumps(
-            {k: (v if isinstance(v, dict) and "_parse_error" in v else "<json>") for k, v in hydration_blob.items()},
-            ensure_ascii=False, indent=2,
-        ),
-        encoding="utf-8",
-    )
-    hydration_lists: list[dict] = []
-    for key, blob in hydration_blob.items():
-        if isinstance(blob, dict):
-            hits = find_list_in_json(blob)
-            for h in hits:
-                h["root"] = key
-                hydration_lists.append(h)
+    print("\n[Phase 6] feed/robots discovery ... (백그라운드 시작, Phase 7~9 와 병렬)")
+    # with-block 으로 묶어 — Phase 7~9b 어디서 raise 해도 __exit__ 가 shutdown(wait=True) 보장.
+    # 두 future 는 with 마지막에 회수, 각자 try/except 로 한쪽 실패가 다른쪽 회수를 막지 못하게.
+    with ThreadPoolExecutor(max_workers=2) as _phase6_ex:
+        _feeds_fut = _phase6_ex.submit(discover_feeds, page_url=url, page_html=page_html, out_dir=out_dir)
+        _robots_fut = _phase6_ex.submit(read_robots, page_url=url, out_dir=out_dir)
 
-    html_lists = html_repeating_patterns(page_html, base_url=url)
-    inline_js_lists = extract_inline_data(page_html)
+        # ---- Hydration & Phase 7: list candidates ----
+        print("\n[Phase 7] list candidates ...")
+        hydration_blob = extract_hydration(page_html)
+        (out_dir / "hydration.json").write_text(
+            __import__("json").dumps(
+                {k: (v if isinstance(v, dict) and "_parse_error" in v else "<json>") for k, v in hydration_blob.items()},
+                ensure_ascii=False, indent=2,
+            ),
+            encoding="utf-8",
+        )
+        hydration_lists: list[dict] = []
+        for key, blob in hydration_blob.items():
+            if isinstance(blob, dict):
+                hits = find_list_in_json(blob)
+                for h in hits:
+                    h["root"] = key
+                    hydration_lists.append(h)
 
-    har_path = out_dir / "traffic.har"
-    if not har_path.exists():
-        har_path = out_dir / "traffic.list.har"
-    json_api_lists = traffic_api_candidates(har_path, page_url=url) if har_path.exists() else []
+        html_lists = html_repeating_patterns(page_html, base_url=url)
+        inline_js_lists = extract_inline_data(page_html)
 
-    first_article_url = pick_first_article_url(
-        html_candidates=html_lists,
-        json_api_candidates=json_api_lists,
-        hydration_candidates=hydration_lists,
-        base_url=url,
-        page_html=page_html,
-    )
-    write_list_candidates(
-        out_dir,
-        html_candidates=html_lists,
-        json_api_candidates=json_api_lists,
-        hydration_candidates=hydration_lists,
-        first_article_url=first_article_url,
-        inline_js_candidates=inline_js_lists,
-    )
-    print(f"  HTML 반복 패턴: {len(html_lists)}건")
-    print(f"  JSON API 후보: {len(json_api_lists)}건 (관련도순)")
-    print(f"  Hydration 후보: {len(hydration_lists)}건")
-    print(f"  인라인 JS/JSON 데이터 후보: {len(inline_js_lists)}건")
-    print(f"  첫 글 URL: {first_article_url}")
+        har_path = out_dir / "traffic.har"
+        if not har_path.exists():
+            har_path = out_dir / "traffic.list.har"
+        json_api_lists = traffic_api_candidates(har_path, page_url=url) if har_path.exists() else []
 
-    # ---- Phase 8: replay ----
-    # lite 에서도 replay 는 돈다(JSON API 후보를 httpx 로 재현해 standalone 동작 확인 — httpx_json config 에 필수 정보).
-    if not args.no_replay and json_api_lists:
-        print("\n[Phase 8] replay candidate APIs ...")
-        replays = replay_all(json_api_lists, out_dir)
-        for r in replays:
-            print(f"  {r.strategy} {r.url[:70]} → {r.status} {r.classification.value}")
-            all_results.append(r)
+        first_article_url = pick_first_article_url(
+            html_candidates=html_lists,
+            json_api_candidates=json_api_lists,
+            hydration_candidates=hydration_lists,
+            base_url=url,
+            page_html=page_html,
+        )
+        write_list_candidates(
+            out_dir,
+            html_candidates=html_lists,
+            json_api_candidates=json_api_lists,
+            hydration_candidates=hydration_lists,
+            first_article_url=first_article_url,
+            inline_js_candidates=inline_js_lists,
+        )
+        print(f"  HTML 반복 패턴: {len(html_lists)}건")
+        print(f"  JSON API 후보: {len(json_api_lists)}건 (관련도순)")
+        print(f"  Hydration 후보: {len(hydration_lists)}건")
+        print(f"  인라인 JS/JSON 데이터 후보: {len(inline_js_lists)}건")
+        print(f"  첫 글 URL: {first_article_url}")
 
-    # ---- Phase 9: article entry ----
-    article_result: Result | None = None
-    if first_article_url:
-        print("\n[Phase 9] article entry probe ...")
-        # 목록이 정적 OK였다면 정적으로, 아니면 headless로
-        static_ok = next((r for r in static_results if r.classification == Classification.OK), None)
-        if static_ok is not None:
-            _polite()
-            article_result = fetch_static(
-                strategy=f"S1.{static_ok.strategy.split('.')[-1]}.article",
-                target="article",
-                url=first_article_url,
-                headers=presets[static_ok.strategy.split(".")[-1]] if static_ok.strategy.split(".")[-1] in presets else presets["H3"],
-                out_dir=out_dir,
-                body_name="article",
-                baseline_blocked=blocked,
-            )
-        elif headless is not None and headless_available():
-            article_result = fetch_with_capture(
-                url=first_article_url,
-                out_dir=out_dir,
-                target="article",
-                headless=not args.headful_debug,
-                baseline_blocked=blocked,
-            )
-        if article_result is not None:
-            all_results.append(article_result)
-            print(f"  {article_result.strategy} {article_result.status} {article_result.classification.value}")
+        # ---- Phase 8: replay ----
+        # lite 에서도 replay 는 돈다(JSON API 후보를 httpx 로 재현해 standalone 동작 확인 — httpx_json config 에 필수 정보).
+        if not args.no_replay and json_api_lists:
+            print("\n[Phase 8] replay candidate APIs ...")
+            replays = replay_all(json_api_lists, out_dir)
+            for r in replays:
+                print(f"  {r.strategy} {r.url[:70]} → {r.status} {r.classification.value}")
+                all_results.append(r)
 
-    # ---- Phase 9b: article-by-click (직접 GET 으론 다른 데로 튕기는 클라이언트 라우트 / href=javascript: 목록 대응) ----
-    click_meta: dict = {}
-    do_click = (not args.no_article_click and not args.no_headless and headless_available()
-                and headless is not None and bool(first_article_url or html_lists))
-    if do_click and args.lite:
-        # lite 에선 직접 GET 으로 *진짜 글로 보이는* URL 의 본문 페이지를 이미 잘 받았으면 클릭 probe 생략(시간 절약).
-        # 단, first_article_url 이 None 이거나(모든 행 href 가 javascript:) 글 ID 숫자가 없으면(메뉴/카테고리 링크였을 수 있음)
-        # — 이 기능의 주 타깃 — got_body 여도 클릭 probe 를 돌린다.
-        got_body = (article_result is not None
-                    and article_result.classification == Classification.OK
-                    and article_result.body_path
-                    and Path(article_result.body_path).is_file()
-                    and Path(article_result.body_path).stat().st_size > 8000)
-        looks_like_real_article_url = bool(first_article_url and re.search(r"\d{3,}", first_article_url))
-        if got_body and looks_like_real_article_url:
-            do_click = False
-    if do_click:
-        print("\n[Phase 9b] article-by-click probe (목록에서 글 링크 클릭 → 최종 페이지/URL/HAR 캡처) ...")
+        # ---- Phase 9: article entry ----
+        article_result: Result | None = None
+        if first_article_url:
+            print("\n[Phase 9] article entry probe ...")
+            # 목록이 정적 OK였다면 정적으로, 아니면 headless로
+            static_ok = next((r for r in static_results if r.classification == Classification.OK), None)
+            if static_ok is not None:
+                _polite()
+                article_result = fetch_static(
+                    strategy=f"S1.{static_ok.strategy.split('.')[-1]}.article",
+                    target="article",
+                    url=first_article_url,
+                    headers=presets[static_ok.strategy.split(".")[-1]] if static_ok.strategy.split(".")[-1] in presets else presets["H3"],
+                    out_dir=out_dir,
+                    body_name="article",
+                    baseline_blocked=blocked,
+                )
+            elif headless is not None and headless_available():
+                article_result = fetch_with_capture(
+                    url=first_article_url,
+                    out_dir=out_dir,
+                    target="article",
+                    headless=not args.headful_debug,
+                    baseline_blocked=blocked,
+                )
+            if article_result is not None:
+                all_results.append(article_result)
+                print(f"  {article_result.strategy} {article_result.status} {article_result.classification.value}")
+
+        # ---- Phase 9b: article-by-click (직접 GET 으론 다른 데로 튕기는 클라이언트 라우트 / href=javascript: 목록 대응) ----
+        click_meta: dict = {}
+        do_click = (not args.no_article_click and not args.no_headless and headless_available()
+                    and headless is not None and bool(first_article_url or html_lists))
+        if do_click and args.lite:
+            # lite 에선 직접 GET 으로 *진짜 글로 보이는* URL 의 본문 페이지를 이미 잘 받았으면 클릭 probe 생략(시간 절약).
+            # 단, first_article_url 이 None 이거나(모든 행 href 가 javascript:) 글 ID 숫자가 없으면(메뉴/카테고리 링크였을 수 있음)
+            # — 이 기능의 주 타깃 — got_body 여도 클릭 probe 를 돌린다.
+            got_body = (article_result is not None
+                        and article_result.classification == Classification.OK
+                        and article_result.body_path
+                        and Path(article_result.body_path).is_file()
+                        and Path(article_result.body_path).stat().st_size > 8000)
+            looks_like_real_article_url = bool(first_article_url and re.search(r"\d{3,}", first_article_url))
+            if got_body and looks_like_real_article_url:
+                do_click = False
+        if do_click:
+            print("\n[Phase 9b] article-by-click probe (목록에서 글 링크 클릭 → 최종 페이지/URL/HAR 캡처) ...")
+            try:
+                click_result, click_meta = fetch_article_by_click(
+                    list_url=url, out_dir=out_dir,
+                    headless=not args.headful_debug, baseline_blocked=blocked,
+                )
+                all_results.append(click_result)
+                _note = click_meta.get("note")
+                print(f"  {click_result.strategy} {click_result.status} {click_result.classification.value}  "
+                      f"resolved={click_meta.get('resolved_url')}" + (f"  ({_note})" if _note else ""))
+            except Exception as e:  # noqa: BLE001
+                print(f"  article-by-click 실패: {type(e).__name__}: {e}")
+
+        # ---- Phase 6 join — 각 future 개별 try/except 로 한쪽 실패가 다른쪽 회수를 막지 못하게 ----
         try:
-            click_result, click_meta = fetch_article_by_click(
-                list_url=url, out_dir=out_dir,
-                headless=not args.headful_debug, baseline_blocked=blocked,
-            )
-            all_results.append(click_result)
-            _note = click_meta.get("note")
-            print(f"  {click_result.strategy} {click_result.status} {click_result.classification.value}  "
-                  f"resolved={click_meta.get('resolved_url')}" + (f"  ({_note})" if _note else ""))
-        except Exception as e:  # noqa: BLE001
-            print(f"  article-by-click 실패: {type(e).__name__}: {e}")
+            feeds = _feeds_fut.result()
+        except Exception as _e_feeds:  # noqa: BLE001 — discover_feeds 의 ContractError 등
+            print(f"  [Phase 6 feeds] fail: {type(_e_feeds).__name__}: {_e_feeds}")
+            feeds = {"page_url": url, "candidates": []}
+        try:
+            robots_info = _robots_fut.result()
+        except Exception as _e_robots:  # noqa: BLE001
+            print(f"  [Phase 6 robots] fail: {type(_e_robots).__name__}: {_e_robots}")
+            robots_info = {"url": "", "status": None, "crawl_delay": None, "disallow": []}
+        print(f"\n[Phase 6 result] feeds: {len(feeds.get('candidates') or [])} candidates · "
+              f"robots: status={robots_info.get('status')} crawl_delay={robots_info.get('crawl_delay')}")
 
     # ---- Phase 10: diagnose + summary ----
     print("\n[Phase 10] diagnose + write summary ...")
