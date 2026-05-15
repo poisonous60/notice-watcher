@@ -199,7 +199,7 @@ def cmd_stop() -> int:
     return 0
 
 
-def cmd_start() -> int:
+def cmd_start(no_idle: bool = False) -> int:
     DAEMON_DIR.mkdir(parents=True, exist_ok=True)
 
     existing = _read_pid()
@@ -317,7 +317,7 @@ def cmd_start() -> int:
 
     ENDPOINT_FILE.write_text(endpoint, encoding="utf-8")
     CHROME_PID_FILE.write_text(str(chrome_proc.pid), encoding="utf-8")
-    _log(f"start pid={os.getpid()} chrome_pid={chrome_proc.pid} endpoint={endpoint}")
+    _log(f"start pid={os.getpid()} chrome_pid={chrome_proc.pid} endpoint={endpoint} no_idle={no_idle}")
 
     try:
         while not stopping:
@@ -329,6 +329,9 @@ def cmd_start() -> int:
             if chrome_proc.poll() is not None:
                 _log(f"chromium 죽음 rc={chrome_proc.returncode} — stop")
                 break
+            if no_idle:
+                # systemd 등 supervisor 환경: idle timer 무의미 (재시작 비용 > 절감). skip mtime 검사.
+                continue
             try:
                 last_use = ENDPOINT_FILE.stat().st_mtime
             except FileNotFoundError:
@@ -380,15 +383,17 @@ def cmd_start() -> int:
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description="Playwright chromium daemon")
     sub = ap.add_subparsers(dest="cmd")
-    sub.add_parser("start", help="start daemon (foreground)")
-    sub.add_parser("stop", help="stop daemon via SIGTERM")
+    p_start = sub.add_parser("start", help="start daemon (foreground)")
+    p_start.add_argument("--no-idle", action="store_true",
+                         help="idle 10분 self-stop 비활성화 (systemd 등 supervisor 환경)")
+    sub.add_parser("stop", help="stop daemon (graceful via STOP_FLAG)")
     sub.add_parser("status", help="show daemon status")
     args = ap.parse_args(argv)
     if args.cmd == "stop":
         return cmd_stop()
     if args.cmd == "status":
         return cmd_status()
-    return cmd_start()
+    return cmd_start(no_idle=getattr(args, "no_idle", False))
 
 
 if __name__ == "__main__":

@@ -1,0 +1,22 @@
+[Unit]
+Description=notice-watcher chromium CDP daemon
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/notice-watcher
+ExecStart=%h/notice-watcher/.venv/bin/python scripts/playwright_daemon.py start --no-idle
+# graceful stop: cmd_stop 이 STOP_FLAG 만들면 daemon main loop 가 감지해서 chromium 정리 후 자기 종료.
+# systemd 가 직접 SIGTERM 보내도 POSIX signal handler 가 stopping=True 세팅 → 같은 cleanup path.
+ExecStop=%h/notice-watcher/.venv/bin/python %h/notice-watcher/scripts/playwright_daemon.py stop
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
+Restart=always
+RestartSec=5
+# chromium + renderer 가 RAM 200-400MB. 안전 마진.
+MemoryHigh=1G
+MemoryMax=2G
+
+[Install]
+WantedBy=default.target
