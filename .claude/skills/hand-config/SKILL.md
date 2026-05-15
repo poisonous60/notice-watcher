@@ -86,6 +86,68 @@ description: >-
 
 ---
 
+## 자율 개선 시 자가 점검 (가이드라인, 권장)
+
+probe/prompt/schema/코드 손대기 전 다음 다섯 질문에 답해보면 누더기 위험 줄어든다. case 파일 본문 또는 commit msg 본문에 한 줄 메모로 적어둠 — 강제 X.
+
+1. **어느 자리?** — 픽스를 다음 6 자리 중 하나에 매핑:
+   - **(E) schema 거부** — `engine/config_schema.py` 의 validate 룰 강화. config 파일만 보고도 잡힘.
+   - **(D) retry feedback** — `prompts/config_writer.retry_skeleton.txt` 또는 `scripts/register.py` 의 feedback 빌더. 실행 결과 패턴 (404/0건/0자) 으로만 잡힘.
+   - **(C) probe digest 신호** — `probe/` 의 휴리스틱 추가/수정. probe 가 새 데이터를 *추출* 해야 알 수 있는 사실.
+   - **(B) few-shot** — `generate/prompt.py` 의 `_EXAMPLE_CONFIG_FILES` 또는 `configs/` 의 예제. 패턴이 흔하고 config 형태로 명확할 때.
+   - **(A) system 규칙 *추가*** — `prompts/config_writer.system.txt` 에 새 룰 줄 추가. *수정/제거* 는 별도 SKILL `pipeline-rot-review` 영역.
+   - **(F) 새 엔진 코드** — `engine/strategies/` / `adapters/` / `engine/recognizers/` 신설 또는 `scripts/register.py` 플로우 변경.
+
+   원칙: **위에서부터 차례로 따져 첫 매칭**. (E)/(D) 로 잡힐 것을 (C)/(A) 에 박지 X. ambiguous 면 비워두고 진행.
+
+2. **이전 케이스 있나?** — `Grep '<failure_key 또는 root_cause>' docs/cases/` 또는 `Read docs/cases/INDEX.md`. 있으면 그때 어느 자리에 박았나 — 일관 유지. 다른 자리에 박을 거면 이유 명시.
+
+3. **누구 깰까?** — 21+ configs 중 영향 사이트 enumerate. 0개 가능하지만 *왜 0개인지* 한 줄 적기 (예: "schema 추가만 — 기존 21 configs 의 validate 규칙은 그대로").
+
+4. **검증 그린?** —
+   - `python scripts/probe_smoke.py` 그린
+   - 영향 사이트 있으면: `python scripts/register.py --config "configs/<영향-slug>.json"` 결과 비교
+   - LLM 거동 영향 (C/A/B) 이면: 가장 최근 실패 케이스의 probe artifact 로 `register.py --reuse-probe` 1회 — 산출 config 동등 또는 더 좋은지.
+
+5. **case 파일 + commit msg** — 
+   - `docs/cases/<slug>.md` 작성 (frontmatter 필수 4: slug·url·status·date; 선택: fix_layer·failure_keys·config_strategy·adapters_changed·engine_files_touched·tags 등). ambiguous 면 비움.
+   - `python scripts/cases_index.py` 실행해 INDEX.md 갱신.
+   - commit msg prefix 권장: `[fix-layer: E|D|C|B|A|F|none] <slug>` + 본문에 5-질문 답 요약.
+
+위 다섯 답이 없어도 commit 막지 X — 그저 *생각해보면 좋은* 질문. 진짜 검증은 reviewer subagent + pre-push hook.
+
+## 자가 review (commit 직전 — 권장)
+
+손-config 변경 (1+ 파일) 을 commit 하기 직전에 `hand-config-reviewer` subagent 호출:
+
+```
+Agent(
+  subagent_type='hand-config-reviewer',
+  model='sonnet',
+  prompt='''
+    ## 변경 diff
+    [git diff HEAD 결과]
+    
+    ## case 파일
+    [docs/cases/<slug>.md 의 frontmatter + body]
+    
+    ## probe_smoke 결과
+    [python scripts/probe_smoke.py 의 stdout + exit code]
+    
+    ## (선택) 영향 사이트 손-실행
+    [register.py --config 출력 비교]
+    
+    위 변경을 6 검증 항목에 비추어 PASS/FAIL 판정.
+  '''
+)
+```
+
+reviewer 는 Bash 없음 — main thread 가 `probe_smoke` 등 실행 후 결과를 prompt 에 박아 넘긴다. reviewer 는 *판단만*.
+
+FAIL 받으면 → **사용자에게 보고**. 자동 재호출 X (비결정 위험 회피). 사용자가 픽스 결정.
+
+---
+
 ## 주의
 - 한 번이라도 자동 등록을 시도한 slug 는 `.FAILED.json` 이 남아 봇 `_is_registered` 가 False → `/preview` 가 또 자동경로로 돈다. 등록은 반드시 `register.py --config`(또는 자동 성공)로 — 그게 `_save_state` 로 마커를 지운다. config 파일만 `configs/` 에 둬선 봇이 모른다.
 - 크롤링 정책(`docs/크롤링 지침.md` §6): `polite_sleep` 은 하한만 올림, robots 존중. 로그인 우회·차단 회피 금지 — 어댑터가 401/403 이면 본문을 비워 반환한다(우회용 코드 넣지 말 것).

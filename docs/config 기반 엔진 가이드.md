@@ -64,11 +64,11 @@ python scripts/demo_config.py --check-all
 - `output/probe/<slug>/` — probe 산출물 (digest 의 입력)
 
 ### register.py 의 처리 순서
-1. **알려진 플랫폼 인식** (`engine/known_platforms.py`, `--no-recognize` 면 생략) — URL 이 *이미 손어댑터/검증된 config 패턴이 있는 플랫폼*(네이버 카페·다음 카페·아카라이브·디시 미니갤·넥슨 포럼·네이버 게임 라운지)이면 그 자리에서 config 를 만들어 `fetch_list` 로 글이 1건 이상 잡히는지 확인하고 바로 등록 — **probe·Gemini 안 돌림**. 잘못 인식했으면(글 0건/예외) 조용히 2번으로 폴백. 같은 플랫폼의 새 게시판은 `cafe_id`/`board`/`channel` 만 다르므로 이걸로 즉시 잡힘.
+1. **알려진 플랫폼 인식** (`engine/recognizers/` 패키지, `--no-recognize` 면 생략) — URL 이 *이미 손어댑터/검증된 config 패턴이 있는 플랫폼*(네이버 카페·다음 카페·아카라이브·디시 미니갤·넥슨 포럼·네이버 게임 라운지·Reddit)이면 그 자리에서 config 를 만들어 `fetch_list` 로 글이 1건 이상 잡히는지 확인하고 바로 등록 — **probe·Gemini 안 돌림**. 잘못 인식했으면(글 0건/예외) 조용히 2번으로 폴백. 같은 플랫폼의 새 게시판은 `cafe_id`/`board`/`channel` 만 다르므로 이걸로 즉시 잡힘.
 2. **probe → preflight(글페이지 HAR re-probe + probe 신호 hint) → digest → Gemini(검증 재시도 ≤max_attempts) → 검증** — 1에서 안 잡힌 사이트. (아래 §4.)
 3. **`--config <path>`** — 사람이 손으로 짠 config 를 그대로 등록(probe/Gemini 둘 다 생략, `fetch_list` 로 baseline 만).
 
-→ 새 플랫폼을 손어댑터/손config 로 한 번 처리했으면 `engine/known_platforms.py` 의 `_RECOGNIZERS` 에 인식기 한 줄 추가 → 그 플랫폼의 다음 게시판은 자동으로 1번에서 처리된다.
+→ 새 플랫폼을 손어댑터/손config 로 한 번 처리했으면 `engine/recognizers/<plat>.py` 한 파일 추가 (`NAME` + `PATTERNS=[(re.Pattern, builder), ...]` export) → auto-discovery 가 잡아 그 플랫폼의 다음 게시판은 자동으로 1번에서 처리된다.
 
 ---
 
@@ -230,7 +230,7 @@ engine/
   transforms.py       닫힌 transform 라이브러리 + apply_chain
   extract_helpers.py  field source 해석(css/attr/json/const/template/concat/class_present) + fallback chain + navigate_json
   config_adapter.py   ConfigAdapter(BaseAdapter) + make_adapter + load_config(_dir)
-  known_platforms.py  알려진 플랫폼 URL 인식 → config 즉시 생성 (register.py 가 probe 전에 recognize() 호출)
+  recognizers/        알려진 플랫폼 URL 인식 패키지 → config 즉시 생성 (register.py 가 probe 전에 recognize() 호출). auto-discovery — <plat>.py 한 파일 추가만으로 인식기 등록
   strategies/         httpx_html / httpx_json / playwright_html (httpx_html 이 파싱 헬퍼 보유 — playwright_html 재사용)
   digest.py           probe 산출물 → gemini 입력 digest (clean_html 포함)
   base_compat.py      adapters.base 의 BaseAdapter/NoticePost 재노출
