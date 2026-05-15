@@ -23,6 +23,7 @@ from probe.discover import discover_feeds, read_robots
 from probe.extract import (
     html_repeating_patterns,
     pick_first_article_url,
+    runtime_id_candidates,
     traffic_api_candidates,
     write_list_candidates,
 )
@@ -350,6 +351,7 @@ def _run(args: argparse.Namespace, url: str, slug: str) -> int:
 
             html_lists = html_repeating_patterns(page_html, base_url=url)
             inline_js_lists = extract_inline_data(page_html)
+            runtime_ids = runtime_id_candidates(page_html)
 
             har_path = out_dir / "traffic.har"
             if not har_path.exists():
@@ -370,6 +372,7 @@ def _run(args: argparse.Namespace, url: str, slug: str) -> int:
                 hydration_candidates=hydration_lists,
                 first_article_url=first_article_url,
                 inline_js_candidates=inline_js_lists,
+                runtime_ids=runtime_ids,
             )
         print(f"  HTML 반복 패턴: {len(html_lists)}건")
         print(f"  JSON API 후보: {len(json_api_lists)}건 (관련도순)")

@@ -481,6 +481,155 @@ def pick_first_article_url(
     return None
 
 
+# runtime_id_candidates: 사이트가 HTML 안에 *고정값으로 박아둔* ID/슬러그 후보.
+# URL path 만으론 안 보이지만 (예: cafe.naver.com/<slug> 는 cafe_id 가 없음) 페이지 HTML 안에 박혀
+# 있는 ID — `g_sClubId="31104609"`, `<meta property="og:url" content=".../boards/1018">`,
+# `__NEXT_DATA__.props.pageProps.boardId` 등. config 작성자(LLM·사람·recognizer 후처리)가
+# 그 ID 를 보고 url_template / kwargs / handwritten adapter 의 매개변수를 *고정값* 으로 박을 수 있다.
+# (어댑터가 매 polling 마다 fetch+scrape 안 해도 됨.)
+
+_ID_VAR_NAME_RE = re.compile(
+    r"\b(?P<name>(?:g_s|window\.)?"
+    r"(?:club|cafe|board|menu|lounge|forum|community|channel|gallery|site|page|category|topic|thread|article|post|user|tenant|workspace|space)"
+    r"(?:Id|_id|ID|_ID))\b",
+    re.IGNORECASE,
+)
+_ID_VAR_ASSIGN_RE = re.compile(
+    # `var foo = "123"` / `foo = 123` / `"foo": "123"` / `"foo": 123`
+    r"""
+    (?:var\s+|let\s+|const\s+|window\.|"\s*)?
+    (?P<name>(?:g_s|window\.)?
+        (?:club|cafe|board|menu|lounge|forum|community|channel|gallery|site|page|category|topic|thread|article|post|tenant|workspace|space)
+        (?:Id|_id|ID|_ID)
+    )
+    \s*["']?\s*[=:]\s*
+    ["']?(?P<value>[A-Za-z0-9_-]{1,64})["']?
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+_ID_INT_RE = re.compile(r"^\d{2,}$")  # 단일 자리 0~9 는 의미 없음 — id 후보로 제외.
+
+
+@heuristic
+def runtime_id_candidates(html: str, *, max_per_source: int = 20) -> list[dict]:
+    """페이지 HTML 안 *런타임 ID/슬러그* 후보 추출.
+
+    출력 dict: {name:str, value:str, source:"js_var"|"next_data"|"meta_og_url"|"hydration_path", context:str}
+
+    소스별:
+      - js_var: `g_sClubId = "31104609"`, `var boardId = 1018` 같은 JS var 할당. name 화이트리스트
+        (board/cafe/club/lounge/forum/... + Id 접미) — 임의 변수까지 잡으면 노이즈 많음.
+      - next_data: `__NEXT_DATA__` 의 JSON 안에서 이름이 `*Id`/`*_id` 로 끝나는 키 + 정수/짧은 문자열 값.
+      - meta_og_url: `<meta property="og:url">` URL path 끝 segment (정수만).
+
+    *추측이 아니라 직접 박힌 값만* 반환 — 사이트가 페이지에 명시한 fact. config 작성자가 이걸 보고
+    `kwargs.cafe_id=31104609`, `url_template=.../boards/1018/...` 처럼 *고정값* 으로 박는 게 목적.
+    """
+    if not html:
+        return []
+    out: list[dict] = []
+
+    soup = BeautifulSoup(html, "lxml")
+
+    # 1. js_var
+    seen_js: set[tuple[str, str]] = set()
+    js_count = 0
+    for m in _ID_VAR_ASSIGN_RE.finditer(html):
+        if js_count >= max_per_source:
+            break
+        name = m.group("name")
+        value = m.group("value")
+        # name 자체가 식별자 패턴인지 다시 검증 (_ID_VAR_ASSIGN_RE 안 alternation 만으로는 부분일치 가능)
+        if not _ID_VAR_NAME_RE.fullmatch(name):
+            continue
+        # value 가 *literal* 인지 *다른 식별자 이름* 인지 구분.
+        # ID 후보로 받는 형태:
+        #   - 순수 정수 (2자리 이상): "31104609", "1018"
+        #   - 숫자가 포함된 슬러그: "abc-123", "ab_42"
+        #   - 하이픈 포함 슬러그: "uuid-style-thing"
+        # 거부:
+        #   - 순수 letter camelCase 식별자: "target", "liTarget", "cafeId" — 보통 JS 변수 참조 (값 아님)
+        is_pure_int = value.isdigit() and len(value) >= 2
+        is_slug_with_digit_or_dash = (
+            len(value) >= 2
+            and re.fullmatch(r"[A-Za-z0-9_-]+", value) is not None
+            and (any(ch.isdigit() for ch in value) or "-" in value)
+        )
+        if not (is_pure_int or is_slug_with_digit_or_dash):
+            continue
+        key = (name, value)
+        if key in seen_js:
+            continue
+        seen_js.add(key)
+        ctx_start = max(0, m.start() - 20)
+        ctx_end = min(len(html), m.end() + 20)
+        out.append({
+            "name": name,
+            "value": value,
+            "source": "js_var",
+            "context": html[ctx_start:ctx_end].replace("\n", " ").strip()[:120],
+        })
+        js_count += 1
+
+    # 2. next_data
+    next_data_tag = soup.find("script", id="__NEXT_DATA__")
+    if isinstance(next_data_tag, Tag):
+        try:
+            data = json.loads(next_data_tag.string or "")
+        except (json.JSONDecodeError, TypeError):
+            data = None
+        if isinstance(data, (dict, list)):
+            count = 0
+            for path, value in _walk_id_keys(data):
+                if count >= max_per_source:
+                    break
+                out.append({
+                    "name": path,
+                    "value": str(value),
+                    "source": "next_data",
+                    "context": ".".join(path.split(".")[-3:]),
+                })
+                count += 1
+
+    # 3. meta_og_url — bs4 로 attribute 순서 무관하게 찾음 (regex 가 property→content 순서만 잡으면 silent miss).
+    og_tag = soup.find("meta", attrs={"property": "og:url"})
+    if isinstance(og_tag, Tag):
+        og_url = og_tag.get("content")
+        if isinstance(og_url, str) and og_url:
+            from urllib.parse import urlsplit
+            sp = urlsplit(og_url)
+            segs = [s for s in sp.path.split("/") if s]
+            if segs and _ID_INT_RE.fullmatch(segs[-1]):
+                out.append({
+                    "name": "og:url last segment",
+                    "value": segs[-1],
+                    "source": "meta_og_url",
+                    "context": og_url[:120],
+                })
+
+    return out
+
+
+def _walk_id_keys(node, prefix: str = "", _depth: int = 0):
+    """__NEXT_DATA__ JSON 안 *Id/_id 키 + scalar 값 (정수 또는 짧은 슬러그) 만 yield. 최대 depth 6."""
+    if _depth > 6:
+        return
+    if isinstance(node, dict):
+        for k, v in node.items():
+            new_prefix = f"{prefix}.{k}" if prefix else str(k)
+            if isinstance(v, (str, int)) and re.search(r"(Id|_id|ID|_ID)$", str(k)):
+                sv = str(v)
+                if _ID_INT_RE.fullmatch(sv) or (len(sv) >= 2 and len(sv) <= 64
+                                                and re.fullmatch(r"[A-Za-z0-9_-]+", sv)):
+                    yield new_prefix, v
+            elif isinstance(v, (dict, list)):
+                yield from _walk_id_keys(v, new_prefix, _depth + 1)
+    elif isinstance(node, list):
+        for i, v in enumerate(node[:20]):  # list 는 첫 20 까지만
+            if isinstance(v, (dict, list)):
+                yield from _walk_id_keys(v, f"{prefix}[{i}]", _depth + 1)
+
+
 def write_list_candidates(
     out_dir: Path,
     *,
@@ -489,6 +638,7 @@ def write_list_candidates(
     hydration_candidates: list[dict],
     first_article_url: Optional[str],
     inline_js_candidates: Optional[list[dict]] = None,
+    runtime_ids: Optional[list[dict]] = None,
 ) -> None:
     payload = {
         "html_repeating_patterns": html_candidates,
@@ -498,6 +648,8 @@ def write_list_candidates(
         "hydration_list_candidates": hydration_candidates,
         # 목록이 정적 HTML 행이 아니라 인라인 JS/JSON 안에 있을 때 (다음카페 모바일: articles.push({...}) 등). probe/hydration.extract_inline_data 산출.
         "inline_js_data_candidates": inline_js_candidates or [],
+        # 페이지 HTML 안에 박힌 ID/슬러그 후보 — URL 에 없지만 사이트가 명시한 cafe_id/board_id 등.
+        "runtime_id_candidates": runtime_ids or [],
         "first_article_url": first_article_url,
     }
     validate_payload("list_candidates.json", payload, allow_extra=False)

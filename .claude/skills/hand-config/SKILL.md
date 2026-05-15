@@ -70,10 +70,16 @@ IP 바뀌었으면 `DEPLOY_HOST=aaaa@<새IP>` 환경변수.
 
 probe 산출물(`diagnosis.json`·`list_candidates.json`·HAR 등) 에 *이미 신호는 있는데* 그걸 휴리스틱화·preflight 거부로 안 연결해서 LLM 이 4회 retry 후 fail 하는 경우. **손 config 보다 우선** — 같은 패턴 미래 사이트도 자동 처리.
 
+**probe 가 현재 추출 중인 신호** — 단일 진실원은 `probe/_contract.py:_ARTIFACTS` 의 각 `_ContractField.note`. 7종 산출물 × 필드별 한 줄 설명. 새 휴리스틱 자리 후보인지 판단할 땐 *거기에 없는 카테고리*인지부터 확인 — 있으면 기존 휴리스틱 보강 자리지 신규 자리가 아님.
+
+휴리스틱화 가치 있는 카테고리는 보통: ① 페이지에 *직접 박힌 fact* (URL · ID · 헤더 · 메타) 인데 현 휴리스틱이 안 추출, ② LLM 이 raw HTML/HAR 만 보고는 *자주 틀리는* 신호 (login gate · paywall · geo block · client-side route · pagination meta · 본문 컨테이너 안정 selector), ③ preflight 거부 가능한 *영구 차단* 신호. 셋 다 아니면 휴리스틱 안 박는 게 낫다 (LLM 이 raw 데이터에서 직접 보게).
 
 처리:
-1. `probe/extract.py`(또는 적절한 `probe/` 파일)에 새 `@heuristic` 함수 추가. 입력: 이미 있는 probe artifact. 출력: `diagnosis.json` 또는 `list_candidates.json` 에 명시적 키 (예: `{"login_gate": {"gated": True, "redirect_host": "nid.naver.com", "sample_url": "..."}}`). 추가 fetch 금지(휴리스틱은 순수해야).
-2. `scripts/register.py` 의 preflight 단계(probe 후·LLM 전)에서 그 키 보면 즉시 fail with `reason="login_required"`(또는 적절한 reason). LLM 호출 skip → 4회 retry 비용 0.
+1. `probe/extract.py`(또는 적절한 `probe/` 파일)에 새 `@heuristic` 함수 추가. 입력: 이미 있는 probe artifact (또는 fetch 된 HTML/HAR — *추가 네트워크 fetch 금지*; 휴리스틱은 순수해야). 출력: `diagnosis.json` 또는 `list_candidates.json` 에 명시적 키 (예: `{"login_gate": {"gated": True, "redirect_host": "...", "sample_url": "..."}}` 또는 위 runtime_id_candidates 형태의 후보 list).
+2. **그 키를 어떻게 쓸지 *동시에* 박아라**:
+   - LLM 이 활용 → `prompts/config_writer.system.txt` 에 그 키 설명 한 줄 추가 + `_PROMPT_REQUIRED_KEY_PATHS` 등록.
+   - register.py preflight 가 거부 → 그 키 보면 즉시 fail with `reason="..."`, LLM 호출 skip (4회 retry 비용 0).
+   - recognizer 후처리가 활용 → 별도 자리 (recognizer 는 probe 못 봄 → register.py 가 recognize 결과를 probe digest 와 merge 하는 단계 추가 필요. 현재 그 단계 X — 그쪽 자리는 F-layer 변경.).
 3. **거부 마커**: 같은 사용자가 또 `/preview`·`/watch` 누르면 또 큐에 쌓이지 않게 하려면 `.REJECTED.json` 마커 + `bot/site_ops.py:is_registered` 가 그것도 보게 — 다만 이건 *봇 코드 변경*이라 별도 PR. 우선 휴리스틱+preflight 만으로도 4회 retry skip 효과는 즉시.
 4. **휴리스틱 추가 규칙** (↓ §4) 따라 fixture·contract·smoke 통과.
 

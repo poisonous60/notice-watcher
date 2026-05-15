@@ -335,12 +335,13 @@ def _summary_line(digest: dict) -> str:
     n_json = len(lc.get("traffic_json_api_candidates") or [])
     n_hyd = len(lc.get("hydration_list_candidates") or [])
     n_ijs = len(lc.get("inline_js_data_candidates") or [])
+    n_rid = len(lc.get("runtime_id_candidates") or [])
     clicked = ah.get("clicked_resolved_url")
     return (
         f"verdict={digest.get('verdict')!r}  recommended={digest.get('recommended_strategy')!r}\n"
         f"  list_html: {len((lh.get('html') or '').encode('utf-8'))} bytes (truncated={lh.get('truncated')})  src={lh.get('source')}\n"
         f"  article_html: {len((ah.get('html') or '').encode('utf-8'))} bytes (truncated={ah.get('truncated')})  src={ah.get('source')}\n"
-        f"  candidates: html={n_html} json_api={n_json} hydration={n_hyd} inline_js={n_ijs}  first_article={lc.get('first_article_url')}"
+        f"  candidates: html={n_html} json_api={n_json} hydration={n_hyd} inline_js={n_ijs} runtime_ids={n_rid}  first_article={lc.get('first_article_url')}"
         + (f"  clicked→{clicked}" if clicked else "") + "\n"
         f"  robots: crawl_delay={digest['robots'].get('crawl_delay')}  disallow={len(digest['robots'].get('disallow') or [])}건\n"
         f"  captured_headers={'yes' if digest.get('captured_headers') else 'no'}  static_ok_preset={digest.get('static_ok_preset')}  hydration_keys={list((digest.get('hydration') or {}).keys())}"

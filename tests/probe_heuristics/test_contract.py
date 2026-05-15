@@ -29,6 +29,7 @@ def run() -> list[tuple[str, bool, str]]:
         "traffic_json_api_candidates": [],
         "hydration_list_candidates": [],
         "inline_js_data_candidates": [],
+        "runtime_id_candidates": [],
     }
     try:
         validate_payload("list_candidates.json", happy_obj)

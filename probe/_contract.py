@@ -139,6 +139,10 @@ _ARTIFACTS: dict[str, ArtifactContract] = {
                            prompt_aliases=("hydration",)),
             _ContractField("inline_js_data_candidates", type_hint="list[dict]",
                            note="<script type=application/json> JSON island / var X=[...] / X.push({...}) — kind=json_island/js_array/js_push"),
+            _ContractField("runtime_id_candidates", type_hint="list[dict]",
+                           note="HTML 안 *런타임 ID/슬러그* 후보 — URL path 에 없지만 사이트가 페이지에 명시한 cafe_id/board_id/community_id 등. "
+                                "각 dict: {name, value, source: 'js_var'|'next_data'|'meta_og_url', context}. config 작성자가 이 값을 "
+                                "kwargs / url_template / handwritten adapter 매개변수에 *고정값* 으로 박을 수 있음."),
         ),
     ),
 
@@ -257,6 +261,7 @@ _PROMPT_REQUIRED_KEY_PATHS: tuple[tuple[str, str], ...] = (
     ("list_candidates.json", "traffic_json_api_candidates"),
     ("list_candidates.json", "hydration_list_candidates"),
     ("list_candidates.json", "inline_js_data_candidates"),
+    ("list_candidates.json", "runtime_id_candidates"),
     # robots.json
     ("robots.json", "crawl_delay"),
     # article_click.json
