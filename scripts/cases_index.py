@@ -44,7 +44,7 @@ FRONTMATTER_RE = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n", re.S)
 
 
 def parse_case(path: Path) -> dict | None:
-    text = path.read_text(encoding="utf-8")
+    text = path.read_text(encoding="utf-8").lstrip("﻿")  # UTF-8 BOM 제거
     m = FRONTMATTER_RE.match(text)
     if not m:
         return None
