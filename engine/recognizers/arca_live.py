@@ -10,6 +10,8 @@ import re
 from typing import Optional
 from urllib.parse import parse_qs, quote, urlsplit
 
+from engine._tracking_query import is_tracking_query
+
 NAME = "arca-live"
 
 # `category` 만 의미. `p` 는 페이지(등록 시엔 채널 전체를 baseline 으로 잡으므로 무시해도 됨).
@@ -18,7 +20,10 @@ _KNOWN_QUERY_PARAMS = {"category", "p"}
 
 def _build(m: "re.Match", url: str) -> Optional[dict]:
     channel = m.group(1)
-    q = parse_qs(urlsplit(url).query, keep_blank_values=False)
+    q_raw = parse_qs(urlsplit(url).query, keep_blank_values=False)
+    # 추적/분석 query (utm_*, fbclid, ...) 는 사이트 의미 X → drop. 같은 채널의 변형 URL 이
+    # unknown query 로 잡혀 fast-path 가 거부되는 걸 막아 한 slug 로 합쳐지게 한다.
+    q = {k: v for k, v in q_raw.items() if not is_tracking_query(k)}
     unknown = set(q) - _KNOWN_QUERY_PARAMS
     if unknown:
         # 모르는 파라미터가 있으면 fast-path 거부 → probe/gemini 경로로 폴백.

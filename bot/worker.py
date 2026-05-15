@@ -19,6 +19,8 @@ from bot.site_ops import (
     append_triage_queue,
     baseline_count,
     body_warning,
+    is_rejected,
+    rejected_info,
     blocking_register,
     edit_channel_message,
     is_registered,
@@ -96,6 +98,18 @@ async def _process_job(client, conn, job, dm_owner) -> None:
     try:
         # __enter__ 는 try 안 — 만약 raise 하면 finally 가 안 부서지고 __exit__ skip.
         trace_cm.__enter__()
+        # enqueue 직후 owner 가 /admin reject 박은 race condition — register subprocess 안 돌리고 fail.
+        if kind == "register" and is_rejected(slug):
+            info = rejected_info(slug) or {}
+            log.info("잡 #%d rejected by admin — register subprocess 스킵 (slug=%s)", job_id, slug)
+            db.mark_job_finished(conn, job_id, ok=False, rc=-4, tail="(rejected by admin)")
+            if job["ack_channel_id"]:
+                await edit_channel_message(
+                    client, job["ack_channel_id"], job["ack_message_id"],
+                    f"❌ 이 사이트는 등록이 거부됐어요 — `{slug}`\n"
+                    f"• 사유: {info.get('reason') or '-'}\n"
+                    f"• 메모: {info.get('note') or '없음'}")
+            return
         # 동시에 두 사용자가 같은 신규 사이트를 enqueue 한 경우 — 두 번째 잡은 register subprocess 스킵.
         if kind == "register" and is_registered(slug):
             log.info("잡 #%d 이미 등록된 사이트 — register subprocess 스킵", job_id)

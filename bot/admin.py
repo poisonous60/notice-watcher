@@ -12,7 +12,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import Optional
+
+# `.json` 파일명에 들어가도 안전한 slug 형식 — engine.slug._SANITIZE_RE 와 같은 charset.
+# admin 입력이 path traversal 시도 (`../`) 를 못 하게.
+_SLUG_RE = re.compile(r"^[A-Za-z0-9._%-]+$")
 
 import discord
 from discord import app_commands
@@ -152,6 +157,44 @@ def build_admin_tree(client: discord.Client, conn, *, admin_guild: discord.Objec
         else:
             await interaction.response.send_message(
                 f"❌ 신고 #{report_id} 가 없거나 이미 resolved.", ephemeral=True)
+
+    @admin.command(name="reject", description="이 slug 의 자동 등록을 영구 거부 마커로 박음")
+    @app_commands.describe(slug="거부할 slug", reason="거부 사유(짧게)", note="(선택) 자세한 메모")
+    async def reject_cmd(interaction: discord.Interaction, slug: str, reason: str,
+                         note: Optional[str] = None):
+        if not _is_owner(interaction):
+            await interaction.response.send_message("❌ owner 전용 명령입니다.", ephemeral=True)
+            return
+        if not _SLUG_RE.fullmatch(slug):
+            await interaction.response.send_message(
+                f"❌ slug 형식 오류 (영문/숫자/._%- 만): `{slug}`", ephemeral=True)
+            return
+        from scripts.register import _save_rejected  # lazy — import 시 sys.path 영향 회피
+        sub_row = conn.execute(
+            "SELECT url FROM subscriptions WHERE slug=? ORDER BY created_at DESC LIMIT 1",
+            (slug,)).fetchone()
+        url = sub_row["url"] if sub_row else "(미상)"
+        p = _save_rejected(slug, url, reason, note=note)
+        await interaction.response.send_message(
+            f"✅ `{slug}` 거부 마커 박힘.\n• reason: {reason}\n• note: {note or '없음'}\n"
+            f"• marker: `{p.name}`\n이후 같은 slug `/preview`·`/watch` 시 거부 응답.",
+            ephemeral=True)
+
+    @admin.command(name="unreject", description="거부 마커 제거 (실수 복구).")
+    @app_commands.describe(slug="거부 해제할 slug")
+    async def unreject_cmd(interaction: discord.Interaction, slug: str):
+        if not _is_owner(interaction):
+            await interaction.response.send_message("❌ owner 전용 명령입니다.", ephemeral=True)
+            return
+        if not _SLUG_RE.fullmatch(slug):
+            await interaction.response.send_message(
+                f"❌ slug 형식 오류 (영문/숫자/._%- 만): `{slug}`", ephemeral=True)
+            return
+        from scripts.register import _clear_rejected
+        ok = _clear_rejected(slug)
+        msg = (f"✅ `{slug}` 거부 마커 제거됨." if ok
+               else f"❌ `{slug}` 거부 마커가 없음.")
+        await interaction.response.send_message(msg, ephemeral=True)
 
     @admin.command(name="triage", description="처리 대기 backlog 요약 (신고/깨짐/실패/큐/의견).")
     async def triage_cmd(interaction: discord.Interaction):

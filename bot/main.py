@@ -19,7 +19,7 @@ import re
 import sys
 import time
 import traceback
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -33,6 +33,7 @@ from bot import admin as admin_mod, db, inspector, site_ops, url_gate, worker  #
 from bot.config import (  # noqa: E402
     admin_guild_id, bot_token, feedback_max_len, guild_id, owner_user_id, safe_browsing_api_key,
 )
+from bot.runtime_config import settings  # noqa: E402
 from probe.paths import url_to_slug  # noqa: E402
 
 CONFIGS_DIR = site_ops.CONFIGS_DIR
@@ -66,12 +67,46 @@ _body_warning = site_ops.body_warning
 # --------------------------------------------------------------------------- #
 # URL 게이트 wrapper — 거부 시 OWNER DM 등 부수 처리
 # --------------------------------------------------------------------------- #
+def _check_rate_limit(user_id: Optional[str]) -> Optional[str]:
+    """settings.rate_limit 따라 user_id 의 register 잡 빈도 검사. 한도 초과면 사용자에 보여줄 메시지, OK면 None.
+    한도 값 <=0 이면 그 검사 끔."""
+    if not user_id:
+        return None
+    rl = settings.rate_limit
+    now = datetime.now(timezone.utc)
+    if rl.per_user_per_hour > 0:
+        cnt = db.count_user_register_jobs_since(
+            _conn, user_id, (now - timedelta(hours=1)).isoformat())
+        if cnt >= rl.per_user_per_hour:
+            return (f"⏱️ 너무 자주 요청하셨어요 — 시간당 {rl.per_user_per_hour}건 한도 초과 "
+                    f"(최근 1시간 {cnt}건). 잠시 후 다시 시도해 주세요.")
+    if rl.per_user_per_day > 0:
+        cnt = db.count_user_register_jobs_since(
+            _conn, user_id, (now - timedelta(days=1)).isoformat())
+        if cnt >= rl.per_user_per_day:
+            return (f"⏱️ 24시간 한도({rl.per_user_per_day}건)를 초과했어요 "
+                    f"(최근 24시간 {cnt}건). 내일 다시 시도해 주세요.")
+    return None
+
+
+def _check_queue_depth() -> Optional[str]:
+    """전역 워커 큐 pending 상한 검사. settings.rate_limit.queue_depth_cap > 0 이고 그 이상이면 reject."""
+    cap = settings.rate_limit.queue_depth_cap
+    if cap <= 0:
+        return None
+    n = db.queue_pending_count(_conn)
+    if n >= cap:
+        return (f"📥 봇 처리 큐가 가득 찼어요 ({n}/{cap}건 대기 중). "
+                f"잠시 후 다시 시도해 주세요.")
+    return None
+
+
 async def _gate_check(url: str, *, article_url: Optional[str], via: str,
                        requested_by: Optional[dict]) -> Optional[str]:
-    """URL 게이트 통과 시 None, 거부 시 사용자에게 보여줄 메시지(이미 OWNER DM 등 부수 처리 완료)."""
+    """URL 게이트 통과 시 None, 거부 시 사용자에게 보여줄 메시지(이미 OWNER DM 등 부수 처리 완료).
+    url_gate.check → per-user rate-limit → 전역 큐 깊이 cap 순서."""
     try:
         await url_gate.check(url, article_url=article_url)
-        return None
     except url_gate.UrlRejected as e:
         log.info("[url_gate] reject %s (article=%s): %s — %s", url, article_url, e.reason, e.msg)
         if e.reason == "malicious":
@@ -80,6 +115,11 @@ async def _gate_check(url: str, *, article_url: Optional[str], via: str,
         elif e.reason == "gsb_error":
             await _dm_owner(f"⚠️ [url_gate] Safe Browsing 검사 실패 — {e.msg}\nURL: {url}", key="url_gate_gsb")
         return e.msg
+    user_id = (requested_by or {}).get("id") if isinstance(requested_by, dict) else None
+    err = _check_rate_limit(user_id) or _check_queue_depth()
+    if err:
+        log.info("[gate] enqueue throttled user=%s via=%s url=%s — %s", user_id, via, url, err)
+    return err
 
 
 # --------------------------------------------------------------------------- #
@@ -133,6 +173,14 @@ async def watch(interaction: discord.Interaction, url: str, filter: Optional[str
         return
 
     slug = url_to_slug(url)
+    if site_ops.is_rejected(slug):
+        info = site_ops.rejected_info(slug) or {}
+        await interaction.edit_original_response(
+            content=f"❌ 이 사이트는 이전에 등록이 거부됐어요.\n"
+                    f"• 사유: {info.get('reason') or '-'}\n"
+                    f"• 메모: {info.get('note') or '없음'}\n"
+                    f"다시 등록을 원하시면 owner 에게 문의해 주세요.")
+        return
     user_id = str(interaction.user.id)
     target_kind = "channel" if here else "dm"
     target_id = str(interaction.channel_id) if here else user_id
@@ -210,6 +258,14 @@ async def preview(interaction: discord.Interaction, url: str, article_url: Optio
         return
 
     slug = url_to_slug(url)
+    if site_ops.is_rejected(slug):
+        info = site_ops.rejected_info(slug) or {}
+        await interaction.edit_original_response(
+            content=f"❌ 이 사이트는 이전에 등록이 거부됐어요.\n"
+                    f"• 사유: {info.get('reason') or '-'}\n"
+                    f"• 메모: {info.get('note') or '없음'}\n"
+                    f"다시 등록을 원하시면 owner 에게 문의해 주세요.")
+        return
     if _is_registered(slug):
         # 등록된 사이트 — 즉시 예시만
         await interaction.edit_original_response(content="⏳ 최신 글 가져와 요약 중…")

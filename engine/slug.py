@@ -45,6 +45,9 @@ SLUG_MAX = 100
 _SANITIZE_RE = re.compile(r"[^A-Za-z0-9._%-]+")
 _MULTI_SLASH_RE = re.compile(r"/+")
 
+# Tracking query 표는 별도 모듈에서 — engine.recognizers._common.qs 도 같은 표를 본다(import cycle 회피).
+from engine._tracking_query import is_tracking_query as _is_tracking_query  # noqa: E402
+
 
 def canonical_url(url: str) -> str:
     """결정적 URL 정규화 — slug hash 의 입력. 같은 의미의 URL → 같은 정규화 출력.
@@ -61,7 +64,8 @@ def canonical_url(url: str) -> str:
     if path != "/" and path.endswith("/"):
         path = path.rstrip("/")
     pairs = sorted(
-        (k, v) for k, v in parse_qsl(sp.query, keep_blank_values=True) if v != ""
+        (k, v) for k, v in parse_qsl(sp.query, keep_blank_values=True)
+        if v != "" and not _is_tracking_query(k)
     )
     return (
         f"//{netloc}{path}"

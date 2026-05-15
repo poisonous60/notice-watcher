@@ -53,7 +53,25 @@ def config_path_for(slug: str) -> Optional[Path]:
 
 
 def is_registered(slug: str) -> bool:
-    return (STATE_DIR / f"{slug}.json").exists() and not (STATE_DIR / f"{slug}.FAILED.json").exists()
+    """polling 대상으로 등록됐는지. `state.json` 있고 `.FAILED.json` / `.REJECTED.json` 둘 다 없을 때 True.
+    REJECTED 마커가 있으면 False — 옛 등록 state 가 남아 있더라도 polling/봇 fast-path 가 안 타게."""
+    return ((STATE_DIR / f"{slug}.json").exists()
+            and not (STATE_DIR / f"{slug}.FAILED.json").exists()
+            and not (STATE_DIR / f"{slug}.REJECTED.json").exists())
+
+
+def is_rejected(slug: str) -> bool:
+    """owner 가 `_save_rejected` 로 박은 영구 거부 마커. 같은 slug 의 자동 등록 시도 자체를
+    안 받음. `/preview`·`/watch` 가 이 체크를 `_is_registered` 보다 *먼저* 해야 함."""
+    return (STATE_DIR / f"{slug}.REJECTED.json").exists()
+
+
+def rejected_info(slug: str) -> Optional[dict]:
+    p = STATE_DIR / f"{slug}.REJECTED.json"
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def baseline_count(slug: str) -> Optional[int]:

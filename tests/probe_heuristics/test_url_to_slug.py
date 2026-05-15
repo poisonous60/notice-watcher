@@ -131,4 +131,32 @@ def run() -> list[tuple[str, bool, str]]:
         f"got hash={last!r}",
     ))
 
+    # 15. tracking query (utm_*, fbclid, ...) drop — 같은 채널 변형 URL 이 한 slug 로 합쳐짐
+    base = url_to_slug("https://arca.live/b/trickcal?category=%EA%B3%B5%EC%8B%9D")
+    with_utm = url_to_slug("https://arca.live/b/trickcal?category=%EA%B3%B5%EC%8B%9D&utm_source=fb")
+    with_fbclid = url_to_slug("https://arca.live/b/trickcal?category=%EA%B3%B5%EC%8B%9D&fbclid=abc")
+    cases.append((
+        "tracking_query_dropped_recognized",
+        base == with_utm == with_fbclid,
+        f"base={base!r} +utm={with_utm!r} +fbclid={with_fbclid!r}",
+    ))
+
+    # 16. 카페 — recognizer 매칭 케이스도 utm 변형이 같은 slug
+    a = url_to_slug("https://cafe.naver.com/f-e/cafes/30291108/menus/6?viewType=L")
+    b = url_to_slug("https://cafe.naver.com/f-e/cafes/30291108/menus/6?viewType=L&utm_source=fb")
+    cases.append((
+        "tracking_query_dropped_cafe",
+        a == b,
+        f"a={a!r} b={b!r}",
+    ))
+
+    # 17. 사이트 의미 query (`category=...`) 는 보존 — 다른 게시판은 다른 slug
+    p = url_to_slug("https://arca.live/b/trickcal?category=%EA%B3%B5%EC%8B%9D")
+    q = url_to_slug("https://arca.live/b/trickcal?category=%EC%9E%A1%EB%8B%B4")
+    cases.append((
+        "meaningful_query_preserved",
+        p != q,
+        f"공식={p!r} 잡담={q!r}",
+    ))
+
     return cases

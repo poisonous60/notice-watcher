@@ -182,12 +182,51 @@ def _save_state(slug: str, url: str, config_path: Path, post_ids: list[str],
     if body_empty_at_baseline is not None:
         state["body_empty_at_baseline"] = bool(body_empty_at_baseline)
     p.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
-    # 등록과 동시에 FAILED 마커 / triage 큐 항목이 남아있으면 제거
+    # 등록과 동시에 FAILED·REJECTED 마커 / triage 큐 항목이 남아있으면 제거.
+    # REJECTED 제거는 의도된 등록 (예: admin 이 풀고 register.py --config --force 로 재등록) 만 해당 —
+    # 자동 경로는 어차피 봇 _is_registered 가 False 라서 워커가 register.py 를 안 부른다.
+    for marker_suffix in (".FAILED.json", ".REJECTED.json"):
+        mp = STATE_DIR / f"{slug}{marker_suffix}"
+        if mp.exists():
+            mp.unlink()
+    _prune_triage_queue(slug)
+    return p
+
+
+def _save_rejected(slug: str, url: str, reason: str, note: Optional[str] = None) -> Path:
+    """`.REJECTED.json` 마커. 봇 `is_rejected(slug)`=True 가 되어 `/preview`·`/watch` 가 자동경로
+    안 타고 "이전에 거부됨" 메시지로 응답. `is_registered` 와 분리 — REJECTED 는 polling 대상도 아님.
+    같은 slug 의 `.FAILED.json` 마커가 있었으면 함께 제거 (REJECTED 가 우선).
+
+    `slug` 는 `[A-Za-z0-9._%-]+` 만 (path traversal 방어) — admin/스크립트 외 호출 없지만 보수적으로.
+    """
+    if not re.fullmatch(r"[A-Za-z0-9._%-]+", slug):
+        raise ValueError(f"잘못된 slug 형식: {slug!r}")
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    p = STATE_DIR / f"{slug}.REJECTED.json"
+    p.write_text(json.dumps({
+        "slug": slug,
+        "url": url,
+        "reason": reason,
+        "note": note,
+        "rejected_at": _now_iso(),
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
     fp = STATE_DIR / f"{slug}.FAILED.json"
     if fp.exists():
         fp.unlink()
     _prune_triage_queue(slug)
     return p
+
+
+def _clear_rejected(slug: str) -> bool:
+    """REJECTED 마커 제거 (실수 거부 복구용). 없었으면 False."""
+    if not re.fullmatch(r"[A-Za-z0-9._%-]+", slug):
+        raise ValueError(f"잘못된 slug 형식: {slug!r}")
+    p = STATE_DIR / f"{slug}.REJECTED.json"
+    if p.exists():
+        p.unlink()
+        return True
+    return False
 
 
 def _check_body_at_baseline(cfg: dict, posts: list, sample: int = 3) -> Optional[bool]:

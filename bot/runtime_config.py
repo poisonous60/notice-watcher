@@ -58,16 +58,35 @@ class NotifySection:
 
 
 @dataclass
+class RateLimitSection:
+    """사용자 1명이 봇으로 register 요청(/preview·/watch)을 짧은 시간에 폭주시키는 걸 막는다.
+    `bot/main.py::_check_rate_limit` + `_check_queue_depth` 가 `_gate_check` 안에서 검사, 초과면
+    사용자에게 안내 메시지 응답 (워커 큐 enqueue 안 함). 각 값 ≤0 이면 그 검사 끔."""
+    per_user_per_hour: int = 10         # 시간당 동일 사용자 register 잡 enqueue 상한
+    per_user_per_day: int = 30          # 24h 동일 사용자 register 잡 enqueue 상한
+    queue_depth_cap: int = 100          # 워커 큐 pending 잡 전역 상한 — 초과 시 새 enqueue reject
+
+
+@dataclass
+class PruneSection:
+    """`scripts/prune_probe.py` (cron) 가 oldness 검사할 기준 (일 단위). 0 이하면 그 카테고리 prune 끔."""
+    probe_failed_max_age_days: int = 30      # .FAILED.json 동반된 probe artifact: 30일 지나면 삭제
+    probe_unregistered_max_age_days: int = 90  # state.json 도 없는 orphan probe artifact: 90일
+
+
+@dataclass
 class Settings:
     poll: PollSection = field(default_factory=PollSection)
     worker: WorkerSection = field(default_factory=WorkerSection)
     chromium_lock: ChromiumLockSection = field(default_factory=ChromiumLockSection)
     notify: NotifySection = field(default_factory=NotifySection)
+    rate_limit: RateLimitSection = field(default_factory=RateLimitSection)
+    prune: PruneSection = field(default_factory=PruneSection)
     # 로딩 정보 — 디버깅용
     sources: list[str] = field(default_factory=list)
 
 
-_SECTIONS = ("poll", "worker", "chromium_lock", "notify")
+_SECTIONS = ("poll", "worker", "chromium_lock", "notify", "rate_limit", "prune")
 
 
 def _coerce(value: Any, annotation: Any) -> Any:

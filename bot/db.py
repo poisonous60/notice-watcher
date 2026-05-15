@@ -502,6 +502,16 @@ def queue_pending_count(conn: sqlite3.Connection) -> int:
     return int(conn.execute("SELECT COUNT(*) FROM jobs WHERE status='pending'").fetchone()[0])
 
 
+def count_user_register_jobs_since(conn: sqlite3.Connection, user_id: str, since_iso: str) -> int:
+    """rate-limit 용 — 특정 user_id 가 since_iso 이후 enqueue 한 register 잡 수.
+    `requested_by` 는 JSON {"id":..., "name":...} — `json_extract($.id)` 로 안전 매칭 (substring 매칭 X)."""
+    return int(conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE kind='register' "
+        "AND json_extract(requested_by, '$.id')=? AND created_at >= ?",
+        (str(user_id), since_iso),
+    ).fetchone()[0])
+
+
 def reset_running_to_pending(conn: sqlite3.Connection) -> int:
     """봇 재시작 직후 호출 — 이전 worker 가 들고 있던 running 잡들을 pending 으로 되돌림."""
     def _do():
