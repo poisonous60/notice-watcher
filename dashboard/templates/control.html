@@ -75,14 +75,17 @@
     repo <code>config.toml</code> 의 default 위에 덮어쓸 머신별 override.
     빈 값 = default 사용. default 와 같은 값을 넣어도 자동 생략. 변경 후 봇/폴링 재시작 필요.
   </p>
-  {% set sections = {'poll':'폴링','worker':'워커','chromium_lock':'Chromium 락','notify':'알림'} %}
+  {# RUNTIME_FIELDS 에 들어있는 section 을 모두 자동 렌더 (whitelist 없음 — 새 필드 추가하면 자동 노출). #}
+  {# 순서는 ctrl.runtime.rows 의 등장 순서 = RUNTIME_FIELDS 의 코드 순서. #}
   {% set grouped = {} %}
+  {% set ordered_sections = [] %}
   {% for r in ctrl.runtime.rows %}
+    {% if r.section not in grouped %}{% set _ = ordered_sections.append(r.section) %}{% endif %}
     {% set _ = grouped.setdefault(r.section, []).append(r) %}
   {% endfor %}
-  {% for section_key, label in sections.items() %}
-  {% if section_key in grouped %}
-  <h4 style="margin:0.7rem 0 0.3rem 0;">[{{ section_key }}]  <span class="muted" style="font-weight:normal;font-size:0.82rem;">{{ label }}</span></h4>
+  {% for section_key in ordered_sections %}
+  {% set label = ctrl.runtime.section_labels.get(section_key, '') %}
+  <h4 style="margin:0.7rem 0 0.3rem 0;">[{{ section_key }}]{% if label %}  <span class="muted" style="font-weight:normal;font-size:0.82rem;">{{ label }}</span>{% endif %}</h4>
   <table class="compact row-grid">
     <thead>
       <tr>
@@ -109,7 +112,6 @@
       {% endfor %}
     </tbody>
   </table>
-  {% endif %}
   {% endfor %}
   <label style="display:block;margin:0.5rem 0;">
     <input type="checkbox" name="restart" value="1"> 저장 후 봇 재시작

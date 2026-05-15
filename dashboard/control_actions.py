@@ -303,7 +303,20 @@ RUNTIME_FIELDS: list[tuple[str, str, type, object, str]] = [
     ("rate_limit", "queue_depth_cap",     int, 100, "워커 큐 pending 잡 전역 상한 (≤0=끔)"),
     ("prune", "probe_failed_max_age_days",       int, 30, "scripts/prune_probe.py: .FAILED 동반 probe artifact prune age (일, ≤0=끔)"),
     ("prune", "probe_unregistered_max_age_days", int, 90, "scripts/prune_probe.py: orphan probe artifact prune age (일, ≤0=끔)"),
+    ("register", "max_attempts", int, 4, "register.py LLM 생성+검증 시도 횟수 (실패당 비용 발생, 1~2 권장)"),
 ]
+
+# UI 표시용 section 라벨. 키 없으면 template 가 section 키 자체를 fallback 으로 씀
+# → 새 RUNTIME_FIELDS 항목 추가해도 UI 가 자동 노출됨 (라벨만 빈 채).
+SECTION_LABELS: dict[str, str] = {
+    "poll":          "폴링",
+    "worker":        "워커",
+    "chromium_lock": "Chromium 락",
+    "notify":        "알림",
+    "rate_limit":    "Rate Limit",
+    "prune":         "Probe 산출물 prune",
+    "register":      "사이트 등록",
+}
 
 
 def runtime_current() -> dict:
@@ -356,7 +369,7 @@ def build_runtime_toml(form_data: dict) -> str:
     # TOML 직렬화 — stdlib writer 없음. int / float 둘 다 str() 으로 충분
     # (int 는 정수 출력, float 는 `1.0` 같은 dot 포함 출력 → TOML 둘 다 valid).
     lines: list[str] = []
-    for section in ("poll", "worker", "chromium_lock", "notify", "rate_limit", "prune"):
+    for section in ("poll", "worker", "chromium_lock", "notify", "rate_limit", "prune", "register"):
         if section not in by_section:
             continue
         lines.append(f"[{section}]")
@@ -564,6 +577,7 @@ async def gather_state(*, load_remote: bool = False) -> dict:
             "local_present": RUNTIME_PATH.exists(),
             "local_text": load_runtime_local(),
             "rows": runtime_rows(),
+            "section_labels": SECTION_LABELS,
         },
         "env": {
             "loaded": False,
