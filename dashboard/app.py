@@ -24,6 +24,7 @@ from dashboard import prompts, state
 from dashboard import usage_view
 from dashboard import user_view
 from dashboard import control_actions as ctrl
+from dashboard import history_view
 from dashboard import tracing_view
 
 HERE = Path(__file__).resolve().parent
@@ -491,6 +492,27 @@ def _attrs_short(attrs: dict) -> str:
         if sum(len(p) for p in parts) > 140:
             break
     return "  ".join(parts)
+
+
+@app.get("/history", response_class=HTMLResponse)
+async def history_index(request: Request,
+                        category: Optional[str] = Query(None),
+                        q: Optional[str] = Query(None),
+                        failed: Optional[str] = Query(None),
+                        limit: int = Query(200, ge=10, le=2000)):
+    """dashboard 액션 audit (output/control_audit.jsonl) tail + 필터 표."""
+    cat = (category or "").strip()
+    if cat and cat not in history_view.CATEGORIES:
+        cat = ""
+    rows, total = history_view.load_rows(
+        limit=limit, category=cat, only_failed=bool(failed), q=(q or "").strip(),
+    )
+    return _render("history.html", request,
+                   active="history", rows=rows, total=total,
+                   categories=history_view.CATEGORIES,
+                   selected_category=cat, q=q or "",
+                   only_failed=bool(failed), limit=limit,
+                   max_tail=history_view.MAX_TAIL_LINES)
 
 
 @app.get("/timings", response_class=HTMLResponse)

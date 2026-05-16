@@ -66,14 +66,15 @@ async def run_push(target: str, *, slug: Optional[str] = None) -> dict:
     if slug:
         cmd.append(slug)
     res = await async_run(cmd, cwd=ROOT)
-    audit(f"push.{target}", ok=res["ok"], detail={"rc": res["rc"]})
+    audit(f"push.{target}", ok=res["ok"], detail={"rc": res["rc"], "trace_id": res.get("trace_id")})
     return res
 
 
 async def run_remote(action: str, *args: str) -> dict:
     cmd = [sys.executable, str(REMOTE_SCRIPT), action, *args]
     res = await async_run(cmd, cwd=ROOT)
-    audit(f"remote.{action}", ok=res["ok"], detail={"rc": res["rc"], "args": list(args)})
+    audit(f"remote.{action}", ok=res["ok"],
+          detail={"rc": res["rc"], "args": list(args), "trace_id": res.get("trace_id")})
     return res
 
 

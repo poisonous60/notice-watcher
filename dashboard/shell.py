@@ -39,9 +39,10 @@ def _verb_for_label(cmd: list[str]) -> str:
 
 
 async def async_run(cmd: list[str], *, cwd: Optional[Path] = None) -> dict:
-    """`subprocess.run` 의 비차단 wrapper. 반환: {ok, rc, output}.
+    """`subprocess.run` 의 비차단 wrapper. 반환: {ok, rc, output, trace_id?}.
 
     TRACE_ENABLED=1: dev박스에서 outer trace + span 자동 wrap. trace 이미 있으면 span 만 추가.
+    결과 dict 에 `trace_id` 추가 — /history 페이지가 액션 row → /timings 점프 링크 생성에 사용.
     """
     if not is_enabled():
         return await asyncio.to_thread(_run_blocking, cmd, cwd=cwd)
@@ -53,11 +54,15 @@ async def async_run(cmd: list[str], *, cwd: Optional[Path] = None) -> dict:
         with start_trace("dashboard", attrs={"cmd": label}) as tr:
             with tr.span(label, attrs={"cmd_argv": " ".join(cmd[:4])}):
                 env = {**os.environ, **env_for_child()}
-                return await asyncio.to_thread(_run_blocking, cmd, cwd=cwd, env=env)
+                res = await asyncio.to_thread(_run_blocking, cmd, cwd=cwd, env=env)
+            res["trace_id"] = tr.trace_id
+            return res
     else:
         with parent.span(label, attrs={"cmd_argv": " ".join(cmd[:4])}):
             env = {**os.environ, **env_for_child()}
-            return await asyncio.to_thread(_run_blocking, cmd, cwd=cwd, env=env)
+            res = await asyncio.to_thread(_run_blocking, cmd, cwd=cwd, env=env)
+        res["trace_id"] = parent.trace_id
+        return res
 
 
 __all__ = ["async_run"]
