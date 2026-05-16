@@ -117,14 +117,33 @@ async def _process_job(client, conn, job, dm_owner) -> None:
             await _post_register_success(client, conn, job)
             return
 
-        # ack — 처리 시작 표시 (register 만)
+        # ack — 처리 시작 표시 (register 만). 곧 [PHASE] probe / recognize 가 와서 덮어쓴다.
         if kind == "register" and job["ack_channel_id"]:
             await edit_channel_message(client, job["ack_channel_id"], job["ack_message_id"],
-                                       f"🔧 사이트 분석 중… — `{slug}`")
+                                       f"🔎 사이트 분석 중… — `{slug}`")
+
+        # register subprocess 가 stdout 에 찍는 [PHASE] <label> 을 받아 ack 메시지를 갱신.
+        # blocking_register 는 to_thread 위에서 도니까 콜백도 그 워커 스레드에서 호출됨 — asyncio
+        # loop 에 schedule 하려면 run_coroutine_threadsafe.
+        on_phase = None
+        if kind == "register" and job["ack_channel_id"]:
+            loop = asyncio.get_running_loop()
+            ch_id = job["ack_channel_id"]
+            msg_id = job["ack_message_id"]
+
+            def on_phase(label: str) -> None:  # noqa: F811  - 의도된 재바인딩
+                msg = _phase_to_message(label, slug)
+                if msg is None:
+                    return
+                asyncio.run_coroutine_threadsafe(
+                    edit_channel_message(client, ch_id, msg_id, msg),
+                    loop,
+                )
 
         # reprobe 면 recognizer 우회 — 깨진 사이트를 같은 fast-path 로 무한 재진입하는 거 차단.
         rc, tail = await asyncio.to_thread(
             blocking_register, url, article_url, no_recognize=(kind == "reprobe"),
+            on_phase=on_phase,
         )
         ok = (rc == 0) and is_registered(slug)
         db.mark_job_finished(conn, job_id, ok=ok, rc=rc, tail=tail)
@@ -185,6 +204,29 @@ async def _process_job(client, conn, job, dm_owner) -> None:
                 trace_cm.__exit__(None, None, None)
             except Exception:  # noqa: BLE001
                 pass
+
+
+def _phase_to_message(label: str, slug: str) -> Optional[str]:
+    """register.py / generator.py 의 [PHASE] <label> 을 사용자 향 ack 메시지로 변환.
+    label 예: "recognize", "probe", "preflight", "digest",
+              "generate max=4", "gemini_attempt 2/4", "baseline".
+    None 반환 시 ack 갱신 안 함 (label 미인식)."""
+    if label == "recognize":
+        return f"🔎 알려진 플랫폼 인식 시도 중… — `{slug}`"
+    if label == "probe":
+        return f"🔎 사이트 분석 중… — `{slug}`"
+    if label == "preflight":
+        return f"🔎 사이트 분석 중… (글 페이지 추가 분석) — `{slug}`"
+    if label == "digest":
+        return f"🔎 사이트 분석 중… (분석 데이터 정리) — `{slug}`"
+    if label.startswith("generate "):
+        return f"🛠 config 파일 만드는 중… — `{slug}`"
+    if label.startswith("gemini_attempt "):
+        spec = label[len("gemini_attempt "):].strip()
+        return f"🛠 config 파일 만드는 중… (시도 {spec}) — `{slug}`"
+    if label == "baseline":
+        return f"🧷 baseline(최근 글 목록) 수집 중… — `{slug}`"
+    return None
 
 
 def _format_register_error(rc: int, tail: str) -> str:

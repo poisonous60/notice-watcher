@@ -99,6 +99,7 @@ async def generate_config_validated(
     tr = current_trace()
 
     for i in range(1, max_attempts + 1):
+        print(f"[PHASE] gemini_attempt {i}/{max_attempts}", flush=True)
         with tr.span("gemini_attempt", attrs={"attempt": i, "max_attempts": max_attempts}):
             if i == 1:
                 prompt_text = build_user_prompt(digest)

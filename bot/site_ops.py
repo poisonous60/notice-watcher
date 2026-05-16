@@ -13,7 +13,7 @@ import sys
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIGS_DIR = ROOT / "configs"
@@ -105,7 +105,8 @@ def body_warning(slug: str) -> str:
 # register.py subprocess (chromium 락 안에서; 호출자는 워커 스레드에서 to_thread 로 부른다)
 # --------------------------------------------------------------------------- #
 def blocking_register(url: str, article_url: Optional[str] = None,
-                      *, no_recognize: bool = False) -> tuple[int, str]:
+                      *, no_recognize: bool = False,
+                      on_phase: Optional[Callable[[str], None]] = None) -> tuple[int, str]:
     """register.py 를 chromium 락 안에서 실행. (rc, last_~4000 chars of stdout/stderr).
     timeout 들은 settings.chromium_lock 에서 (config.toml).
 
@@ -114,6 +115,11 @@ def blocking_register(url: str, article_url: Optional[str] = None,
 
     `no_recognize=True` 면 register.py 에 `--no-recognize` 전달 — recognizer 가 깨진 사이트를
     같은 fast-path 로 다시 박는 무한 루프 방지용 (reprobe 시 worker 가 켬).
+
+    `on_phase` 콜백: register.py / generator.py 가 stdout 에 `[PHASE] <label>` 을 찍으면 그 label
+    (`recognize`, `probe`, `preflight`, `digest`, `generate max=N`, `gemini_attempt i/N`, `baseline`)
+    이 인자로 호출됨. worker thread 에서 실행되므로 콜백은 thread-safe 해야 함 (asyncio loop 에
+    edit 을 schedule 하는 식). 콜백 예외는 ack 메시지 갱신 실패로 끝나면 됨 — register 자체는 계속.
     """
     import os
     from engine.tracing import env_for_child
@@ -145,6 +151,11 @@ def blocking_register(url: str, article_url: Optional[str] = None,
                     s = line.rstrip("\n")
                     tail.append(s)
                     log.info("[register] %s", s)
+                    if on_phase and s.startswith("[PHASE] "):
+                        try:
+                            on_phase(s[len("[PHASE] "):])
+                        except Exception as ce:  # noqa: BLE001
+                            log.warning("on_phase 콜백 예외 (무시): %r", ce)
                 rc = proc.wait()
             finally:
                 killer.cancel()
