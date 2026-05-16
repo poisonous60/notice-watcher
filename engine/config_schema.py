@@ -48,6 +48,10 @@ article:
   data_path    : ["data"]          (json 전용; 본문 객체까지의 경로. content/enrich 는 이 기준 상대 경로)
   content      : [ {from:"css", selector:"div.fr-view", html:true} ]  또는 [ {from:"json", path:["data"]} ]
   enrich       : { title:[...], published_at:[...], author:[...], ... }  (선택; None 인 기존 값만 덮어씀)
+  body_empty_acceptable : bool     (선택; True 면 generate/validate 의 article_body_len 체크가 hard=False 로 완화 —
+                                    본문이 본질적으로 없는 사이트(검색결과 SERP, 게임 디렉토리, 외부 host 행 aggregator 등)
+                                    에서 자동 등록을 통과시키기 위함. 봇은 baseline 후 body_empty_at_baseline=true 면
+                                    "본문 추출 안 됨" 경고를 자동으로 메시지에 붙임 — 사용자 향 경고는 그대로 작동.)
 """
 from __future__ import annotations
 
@@ -111,6 +115,7 @@ CONFIG_JSON_SCHEMA: dict = {
                 "content": {"type": "array"},
                 "enrich": {"type": "object"},
                 "re_extract": {"type": "boolean"},
+                "body_empty_acceptable": {"type": "boolean"},
             },
         },
     },

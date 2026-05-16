@@ -80,6 +80,7 @@ data_path    : (json, 선택) 본문 객체까지의 경로. content/enrich/re_e
 content      : source dict 리스트. **반드시 위 "글(본문) 페이지 HTML 샘플" 에서 글 본문이 들어있는 *가장 작은* 컨테이너를 직접 찾아** 그 CSS selector 를 쓴다(사이트 헤더/푸터/사이드바/댓글 영역은 제외). 확신 없으면 후보 2~3개를 fallback chain 으로. HTML 이면 [{from:"css", selector:"div.write_div", html:true}, {from:"css", selector:".article-body", html:true}, ...]. JSON 이면 [{from:"json", path:["contentHtml"]}]. (본문이 100자 미만으로 나오면 selector 가 틀린 것 — 샘플 HTML 을 다시 봐라.)
                ※ digest 에 "글 본문 JSON API 후보"(article_sample.api_candidates)가 있으면 그걸 써라: article.url_template = 후보의 url(거기 박힌 글 ID 숫자를 {post_id} 로 치환), article.fetch_kind = "json", article.content = [{from:"json", path: <후보의 body_field_path 그대로>}]. 필요하면 후보의 request_headers 중 X-Requested-With / Referer 를 config 최상위 headers 에 추가. 후보가 여러 개면 url_id_match=true · body_looks_html=true 인 걸 우선.
 skip_status  : (선택) [401,403] 처럼, 이 상태코드면 본문 비워서 반환(차단 우회 안 함).
+body_empty_acceptable : (선택, bool) true 면 article_body_len 검증을 hard=False 로 완화 — 본문이 본질적으로 없는 사이트 (검색결과 SERP / 이상형월드컵·인터랙티브 게임 디렉토리 / 외부 host 행 aggregator / canvas-only SPA 등) opt-in. 보통 retry 에서 2회+ 본문 0자 + 글페이지 HTML 에 진짜 "글 본문" 없을 때 박는다. 봇이 등록 후 body_empty_at_baseline=true 면 "본문 추출 안 됨" 경고를 자동으로 사용자 메시지에 붙임 — 알림은 제목+URL 만 나가도 OK.
 enrich       : (선택) {title:[...], published_at:[...], ...} — 현재 None/빈 값인 필드만 본문 페이지에서 보강.
 re_extract   : (선택, json) true 면 본문 payload(data)에서 list.fields 를 재추출해 None 아닌 값으로 덮어씀(엔드필드처럼 본문 API 가 목록 item 과 같은 형태일 때).
 

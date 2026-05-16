@@ -423,8 +423,10 @@ def stage3_configs_validate() -> list[Result]:
 
 # ----------------------------------------------------------------------------
 # Stage 5 — heuristic units (tests/probe_heuristics/test_*.py 자동 발견·실행)
+# + engine regression units (tests/validate/test_*.py)
 # ----------------------------------------------------------------------------
 HEURISTIC_TESTS_DIR = ROOT / "tests" / "probe_heuristics"
+EXTRA_UNIT_TEST_DIRS = [ROOT / "tests" / "validate"]  # 비-휴리스틱 engine 회귀 테스트
 
 
 def _load_test_module(test_py: Path):
@@ -488,6 +490,9 @@ def stage5_heuristic_units() -> list[Result]:
     if not HEURISTIC_TESTS_DIR.exists():
         return [Result(5, "_dir", "WARN", f"{HEURISTIC_TESTS_DIR.relative_to(ROOT)} 없음 — 휴리스틱 unit 테스트 디렉토리")]
     files = sorted(HEURISTIC_TESTS_DIR.glob("test_*.py"))
+    for extra_dir in EXTRA_UNIT_TEST_DIRS:
+        if extra_dir.exists():
+            files.extend(sorted(extra_dir.glob("test_*.py")))
     if not files:
         return [Result(5, "_dir", "WARN", f"{HEURISTIC_TESTS_DIR.relative_to(ROOT)}/test_*.py 없음")]
 

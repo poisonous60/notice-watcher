@@ -156,6 +156,8 @@ async def validate_built_config(
             rep.add("fetch_list", True, hard=True, detail=f"{len(posts)}건")
 
             # 본문 — skip_status(접근제한)로 비워진 글은 건너뛰고 다음 글 시도. "진짜 본문" 하나 검증되면 충분.
+            # article.body_empty_acceptable=true 면 본문 길이 검증을 hard=False 로 완화 (본문이 본질적으로 없는 사이트 opt-in).
+            body_optional = bool((cfg.get("article") or {}).get("body_empty_acceptable"))
             if posts and fetch_articles > 0:
                 want = max(1, fetch_articles)
                 budget = min(len(posts), max(want + 2, 5))  # skip 대비 여유
@@ -180,7 +182,11 @@ async def validate_built_config(
                         detail += " (<100 — content selector 의심)"
                         if ext_hint:
                             detail += f" / {ext_hint}"
-                    rep.add("article_body_len", ok, hard=True, detail=detail)
+                    if body_optional and not ok:
+                        rep.add("article_body_len", True, hard=False,
+                                detail=detail + " — body_empty_acceptable=true 로 완화 (본문 없는 사이트 opt-in)")
+                    else:
+                        rep.add("article_body_len", ok, hard=True, detail=detail)
                     ch = full.content_html or ""
                     if "<nav" in ch and "<footer" in ch:
                         rep.add("article_body_chrome", False, hard=False,
@@ -192,6 +198,9 @@ async def validate_built_config(
                     # 진짜 본문 글을 하나도 못 봄
                     if rep.article_bodies and all(v == 0 for v in rep.article_bodies.values()):
                         rep.add("article_body_len", True, hard=False, detail="첫 글들이 전부 접근제한(skip_status) — 본문 검증 보류")
+                    elif body_optional:
+                        rep.add("article_body_len", True, hard=False,
+                                detail="fetch_article 로 본문을 못 얻음 — body_empty_acceptable=true 로 완화")
                     else:
                         rep.add("article_body_len", False, hard=True, detail="fetch_article 로 본문을 못 얻음")
     except Exception as e:

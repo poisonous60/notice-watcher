@@ -38,19 +38,9 @@
   "article": {
     "url_template": "https://www.piku.co.kr/w/{post_id}",
     "fetch_kind": "html",
-    "wait_selector": "head meta[name=\"description\"]",
+    "body_empty_acceptable": true,
     "content": [
-      {"from": "css", "selector": "div.modal-content", "html": true},
-      {
-        "from": "concat",
-        "parts": [
-          {"from": "css", "selector": "head title", "text": true},
-          {"const": "\n\n"},
-          {"from": "css", "selector": "head meta[name=\"description\"]", "attr": "content"},
-          {"const": "\n\n"},
-          {"from": "css", "selector": "head meta[property=\"og:description\"]", "attr": "content"}
-        ]
-      }
+      {"from": "css", "selector": "div.modal-content", "html": true}
     ],
     "enrich": {
       "title": [
@@ -59,5 +49,5 @@
     }
   },
   "_source_url": "https://www.piku.co.kr/w/search/order=hot",
-  "_note": "piku.co.kr 이상형 월드컵 hot 랭킹 — '글'=게임. 본문=div.modal-content (게임 소개+라운드 버튼) html, fallback=<head> title+meta description+og:description concat. CF 챌린지가 nav 마다 ~30% 재발화(N100 측정 3회 중 2회 list 성공)라 polite_sleep 길게/wait_selector div.product-desc/quiet 800ms/idle 10s 로 안정화. 자동 시도(last_config) 는 strategy=playwright_html 인데 wait_selector div.row.equal>div.col-xs-6 가 일부 article 페이지에서 안 떠 article_body_len=0 으로 떨어짐."
+  "_note": "piku.co.kr 이상형월드컵 hot 랭킹 — '글'=인터랙티브 게임. 본문이 본질적으로 없는 사이트 → article.body_empty_acceptable=true 로 article_body_len 검증 완화 (옵트인). content 는 modal-content (렌더되면 추출, 안 되면 봇이 body_empty_at_baseline=true 자동 경고). 카드는 JS 렌더라 playwright_html 필수, CF 챌린지 nav 마다 ~30% 재발화 → idle 10s/quiet 800ms 로 안정화 + wait_selector div.product-desc 카드 직접 대기."
 }

@@ -1,16 +1,16 @@
 ---
 slug: host_piku-co-kr_w_4d61ac2c
 url: https://www.piku.co.kr/w/search/order=hot
-status: 🔧 손 config (작동중, baseline 10, playwright_html, flaky ~67%)
-outcome: handcrafted
+status: 🔧 손 config + (E) body_empty_acceptable 플래그 신설 (자동 등록 통과 길 개통)
+outcome: improved
 date: 2026-05-16
 requested_by: poi23619
-failure_keys: [article_body_len, cf_challenge_renav]
-fix_layer: none
+failure_keys: [article_body_len, cf_challenge_renav, body_empty_acceptable_missing]
+fix_layer: E+A+D
 config_strategy: playwright_html
 adapters_changed: []
-engine_files_touched: []
-tags: [worldcup, game-directory, cloudflare, anti-bot, flaky-polling, SPA, modal-content, non-article-site]
+engine_files_touched: [engine/config_schema.py, generate/validate.py, prompts/config_writer.system.txt, prompts/config_writer.retry_skeleton.txt, scripts/probe_smoke.py, tests/validate/test_body_empty_acceptable.py]
+tags: [worldcup, game-directory, cloudflare, anti-bot, flaky-polling, SPA, modal-content, non-article-site, body-empty-acceptable, schema-flag]
 ---
 
 ## 무엇이 일어났나
@@ -30,44 +30,83 @@ list 5건 추출 OK (post_id=data-id, title=a.product-name, url=a.btn-danger hre
 - Playwright 도 CF 챌린지 재발화 → 폴링마다 flaky
 - "본문"이 본질적으로 부재 → article_body_len 임계 100자 통과시키려면 head meta concat fallback 같은 인공 padding 필요
 
-## 픽스 (fix_layer: none — 손-config)
+## 픽스 (fix_layer: E+A+D — 인프라 보강 + 손-config 간소화)
 
-### 손-config: `configs/host_piku-co-kr_w_4d61ac2c.json`
+### (E) 새 스키마 플래그 `article.body_empty_acceptable: bool`
+`engine/config_schema.py` 에 추가. true 면 `generate/validate.py:183` 의 article_body_len 검증이 `hard=False` 로 완화 — 본문이 *본질적으로 없는* 사이트 (검색결과 SERP / 인터랙티브 게임 디렉토리 / 외부 host 행 aggregator / canvas-only SPA) opt-in. 봇은 등록 후 `body_empty_at_baseline=true` 면 "본문 추출 안 됨" 경고를 사용자 메시지에 자동으로 붙임 (`bot/site_ops.py:body_warning`) — 알림은 제목+URL+요약 만 나가도 OK.
+
+이전엔 본문 0자 = `hard=True` → auto-pipeline 4회 retry FAIL → triage 큐 강제 진입. 본문 selector 만 *집착* 하느라 본질 ("이 사이트는 본문 자체 없음") 못 인식. 같은 패턴 사이트들 (`host_google_search`, `host_scholar_google`, 그리고 이번 piku) 모두 같은 함정.
+
+### (A) prompt 룰 추가 (config_writer system + retry skeleton)
+- `prompts/config_writer.system.txt` 의 article 키 설명에 `body_empty_acceptable` 한 줄 추가
+- `prompts/config_writer.retry_skeleton.txt` 의 "수정 힌트" 에 룰: "본문 검증 article_body_len 가 *직전 2회 이상* FAIL 했고 글페이지 HTML 에 진짜 '글 본문' 자체가 부재 — 사이트가 본문 없는 종류 → `article.body_empty_acceptable: true` 박고 멈춰라. 더 이상 selector 시도 X."
+
+LLM 이 자동 파이프라인 retry 중 2회+ 본문 0자 보면 selector 더 시도 안 하고 flag 박고 마무리 — 같은 패턴 미래 사이트 자동 등록 통과.
+
+### (D) validate.py 의 article_body_len 분기
+`generate/validate.py:158-200` — `cfg["article"].get("body_empty_acceptable")` 가 true 면:
+- 본문 <100자 → `hard=False` (warn 만, 등록 진행)
+- "fetch_article 로 본문을 못 얻음" 도 `hard=False`
+
+기존 `(blen == 0 and fetch_note)` skip_status 분기는 그대로 — 401/403 차단글과 분리.
+
+### 손-config (간소화): `configs/host_piku-co-kr_w_4d61ac2c.json`
+플래그 신설로 fallback 인공 작성 제거 — `article.content` 가 단일 selector (`div.modal-content` html) 만. modal-content 안 떠도 봇이 자동 경고. 단순.
+
 - `strategy: playwright_html` (httpx 는 카드 미렌더로 불가)
 - `nav_timeout_ms: 30000`, `idle_timeout_ms: 10000`, `quiet_ms: 800` — CF 챌린지 자체 해소 + JS render 시간 확보
-- `list.wait_selector: div.product-desc` — 카드 셀렉터로 직접 대기 (last_config 의 `div.row.equal > div.col-xs-6` 는 wrapper 만 잡혀 카드 없이도 통과해서 0건 추출되던 원인)
-- `list.row_selector: div.row.equal > div.col-xs-6, div.row.equal > div.col-xs-12` (last_config 유지) + `row_required_selector: div.product-desc` 로 카드 없는 wrapper 거름
-- `article.content` 2-tier fallback:
-  1. `div.modal-content` html (~170자, 정상 렌더 시)
-  2. `concat([head title text, head meta[name=description] content, head meta[property=og:description] content])` (~150자, modal-content 미렌더 시. 모든 piku 글페이지에 존재하는 정적 head meta 라 결과 보장)
-- `article.enrich.title`: `head meta[property=og:title]` (자동생성 title 더 완전한 게임 풀네임으로 덮어쓰기)
+- `list.wait_selector: div.product-desc` — 카드 셀렉터로 직접 대기
+- `article.body_empty_acceptable: true` — 본문 없는 사이트 opt-in
+- `article.content: [div.modal-content html]` — 단일 selector. 렌더되면 추출, 안 되면 봇 자동 경고
+- `article.enrich.title: head meta[property=og:title]` — title 보강
+
+### 테스트
+`tests/validate/test_body_empty_acceptable.py` — 5 케이스:
+1. flag=true + body 0자 → hard fail 없어야
+2. flag=true + body 50자(<100) → hard fail 없어야
+3. flag 없음 + body 0자 → article_body_len hard fail (기존 동작 유지)
+4. flag 없음 + body 200자 → 모두 pass
+5. schema 가 flag 받아들이는지
+
+`scripts/probe_smoke.py` 의 stage 5 가 `tests/validate/` 도 자동 스캔 (`EXTRA_UNIT_TEST_DIRS`). pre-push hook 통해 회귀 방어.
+
+probe_smoke 최종: PASS 257 FAIL 0 WARN 4 (24 파일 · 221 케이스 · 0 FAIL).
 
 ### N100 register baseline
-3회 retry — 10건 / 0건 / 10건. ~67% 신뢰도. 봇 polling cycle 도 동률 flaky 예상 (CF 챌린지 = silent skip). 사용자 입장: 알림이 모든 사이클은 아니지만 *결국* 도달.
+3회 retry — 10건 / 0건 / 10건. ~67% 신뢰도. 봇 polling cycle 도 flaky 예상 (CF 챌린지 = silent skip). 사용자 입장: 알림이 모든 사이클은 아니지만 *결국* 도달.
 
-### 손-config 만 — engine 코드 변경 X
-fix_layer none, adapters_changed [], engine_files_touched [].
+## 트랙 B (미래 향 — 일반화) — 1건 매칭 (E+A+D)
 
-## 트랙 B (미래 향 — probe 일반화) — 0건 매칭
+**1차 검토 (커밋 3fe996e 시점) — 0건 매칭 결론. 사용자 피드백 "naver cafe 처럼 본문 없으면 그냥 없는대로 보내면 안 되나" 로 재검토 → (E) 진짜 막힌 자리 발견.**
 
-- **2a (인식기 PATTERNS) — X.** piku 는 단일 게시판 사이트 (`/w/search/order=hot` 외 다른 board URL 형태 없음). 플랫폼화 가치 0.
-- **2b (--article-url 재시도) — X.** list 추출 OK + first_article_url 정상 추출 (`/w/721FCA` 등). first article 오집음 문제 아님.
-- **2c (probe heuristic 신규) — X (현재 사례 단일).** "CF challenge re-fires per nav" 패턴 — probe 가 측정하려면 같은 URL 을 *2회 연속* 나비게이션 후 두 번째도 200/유효 콘텐츠 받았는지 비교해야 함. 현재 probe.py 는 1회 fetch + sec-ch-ua 강화본(`S1.Hcap`) 측정만 — re-nav reliability 측정 없음. 일반화 가치는 있는데 단일 사례라 가성비 의문 — *재발 시* 휴리스틱화. `probe/_contract.py:_ARTIFACTS` 에 후보 키 슬롯 미추가.
-- **2d (probe artifact 수정) — X.** `S1.H2`/`S4` 모두 200 OK + 41970 bytes html 잡힘 — probe 자체 작동 정상. 문제는 *production polling 시 CF re-validate* 인데 probe 가 single-shot 이라 못 본 게 정상.
+- **2a (인식기 PATTERNS) — X.** piku 는 단일 게시판 사이트, 플랫폼화 가치 0.
+- **2b (--article-url 재시도) — X.** list 추출 OK + first_article_url 정상.
+- **2c (probe heuristic 신규) — X (현재 사례 단일, 재발 시 휴리스틱화).** "CF challenge re-fires per nav" — probe 가 single-shot 이라 못 보는 게 정상. probe 비용 증가 vs 단일 사례 가성비 의문.
+- **2d (probe artifact 수정) — X.** probe 자체 정상 작동.
+- **(E) schema 거부 — O.** `article.body_empty_acceptable` 플래그 신설. 본문 없는 사이트 (이번 piku + `host_google_search` + `host_scholar_google` + 미래 비슷한 SERP/aggregator) 모두 자동 등록 통과 길 개통.
+- **(A) system 룰 추가 — O.** prompt 에 flag 등장 + 사용 조건 명시. LLM 이 retry 중 2회+ 본문 0자면 flag 박고 마무리.
+- **(D) retry feedback — O.** retry_skeleton.txt 의 "수정 힌트" 에 명시 룰 추가.
 
-매칭 0건 이유: piku 는 (i) anti-bot+SPA 단일 사이트라 패턴 일반화 가치 작고, (ii) 본질적으로 notice site 아닌 worldcup 게임 디렉토리라 fix_layer 어디에도 *해결*이 안 됨 — 단순 손-config 으로 *완화*만 가능.
+1차 결론 ("자동 파이프라인이 진짜 안 닿는 한계 = 손-config 만") 이 잘못이었음. 진짜 한계는 `generate/validate.py:183` 의 `article_body_len, hard=True` 가 본문 없는 사이트도 강제로 retry 시키는 것 — 사용자 지적이 핀포인트.
 
-## 자가 점검 결과 (§6)
+## 자가 점검 결과 (§6) — 재검토판 (사용자 피드백 후)
 
-1. **어느 자리?** — none (손-config 만). config 파일이 자기-contained — strategy/timing tweak + selector fallback.
-2. **이전 케이스?** — `host_google-com_search_9440e9f9` (anti-bot 챌린지 → rejected_with_policy). piku 도 anti-bot 인데 reject 안 한 이유: 챌린지가 영구 블록 아닌 *간헐적 재발화* + 사용자가 실제 폴링 가치 있는 콘텐츠 (인기 worldcup 신규 등록) 요청. google search 는 SERP 자체가 notice-쓰임 아님.
-3. **누구 깰까?** — 0 사이트. piku.co.kr 단일 사이트 손-config — 다른 config 0 영향.
-4. **검증 그린?** — `python scripts/probe_smoke.py` (commit 단계 pre-push hook). 영향 사이트 0. 손-실행 = N100 register --config baseline 10건 성공 (3회 중 2회).
-5. **case 파일 + commit msg 양식** — frontmatter outcome=handcrafted, fix_layer=none.
-6. **새 패턴 fixture 추가?** — 신규 strategy/휴리스틱 X → fixture X.
-7. **트랙 B 0건 이유** — 위 ↑.
+1. **어느 자리?** — E (schema) + A (system 룰) + D (retry feedback). 1차 결론 "none (손-config)" 은 잘못 — `article_body_len, hard=True` 자체가 막혀 있던 거였음.
+2. **이전 케이스?** — `host_google_search_9440e9f9` (anti-bot SERP, rejected_with_policy), `host_scholar_google_706d9c49` (aggregator, list_row_external_host C+D fix), `naver-cafe_31104609_1` (body_empty_at_baseline 봇 경고 시스템 F). 이번 (E) 가 그 셋의 *위쪽 공통 패턴* — "본문 없는 사이트 자동 등록 통과 길 개통".
+3. **누구 깰까?** — 0 사이트. 기존 21+ configs 는 article.body_empty_acceptable 기본값 false → 동작 불변. flag opt-in 패턴이라 누락 위험 없음.
+4. **검증 그린?** —
+   - `python scripts/probe_smoke.py` PASS 257/0/4/0 (4 WARN = 기존 fixture probe artifact 옛것, 무관)
+   - `python tests/validate/test_body_empty_acceptable.py` 5/5 PASS
+   - 영향 사이트 0 — 기존 configs flag 없으니 옛 동작
+   - 손-실행 N100 register baseline 10/0/10 (이번 PR 이전 측정, config 본질 변화 X)
+5. **case 파일 + commit msg** — frontmatter outcome=improved (였던 handcrafted 에서 격상 — 인프라 일반화 박음), fix_layer=E+A+D, commit msg prefix `[fix-layer: E+A+D]`.
+6. **새 패턴 fixture 추가?** — `tests/validate/test_body_empty_acceptable.py` 신규 — probe_smoke stage 5 의 `EXTRA_UNIT_TEST_DIRS` 통해 회귀 방어. 새 strategy/휴리스틱은 아니라 probe_heuristics fixture 는 X.
+7. **트랙 B 매칭 이유** — 위 §트랙 B 참조.
 
 ## 운영상 주의
-- 봇 폴링 사이클당 ~30% silent skip 예상. 사용자 알림 latency 평균 7-15분 (5분 폴 + retry).
-- fetch_article 도 CF 챌린지/modal 미렌더로 종종 0자 → 알림에 본문 없을 수 있음 (제목 + URL 만).
-- 패턴 재발 시 (다른 SPA+CF 사이트 사용자 요청) → 트랙 B 2c "renavigation reliability" 휴리스틱화 검토.
+- 봇 폴링 사이클당 ~30% silent skip 예상 (CF 챌린지). 사용자 알림 latency 평균 7-15분.
+- fetch_article 도 CF 챌린지/modal 미렌더로 종종 0자 → 알림에 본문 없을 수 있음. 봇이 `body_warning(slug)` 으로 "⚠️ 본문 추출 안 됨" 자동 표시.
+- 패턴 재발 시 (다른 SPA+CF 사이트) → trigger 적으면 손-config + body_empty_acceptable, 자주 들어오면 (C) "renavigation reliability" probe 휴리스틱화 검토.
+
+## 교훈
+30분 손-config 작업 후 사용자 한 줄 질문 ("naver cafe 처럼 본문 없으면 그냥 없는대로 보내면 안 되나") 으로 진짜 픽스 자리 발견. 1차에 "트랙 B 0건 매칭" 결론 낼 때 *왜* 검증 자체가 hard=True 인지 의심 안 한 게 패착. 다음 사례부터: hard fail 항목 만나면 "이 hard 가 정당한가, opt-out 길은 있는가" 1초 물어보기.
