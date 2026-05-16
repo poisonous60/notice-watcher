@@ -5,6 +5,7 @@ from .dcinside import DCInsideMGalleryAdapter
 from .skku_cse import SkkuCseAdapter
 from .navercafe import NaverCafeAdapter
 from .daumcafe import DaumCafeAdapter
+from .naver_blog import NaverBlogRssAdapter
 from .reddit import RedditAdapter
 
 __all__ = [
@@ -16,5 +17,6 @@ __all__ = [
     "SkkuCseAdapter",
     "NaverCafeAdapter",
     "DaumCafeAdapter",
+    "NaverBlogRssAdapter",
     "RedditAdapter",
 ]

@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "site": "blog.naver.com",
+  "board": "ghangth",
+  "strategy": "handwritten",
+  "adapter": "NaverBlogRssAdapter",
+  "kwargs": {
+    "blog_id": "ghangth",
+    "timeout": 15.0
+  },
+  "_slug_board": "ghangth",
+  "_source_url": "https://blog.naver.com/ghangth/221299970841",
+  "_note": "네이버 블로그 — known-platform 자동 인식. 손어댑터 NaverBlogRssAdapter 가 rss.blog.naver.com/<blogId>.xml 을 직접 파싱(자동 httpx_html/playwright_html 은 데스크톱 iframe·모바일 SPA 라 글 행 0개로 실패). 사용자가 개별 글 URL 을 줘도 blog_id 추출해 blog 단위로 등록. 본문은 m.blog.naver.com/PostView.naver 에서 se-main-container/postViewArea 추출.",
+  "_recognized_platform": "naver-blog"
+}

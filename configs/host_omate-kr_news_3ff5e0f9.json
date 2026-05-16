@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "site": "omate.kr",
+  "board": "news",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9"
+  },
+  "timeout": 15.0,
+  "polite_sleep": {"min": 5.0, "max": 10.0},
+  "list": {
+    "url_template": "https://www.omate.kr/news/articleList.html?view_type=sm",
+    "pagination": {"kind": "query_param", "page_param": "page"},
+    "row_selector": "section#section-list > ul > li",
+    "row_required_selector": "h2.titles > a",
+    "fields": {
+      "post_id": [
+        {"from": "attr", "selector": "h2.titles > a", "attr": "href",
+         "transform": [["regex_extract", "[?&]idxno=(\\d+)"]]}
+      ],
+      "title": [
+        {"from": "css", "selector": "h2.titles > a", "text": true,
+         "transform": [["collapse_ws"]]}
+      ],
+      "url": [
+        {"from": "attr", "selector": "h2.titles > a", "attr": "href",
+         "transform": [["urljoin", "https://www.omate.kr/"]]}
+      ],
+      "author": [
+        {"from": "css", "selector": "div.byline div.name", "text": true,
+         "transform": [["collapse_ws"]]}
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {"from": "css", "selector": "article#article-view-content-div", "html": true}
+    ]
+  },
+  "_source_url": "https://www.omate.kr/news/articleView.html?idxno=21030",
+  "_note": "omate.kr — 사용자가 개별 기사 URL(articleView.html?idxno=...)을 /preview 로 줌. 자동 probe 는 list_url 못 잡아 fail. articleList.html?view_type=sm 가 정적 HTML — section#section-list > ul > li 가 글 행. published_at 은 'MM-DD HH:MM' 라 연도 모호해 생략(폴링은 post_id 중복으로만 신규 판정 — 영향 X)."
+}
