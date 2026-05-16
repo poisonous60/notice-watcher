@@ -3,46 +3,71 @@
 {% block body %}
 
 <p><a href="/">← Triage</a></p>
-<h2>🛠 자동등록 실패 (FAILED) — {{ items | length }}건</h2>
+<h2>🛠 자동등록 실패 (FAILED) — 활성 {{ items | length }}건 · 나중에 {{ later_items | length }}건</h2>
 <p class="muted">
   봇·polling 이 자동 등록 시도 실패 → <code>output/poll_state/&lt;slug&gt;.FAILED.json</code> 으로 쌓인 큐.
   처리: hand-config 스킬 모드 B (probe 진단 → 손 config / 손 adapter → <code>register --config</code> → N100 배포).
+  바로 못 할 항목은 체크 후 <b>→ 나중에</b>로 내려두면 일괄 hand-config 프롬프트에서도 빠짐 (N100 polling 영향 X).
 </p>
 
+{% macro queue_table(rows, action, button_label) -%}
+<form method="post" action="/triage/failed/later">
+  <input type="hidden" name="action" value="{{ action }}">
+  <div class="row" style="margin:.4em 0;gap:.6em;align-items:center;">
+    <label class="muted">
+      <input type="checkbox" onclick="for(const c of this.closest('form').querySelectorAll('input[name=slugs]')) c.checked=this.checked;">
+      전체
+    </label>
+    <button class="secondary" type="submit">{{ button_label }}</button>
+  </div>
+  <table class="compact striped">
+    <thead>
+      <tr>
+        <th style="width:1.5em;"></th>
+        <th>slug</th>
+        <th>failed_at</th>
+        <th>reason</th>
+        <th>[FAIL] / 첫 줄</th>
+        <th>url</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for it in rows %}
+      <tr>
+        <td><input type="checkbox" name="slugs" value="{{ it.slug }}"></td>
+        <td class="mono" style="white-space:nowrap;">
+          <a href="/subs/{{ it.slug | urlencode }}?from=triage">{{ it.slug }}</a>
+          {% if it.url and is_http_url(it.url) %} <a href="{{ it.url }}" target="_blank" rel="noopener noreferrer" title="원본 URL 새 탭 열기">↗</a>{% endif %}
+        </td>
+        <td style="white-space:nowrap;">{{ it.failed_at or '—' }}</td>
+        <td style="max-width:18em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+          <span title="{{ it.reason }}">{{ it.reason or '—' }}</span>
+        </td>
+        <td style="max-width:32em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+          <span title="{{ it.first_fail }}">{{ it.first_fail or '—' }}</span>
+        </td>
+        <td class="mono" style="max-width:22em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+          <span title="{{ it.url }}">{{ it.url or '—' }}</span>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</form>
+{%- endmacro %}
+
+<h3>활성 — hand-config 대상</h3>
 {% if not items %}
-<p class="muted">현재 FAILED 큐 비어 있음. ✨</p>
+<p class="muted">활성 FAILED 큐 비어 있음. ✨</p>
 {% else %}
-<table class="compact striped">
-  <thead>
-    <tr>
-      <th>slug</th>
-      <th>failed_at</th>
-      <th>reason</th>
-      <th>[FAIL] / 첫 줄</th>
-      <th>url</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for it in items %}
-    <tr>
-      <td class="mono" style="white-space:nowrap;">
-        <a href="/subs/{{ it.slug | urlencode }}?from=triage">{{ it.slug }}</a>
-        {% if it.url and is_http_url(it.url) %} <a href="{{ it.url }}" target="_blank" rel="noopener noreferrer" title="원본 URL 새 탭 열기">↗</a>{% endif %}
-      </td>
-      <td style="white-space:nowrap;">{{ it.failed_at or '—' }}</td>
-      <td style="max-width:18em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
-        <span title="{{ it.reason }}">{{ it.reason or '—' }}</span>
-      </td>
-      <td style="max-width:32em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
-        <span title="{{ it.first_fail }}">{{ it.first_fail or '—' }}</span>
-      </td>
-      <td class="mono" style="max-width:22em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
-        <span title="{{ it.url }}">{{ it.url or '—' }}</span>
-      </td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+{{ queue_table(items, "add", "→ 나중에") }}
+{% endif %}
+
+{% if later_items %}
+<details {% if not items %}open{% endif %} style="margin-top:1.5em;">
+  <summary><b>나중에</b> ({{ later_items | length }}건) — 후순위, hand-config 프롬프트에서 제외됨</summary>
+  {{ queue_table(later_items, "remove", "← 활성으로 복귀") }}
+</details>
 {% endif %}
 
 {% endblock %}

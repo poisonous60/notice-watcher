@@ -13,7 +13,7 @@ import html as _html
 
 import jinja2
 from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -21,7 +21,7 @@ from bot import db, inspector
 from dashboard import actions as act
 from dashboard import cases_view
 from dashboard import learned_view
-from dashboard import prompts, state
+from dashboard import prompts, state, triage_later
 from dashboard import usage_view
 from dashboard import user_view
 from dashboard import control_actions as ctrl
@@ -106,16 +106,22 @@ async def triage_page(request: Request, conn=Depends(get_conn)):
     paths = state.snapshot_paths()
     summary = inspector.triage_summary(conn, paths)
     rows = inspector.recent_jobs(conn, limit=15)
+    later = triage_later.load()
+    active_failed = [s for s in summary["failed_slugs"] if s not in later]
+    later_failed = [s for s in summary["failed_slugs"] if s in later]
     quick_prompts = {
         "report_triage_bulk": prompts.report_triage_bulk(
             report_ids=[r["id"] for r in db.list_reports(conn, status="open", limit=200)]
         ) if summary["open_reports"] > 0 else None,
         "hand_config_triage": prompts.hand_config_triage_queue(
-            failed_slugs=summary["failed_slugs"]
-        ) if summary["failed_slugs"] else None,
+            failed_slugs=active_failed
+        ) if active_failed else None,
     }
     return _render("triage.html", request,
-                   summary=summary, recent=rows, quick=quick_prompts, active="triage")
+                   summary=summary, recent=rows, quick=quick_prompts,
+                   active_failed_count=len(active_failed),
+                   later_failed_count=len(later_failed),
+                   active="triage")
 
 
 @app.get("/triage/failed", response_class=HTMLResponse)
@@ -123,22 +129,50 @@ async def triage_failed_page(request: Request):
     """자동등록 실패(FAILED.json) 큐 한눈 — snapshot 의 `*.FAILED.json` 들을 한 줄씩 표로.
 
     한 행만; last_feedback / last_config 원문은 `/subs/<slug>` 상세에서 본다.
+    '나중에' 토글된 slug 는 별도 섹션 (dashboard view 만 분리 — N100 영향 X).
     """
-    items: list[dict] = []
+    later = triage_later.load()
+    active: list[dict] = []
+    later_items: list[dict] = []
     for slug in state.failed_slugs():
         d = state.failed_payload(slug) or {}
         lines = [ln.strip() for ln in (d.get("last_feedback") or "").splitlines() if ln.strip()]
         first_fail = next((ln for ln in lines if "[FAIL]" in ln), lines[0] if lines else "")
-        items.append({
+        row = {
             "slug": slug,
             "url": d.get("url") or "",
             "failed_at": (d.get("failed_at") or "")[:19],
             "reason": d.get("reason") or "",
             "first_fail": first_fail,
-        })
-    items.sort(key=lambda r: r["failed_at"], reverse=True)
+        }
+        (later_items if slug in later else active).append(row)
+    active.sort(key=lambda r: r["failed_at"], reverse=True)
+    later_items.sort(key=lambda r: r["failed_at"], reverse=True)
     return _render("triage_failed.html", request,
-                   items=items, active="triage")
+                   items=active, later_items=later_items, active="triage")
+
+
+@app.post("/triage/failed/later", response_class=HTMLResponse)
+async def triage_failed_later(request: Request):
+    """체크박스 일괄 토글. action=add → 나중에 섹션으로, action=remove → 활성 복귀.
+
+    Form fields:
+      - action: "add" | "remove"
+      - slugs: 반복 (체크된 행마다 한 값)
+    """
+    form = await request.form()
+    action = (form.get("action") or "").strip()
+    if action not in ("add", "remove"):
+        raise HTTPException(status_code=400, detail="invalid action")
+    slugs = [s for s in form.getlist("slugs") if isinstance(s, str)]
+    if not all(state.safe_slug(s) for s in slugs):
+        raise HTTPException(status_code=400, detail="invalid slug")
+    if slugs:
+        if action == "add":
+            triage_later.add_many(slugs)
+        else:
+            triage_later.remove_many(slugs)
+    return RedirectResponse(url="/triage/failed", status_code=303)
 
 
 # --------------------------------------------------------------------------- #

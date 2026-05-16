@@ -13,8 +13,8 @@
   </div>
   <div class="card">
     <p class="lbl">자동등록 실패 (FAILED)</p>
-    <p class="n">{{ summary.failed_slugs | length }}</p>
-    <p class="muted">손 config 대상</p>
+    <p class="n">{{ active_failed_count }}</p>
+    <p class="muted">손 config 대상{% if later_failed_count %} · 나중에 {{ later_failed_count }}건{% endif %}</p>
     {% if summary.failed_slugs %}<a href="/triage/failed">view →</a>{% endif %}
   </div>
   <div class="card">
@@ -53,7 +53,7 @@
 {% if quick.hand_config_triage %}
 <div class="prompt-card">
   <div class="row">
-    <span class="label">🛠 FAILED 큐 일괄 처리 ({{ summary.failed_slugs | length }}건)</span>
+    <span class="label">🛠 FAILED 큐 일괄 처리 ({{ active_failed_count }}건)</span>
     <button class="secondary" data-copy-target="#qp-hc-tri">📋 복사</button>
   </div>
   <details>
