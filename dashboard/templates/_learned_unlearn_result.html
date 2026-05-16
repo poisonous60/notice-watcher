@@ -2,13 +2,13 @@
 {% if ok and ("REMOVED" in output) %}
 <tr id="learned-row-{{ pattern_id }}">
   <td colspan="8" class="muted">
-    ✅ <code>{{ pattern_id }}</code> 제거됨 (N100). {% if snapshot_removed %}snapshot 동기 OK.{% else %}snapshot 동기 실패 — Pull 한 번.{% endif %}
+    ✅ <code>{{ pattern_id }}</code> 제거됨 (N100). {% if snapshot_removed %}snapshot 동기 OK.{% else %}snapshot 동기 실패 — 새로고침해서 자동 Pull.{% endif %}
   </td>
 </tr>
 {% elif ok and ("NOT_FOUND" in output) %}
 <tr id="learned-row-{{ pattern_id }}">
   <td colspan="8" class="muted">
-    ⚠ <code>{{ pattern_id }}</code> 가 N100 에 이미 없음 (다른 경로로 풀린 듯). Pull 후 새로고침.
+    ⚠ <code>{{ pattern_id }}</code> 가 N100 에 이미 없음 (다른 경로로 풀린 듯). 새로고침.
   </td>
 </tr>
 {% else %}

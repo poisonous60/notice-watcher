@@ -70,7 +70,7 @@
 </table>
 {% else %}
   {% if stats.total == 0 %}
-  <p class="muted">학습된 패턴 없음. <code>Pull from N100</code> 로 snapshot 갱신했는지 확인.</p>
+  <p class="muted">학습된 패턴 없음. 새로고침 시 자동 Pull 로 snapshot 갱신됩니다.</p>
   {% else %}
   <p class="muted">검색 결과 없음. 검색어를 비우면 전체 {{ stats.total }}건 표시.</p>
   {% endif %}

@@ -56,13 +56,13 @@
         <div class="snap">
           <span class="muted">snapshot:</span> <code>{{ snapshot_ts }}</code>
         </div>
-        <button class="secondary pull-btn"
-                hx-post="/actions/pull"
-                hx-target="#pull-result"
-                hx-swap="innerHTML"
-                hx-indicator="#pull-spinner">
-          🔄 Pull from N100
-        </button>
+        <span id="auto-pull"
+              hx-post="/actions/pull"
+              hx-trigger="load"
+              hx-target="#pull-result"
+              hx-swap="innerHTML"
+              hx-indicator="#pull-spinner"></span>
+        <span class="muted">🔄 자동 Pull</span>
         <span id="pull-spinner" class="htmx-indicator">…진행중</span>
       </header>
 
