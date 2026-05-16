@@ -5,10 +5,15 @@
   - `output/triage_queue.jsonl`            : 봇이 `_ensure_registered` 실패 때마다 한 줄씩 append — `{ts,url,slug,via("preview"|"watch"),requested_by,register_tail}`.
 성공 등록되면(자동이든 `register.py --config` 든) `_save_state` 가 둘 다 정리한다.
 
-흐름:  python scripts/triage.py pull          # N100 → 로컬 (FAILED.json + triage_queue.jsonl + 각 실패 slug 의 probe/)
-       python scripts/triage.py list          # 로컬에 받아온 실패 목록 표
-       python scripts/triage.py show <slug>   # 그 slug 의 .FAILED.json(사유·last_config) + probe 산출물 위치 + 요청자
+흐름:  python scripts/triage.py pull [--skip-later]   # N100 → 로컬 (FAILED.json + triage_queue.jsonl + 각 실패 slug 의 probe/)
+       python scripts/triage.py list [--skip-later]   # 로컬에 받아온 실패 목록 표
+       python scripts/triage.py show <slug>           # 그 slug 의 .FAILED.json(사유·last_config) + probe 산출물 위치 + 요청자
    → 그다음 hand-config 스킬 "모드 B(triage)" 로 사이트별 처리(probe 고치거나 손 config/손어댑터 작성 → register --config → N100 배포).
+
+`--skip-later` : dashboard `/triage/failed` 에서 '나중에' 토글한 slug 제외 (`output/triage_later.json` 공유).
+                  pull 시 → Later slug 의 `.FAILED.json`·`probe/<slug>/` 로컬에서 제거(다음 호출에서도 안 누적).
+                  list 시 → Later slug 행 안 보임.
+                  show <slug> 는 명시 호출이라 Later 라도 통과.
 
 N100 호스트: 환경변수 `DEPLOY_HOST`(기본 `aaaa@<lan-ip>`) / `DEPLOY_PATH`(기본 `~/notice-watcher`).
   IP 가 DHCP 라 바뀌었으면 `DEPLOY_HOST=aaaa@<새IP>` 로. N100 콘솔에서 `ip a` 로 확인 — `docs/운영 메모.md` §1~2.
@@ -18,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -27,11 +33,23 @@ OUTPUT = ROOT / "output"
 STATE_DIR = OUTPUT / "poll_state"
 QUEUE = OUTPUT / "triage_queue.jsonl"
 PROBE_DIR = OUTPUT / "probe"
+LATER_STORE = OUTPUT / "triage_later.json"  # dashboard `/triage/failed` 의 '나중에' 토글 (dev box only, gitignored)
 
 DEPLOY_HOST = os.environ.get("DEPLOY_HOST", "aaaa@<lan-ip>")
 DEPLOY_PATH = os.environ.get("DEPLOY_PATH", "~/notice-watcher")
 
 _FAILED_SUFFIX = ".FAILED.json"
+
+
+def _load_later() -> set[str]:
+    """dashboard/triage_later.py 와 같은 파일. 부재 OK."""
+    if not LATER_STORE.exists():
+        return set()
+    try:
+        d = json.loads(LATER_STORE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return set()
+    return {str(s) for s in (d.get("later") or []) if s}
 
 
 def _run(cmd: list[str]) -> tuple[int, str]:
@@ -76,38 +94,71 @@ def _first_fail_line(last_feedback: str) -> str:
 
 
 # --------------------------------------------------------------------------- #
-def cmd_pull() -> int:
+def cmd_pull(skip_later: bool = False) -> int:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     OUTPUT.mkdir(parents=True, exist_ok=True)
+    later = _load_later() if skip_later else set()
 
     # 1) <slug>.FAILED.json 들 — 원격 셸이 glob 확장. 매치 0개면 scp 가 비0 으로 끝남(에러 아님).
     rc, out = _run(["scp", "-q", f"{DEPLOY_HOST}:{DEPLOY_PATH}/output/poll_state/*{_FAILED_SUFFIX}", f"{STATE_DIR}{os.sep}"])
     if rc != 0 and not any(s in out for s in ("No such file", "not a regular file", "matches no files")):
         sys.stderr.write(f"[triage pull] FAILED.json 가져오기 경고: {out}\n")
 
+    # 1b) skip-later: glob 받은 뒤 Later slug 의 marker 즉시 삭제 (selective scp 불가, 받은 뒤 정리)
+    pruned_failed = 0
+    if later:
+        for slug in list(later):
+            fp = STATE_DIR / f"{slug}{_FAILED_SUFFIX}"
+            if fp.exists():
+                try:
+                    fp.unlink()
+                    pruned_failed += 1
+                except OSError as e:
+                    sys.stderr.write(f"[triage pull] Later {slug}.FAILED.json 삭제 실패: {e}\n")
+
     # 2) triage_queue.jsonl (없을 수 있음)
     _run(["scp", "-q", f"{DEPLOY_HOST}:{DEPLOY_PATH}/output/triage_queue.jsonl", str(QUEUE)])
 
-    # 3) 각 실패 slug 의 probe 산출물 디렉토리 (진단 재료)
+    # 3) 각 실패 slug 의 probe 산출물 디렉토리 (진단 재료). Later 는 건너뜀 + 이미 받은 거 정리.
     PROBE_DIR.mkdir(parents=True, exist_ok=True)
     slugs = _failed_slugs()
+    pruned_probe = 0
     for slug in slugs:
+        if slug in later:
+            continue
         _run(["scp", "-rq", f"{DEPLOY_HOST}:{DEPLOY_PATH}/output/probe/{slug}", f"{PROBE_DIR}{os.sep}"])
+    if later:
+        for slug in later:
+            pd = PROBE_DIR / slug
+            if pd.exists():
+                try:
+                    shutil.rmtree(pd)
+                    pruned_probe += 1
+                except OSError as e:
+                    sys.stderr.write(f"[triage pull] Later {slug} probe/ 삭제 실패: {e}\n")
 
     nq = len({e.get("slug") for e in _read_queue()})
     print(f"[triage pull] {DEPLOY_HOST}:{DEPLOY_PATH}/output → {OUTPUT}")
     print(f"  FAILED.json: {len(slugs)}건   triage_queue slug: {nq}건   probe 디렉토리: {sum(1 for s in slugs if (PROBE_DIR / s).exists())}개")
+    if later:
+        print(f"  Later 제외: FAILED.json {pruned_failed}건 / probe {pruned_probe}개 정리   (`output/triage_later.json` — dashboard 토글)")
     print("  → `python scripts/triage.py list`")
     return 0
 
 
-def cmd_list() -> int:
+def cmd_list(skip_later: bool = False) -> int:
     slugs = set(_failed_slugs())
     q = _read_queue()
     q_by_slug: dict[str, list[dict]] = {}
     for e in q:
         q_by_slug.setdefault(str(e.get("slug") or ""), []).append(e)
     all_slugs = sorted(slugs | set(k for k in q_by_slug if k))
+    later_skipped = 0
+    if skip_later:
+        later = _load_later()
+        before = len(all_slugs)
+        all_slugs = [s for s in all_slugs if s not in later]
+        later_skipped = before - len(all_slugs)
     if not all_slugs:
         print("처리할 실패 등록 없음. (먼저 `python scripts/triage.py pull` — N100 에서 가져오기)")
         return 0
@@ -128,6 +179,8 @@ def cmd_list() -> int:
     for r in rows:
         print(f"{r[0]:<{w_slug}}  {r[1]:<19}  {r[2]:<10}  {r[3]:<{w_who}}  {r[4]}  {r[5]:<58}  {r[6]}")
     print(f"\n  F=y → 로컬에 <slug>.FAILED.json 있음(상세 진단 가능). F=- → triage_queue 에만 있음(`pull` 다시 하거나 직접 probe).")
+    if later_skipped:
+        print(f"  Later 제외: {later_skipped}건 숨김 (dashboard `/triage/failed` 의 '나중에' 토글).")
     print(f"  자세히: python scripts/triage.py show <slug>")
     print(f"  처리:   hand-config 스킬 모드 B  (사이트별로: 진단 → probe 수정 or 손 config/손어댑터 → register --config → N100 배포)")
     return 0
@@ -175,16 +228,20 @@ def main(argv: list[str]) -> int:
         print(__doc__)
         return 0
     cmd, rest = argv[0], argv[1:]
+    skip_later = False
+    if "--skip-later" in rest:
+        skip_later = True
+        rest = [a for a in rest if a != "--skip-later"]
     if cmd == "pull":
-        return cmd_pull()
+        return cmd_pull(skip_later=skip_later)
     if cmd == "list":
-        return cmd_list()
+        return cmd_list(skip_later=skip_later)
     if cmd == "show":
         if not rest:
             print("usage: python scripts/triage.py show <slug>")
             return 2
         return cmd_show(rest[0])
-    print(f"알 수 없는 명령: {cmd!r}  (pull | list | show <slug>)")
+    print(f"알 수 없는 명령: {cmd!r}  (pull | list | show <slug>)  [--skip-later]")
     return 2
 
 

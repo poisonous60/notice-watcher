@@ -33,10 +33,12 @@ description: >-
 ## 1. 가져오기 + 진단
 
 ```
-python scripts/triage.py pull          # N100 → 로컬 (FAILED.json + triage_queue.jsonl + 실패 slug 의 probe/)
-python scripts/triage.py list          # 받아온 실패 목록 표
-python scripts/triage.py show <slug>   # 그 slug 의 .FAILED.json(reason/last_feedback/last_config) + 요청자 + probe 산출물 목록
+python scripts/triage.py pull --skip-later   # N100 → 로컬 (FAILED.json + triage_queue.jsonl + 실패 slug 의 probe/); dashboard '나중에' 토글 slug 제외
+python scripts/triage.py list --skip-later   # 받아온 실패 목록 표 (Later 숨김)
+python scripts/triage.py show <slug>         # 그 slug 의 .FAILED.json(reason/last_feedback/last_config) + 요청자 + probe 산출물 목록
 ```
+
+`--skip-later` 가 제외하는 slug 는 dashboard `/triage/failed` 의 '나중에' 토글로 결정 (`output/triage_later.json`, dev box only). 후순위로 미뤘다는 신호 — 같은 dev 박스에서 dashboard 와 동일 큐 공유. Later 라도 명시적으로 처리하고 싶으면 `show <slug>` 또는 인자 빼고 호출.
 
 IP 바뀌었으면 `DEPLOY_HOST=aaaa@<새IP>` 환경변수.
 
