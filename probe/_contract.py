@@ -148,6 +148,13 @@ _ARTIFACTS: dict[str, ArtifactContract] = {
                                 "None=의미 있는 row 후보 0건. dict={base_host, total_count, external_count, external_ratio, sample_external_urls}. "
                                 "external_ratio≥0.8 이면 검색결과/aggregator 일 가능성 — article body 통합 추출 불가, "
                                 "config 작성자는 article 섹션 생략 또는 article.skip_status:[200] 박아 본문 fetch 시도 짧게 끊을 것."),
+            _ContractField("row_interactive_action", type_hint="dict|null", required=False,
+                           note="list row 의 first_text 안 *액션 UI* 키워드 매칭 — 게임 디렉토리/투표/SPA 검출 신호. "
+                                "None=매칭 0건. dict={matched_row_count, matched_keyword_set, sample_row_first_text, is_interactive_action}. "
+                                "is_interactive_action=true 면 본문 없는 사이트일 가능성 — article.body_empty_acceptable:true 박을 것."),
+            _ContractField("body_empty_likely", type_hint="bool", required=False,
+                           note="본문 없는 사이트 summary — row_external_host(external_ratio≥0.8) OR row_interactive_action(is_interactive_action=true) 둘 중 하나면 true. "
+                                "true 면 article.body_empty_acceptable:true 박고 article.content selector 시도 안 해도 됨 (retry 단축)."),
         ),
     ),
 
@@ -267,6 +274,7 @@ _PROMPT_REQUIRED_KEY_PATHS: tuple[tuple[str, str], ...] = (
     ("list_candidates.json", "hydration_list_candidates"),
     ("list_candidates.json", "inline_js_data_candidates"),
     ("list_candidates.json", "runtime_id_candidates"),
+    ("list_candidates.json", "body_empty_likely"),
     # robots.json
     ("robots.json", "crawl_delay"),
     # article_click.json

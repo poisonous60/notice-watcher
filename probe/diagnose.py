@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 from .baseline import is_baseline_blocked
+from .extract import static_vs_headless_check
 from .types import Classification, Diagnosis, Result
 
 
@@ -43,6 +44,35 @@ def diagnose(
     static_ok = [r for r in static_results if r.classification == Classification.OK]
     headless_ok = headless is not None and headless.classification == Classification.OK
     captured_ok = captured_retry is not None and captured_retry.classification == Classification.OK
+
+    # static_vs_headless content 비교 — static 응답이 *빈 shell* (JS 가 카드/목록 그려야 하는 사이트) 인지 검증.
+    # static_ok + headless_ok 둘 다 있을 때만 의미 있음. piku 처럼 같은 URL 정적=14kb·data-id=0 vs
+    # Playwright=44kb·data-id=20 인 케이스 → static_insufficient=True → "정적 HTTP로 충분" verdict 정정.
+    static_vs_headless: Optional[dict] = None
+    if static_ok and headless_ok and headless is not None:
+        biggest_static = max(
+            (r for r in static_ok if r.body_path),
+            key=lambda r: (Path(r.body_path).stat().st_size if Path(r.body_path).exists() else 0),
+            default=None,
+        )
+        if biggest_static is not None and biggest_static.body_path and headless.body_path:
+            s_path = Path(biggest_static.body_path)
+            h_path = Path(headless.body_path)
+            if s_path.exists() and h_path.exists():
+                static_vs_headless = static_vs_headless_check(
+                    s_path.read_text(encoding="utf-8", errors="replace"),
+                    h_path.read_text(encoding="utf-8", errors="replace"),
+                )
+                if static_vs_headless.get("static_insufficient"):
+                    # static_ok 무효화 — static 응답이 빈 shell. headless 만 쓸모 있음.
+                    static_ok = []
+                    notes.append(
+                        "정적 응답이 빈 shell — Playwright 응답이 정적보다 "
+                        f"{static_vs_headless.get('ratio'):.1f}배 크고 row-like 요소 "
+                        f"({static_vs_headless.get('row_signal_headless')} vs "
+                        f"{static_vs_headless.get('row_signal_static')}) 만 잡힘. "
+                        "JS 가 카드/목록 그리는 사이트 — strategy=playwright_html 필수."
+                    )
 
     recommended_strategy: str
     recommended_headers_summary: str

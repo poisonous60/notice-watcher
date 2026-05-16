@@ -24,6 +24,7 @@ from probe.extract import (
     html_repeating_patterns,
     pick_first_article_url,
     list_row_external_host,
+    list_row_interactive_action_text,
     runtime_id_candidates,
     traffic_api_candidates,
     write_list_candidates,
@@ -370,6 +371,9 @@ def _run(args: argparse.Namespace, url: str, slug: str) -> int:
                 html_candidates=html_lists,
                 base_url=url,
             )
+            row_interactive_action = list_row_interactive_action_text(
+                html_candidates=html_lists,
+            )
             write_list_candidates(
                 out_dir,
                 html_candidates=html_lists,
@@ -379,6 +383,7 @@ def _run(args: argparse.Namespace, url: str, slug: str) -> int:
                 inline_js_candidates=inline_js_lists,
                 runtime_ids=runtime_ids,
                 row_external_host=row_external_host,
+                row_interactive_action=row_interactive_action,
             )
         print(f"  HTML 반복 패턴: {len(html_lists)}건")
         print(f"  JSON API 후보: {len(json_api_lists)}건 (관련도순)")

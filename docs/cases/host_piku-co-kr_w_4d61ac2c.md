@@ -1,16 +1,16 @@
 ---
 slug: host_piku-co-kr_w_4d61ac2c
 url: https://www.piku.co.kr/w/search/order=hot
-status: 🔧 손 config + (E) body_empty_acceptable 플래그 신설 (자동 등록 통과 길 개통)
+status: 🔧 손 config + (E) body_empty_acceptable 플래그 + (C) probe 휴리스틱 2종 (interactive_action + static_vs_headless)
 outcome: improved
 date: 2026-05-16
 requested_by: poi23619
-failure_keys: [article_body_len, cf_challenge_renav, body_empty_acceptable_missing]
-fix_layer: E+A+D
+failure_keys: [article_body_len, cf_challenge_renav, body_empty_acceptable_missing, static_verdict_false_positive]
+fix_layer: E+A+C+D
 config_strategy: playwright_html
 adapters_changed: []
-engine_files_touched: [engine/config_schema.py, generate/validate.py, prompts/config_writer.system.txt, prompts/config_writer.retry_skeleton.txt, scripts/probe_smoke.py, tests/validate/test_body_empty_acceptable.py]
-tags: [worldcup, game-directory, cloudflare, anti-bot, flaky-polling, SPA, modal-content, non-article-site, body-empty-acceptable, schema-flag]
+engine_files_touched: [engine/config_schema.py, generate/validate.py, prompts/config_writer.system.txt, prompts/config_writer.retry_skeleton.txt, scripts/probe_smoke.py, tests/validate/test_body_empty_acceptable.py, probe/extract.py, probe/diagnose.py, probe/_contract.py, scripts/probe.py, tests/probe_heuristics/test_list_row_interactive_action_text.py, tests/probe_heuristics/test_static_vs_headless_check.py]
+tags: [worldcup, game-directory, cloudflare, anti-bot, flaky-polling, SPA, modal-content, non-article-site, body-empty-acceptable, schema-flag, probe-heuristic, verdict-correction, interactive-action, static-vs-headless]
 ---
 
 ## 무엇이 일어났나
@@ -75,19 +75,29 @@ probe_smoke 최종: PASS 257 FAIL 0 WARN 4 (24 파일 · 221 케이스 · 0 FAIL
 ### N100 register baseline
 3회 retry — 10건 / 0건 / 10건. ~67% 신뢰도. 봇 polling cycle 도 flaky 예상 (CF 챌린지 = silent skip). 사용자 입장: 알림이 모든 사이클은 아니지만 *결국* 도달.
 
-## 트랙 B (미래 향 — 일반화) — 1건 매칭 (E+A+D)
+## 트랙 B (미래 향 — 일반화) — 4건 매칭 (E+A+C+D)
 
-**1차 검토 (커밋 3fe996e 시점) — 0건 매칭 결론. 사용자 피드백 "naver cafe 처럼 본문 없으면 그냥 없는대로 보내면 안 되나" 로 재검토 → (E) 진짜 막힌 자리 발견.**
+**3차 진화:**
+- 1차 (커밋 3fe996e): "트랙 B 0건" 결론.
+- 2차 (커밋 e18e807): 사용자 피드백 "naver cafe 처럼 본문 없으면 그냥 없는대로 보내면 안 되나" → **(E)+(A)+(D)** body_empty_acceptable 플래그 박음. validate.py hard 완화 길 개통.
+- 3차 (이번): 사용자 후속 분류 질문 "단서 증가/필터링/점수 재계산 중 뭐?" → **(C) probe 휴리스틱 2종** 박음. **(A)** 단서 증가 = `list_row_interactive_action_text` + body_empty_likely summary 키 = 1st attempt 부터 flag 자동. **(B)** 단서 필터링 = `static_vs_headless_check` = probe verdict "정적 충분" false positive 정정.
 
-- **2a (인식기 PATTERNS) — X.** piku 는 단일 게시판 사이트, 플랫폼화 가치 0.
-- **2b (--article-url 재시도) — X.** list 추출 OK + first_article_url 정상.
-- **2c (probe heuristic 신규) — X (현재 사례 단일, 재발 시 휴리스틱화).** "CF challenge re-fires per nav" — probe 가 single-shot 이라 못 보는 게 정상. probe 비용 증가 vs 단일 사례 가성비 의문.
-- **2d (probe artifact 수정) — X.** probe 자체 정상 작동.
-- **(E) schema 거부 — O.** `article.body_empty_acceptable` 플래그 신설. 본문 없는 사이트 (이번 piku + `host_google_search` + `host_scholar_google` + 미래 비슷한 SERP/aggregator) 모두 자동 등록 통과 길 개통.
-- **(A) system 룰 추가 — O.** prompt 에 flag 등장 + 사용 조건 명시. LLM 이 retry 중 2회+ 본문 0자면 flag 박고 마무리.
-- **(D) retry feedback — O.** retry_skeleton.txt 의 "수정 힌트" 에 명시 룰 추가.
+- **2a (인식기 PATTERNS) — X.** piku 단일 게시판, 플랫폼화 가치 0.
+- **2b (--article-url 재시도) — X.** list/first_article_url 정상.
+- **2c (probe heuristic 신규) — O 2종.**
+  - **`list_row_interactive_action_text`** (단서 증가) — `html_repeating_patterns` 의 `first_text` 안 액션 UI 키워드 (이상형월드컵/시작하기/랭킹보기/투표/Vote now/Round 1 등 KO+EN) ≥2개 매칭 = 본문 없는 사이트. piku artifact 로 retroactive 검증 — `is_interactive_action=true, matched_keyword_set=['랭킹보기','시작하기','월드컵','이상형 월드컵']` 매칭. 일반 게시판 (글 제목 list) 안 매칭.
+  - **`static_vs_headless_check`** (단서 필터링) — 정적 응답 size 와 Playwright 응답 size 비교 + `data-id=`/`<a ` count 차이. ratio≥2.0 AND row_signal_diff≥5 면 `static_insufficient=true`. piku artifact 로 retroactive 검증 — `ratio=3.26 (static 12kb vs headless 41kb), row_signal_static=5, row_signal_headless=55, static_insufficient=true`.
+- **2d (probe artifact 수정) — O.** `list_candidates.json` 에 `row_interactive_action`/`body_empty_likely` 키 신규 추가 + `diagnose.py` 의 verdict 결정 분기에 `static_vs_headless_check` 호출 — static_insufficient=true 면 `static_ok=[]` 강제 무효화 + verdict 정정 + notes 추가.
+- **(E) schema 거부 — O (2차).** `article.body_empty_acceptable` 플래그.
+- **(A) system 룰 추가 — O.** prompt 에 `body_empty_likely` 키 등장 룰 추가 — 1st attempt 부터 flag 박게.
+- **(D) retry feedback — O (2차).** "본문 검증 2회+ FAIL + 본문 자체 부재 → flag 박고 멈춰라" 룰.
 
-1차 결론 ("자동 파이프라인이 진짜 안 닿는 한계 = 손-config 만") 이 잘못이었음. 진짜 한계는 `generate/validate.py:183` 의 `article_body_len, hard=True` 가 본문 없는 사이트도 강제로 retry 시키는 것 — 사용자 지적이 핀포인트.
+### 효과 비교
+| 단계 | piku-패턴 사이트 등록 흐름 |
+|---|---|
+| 1차 전 (커밋 d202fa5) | auto-pipeline 4회 retry FAIL → triage 진입 → 사용자 손-config 필요 |
+| 2차 후 (e18e807) | auto-pipeline 1-2회 retry 후 LLM 이 flag 박음 → 등록 OK |
+| 3차 후 (이번) | probe digest 의 `body_empty_likely=true` + verdict "JS 실행 필요" → LLM 1st attempt 부터 flag + playwright_html → 등록 OK (retry 0) |
 
 ## 자가 점검 결과 (§6) — 재검토판 (사용자 피드백 후)
 
@@ -109,4 +119,9 @@ probe_smoke 최종: PASS 257 FAIL 0 WARN 4 (24 파일 · 221 케이스 · 0 FAIL
 - 패턴 재발 시 (다른 SPA+CF 사이트) → trigger 적으면 손-config + body_empty_acceptable, 자주 들어오면 (C) "renavigation reliability" probe 휴리스틱화 검토.
 
 ## 교훈
-30분 손-config 작업 후 사용자 한 줄 질문 ("naver cafe 처럼 본문 없으면 그냥 없는대로 보내면 안 되나") 으로 진짜 픽스 자리 발견. 1차에 "트랙 B 0건 매칭" 결론 낼 때 *왜* 검증 자체가 hard=True 인지 의심 안 한 게 패착. 다음 사례부터: hard fail 항목 만나면 "이 hard 가 정당한가, opt-out 길은 있는가" 1초 물어보기.
+30분 손-config 작업 후 사용자 한 줄 질문 ("naver cafe 처럼 본문 없으면 그냥 없는대로 보내면 안 되나") 으로 (E)+(A)+(D) 진짜 픽스 자리 발견. 또 한 줄 질문 ("단서 증가/필터링/점수 재계산 중 뭐?") 로 *probe verdict false positive (단서 필터링 미흡)* 발견 — (C) 휴리스틱 2종 박음. 1차에 "트랙 B 0건 매칭" 결론 낼 때 *왜* 검증 자체가 hard=True 인지, *왜* probe 가 "정적 충분" 박았는지 의심 안 한 게 패착.
+
+**다음 사례부터 체크:**
+1. hard fail 항목 만나면 "이 hard 가 정당한가, opt-out 길은 있는가" 1초 물어보기.
+2. probe verdict (recommended_strategy, "정적 충분" 등) 이 옳은지 *원본 응답과 대조* — HTTP status 만 보면 false positive 발생 (콘텐츠 양/구조 차이 무시).
+3. fix-layer 분류를 (1) 단서 증가 / (2) 단서 필터링 / (3) 단서 점수 재계산 중 어디 박을지 명시 — (1) 만 자꾸 박으면 누더기, (2)+(3) 가 시급한 경우 많음.

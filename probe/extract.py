@@ -481,6 +481,111 @@ def pick_first_article_url(
     return None
 
 
+# 본문이 본질적으로 없는 사이트 — row 의 first_text 안 *액션 UI* 키워드 매칭.
+# 게임 디렉토리 (이상형월드컵 piku) / 투표·설문 / 인터랙티브 SPA 검출. KO/EN 액션 단어.
+# 짧고 보수적인 사전 — false positive 위험 줄이려 *합성어/명사구* 위주 (단어 "play"/"start" 단독 X).
+_INTERACTIVE_ACTION_KEYWORDS: tuple[str, ...] = (
+    # KO 게임 UI / 월드컵
+    "이상형월드컵", "이상형 월드컵", "월드컵", "시작하기", "랭킹보기",
+    "투표하기", "참여하기", "결과보기", "라운드", "준결승", "결승전",
+    # KO 인터랙티브
+    "좋아요", "싫어요", "공유하기",
+    # EN 게임/투표
+    "Vote now", "Start game", "Play now", "Round 1", "winner takes",
+    "tournament", "bracket",
+)
+
+
+@heuristic
+def list_row_interactive_action_text(
+    html_candidates: list[dict],
+) -> Optional[dict]:
+    """list row 의 `first_text` 안 *액션 UI* 키워드 매칭 — 본문 없는 사이트 (게임 디렉토리 / 투표·설문 / 인터랙티브 SPA) 검출.
+
+    검출 룰:
+      - 후보 row: `child_count ≥ 5` 인 `html_repeating_patterns` 항목
+      - 매칭 row: `first_text` 안 `_INTERACTIVE_ACTION_KEYWORDS` 중 **≥2개** 등장
+      - 의미 있는 신호: matched_row_count ≥ 1 + matched_keyword 종류 ≥ 2 (단어 한 종이 우연히 들어간 케이스 배제)
+
+    *왜 보수적인가*: row 안에 "play"/"start" 같은 흔한 단어 단독은 정상 게시판 (게임 카페 등) 도 매칭됨.
+    "이상형월드컵"/"라운드"/"Vote now" 같은 *합성어/구* 만 키워드로 — false positive 줄임.
+
+    출력: {matched_row_count, matched_keyword_set, sample_row_first_text, is_interactive_action: bool}
+        또는 None — 매칭 0건 또는 의미 있는 신호 미달.
+    """
+    if not html_candidates:
+        return None
+    matched_rows: list[tuple[str, set[str]]] = []
+    for c in html_candidates:
+        if int(c.get("child_count") or 0) < 5:
+            continue
+        ft = str(c.get("first_text") or "")
+        if not ft:
+            continue
+        hits = {kw for kw in _INTERACTIVE_ACTION_KEYWORDS if kw in ft}
+        if len(hits) >= 2:
+            matched_rows.append((ft[:120], hits))
+    if not matched_rows:
+        return None
+    # 매칭 row 들의 키워드 union (의미: 사이트 전체 패턴인지 확인)
+    all_keywords: set[str] = set()
+    for _ft, kws in matched_rows:
+        all_keywords |= kws
+    return {
+        "matched_row_count": len(matched_rows),
+        "matched_keyword_set": sorted(all_keywords),
+        "sample_row_first_text": matched_rows[0][0],
+        "is_interactive_action": True,
+    }
+
+
+@heuristic
+def static_vs_headless_check(
+    static_html: Optional[str],
+    headless_html: Optional[str],
+    *,
+    min_ratio: float = 2.0,
+    min_row_diff: int = 5,
+) -> dict:
+    """정적 응답 vs Playwright 응답 콘텐츠 비교 — *정적이 충분한지* 검증.
+
+    검출 룰:
+      - `headless_size / static_size ≥ min_ratio` AND
+      - headless 의 row-like 신호 (`data-id=`/`<a ` count) 가 정적보다 `+ min_row_diff` 이상
+      - → `static_insufficient: True` (정적 응답이 빈 shell — JS 가 카드/목록 그려야 함)
+
+    *왜 필요한가*: probe 의 verdict 결정이 HTTP status(200 OK) 만 보고 "정적 HTTP로 충분" 박음.
+    piku 같은 사이트 (정적 14kb data-id=0 vs Playwright 44kb data-id=20) 도 같은 weight 로
+    봐서 LLM 한테 잘못된 strategy=httpx_html 권고 → retry 헛수고. 이 휴리스틱이 verdict 정정 신호.
+
+    출력: {static_size, headless_size, ratio, row_signal_static, row_signal_headless, static_insufficient: bool}
+        둘 중 하나라도 None/빈 문자열이면 ratio=0.0 / static_insufficient=False (판단 불가 → 안전쪽).
+    """
+    s_text = static_html or ""
+    h_text = headless_html or ""
+    s_size = len(s_text)
+    h_size = len(h_text)
+    if s_size == 0 or h_size == 0:
+        return {
+            "static_size": s_size, "headless_size": h_size,
+            "ratio": 0.0,
+            "row_signal_static": 0, "row_signal_headless": 0,
+            "static_insufficient": False,
+        }
+    s_signal = s_text.count("data-id=") + s_text.count("<a ")
+    h_signal = h_text.count("data-id=") + h_text.count("<a ")
+    ratio = round(h_size / s_size, 2)
+    static_insufficient = (ratio >= min_ratio) and ((h_signal - s_signal) >= min_row_diff)
+    return {
+        "static_size": s_size,
+        "headless_size": h_size,
+        "ratio": ratio,
+        "row_signal_static": s_signal,
+        "row_signal_headless": h_signal,
+        "static_insufficient": static_insufficient,
+    }
+
+
 @heuristic
 def list_row_external_host(
     html_candidates: list[dict],
@@ -699,7 +804,15 @@ def write_list_candidates(
     inline_js_candidates: Optional[list[dict]] = None,
     runtime_ids: Optional[list[dict]] = None,
     row_external_host: Optional[dict] = None,
+    row_interactive_action: Optional[dict] = None,
 ) -> None:
+    # body_empty_likely summary — 본문이 본질적으로 없는 사이트 신호.
+    # row_external_host (검색결과/aggregator) OR row_interactive_action (게임/투표/SPA) 중 하나라도 true 면 박힘.
+    # LLM 한테 이 한 키만 보고 article.body_empty_acceptable=true 박으라고 시킴.
+    body_empty_likely = bool(
+        (row_external_host and float(row_external_host.get("external_ratio") or 0.0) >= 0.8)
+        or (row_interactive_action and row_interactive_action.get("is_interactive_action"))
+    )
     payload = {
         "html_repeating_patterns": html_candidates,
         "traffic_json_api_candidates": [
@@ -714,6 +827,12 @@ def write_list_candidates(
         # list row 들의 sample_url host 가 base host 와 다른 비율 — 검색결과/aggregator 검출.
         # None = 의미 있는 row 후보 0건; dict = {base_host, total_count, external_count, external_ratio, sample_external_urls}.
         "row_external_host": row_external_host,
+        # list row 의 first_text 안 *액션 UI* 키워드 매칭 — 게임 디렉토리/투표/SPA 검출.
+        # None = 매칭 0건; dict = {matched_row_count, matched_keyword_set, sample_row_first_text, is_interactive_action}.
+        "row_interactive_action": row_interactive_action,
+        # 본문 없는 사이트 summary — row_external_host(>=0.8) OR row_interactive_action 둘 중 하나면 true.
+        # LLM 이 이 키 보고 article.body_empty_acceptable=true 박음. retry 안 거치고 1st attempt 부터.
+        "body_empty_likely": body_empty_likely,
     }
     validate_payload("list_candidates.json", payload, allow_extra=False)
     (out_dir / "list_candidates.json").write_text(
