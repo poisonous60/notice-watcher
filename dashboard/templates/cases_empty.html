@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Cases · 비어있음{% endblock %}
+{% block body %}
+<h2>📒 Cases</h2>
+<p>
+  <code>output/cases.sqlite3</code> 파일 없음. backfill 또는 첫 skill 실행 후 다시 들어와.
+</p>
+<details>
+  <summary>backfill 명령</summary>
+  <pre><code>python scripts/cases_index.py --backfill-db output/cases.sqlite3</code></pre>
+  <p>기존 <code>docs/cases/*.md</code> frontmatter → row 생성.</p>
+</details>
+<details>
+  <summary>매 skill 실행 row 박는 자리</summary>
+  <pre><code>python scripts/case_log.py log \
+  --slug &lt;slug&gt; --skill hand-config \
+  --outcome &lt;improved|handcrafted|no_change|rejected|rejected_with_policy|error&gt; \
+  --reason "&lt;1-3줄&gt;" \
+  [--fix-layer &lt;C+D&gt;] [--failure-keys &lt;key&gt;] [--case-md-slug &lt;slug&gt;]</code></pre>
+  <p>SKILL.md 끝 단계에 박힘 — 잊으면 row gap (~10% 수용).</p>
+</details>
+{% endblock %}

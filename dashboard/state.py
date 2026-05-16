@@ -17,6 +17,8 @@ from bot import inspector
 ROOT = Path(__file__).resolve().parent.parent
 SNAPSHOT_DIR = ROOT / "output" / "snapshot"
 CONFIGS_SNAPSHOT = ROOT / "configs.snapshot"
+CASES_DB_PATH = ROOT / "output" / "cases.sqlite3"  # dev box only — N100 안 봄
+CASES_DIR = ROOT / "docs" / "cases"
 
 # slug 형식: `<platform>_<board-id>_<hash>` 또는 `host_<host-dashed>_<seg>_<hash>` (docs/운영 메모.md §6).
 # 허용 문자 = `engine.slug._SANITIZE_RE` 와 동일: 영숫자·점·언더스코어·하이픈·`%`(percent-encoded
@@ -106,3 +108,34 @@ def unique_slugs(conn) -> list[str]:
     """현재 누군가 구독중인 distinct slug."""
     rows = conn.execute("SELECT DISTINCT slug FROM subscriptions ORDER BY slug").fetchall()
     return [r[0] for r in rows]
+
+
+def open_cases_conn():
+    """case_runs 테이블 (skill 실행 audit) sqlite. dev box 전용 — N100 안 봄.
+    파일 없으면 None — 라우트가 안내 페이지 분기.
+
+    bot.sqlite3 (사용자 런타임) 와 분리: ownership 혼란 + snapshot scp 사고 회피
+    (`docs/case_runs DB 계획.md` §1a).
+    """
+    if not CASES_DB_PATH.exists():
+        return None
+    conn = sqlite3.connect(str(CASES_DB_PATH), timeout=15.0, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def cases_md_path(slug: str) -> Optional[Path]:
+    """slug → docs/cases/<slug>.md 파일 경로. path traversal 가드 3중:
+    1. safe_slug 통과 (영숫자 + `._%-` 만)
+    2. `..` substring 거부 (safe_slug 가 `.` 두 개 통과 가능 — 방어 깊이)
+    3. INDEX 거부 (자동 생성 표 — case 파일 X)
+    4. resolve 후 CASES_DIR 안 검사 (1·2 가 다 우회되어도 차단)
+    """
+    if not safe_slug(slug) or ".." in slug or slug == "INDEX":
+        return None
+    p = (CASES_DIR / f"{slug}.md").resolve()
+    try:
+        p.relative_to(CASES_DIR.resolve())
+    except ValueError:
+        return None  # CASES_DIR 밖 → 거부
+    return p if p.exists() else None

@@ -19,17 +19,26 @@
     python scripts/cases_index.py                 # docs/cases/INDEX.md 덮어씀
     python scripts/cases_index.py --output PATH   # 다른 경로로
     python scripts/cases_index.py --cases-dir DIR # 다른 디렉토리에서 읽기
+    python scripts/cases_index.py --backfill-db PATH  # output/cases.sqlite3 에 row backfill
 
 `--check` 는 만들지 않음 — pre-push 강제 시 UX friction (typo fix 도 regen 강제) 발생.
 """
 from __future__ import annotations
 
 import argparse
+import json
 import re
+import sqlite3
+import subprocess
 import sys
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+# bot/ 패키지 — case_runs schema 단일 진실원
+_THIS_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_THIS_ROOT))
+from bot.case_runs_meta import SCHEMA as _SCHEMA  # noqa: E402
 
 try:
     import yaml
@@ -149,10 +158,166 @@ def render_index(cases: list[dict], cases_dir: Path) -> str:
     return "\n".join(rows) + "\n"
 
 
+# ---------------------------------------------------------------------------- #
+# Backfill — frontmatter → output/cases.sqlite3 의 case_runs 테이블
+# ---------------------------------------------------------------------------- #
+# schema 는 bot/case_runs_meta.py 가 단일 진실원 — 위 import 의 _SCHEMA 사용.
+
+
+def _classify_outcome(status: str, fm: dict) -> list[str]:
+    """frontmatter status + fix_layer → outcome 1개 또는 2개 (🚫+후속 분리).
+
+    fix_layer 가 있으면 코드 일반화가 일어났다는 신호 → improved 우선. 손-config 측면은
+    status 🔧 로 따로 보임 — DB row 의 outcome 은 가장 강한 신호 하나.
+
+    매핑:
+      🚫 거부 + 본문에 "후속 완료" 또는 "시스템 차원"  → [rejected_with_policy, improved] 두 row
+      🚫 거부 (단순)                                   → rejected
+      fix_layer 있음 (A/B/C/D/F/G 등)                  → improved (코드 일반화)
+      ✅ 자동 (recognizer/probe 자동)                  → improved (engine_files_touched 비면 handcrafted 폴백)
+      🔧 / 🧩                                          → handcrafted (코드 일반화 X, 그 사이트만 작동)
+      ❌ FAILED                                         → error
+      기타                                              → error 폴백 (warn)
+    """
+    s = status or ""
+
+    # 🚫 + 후속 = 거부 정책 + 시스템 차원 후속 두 동시
+    if s.startswith("🚫"):
+        if "후속 완료" in s or "시스템 차원" in s:
+            return ["rejected_with_policy", "improved"]
+        return ["rejected"]
+
+    # fix_layer 있으면 코드 일반화 일어남 — improved
+    if fm.get("fix_layer"):
+        return ["improved"]
+
+    if s.startswith("✅"):
+        if "자동" in s and "손작성" not in s:
+            engine_touched = fm.get("engine_files_touched") or []
+            return ["improved" if engine_touched else "handcrafted"]
+        return ["handcrafted"]
+    if s.startswith("🔧") or s.startswith("🧩"):
+        return ["handcrafted"]
+    if s.startswith("❌"):
+        return ["error"]
+    return ["error"]
+
+
+def _extract_first_paragraph(text: str, cap: int = 200) -> str:
+    """frontmatter 이후 본문의 첫 단락 (첫 ## 섹션 본문) — reason 폴백."""
+    body = text
+    m = FRONTMATTER_RE.match(text)
+    if m:
+        body = text[m.end():]
+    # 첫 ## 섹션 찾기 — 그 안 첫 단락
+    section_match = re.search(r"^##\s+[^\n]+\n([^\n].+?)(?:\n\n|\n##|\Z)", body, re.S | re.M)
+    if section_match:
+        para = section_match.group(1).strip()
+    else:
+        # 없으면 본문 첫 단락
+        para = body.strip().split("\n\n", 1)[0].strip()
+    para = re.sub(r"\s+", " ", para)
+    if len(para) > cap:
+        para = para[:cap].rstrip() + "…"
+    return para or "(본문 없음)"
+
+
+def _git_commit_for_slug(slug: str) -> str | None:
+    try:
+        r = subprocess.run(
+            ["git", "log", "-1", "--pretty=%H", "--grep", slug],
+            cwd=str(ROOT),
+            capture_output=True, text=True, timeout=10,
+        )
+        if r.returncode != 0:
+            return None
+        out = r.stdout.strip()
+        return out or None
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return None
+
+
+def _fmt_layer_str(value) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, (list, tuple)):
+        return "+".join(str(x) for x in value)
+    return str(value)
+
+
+def backfill_db(db_path: Path, cases: list[dict]) -> tuple[int, int, int]:
+    """frontmatter → case_runs row. (inserted, skipped_dup, warned) 반환."""
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(db_path))
+    conn.executescript(_SCHEMA)
+
+    inserted = 0
+    skipped = 0
+    warned = 0
+
+    for fm in cases:
+        path: Path = fm["_path"]
+        slug = fm.get("slug") or path.stem
+        url = fm.get("url")
+        date = str(fm.get("date") or "")
+        if not date:
+            print(f"WARN: {path.name} date 없음 — skip", file=sys.stderr)
+            warned += 1
+            continue
+        status = str(fm.get("status") or "")
+        outcomes = _classify_outcome(status, fm)
+        if outcomes[0] == "error" and not status.startswith("❌"):
+            print(f"WARN: {path.name} status='{status[:40]}' 알려진 패턴 X → 'error' 폴백 (사람 분류 필요)", file=sys.stderr)
+            warned += 1
+
+        failure_keys = fm.get("failure_keys")
+        fk_json = json.dumps(failure_keys, ensure_ascii=False) if failure_keys else None
+        fix_layer = _fmt_layer_str(fm.get("fix_layer"))
+
+        files = []
+        for k in ("engine_files_touched", "adapters_changed"):
+            v = fm.get(k)
+            if isinstance(v, list):
+                files.extend(str(x) for x in v)
+            elif v:
+                files.append(str(v))
+        files = sorted(set(files))
+        files_json = json.dumps(files, ensure_ascii=False) if files else None
+
+        text = path.read_text(encoding="utf-8").lstrip("﻿")
+        reason = _extract_first_paragraph(text)
+        commit_sha = _git_commit_for_slug(slug)
+        requested_by = fm.get("requested_by")
+
+        for i, outcome in enumerate(outcomes):
+            # 같은 slug 의 두 row (rejected_with_policy + improved) 는 ts 1초 차로 박음
+            ts = f"{date}T00:00:{i:02d}Z"
+            try:
+                conn.execute(
+                    """INSERT INTO case_runs
+                       (ts, slug, url, skill, outcome, failure_keys, fix_layer,
+                        files_changed, case_md_slug, reason, requested_by, commit_sha)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        ts, slug, url, "hand-config", outcome, fk_json, fix_layer,
+                        files_json, slug, reason, requested_by, commit_sha,
+                    ),
+                )
+                inserted += 1
+            except sqlite3.IntegrityError:
+                skipped += 1
+
+    conn.commit()
+    conn.close()
+    return inserted, skipped, warned
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="docs/cases/*.md → docs/cases/INDEX.md")
     ap.add_argument("--cases-dir", type=Path, default=DEFAULT_CASES_DIR)
     ap.add_argument("--output", type=Path, default=None)
+    ap.add_argument("--backfill-db", type=Path, default=None,
+                    help="output/cases.sqlite3 같은 sqlite 경로 — frontmatter → case_runs row backfill")
     args = ap.parse_args()
 
     cases_dir: Path = args.cases_dir
@@ -176,6 +341,11 @@ def main() -> int:
     content = render_index(cases, cases_dir)
     out_path.write_text(content, encoding="utf-8", newline="\n")
     print(f"[cases_index] {out_path.relative_to(ROOT)} — {len(cases)} 건 (skip {skipped})")
+
+    if args.backfill_db:
+        ins, dup, warn = backfill_db(args.backfill_db, cases)
+        print(f"[backfill] {args.backfill_db} — INSERT {ins} / dup {dup} / warn {warn}")
+
     return 0
 
 

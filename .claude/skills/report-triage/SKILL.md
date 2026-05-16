@@ -181,6 +181,25 @@ CLI 에서 처리하려면 (admin guild 에 없을 때 등) — 아직 `scripts/
 ssh aaaa@<lan-ip> 'cd ~/notice-watcher && .venv/bin/python -c "from bot import db; c=db.connect(); print(db.resolve_report(c, <N>, \"수정 내용\"))"'
 ```
 
+### 9.5. case_runs DB row (필수, 매 신고 처리)
+dev 박스에서 `docs/case_runs DB 계획.md` 의 audit row 박음 — 코드 변경 X (재현 안 됨 / 사용자 오해) 도:
+```bash
+python scripts/case_log.py log \
+  --slug <신고 slug> --skill report-triage \
+  --outcome <improved|handcrafted|no_change|rejected|rejected_with_policy|error> \
+  --reason "<1-3줄 — 신고 issue + 진단 + 처리 결과>" \
+  [--fix-layer <F>] [--failure-keys <key>] [--case-md-slug <slug if 만들었으면>]
+```
+outcome 분류 (hand-config 와 동일):
+- `improved` — recognizer/엔진 fix 로 코드 일반화 + 효과
+- `handcrafted` — 손-config 또는 어댑터 fix 로 그 사이트만
+- `no_change` — 재현 안 됨 / 사용자 오해 / 이미 작동
+- `rejected` — 정책상 처리 안 함 (예: 사이트가 차단 정책 변경)
+- `rejected_with_policy` — no-change 인데 영구 기록 가치
+- `error` — 처리 도중 미완
+
+dashboard `/cases` 에서 표시. 잊어도 push 차단 X (~10% gap 수용).
+
 ### 10. (선택) 신고자에게 통보
 봇에 그런 명령은 없음. owner 가 DM 으로 직접 알리거나, 사용자가 다시 `/watch` 하기 전까진 모름.
 필요하면 `bot/admin.py` 에 `/admin notify report:<N>` 추가 (resolved_note 를 신고자 DM 으로) — 현재 미구현.

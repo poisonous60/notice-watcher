@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block title %}Cases · notice-watcher{% endblock %}
+{% block body %}
+<h2>📒 Cases — skill 실행 audit</h2>
+<p class="muted">
+  hand-config / report-triage skill 실행 흔적. 매 실행 1 row (코드 변경 X 도). dev box 전용 (<code>output/cases.sqlite3</code>).
+  매핑·운영: <code>docs/case_runs DB 계획.md</code>.
+</p>
+
+{% if stats.show %}
+<details open>
+  <summary><strong>통계</strong> (총 {{ stats.total }} row)</summary>
+  <div class="grid">
+    <div>
+      <h5>outcome 분포</h5>
+      <ul>
+        {% for name, cnt in stats.outcome_dist %}
+          <li><code>{{ name }}</code> — {{ cnt }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    <div>
+      <h5>fix_layer top 5</h5>
+      <ul>
+        {% for name, cnt in stats.layer_top %}
+          <li><code>{{ name }}</code> — {{ cnt }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+</details>
+{% else %}
+<p class="muted">통계는 row 30+ 후 표시 (현재 {{ stats.total }} row).</p>
+{% endif %}
+
+<form method="get" action="/cases" class="filters">
+  <div class="grid">
+    <label>
+      <span>skill</span>
+      <select name="skill">
+        <option value="">(전체)</option>
+        {% for s in facets.skills %}
+          <option value="{{ s }}" {% if cur.skill==s %}selected{% endif %}>{{ s }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>
+      <span>outcome</span>
+      <select name="outcome">
+        <option value="">(전체)</option>
+        {% for o in facets.outcomes %}
+          <option value="{{ o }}" {% if cur.outcome==o %}selected{% endif %}>{{ o }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>
+      <span>fix_layer (substring)</span>
+      <input type="text" name="layer" value="{{ cur.layer or '' }}" placeholder="C / C+D / F …">
+    </label>
+    <label>
+      <span>failure_key (정확 매칭)</span>
+      <input type="text" name="failure_key" value="{{ cur.failure_key or '' }}" placeholder="article_body_len …">
+    </label>
+  </div>
+  <div class="grid">
+    <label>
+      <span>requested_by</span>
+      <input type="text" name="requested_by" value="{{ cur.requested_by or '' }}" placeholder="poi23619 …">
+    </label>
+    <label>
+      <span>검색 (slug/url/reason)</span>
+      <input type="text" name="q" value="{{ cur.q or '' }}" placeholder="…">
+    </label>
+    <label>
+      <span>기간</span>
+      <select name="period">
+        <option value="0"  {% if cur.period==0  %}selected{% endif %}>전체</option>
+        <option value="7"  {% if cur.period==7  %}selected{% endif %}>최근 7일</option>
+        <option value="30" {% if cur.period==30 %}selected{% endif %}>최근 30일</option>
+        <option value="90" {% if cur.period==90 %}selected{% endif %}>최근 90일</option>
+      </select>
+    </label>
+    <label>
+      <span>&nbsp;</span>
+      <button type="submit">필터 적용</button>
+    </label>
+  </div>
+</form>
+
+<p class="muted">{{ rows|length }} row (cap 500).</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>ts</th>
+      <th>slug</th>
+      <th>skill</th>
+      <th>outcome</th>
+      <th>layer</th>
+      <th>failure_keys</th>
+      <th>files</th>
+      <th>reason</th>
+      <th>case</th>
+      <th>commit</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+    <tr>
+      <td><code>{{ r.ts }}</code></td>
+      <td><code>{{ r.slug }}</code>{% if r.url and is_http_url(r.url) %} · <a href="{{ r.url }}" target="_blank" rel="noopener noreferrer">↗</a>{% endif %}</td>
+      <td>{{ r.skill }}</td>
+      <td>{{ r.outcome_label }}</td>
+      <td>{% if r.fix_layer %}<code>{{ r.fix_layer }}</code>{% endif %}</td>
+      <td>
+        {% for k in r.failure_keys %}<code>{{ k }}</code>{% if not loop.last %} {% endif %}{% endfor %}
+      </td>
+      <td title="{{ r.files_changed|join('\n') }}">{{ r.files_changed|length }}</td>
+      <td>{{ r.reason_short }}</td>
+      <td>
+        {% if r.case_md_slug %}
+          <a href="/cases/{{ r.case_md_slug }}/md">📄 md</a>
+        {% endif %}
+      </td>
+      <td>
+        {% if r.commit_sha %}
+          <code>{{ r.commit_sha[:8] }}</code>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

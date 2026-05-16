@@ -152,6 +152,24 @@ handwritten 만 가능: 클릭/스크롤로만 글이 뜨는 SPA, 강한 anti-bo
 6. **commit + push**:
    - 바뀐 파일들 stage (`configs/<slug>.json` + 인식기/휴리스틱/엔진/스크립트/docs).
    - `git add <...>; git commit -m "<요지>"; git push origin main` — commit msg 끝에 `Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>`. pre-push hook 이 probe_smoke 자동 실행 → FAIL 이면 push 차단(`--no-verify` 금지).
+   - **단일 commit 정책 권장** — 한 skill 실행 = 한 commit (track A + B 한 묶음). `case_log` 의 `files_changed` derive 가 `git diff HEAD~1..HEAD` 로 마지막 1 commit 만 보기 때문 — 다중 commit 분리하면 첫 commit 변경 미캡쳐.
+6.5. **case_runs DB row** (필수, 코드 변경 X 도 — `docs/case_runs DB 계획.md`):
+   ```bash
+   python scripts/case_log.py log \
+     --slug <slug> --skill hand-config \
+     --outcome <improved|handcrafted|no_change|rejected|rejected_with_policy|error> \
+     --reason "<1-3줄 — 무엇 시도, 왜 그 결과>" \
+     [--fix-layer <C+D>] [--failure-keys <key1,key2>] [--case-md-slug <slug>]
+   ```
+   outcome 분류:
+   - `improved` — fix_layer 기반 코드 일반화 (휴리스틱·prompt 룰 추가·인식기·엔진) + 효과
+   - `handcrafted` — 손-config 또는 신규 손어댑터로 *그 사이트만* 작동 (코드 일반화 X)
+   - `no_change` — 시도했으나 효과 X (revert 또는 동등 출력)
+   - `rejected` — 정책 거부 마커
+   - `rejected_with_policy` — no-change 인데 영구 기록 가치 정책 결정
+   - `error` — skill 도중 미완 (정상 흐름엔 박지 X — 사람 사후 박기)
+
+   잊어도 push 차단 X (~10% gap 수용). dashboard `/cases` 에서 표시.
 7. **N100 pull + register + (필요시) restart** (`docs/운영 메모.md` §8):
    - `ssh aaaa@<lan-ip> 'cd ~/notice-watcher && git pull --ff-only && .venv/bin/python scripts/register.py --config "configs/<slug>.json"'` ← **반드시 `.venv/bin/python`**(시스템 python 엔 httpx 없음).
    - `requirements.txt` 변경 시 앞에 `.venv/bin/pip install -r requirements.txt &&`.
@@ -207,30 +225,40 @@ probe/prompt/schema/코드 손대기 전 다음 여섯 질문에 답해보면 �
 
 ## 7. 자가 review (commit 직전 — 권장)
 
-코드 변경(휴리스틱·인식기·엔진·schema·prompt) 또는 손-config 변경 (1+ 파일) 을 commit 하기 직전에 `hand-config-reviewer` subagent 호출:
+코드 변경(휴리스틱·인식기·엔진·schema·prompt) 또는 손-config 변경 (1+ 파일) 을 commit 하기 직전에 `hand-config-reviewer` subagent 호출. **순서: §5 step 6.5 의 case_log 호출 → 그 결과 query → reviewer prompt 에 박음**:
 
 ```
+# main thread (Claude Code) — reviewer 호출 *전*:
+case_row_json = Bash('python scripts/case_log.py query --slug <slug> --recent 1 --format json')
+# 결과 = '[]' (log 호출 잊음) 또는 '[{...}]' (정상)
+
 Agent(
   subagent_type='hand-config-reviewer',
   model='sonnet',
   prompt='''
     ## 변경 diff
     [git diff HEAD 결과]
-    
+
     ## case 파일
     [docs/cases/<slug>.md 의 frontmatter + body]
-    
+
     ## probe_smoke 결과
     [python scripts/probe_smoke.py 의 stdout + exit code]
-    
+
+    ## case_runs row (이번 실행 — 최근 1일)
+    {case_row_json}
+
     ## (선택) 영향 사이트 손-실행
     [register.py --config 출력 비교]
-    
-    위 변경을 검증 항목에 비추어 PASS/FAIL 판정.
+
+    위 변경을 검증 항목에 비추어 PASS/FAIL. 추가:
+    - case_runs row 가 `[]` 면 main thread 가 case_log 호출 잊음. PASS 가능 but warn 표시.
+    - row 의 fix_layer / files_changed / failure_keys 가 case .md frontmatter 와 일치하나? 모순이면 FAIL.
+    - row 의 outcome 이 case .md status 와 일치하나? (🔧 → handcrafted, ✅ → improved 등)
   '''
 )
 ```
 
-reviewer 는 Bash 없음 — main thread 가 `probe_smoke` 등 실행 후 결과를 prompt 에 박아 넘긴다. reviewer 는 *판단만*.
+reviewer 는 Bash 없음 — main thread 가 `probe_smoke`·`case_log query` 등 실행 후 결과를 prompt 에 박아 넘긴다. reviewer 는 *판단만*.
 
 FAIL 받으면 → **사용자에게 보고**. 자동 재호출 X (비결정 위험 회피). 사용자가 픽스 결정.

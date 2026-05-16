@@ -19,6 +19,7 @@ from fastapi.templating import Jinja2Templates
 
 from bot import db, inspector
 from dashboard import actions as act
+from dashboard import cases_view
 from dashboard import prompts, state
 from dashboard import usage_view
 from dashboard import user_view
@@ -735,6 +736,12 @@ async def actions_fetch(request: Request, slug: str = Form(...),
         raise HTTPException(status_code=400, detail="invalid slug")
     res = await act.run_fetch(slug, n=n)
     return _partial("_fetch_result.html", request, res=res, slug=slug, n=n)
+
+
+# --------------------------------------------------------------------------- #
+# Cases — skill 실행 audit (`docs/case_runs DB 계획.md`). dev box only.
+# --------------------------------------------------------------------------- #
+cases_view.register(app, templates, _render)
 
 
 # --------------------------------------------------------------------------- #

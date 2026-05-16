@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}case · {{ slug }}{% endblock %}
+{% block body %}
+<p><a href="/cases">← Cases</a></p>
+<h2>📄 {{ slug }}</h2>
+<p class="muted">파일: <code>docs/cases/{{ slug }}.md</code> (raw markdown — 렌더 X, autoescape 보호 + monospace).</p>
+<pre style="white-space: pre-wrap; word-wrap: break-word; padding: 1em; background: var(--pico-card-background-color, #fafafa); border-radius: 4px;">{{ body }}</pre>
+{% endblock %}
