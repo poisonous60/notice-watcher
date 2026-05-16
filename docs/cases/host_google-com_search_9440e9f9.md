@@ -1,15 +1,15 @@
 ---
 slug: host_google-com_search_9440e9f9
 url: https://www.google.com/search?sa=X&sca_esv=d27b705f235d78cd&sxsrf=ANbL-n5nYxvvoLZQf_qvbJovw6dbr9D4Hw:1778909863391&udm=2&fbs=ADc_l-bD_nyrjATWBKup7flJ4rea5XFXsPHwMjGsTekJ1HCohBAQ3Hh19DqzlO7wr7YUgTdO4_C3uXoTo1-SRivc_Swap6of3IufrklCc-R1r_cYZiN4MoktmDvuiC1PeD4nH8f3b94UIye9mkD9gJ2OhVe3exK-hbmw6eC71bKU8Iww7ZBWxXDSN4anKuWYzQn_6P9msObToyspvu095YuigmETY6lXxzyOSC7CqTlAUcF0IYHKDC4&q=%EB%8C%80%EB%82%98%EB%AC%B4&ved=2ahUKEwjMufrTi72UAxWpia8BHQuuKc4QtKgLegQIERAB&biw=1707&bih=791&dpr=1.5
-status: 🛠 엔진 픽스 (silent hang 2 개 잡음 — subprocess 손자 pipe inherit + playwright sync_api close timeout 부재)
-outcome: improved
+status: 🚫 거부 (board_shape_check anti-bot 구멍 보강 + REJECTED 마커 — 비-게시판 영구 거부)
+outcome: rejected_with_policy
 date: 2026-05-16
 fix_layer: F
-failure_keys: [silent_hang, subprocess_pipe_inherit, playwright_close_no_timeout]
+failure_keys: [silent_hang, subprocess_pipe_inherit, playwright_close_no_timeout, board_shape_check, antibot_redirect, posts_nonempty]
 config_strategy:
 adapters_changed:
-engine_files_touched: [bot/site_ops.py, probe/fetch_headless.py]
-tags: [silent-death, subprocess, playwright, anti-bot, /preview]
+engine_files_touched: [bot/site_ops.py, probe/fetch_headless.py, scripts/register.py]
+tags: [silent-death, subprocess, playwright, anti-bot, /preview, policy-gate, non-board, antibot-redirect, google-search]
 requested_by: poi2 (Discord user id <OWNER_ID>)
 ---
 
@@ -108,3 +108,59 @@ def _bounded_close(closeable, *, label, timeout_s=10.0):
 
 ## 관련 commit
 `57032e6` — fix(bot,probe): /preview 무한 hang — process-group kill + bounded playwright close
+
+---
+
+## 후속 (2026-05-16 — board_shape_check anti-bot 구멍 보강 + REJECTED 마커)
+
+silent-hang fix 후 같은 사용자 (다른 Discord id `poi23619`) 가 동일 URL `/preview` 재시도 → 이번엔 pipeline 이 정상 흘러서 30~60s 안에 rc 반환됨 (silent-hang 재발 X — F-1/F-2 효과 확인). 다만 `_board_shape_check` 가 통과 → gemini 3회 retry → `.FAILED.json` + triage 큐 1건. "남은 정리" 항목(line 104) 이 예측한 그 자리.
+
+### 진단
+
+probe artifact (`list_candidates.json`, `article_click.json`) 신호:
+
+- `list_candidates.first_article_url`: null
+- `traffic_json_api_candidates` / `hydration_list_candidates` / `inline_js_data_candidates`: 모두 0
+- `html_repeating_patterns`: 1건 (`div > br`, `href_pattern_guess=None`, `sample_url=None`)
+- `feed_candidates`: 0
+- **`article_sample.clicked_resolved_url`: `https://www.google.com/sorry/index?continue=...`** ← Google abuse-detection 챌린지
+
+board 신호 0/7 인데 마지막 항목의 netloc(`www.google.com`) 이 원본 host 와 일치 → 기존 `_board_shape_check` 가 `clicked_same=True` 한 줄로 통과. anti-bot 챌린지로의 리다이렉트는 *negative* 증거(차단됨)인데 *positive* 로 해석된 게 hole.
+
+### 픽스 (fix_layer: F — `scripts/register.py:_board_shape_check` 의 clicked 신호 정밀화)
+
+> fix_layer 선택 근거: SKILL.md §6 의 (C) = `probe/` 휴리스틱 추가/수정(새 데이터 추출), (F) = `scripts/register.py` 플로우 변경. 이번 변경은 probe 가 *이미 추출한* `clicked_resolved_url` 을 register 단의 게이트가 *해석할 때* anti-bot 경로를 negative 로 가중. 새 probe 데이터 추출 없음 → (F) 가 정확.
+
+`scripts/register.py`:
+- 모듈 상수 `_ANTIBOT_REDIRECT_PATH_PREFIXES = ("/sorry/", "/captcha", "/recaptcha", "/challenges/", "/challenge/", "/cdn-cgi/challenge")`
+- `_is_antibot_redirect(u)` — URL path 가 위 prefix 중 하나로 시작하면 True.
+- `_board_shape_check` 내부:
+  - `clicked_blocked = _is_antibot_redirect(clicked_url)`
+  - `clicked_same = _same_host(clicked_url) and not clicked_blocked` — 같은 호스트라도 챌린지 경로면 board 신호로 안 셈.
+  - 실패 메시지 `detail` 에 `clicked_blocked_by_antibot=<URL>` 표시 (운영자 디버깅 가시성).
+
+### 트랙 A — REJECTED 마커 (사용자 향)
+
+비-게시판 + anti-bot 챌린지 URL = 영구 거부 대상. 손-config 작성 의미 없음. N100 에서 `_save_rejected` 호출 → `output/poll_state/host_google-com_search_9440e9f9.REJECTED.json` 작성, `.FAILED.json` + `triage_queue.jsonl` 항목 함께 제거. 같은 slug 재시도 시 봇 `is_rejected(slug)` 가 먼저 잡혀 "이전에 거부됨" 응답.
+
+### 트랙 B enumerate (2a/2b/2c/2d) — 매칭 1, 미매칭 3
+
+- 2a (인식기 확장) — X. google.com/search 는 게시판 아님, 인식기 박을 가치 없음.
+- 2b (--article-url) — X. 진짜 글 페이지 없음 (검색 결과는 외부 호스트로 분기될 뿐).
+- **2c (probe 휴리스틱) — O.** `_board_shape_check` 의 anti-bot 경로 제외 픽스가 이 자리. 같은 PR.
+- 2d (probe artifact 수정) — X. probe 가 redirect 정확히 캡쳐 (article_click.json.resolved_url). 휴리스틱 해석 문제만.
+
+### 후속 영향
+
+- 비-게시판 + anti-bot 챌린지 URL 일반: 이제 board_shape_check 가 즉시 rc=3 거부 → 워커가 "게시판 형식 아님" 친절 메시지 + triage 큐 안 쌓음. Google 검색, search 엔진 결과, CF 챌린지 사이트 전반 적용.
+- 정상 게시판 회귀 risk: 0. `clicked_resolved_url` 이 anti-bot 경로에 *우연* 매칭될 일 사실상 없음 (실제 게시판 path 는 `/board/`, `/article/`, `/post/`, `/notice/`, `/bbs/` 등). 23 configs 모두 `register.py --config` 경로 — 이 함수 안 탐.
+- 트리거 사례 단위 검증 (probe artifact 재사용):
+  ```
+  _is_antibot_redirect("https://www.google.com/sorry/index?...")   == True
+  _is_antibot_redirect("https://example.com/board/article/12345") == False
+  _board_shape_check(digest, url)                                  == (False, "...clicked_blocked_by_antibot=...")  ← 이전엔 (True, "")
+  ```
+
+### probe.py Phase 9b `_score_click_link` 의 `href="#"` 점수 — 별 작업
+
+이번 commit 범위 밖. anti-bot redirect 게이트가 잡으니 silent hang 재발 위험 0 (F-1/F-2 + C 보강). placeholder anchor 점수 0 으로 두면 click 자체 안 함 → 더 깨끗하지만 다른 사이트 회귀 영향 검토 필요 → 별 case.

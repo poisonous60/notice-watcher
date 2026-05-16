@@ -119,6 +119,29 @@ def _policy_check(digest: dict, url: str) -> tuple[bool, list[str]]:
     return True, msgs
 
 
+# anti-bot/captcha 챌린지로 리다이렉트된 URL — board 신호로 잡으면 안 됨.
+# 같은 호스트라도 사실상 "차단됐다" 는 negative 증거. 예: google.com/sorry/index 는
+# Google 검색 클릭 시 abuse-detection 챌린지로 가는 자리 — clicked_same=True 로 위장됨.
+_ANTIBOT_REDIRECT_PATH_PREFIXES = (
+    "/sorry/",           # Google abuse-detection
+    "/captcha",          # generic
+    "/recaptcha",        # generic
+    "/challenges/",      # Cloudflare 등
+    "/challenge/",       # Cloudflare 등
+    "/cdn-cgi/challenge", # Cloudflare
+)
+
+
+def _is_antibot_redirect(u: Optional[str]) -> bool:
+    if not u:
+        return False
+    try:
+        path = (urlsplit(u).path or "").lower()
+    except ValueError:
+        return False
+    return any(path.startswith(pfx) for pfx in _ANTIBOT_REDIRECT_PATH_PREFIXES)
+
+
 def _board_shape_check(digest: dict, url: str) -> tuple[bool, str]:
     """probe digest 만으로 '게시판 형식 같은가' 판정 — gemini 부르기 전에.
     어떤 board 신호도 같은 호스트로 안 잡히면 '게시판 아님' 단정 (rc=3 로 거부).
@@ -128,7 +151,9 @@ def _board_shape_check(digest: dict, url: str) -> tuple[bool, str]:
       - list_candidates.hydration_list_candidates (Next/Nuxt 하이드레이션)
       - list_candidates.html_repeating_patterns 중 같은 호스트 글 링크 가진 것 (href_pattern_guess / sample_url)
       - list_candidates.first_article_url 가 같은 호스트
-      - article_sample.clicked_resolved_url 가 같은 호스트 (클릭 진입 성공)
+      - article_sample.clicked_resolved_url 가 같은 호스트 (클릭 진입 성공) — 단,
+        anti-bot/captcha 챌린지 경로(`/sorry/`, `/captcha`, `/challenges/` 등)는 제외.
+        같은 호스트로 보이지만 사실상 차단된 거라 board 증거가 아님 (예: google.com/sorry/index).
       - feed_candidates 비어있지 않음 (RSS/Atom)
     """
     host = (urlsplit(url).netloc or "").lower()
@@ -154,13 +179,16 @@ def _board_shape_check(digest: dict, url: str) -> tuple[bool, str]:
         if _same_host(p.get("href_pattern_guess")) or _same_host(p.get("sample_url"))
     )
     fau_same = _same_host(lc.get("first_article_url"))
-    clicked_same = _same_host(ah.get("clicked_resolved_url"))
+    clicked_url = ah.get("clicked_resolved_url")
+    clicked_blocked = _is_antibot_redirect(clicked_url)
+    clicked_same = _same_host(clicked_url) and not clicked_blocked
 
     if (n_json + n_inline + n_hyd + n_feed + n_html_same) >= 1 or fau_same or clicked_same:
         return True, ""
 
     detail = (f"traffic_json={n_json} inline_js={n_inline} hydration={n_hyd} feed={n_feed} "
-              f"html_same_host={n_html_same} first_article_same_host={fau_same} clicked_same_host={clicked_same}")
+              f"html_same_host={n_html_same} first_article_same_host={fau_same} clicked_same_host={clicked_same}"
+              + (f" clicked_blocked_by_antibot={clicked_url}" if clicked_blocked else ""))
     return False, ("게시판 형식이 아닌 것 같다 — probe 가 같은 호스트로 가는 반복되는 글 링크/목록 API/피드를 하나도 못 찾았다. "
                    "게시판/공지 목록 페이지(글 행이 반복되는 페이지)의 URL 을 주세요. "
                    f"[신호: {detail}]")
