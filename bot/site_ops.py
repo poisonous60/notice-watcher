@@ -8,6 +8,7 @@ import asyncio
 import collections
 import json
 import logging
+import re
 import signal
 import subprocess
 import sys
@@ -73,6 +74,20 @@ def rejected_info(slug: str) -> Optional[dict]:
         return json.loads(p.read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001
         return None
+
+
+# reason 끝 ` (...)` triage/디버그 hint — 사용자에 안 보이고 owner 운영용. 사용자 향 메시지에 쓸 때만 strip.
+_INTERNAL_HINT_TAIL_RE = re.compile(r"\s*\([^()]+\)\s*$")
+
+
+def public_reason(reason: Optional[str]) -> str:
+    """저장된 reason 의 끝부분 ` (...)` 내부 triage hint 제거해 사용자 향 짧은 사유만 반환.
+    예: 'backfill: gemini 생성+검증 3회 실패 (preflight: 글페이지 HAR re-probe + probe 신호 hint 적용 상태)'
+        → 'backfill: gemini 생성+검증 3회 실패'
+    None/빈 문자열 → '-' (메시지 template 에서 '-' 표시)."""
+    if not reason:
+        return "-"
+    return _INTERNAL_HINT_TAIL_RE.sub("", reason).strip() or "-"
 
 
 def baseline_count(slug: str) -> Optional[int]:

@@ -177,7 +177,7 @@ async def watch(interaction: discord.Interaction, url: str, filter: Optional[str
         info = site_ops.rejected_info(slug) or {}
         await interaction.edit_original_response(
             content=msg("rejected_site",
-                        reason=info.get('reason') or '-',
+                        reason=site_ops.public_reason(info.get('reason')),
                         note=info.get('note') or '없음'))
         return
     user_id = str(interaction.user.id)
@@ -262,7 +262,7 @@ async def preview(interaction: discord.Interaction, url: str, article_url: Optio
         info = site_ops.rejected_info(slug) or {}
         await interaction.edit_original_response(
             content=msg("rejected_site",
-                        reason=info.get('reason') or '-',
+                        reason=site_ops.public_reason(info.get('reason')),
                         note=info.get('note') or '없음'))
         return
     if _is_registered(slug):

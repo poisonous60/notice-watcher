@@ -21,6 +21,7 @@ from bot.site_ops import (
     baseline_count,
     body_warning,
     is_rejected,
+    public_reason,
     rejected_info,
     blocking_register,
     edit_channel_message,
@@ -109,7 +110,7 @@ async def _process_job(client, conn, job, dm_owner) -> None:
                     client, job["ack_channel_id"], job["ack_message_id"],
                     msg("worker_rejected_during",
                         slug=slug,
-                        reason=info.get('reason') or '-',
+                        reason=public_reason(info.get('reason')),
                         note=info.get('note') or '없음'))
             return
         # 동시에 두 사용자가 같은 신규 사이트를 enqueue 한 경우 — 두 번째 잡은 register subprocess 스킵.
