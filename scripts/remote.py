@@ -8,7 +8,8 @@
     python scripts/remote.py logs poll --tail 100
     python scripts/remote.py daemon-reload                                  # 유닛 변경 후
     python scripts/remote.py read routing                                   # 원격 파일 cat (allowlist)
-    python scripts/remote.py poll-now-slug s1,s2                            # 부분 poll-now (slug 일부만)
+    python scripts/remote.py poll-now-slug s1,s2                            # 부분 poll-now + notify (정상 pipeline; fan-out)
+    python scripts/remote.py poll-now-slug-quiet s1,s2                      # poll 만 (notify X; m1_solo 격리 발송용)
     python scripts/remote.py replay-deliveries <slug> <kind> <id> [post]    # M2/M3 replay (lock 잡고 직렬)
     python scripts/remote.py notify-target <slug> <kind> <id>               # collected → 그 target 만 발송
     python scripts/remote.py announce-scoped <base64-json>                  # 좁힌 공지 발송
@@ -176,6 +177,17 @@ def _remote_python_cmd(*args: str) -> str:
 
 
 def cmd_poll_now_slug(slugs_csv: str) -> int:
+    """정상 pipeline — poll_and_notify.py 가 chromium_lock 안에서 poll.py 후 notify.py --no-digest --heartbeat 호출.
+
+    새 글 없어도 notify_empty=1 구독자에 'heartbeat' 발송. 새 글 있으면 그 slug 의 *모든* 구독자에게 fan-out.
+    격리 발송이 필요하면 `poll-now-slug-quiet` + `notify-target` 조합 (m1_solo).
+    """
+    csv = _require_slugs_csv(slugs_csv)
+    return _ssh(_remote_python_cmd("scripts/poll_and_notify.py", "--sites", csv))
+
+
+def cmd_poll_now_slug_quiet(slugs_csv: str) -> int:
+    """poll.py 만 — notify 단계 생략. m1_solo 가 직후 notify-target 으로 격리 발송하기 위함."""
     csv = _require_slugs_csv(slugs_csv)
     return _ssh(_remote_python_cmd("scripts/poll.py", "--sites", csv))
 
@@ -260,7 +272,8 @@ def list_actions() -> int:
     print("  logs <unit> [--tail N]                         journalctl --user -u")
     print("  daemon-reload                                  systemctl --user daemon-reload")
     print("  read <alias>                                   원격 파일 cat (allowlist)")
-    print("  poll-now-slug <s1,s2,...>                      부분 poll-now (slug 일부)")
+    print("  poll-now-slug <s1,s2,...>                      부분 poll-now + notify (정상 pipeline; fan-out)")
+    print("  poll-now-slug-quiet <s1,s2,...>                poll 만 (notify X; m1_solo 격리 발송용)")
     print("  replay-deliveries <slug> <kind> <id> [post]    M2/M3 replay (lock+직렬)")
     print("  notify-target <slug> <kind> <id>               collected → 그 target 만 발송")
     print("  announce-scoped <base64-json>                  좁힌 공지 발송")
@@ -285,6 +298,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     sp = sub.add_parser("read"); sp.add_argument("alias")
     sub.add_parser("list")
     sp = sub.add_parser("poll-now-slug"); sp.add_argument("slugs", help="콤마 구분 slug 리스트")
+    sp = sub.add_parser("poll-now-slug-quiet"); sp.add_argument("slugs", help="콤마 구분 slug 리스트 (notify 생략)")
     sp = sub.add_parser("replay-deliveries")
     sp.add_argument("slug"); sp.add_argument("target_kind"); sp.add_argument("target_id")
     sp.add_argument("post_id", nargs="?", default=None)
@@ -311,6 +325,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         return cmd_read(args.alias)
     if args.cmd == "poll-now-slug":
         return cmd_poll_now_slug(args.slugs)
+    if args.cmd == "poll-now-slug-quiet":
+        return cmd_poll_now_slug_quiet(args.slugs)
     if args.cmd == "replay-deliveries":
         return cmd_replay_deliveries(args.slug, args.target_kind, args.target_id, args.post_id)
     if args.cmd == "notify-target":

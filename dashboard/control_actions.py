@@ -82,7 +82,7 @@ async def run_remote(action: str, *args: str) -> dict:
 # 인자 검증은 remote.py 가 정규식으로 한 번 더 거름 (중복 방어 — XSS/injection 가드).
 # --------------------------------------------------------------------------- #
 async def users_poll_now_slug(slugs_csv: str) -> dict:
-    """M1 — 일부 slug 즉시 poll-now."""
+    """M1 — 일부 slug 즉시 poll-now + notify (정상 pipeline; fan-out 발송)."""
     res = await run_remote("poll-now-slug", slugs_csv)
     audit("users.poll_now_slug", ok=res["ok"], detail={"slugs": slugs_csv, "rc": res["rc"]})
     return res
@@ -108,13 +108,16 @@ async def users_notify_target(slug: str, target_kind: str, target_id: str) -> di
 
 
 async def users_m1_solo(slug: str, target_kind: str, target_id: str) -> dict:
-    """M1 단독 — `poll-now-slug` 한 뒤 곧바로 `notify-target` 으로 그 target 만 발송.
+    """M1 단독 — `poll-now-slug-quiet` (poll 만, notify 생략) 후 `notify-target` 으로 그 target 만 발송.
 
     poll → collected/<ts>/<slug>.new.json → notify-target 이 처리 후 `.notified` 마커 작성 →
     이후 notice-poll.timer / notice-notify.timer tick 에서 같은 dir 재처리 안 됨 → 다른
     구독자 자동 fan-out 차단. poll 실패 시 notify 단계 skip.
+
+    quiet 변종을 쓰는 이유: 기본 `poll-now-slug` 은 정상 pipeline (poll_and_notify) 이라 새 글이
+    있으면 *모든* 구독자에 fan-out 됨 → 격리 발송 의도가 깨짐.
     """
-    r1 = await run_remote("poll-now-slug", slug)
+    r1 = await run_remote("poll-now-slug-quiet", slug)
     audit("users.m1_solo.poll", ok=r1["ok"], detail={"slug": slug, "rc": r1["rc"]})
     if not r1["ok"]:
         return r1
