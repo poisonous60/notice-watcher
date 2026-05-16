@@ -222,9 +222,93 @@ probe/prompt/schema/코드 손대기 전 다음 여섯 질문에 답해보면 �
 
 ## 7. 자가 review (commit 직전 — 권장)
 
-코드 변경 또는 손-config 변경 1+ 파일 **commit 직전** `hand-config-reviewer` subagent 호출. reviewer 는 Bash 없음 — main thread 가 `probe_smoke`·`case_log query` 실행 결과 prompt 에 박음.
+**현재 reviewer backend: `codex`** — 전환은 §7b.
+
+코드 변경 또는 손-config 변경 1+ 파일 **commit 직전** reviewer 호출. main thread 가 `probe_smoke`·`case_log query` 실행 결과 prompt 에 박음.
 
 순서: §5 step 3 cases_index `--backfill-db` 후 (= DB 에 frontmatter row 박혔음) → step 4 reviewer → step 6 commit + push → step 7 `case_log log`. **case_log log 는 commit 후** — commit_sha 정확. reviewer 가 보는 row 는 frontmatter backfill row 만 (≈ case .md frontmatter 사본 — 일치성 검사용).
+
+### 7a. 호출 (active backend = codex)
+
+main thread 는 단일 `Bash` 로 codex-companion `task` 호출. `--write` 미부착 = read-only sandbox (review-only 적합).
+
+```python
+case_row_json = Bash('python scripts/case_log.py query --slug <slug> --recent 1 --format json')
+probe_smoke_out = Bash('python scripts/probe_smoke.py')  # stdout + exit code 캡쳐
+diff_out = Bash('git diff HEAD')
+
+# rubric + context 를 한 prompt 에 박음. heredoc 으로 multi-line 안전 전달.
+review_prompt = f'''너는 notice-watcher 의 hand-config 변경 reviewer 다.
+
+# fix-layer 6 자리
+- E (schema 거부): engine/config_schema.py validate 룰
+- D (retry feedback): prompts/config_writer.retry_skeleton.txt 또는 scripts/register.py feedback 빌더
+- C (probe digest 신호): probe/ 휴리스틱 추가/수정 → digest 새 키
+- B (few-shot): generate/prompt.py 의 _EXAMPLE_CONFIG_FILES 또는 configs/ 예제
+- A (system 규칙 *추가*): prompts/config_writer.system.txt 새 룰 줄 추가만. 수정/제거는 pipeline-rot-review 영역
+- F (새 엔진 코드): engine/strategies/ / adapters/ / engine/recognizers/ / scripts/register.py 플로우
+
+원칙: 위에서부터 차례 (E > D > C > B > A > F).
+
+# 검증 항목 (8 개) — 하나라도 FAIL 이면 전체 FAIL
+
+1. case 파일 존재 + 필수 frontmatter (slug/url/status/date)
+2. fix_layer 정합성 — declared layer 와 변경 파일 세트 일치
+3. 회귀 검증 흔적 — case body 에 "회귀 검증" 또는 동등 결과 / 영향 0개 면 이유 명시
+4. prompt 수정 종류 — config_writer.system.txt 는 *추가* 만, 수정/제거 FAIL
+5. 외부 검증 — probe_smoke 출력에 FAIL 또는 exit≠0 있나
+6. docs/cases/INDEX.md 동기화 — cases_index.py 실행 흔적
+7. 새 strategy → scripts/probe_smoke.py 의 REPS 에 fixture entry + _stage2_check_digest 분기 추가
+8. 새 @heuristic → tests/probe_heuristics/test_<name>.py fixture 추가
+
+# case_runs row 추가 검증
+- row=[] 면 cases_index --backfill-db 잊음. PASS but warn.
+- row 의 fix_layer/failure_keys/outcome 가 case .md frontmatter 와 일치? 모순이면 FAIL.
+- row 의 commit_sha=null 정상 (commit 전이라 — step 7 의 case_log log 가 commit 후 보강).
+
+# 출력 형식 (엄격)
+PASS
+또는
+FAIL
+- 항목 N: <위반 한 줄>
+- 항목 M: <위반 한 줄>
+
+작문/해설/추천 X. 위반만.
+
+---
+## 변경 diff
+{diff_out}
+
+## case 파일
+[docs/cases/<slug>.md frontmatter + body — main thread 가 Read 로 박음]
+
+## probe_smoke 결과
+{probe_smoke_out}
+
+## case_runs row (frontmatter backfill — commit_sha=null 정상)
+{case_row_json}
+
+## (선택) 영향 사이트 손-실행
+[register.py --config 출력 — 있으면]
+'''
+
+result = Bash(f'''node "C:/Users/poiso/.claude/plugins/marketplaces/openai-codex/plugins/codex/scripts/codex-companion.mjs" task "$(cat <<'EOF'
+{review_prompt}
+EOF
+)"''')
+```
+
+FAIL → **사용자에게 보고**. 자동 재호출 X. 사용자가 픽스 결정.
+
+### 7b. backend 전환 — claude agent 로 복귀 (현재 비활성)
+
+> 이 sub-section 은 **사용 X**. codex 다운/쿼터 또는 사용자 명시 요청 시에만 §7a 와 swap.
+> 전환 절차: §7 상단의 "현재 reviewer backend: `codex`" → `claude` 로 변경 + §7a 의 Bash 호출 블록을 아래 archive 된 `Agent(...)` 블록으로 교체.
+
+`.claude/agents/hand-config-reviewer.md` 가 fallback 으로 유지됨 — sonnet 모델 + 동일 rubric 내장.
+
+<details>
+<summary>archive 된 claude agent 호출 (활성화 시 §7a 와 swap)</summary>
 
 ```python
 case_row_json = Bash('python scripts/case_log.py query --slug <slug> --recent 1 --format json')
@@ -248,4 +332,4 @@ Agent(subagent_type='hand-config-reviewer', model='sonnet', prompt=f'''
 ''')
 ```
 
-FAIL → **사용자에게 보고**. 자동 재호출 X. 사용자가 픽스 결정.
+</details>
