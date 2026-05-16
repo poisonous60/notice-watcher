@@ -143,6 +143,25 @@ def run() -> list[tuple[str, bool, str]]:
             cases.append(("clear_by_id_empties", len(_list_learned()) == 0, ""))
             cases.append(("clear_by_id_absent", _clear_learned_by_id("zzzzzzzzzzzz") is False, ""))
 
+            # 10b. _save_failed 학습 hook — gemini/policy 실패 경로도 learned 박힘
+            from scripts.register import _save_failed
+            _save_failed("host_test_failpath", "https://example-fail.com/board/list?p=1",
+                         reason="gemini 생성+검증 3회 실패 (sim)",
+                         last_config=None, last_feedback="[FAIL] posts_nonempty: 0건")
+            patterns = _list_learned()
+            ok = any(p.get("host_suffix") == "example-fail.com" and p.get("path_prefix") == "/board"
+                     for p in patterns)
+            cases.append(("save_failed_learns_pattern", ok,
+                          f"after _save_failed, patterns={[(p['host_suffix'], p['path_prefix']) for p in patterns]}"))
+            # cleanup
+            for p in _list_learned():
+                _clear_learned_by_id(p["id"])
+            # FAILED.json 파일도 직접 만들지 X, _save_failed 가 만든 거 정리.
+            from scripts.register import STATE_DIR
+            failed_p = STATE_DIR / "host_test_failpath.FAILED.json"
+            if failed_p.exists():
+                failed_p.unlink()
+
             # ----- url_gate 통합 ----- #
             from bot import url_gate
             from bot.url_gate import (_normalize_groups, _path_matches_prefix,

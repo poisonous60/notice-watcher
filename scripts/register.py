@@ -495,12 +495,19 @@ def _prune_triage_queue(slug: str) -> None:
 
 
 def _save_failed(slug: str, url: str, reason: str, last_config, last_feedback: str) -> Path:
+    """`.FAILED.json` 마커. gemini 자동 등록 실패 (triage 큐 진입). 자동 패턴 학습도 함께 박음 —
+    같은 host+path_prefix 의 다음 시도는 url_gate stage 2 에서 즉시 거부 (probe skip)."""
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     p = STATE_DIR / f"{slug}.FAILED.json"
     p.write_text(json.dumps({
         "slug": slug, "url": url, "failed_at": _now_iso(),
         "reason": reason, "last_config": last_config, "last_feedback": last_feedback,
     }, ensure_ascii=False, indent=2), encoding="utf-8")
+    # 자동 패턴 학습 — 어떤 실패 경로든 한 번 떨어지면 같은 패턴 다음 시도는 probe 안 돌게.
+    try:
+        _learn_pattern(url, f"register failed: {reason}", slug=slug)
+    except Exception as e:  # noqa: BLE001
+        print(f"[register] ⚠ learned_blacklist 학습 실패 — FAILED 마커는 박힘: {e}", file=sys.stderr)
     return p
 
 
@@ -968,6 +975,11 @@ def _main_inner(argv) -> int:
         print(f"[register] {m}")
     if not ok_policy:
         print("[register] ❌ 등록 거부 (위 사유).")
+        # policy 거부 = LOGIN_REQUIRED / BLOCKED. 같은 host+path_prefix 재시도해도 똑같이 막힘 — 학습.
+        try:
+            _learn_pattern(url, f"policy_check 거부: {'; '.join(msgs)[:200]}", slug=slug)
+        except Exception as e:  # noqa: BLE001
+            print(f"[register] ⚠ learned_blacklist 학습 실패 (rc=2): {e}", file=sys.stderr)
         return 2
 
     # board-shape 게이트 — gemini 부르기 전에 한 번 더. probe 가 같은 호스트로 가는 반복 글 링크/목록 API/피드를
@@ -976,6 +988,12 @@ def _main_inner(argv) -> int:
     if not ok_board:
         print(f"[register] {board_msg}")
         print("[register] ❌ 등록 거부 — 게시판 형식 아님.")
+        # board_shape 거부 = 비-게시판. 학습 — bot/worker.py 의 rc=3 분기가 _save_rejected 도 추가로 부르지만
+        # _learn_pattern 은 같은 패턴 idempotent (count 증가만) 이라 중복 호출 안전.
+        try:
+            _learn_pattern(url, "board_shape_check 거부 (게시판 형식 아님)", slug=slug)
+        except Exception as e:  # noqa: BLE001
+            print(f"[register] ⚠ learned_blacklist 학습 실패 (rc=3): {e}", file=sys.stderr)
         return 3
 
     # preflight: gemini 부르기 전에 정보 수집을 끝낸다 (옛 escalation 의 "N회 실패 후" 대신 "처음부터").
