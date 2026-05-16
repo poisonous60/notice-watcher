@@ -142,23 +142,25 @@ handwritten 만 가능: 클릭/스크롤로만 글이 뜨는 SPA, 강한 anti-bo
 
 ## 5. 검증 + N100 배포 (모든 분기 공통)
 
+순서 중요 — `case_log` 의 `commit_sha`/`files_changed` derive 가 *현재 HEAD* + `git diff HEAD~1..HEAD` 라 **반드시 commit + push 뒤에** 호출해야 본 case 의 commit 잡힘. commit 전 호출하면 직전 commit (의 sha + diff) 가 잘못 박힘.
+
 1. `python scripts/probe_smoke.py` 그린.
 2. 자가 점검 7-질문 (↓ §6) — 비워도 commit 막진 X, 그저 생각해두는 게이트.
-3. `docs/cases/<slug>.md` 작성 + `python scripts/cases_index.py`.
-4. (권장) `hand-config-reviewer` subagent 호출 (↓ §7). PASS 받으면.
+3. `docs/cases/<slug>.md` 작성 + `python scripts/cases_index.py --backfill-db output/cases.sqlite3` (frontmatter 기반 row 박힘).
+4. (권장) `hand-config-reviewer` subagent 호출 (↓ §7). PASS 받으면. (이 시점 DB row = frontmatter backfill 만 — `case_log log` 는 아직 X.)
 5. `docs/사이트별 등록 시도 기록.md` 갱신 (상태 이모지·원인·해결).
 6. **commit + push** — 단일 commit 정책 (track A+B 한 묶음). `case_log` 의 `files_changed` derive 가 `git diff HEAD~1..HEAD` 만 봐서 다중 commit 시 첫 commit 미캡쳐.
    - stage: `configs/<slug>.json` + 인식기/휴리스틱/엔진/스크립트/docs
    - `git commit -m "<요지>" --trailer "Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"; git push origin main`
    - pre-push hook = probe_smoke 자동, FAIL 시 push 차단. `--no-verify` 금지.
 
-7. **case_runs DB row** (필수, 코드 변경 X 도 — `docs/case_runs DB 계획.md`):
+7. **case_runs DB row** (필수, 코드 변경 X 도 — `docs/case_runs DB 계획.md`) — **반드시 step 6 commit + push 후**:
    ```bash
    python scripts/case_log.py log --slug <slug> --skill hand-config \
      --outcome <improved|handcrafted|no_change|rejected|rejected_with_policy|error> \
      --reason "<1-3줄>" [--fix-layer <C+D>] [--failure-keys <k1,k2>] [--case-md-slug <slug>]
    ```
-   outcome 분류는 §6 step 5 표 참조. 잊어도 push 차단 X (~10% gap). dashboard `/cases` 에서 표시.
+   이 시점 HEAD = 본 case 의 commit → `commit_sha` 와 `files_changed` 정확. commit 전 실행하면 stderr 에 `⚠ staged/working tree 변경 있음 — commit 후 호출 권장` 경고만 박고 진행 (derive 부정확 가능). outcome 분류는 §6 step 5 표 참조. 잊어도 push 차단 X (~10% gap). dashboard `/cases` 에서 표시.
 
 8. **N100 배포** (운영 메모 §8 SoT) — `ssh aaaa@<lan-ip> 'cd ~/notice-watcher && git pull --ff-only && .venv/bin/python scripts/register.py --config "configs/<slug>.json"'`.
    - **`adapters/`·`engine/`·`scripts/notify.py`·`bot/` 변경 시 뒤에 `&& systemctl --user restart notice-bot.service`** — 봇 import 캐시. 안 하면 `make_adapter() ValueError`.
@@ -218,9 +220,10 @@ probe/prompt/schema/코드 손대기 전 다음 여섯 질문에 답해보면 �
 
 ## 7. 자가 review (commit 직전 — 권장)
 
-코드 변경 또는 손-config 변경 1+ 파일 commit 직전 `hand-config-reviewer` subagent 호출. reviewer 는 Bash 없음 — main thread 가 `probe_smoke`·`case_log query` 실행 결과 prompt 에 박음.
+코드 변경 또는 손-config 변경 1+ 파일 **commit 직전** `hand-config-reviewer` subagent 호출. reviewer 는 Bash 없음 — main thread 가 `probe_smoke`·`case_log query` 실행 결과 prompt 에 박음.
 
-순서: §5 step 7 case_log 후 → query → reviewer:
+순서: §5 step 3 cases_index `--backfill-db` 후 (= DB 에 frontmatter row 박혔음) → step 4 reviewer → step 6 commit + push → step 7 `case_log log`. **case_log log 는 commit 후** — commit_sha 정확. reviewer 가 보는 row 는 frontmatter backfill row 만 (≈ case .md frontmatter 사본 — 일치성 검사용).
+
 ```python
 case_row_json = Bash('python scripts/case_log.py query --slug <slug> --recent 1 --format json')
 
@@ -231,15 +234,15 @@ Agent(subagent_type='hand-config-reviewer', model='sonnet', prompt=f'''
   [docs/cases/<slug>.md frontmatter + body]
   ## probe_smoke 결과
   [stdout + exit code]
-  ## case_runs row (recent 1day)
+  ## case_runs row (frontmatter backfill — commit_sha=null 정상)
   {{case_row_json}}
   ## (선택) 영향 사이트 손-실행
   [register.py --config 출력]
 
   PASS/FAIL. 추가 검증:
-  - row=[] 면 case_log 잊음. PASS but warn.
-  - row 의 fix_layer/files/failure_keys 가 case .md frontmatter 와 일치? 모순이면 FAIL.
-  - row 의 outcome 이 case .md outcome 필드와 일치?
+  - row=[] 면 cases_index --backfill-db 잊음. PASS but warn.
+  - row 의 fix_layer/failure_keys/outcome 가 case .md frontmatter 와 일치? 모순이면 FAIL.
+  - row 의 commit_sha=null 정상 (commit 전이라 — step 7 의 case_log log 가 commit 후 보강).
 ''')
 ```
 

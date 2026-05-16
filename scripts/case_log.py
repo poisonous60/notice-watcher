@@ -79,6 +79,12 @@ def _derive_files_changed() -> Optional[list[str]]:
     return files  # 변경 없는 commit 도 있을 수 있음 — 빈 list 박음
 
 
+def _has_uncommitted_changes() -> bool:
+    """staged + working tree 에 변경 있나 — `case_log log` 가 commit 전 호출됐는지 검출."""
+    out = _git("status", "--porcelain")
+    return bool(out and out.strip())
+
+
 def _lookup_url_and_requester(slug: str) -> tuple[Optional[str], Optional[str]]:
     """FAILED.json / 성공 후 .json / triage_queue.jsonl 에서 slug 매칭하는 url + requested_by lookup.
 
@@ -145,6 +151,15 @@ def cmd_log(args: argparse.Namespace) -> int:
     files_arg = _split_csv(args.files_changed)
     files_changed = files_arg if files_arg is not None else _derive_files_changed()
     commit_sha = _derive_commit_sha()
+    if files_arg is None and _has_uncommitted_changes():
+        # commit 전 호출 — derive 가 직전 commit 의 sha+diff 잡음 (현 case 아님).
+        # SKILL.md §5 step 7 = commit + push 뒤에 호출하도록 명시. graceful 진행.
+        print(
+            "⚠ staged/working tree 변경 있음 — case_log 가 직전 commit 의 sha/files 를 잡습니다.\n"
+            "  SKILL.md §5 step 7 따라 'git commit && git push' 후 호출 권장.\n"
+            "  (`--files-changed` 명시 override 하면 이 경고 안 뜸.)",
+            file=sys.stderr,
+        )
     url, requester = _lookup_url_and_requester(args.slug)
     if args.requested_by:  # CLI override
         requester = args.requested_by
