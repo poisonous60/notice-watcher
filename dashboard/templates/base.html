@@ -57,8 +57,9 @@
           <span class="muted">snapshot:</span> <code>{{ snapshot_ts }}</code>
         </div>
         <span id="auto-pull"
+              data-auto-pull
               hx-post="/actions/pull"
-              hx-trigger="load once"
+              hx-trigger="auto-pull-fire"
               hx-target="#pull-result"
               hx-swap="innerHTML"
               hx-indicator="#pull-spinner"></span>
@@ -67,6 +68,35 @@
       </header>
 
       <div id="pull-result" aria-live="polite"></div>
+
+      <script>
+      // 자동 Pull throttle — 같은 탭에서 30초 이내 재발사 차단.
+      // 무한 새로고침 루프가 어떤 이유로든 생겨도 클라이언트 측에서 흡수.
+      (function () {
+        var KEY = 'nw.lastAutoPull';
+        var WINDOW_MS = 30 * 1000;
+        var now = Date.now();
+        var last = parseInt(sessionStorage.getItem(KEY) || '0', 10);
+        var el = document.getElementById('auto-pull');
+        if (!el) return;
+        if (last && (now - last) < WINDOW_MS) {
+          // skip — 최근 발사 이력 있음. hx 속성 모두 제거해서 HTMX 가 안 건드리게.
+          el.removeAttribute('hx-post');
+          el.removeAttribute('hx-trigger');
+          var info = document.getElementById('pull-result');
+          if (info) {
+            var s = Math.ceil((WINDOW_MS - (now - last)) / 1000);
+            info.innerHTML = '<div class="pull-result ok">⏭ 자동 Pull skip (' + s + '초 후 재가능 — 무한 루프 방어)</div>';
+          }
+          return;
+        }
+        sessionStorage.setItem(KEY, String(now));
+        // 다음 tick 에 한 번만 fire — HTMX 가 이 element 를 process 한 뒤.
+        setTimeout(function () {
+          htmx.trigger(el, 'auto-pull-fire');
+        }, 50);
+      })();
+      </script>
 
       {% block body %}{% endblock %}
     </main>
