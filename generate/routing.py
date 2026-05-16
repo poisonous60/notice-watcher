@@ -22,9 +22,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+from .codex import CodexClient
 from .gemini import GeminiClient, default_model as gemini_default_model
 from .openrouter import OpenRouterClient
-from .llm_base import LLMClient
+from .llm_base import LLMClient, LLMError, LLMResponse
 from .prices import compute_cost
 from .usage_recorder import get_default_recorder
 
@@ -122,10 +123,54 @@ def client_for(call_site: str, *, override: Optional[str] = None,
             cli = GeminiClient(model=route.model, recorder=rec, cost_fn=compute_cost)
         elif route.provider == "openrouter":
             cli = OpenRouterClient(model=route.model, recorder=rec, cost_fn=compute_cost)
+        elif route.provider == "codex":
+            primary = CodexClient(model=route.model, recorder=rec, cost_fn=compute_cost)
+            fallback = GeminiClient(model=gemini_default_model(), recorder=rec, cost_fn=compute_cost)
+            cli = FallbackClient(primary, fallback)
         else:
             raise ValueError(f"unknown provider {route.provider!r} in routing for call_site={call_site!r}")
         _client_cache[key] = cli
     return cli
+
+
+class FallbackClient(LLMClient):
+    """primary 실패 시 fallback 으로 자동 전환.
+
+    `generate()` 자체를 override 해서 primary 와 fallback 가 각자의 recorder/cost 흐름으로
+    기록되게 한다 — primary 실패 1건 + fallback 성공 1건 (총 2건) 기록 → quota 고갈 모니터링 가능.
+    provider/cost 라벨도 각 client 자기 것 그대로 (mislabel 없음).
+    """
+
+    provider = "fallback"  # wrapper 자체는 직접 _do_request 안 함
+
+    def __init__(self, primary: LLMClient, fallback: LLMClient) -> None:
+        # wrapper 의 recorder/cost_fn 은 안 씀 (primary/fallback 이 직접 기록).
+        super().__init__(model=primary.model, recorder=None, cost_fn=None)
+        self.primary = primary
+        self.fallback = fallback
+
+    def _do_request(self, *, system_instruction: str, user_text: str,
+                    temperature: float, json_mode: bool) -> LLMResponse:
+        raise NotImplementedError("FallbackClient overrides generate() — _do_request unused")
+
+    def generate(self, *, system_instruction: str, user_text: str,
+                 temperature: float = 0.2, json_mode: bool = True,
+                 call_site: str = "legacy", slug: Optional[str] = None,
+                 attempt: int = 1) -> LLMResponse:
+        try:
+            return self.primary.generate(
+                system_instruction=system_instruction, user_text=user_text,
+                temperature=temperature, json_mode=json_mode,
+                call_site=call_site, slug=slug, attempt=attempt,
+            )
+        except LLMError as e:
+            print(f"  [{self.primary.provider}→{self.fallback.provider} fallback] "
+                  f"{type(e).__name__}: {e}")
+            return self.fallback.generate(
+                system_instruction=system_instruction, user_text=user_text,
+                temperature=temperature, json_mode=json_mode,
+                call_site=call_site, slug=slug, attempt=attempt,
+            )
 
 
 __all__ = ["client_for", "resolve", "set_process_override"]
