@@ -5,7 +5,7 @@
 <h2>🕘 History</h2>
 <p class="muted" style="font-size:0.85rem;">
   dashboard 에서 실행한 모든 액션 (<code>output/control_audit.jsonl</code>) 의 최근 {{ max_tail }} 줄.
-  <code>trace_id</code> 열을 클릭하면 그 액션의 <a href="/timings">Timings</a> 상세로 점프.
+  <code>trace_id</code> 컬럼 클릭 → 그 액션의 <a href="/timings">Timings</a> 상세로 점프.
   <code>TRACE_ENABLED=1</code> 안 켜져 있으면 trace_id 가 비어있음.
 </p>
 
@@ -13,59 +13,47 @@
   <label style="display:flex;flex-direction:column;font-size:0.85rem;">
     category
     <select name="category">
-      <option value="" {% if not selected_category %}selected{% endif %}>(전체)</option>
+      <option value="" {% if not selected_category %}selected{% endif %}>(모두)</option>
       {% for c in categories %}
         <option value="{{ c }}" {% if c == selected_category %}selected{% endif %}>{{ c }}</option>
       {% endfor %}
     </select>
   </label>
   <label style="display:flex;flex-direction:column;font-size:0.85rem;">
-    검색 (slug · action · detail)
-    <input type="text" name="q" value="{{ q or '' }}" placeholder="cse-skku..." style="min-width:18em;">
+    action/detail 검색
+    <input type="text" name="q" value="{{ q or '' }}" placeholder="cse-skku..." style="min-width:14em;">
   </label>
   <label style="display:flex;align-items:center;gap:0.3rem;font-size:0.85rem;">
     <input type="checkbox" name="failed" value="1" {% if only_failed %}checked{% endif %}> failed only
   </label>
   <label style="display:flex;flex-direction:column;font-size:0.85rem;">
     limit
-    <input type="number" name="limit" value="{{ limit }}" min="10" max="2000" style="width:6em;">
+    <input type="number" name="limit" value="{{ limit }}" min="10" max="2000" style="width:5em;">
   </label>
   <button type="submit">적용</button>
-  <a href="/history" role="button" class="secondary outline">초기화</a>
 </form>
-
-<p class="muted" style="font-size:0.8rem;margin:0.2rem 0 0.6rem 0;">
-  {{ rows|length }} 건 표시 / tail {{ total }} 줄 read
-  {% if total >= max_tail %}<span class="badge warn">tail 가득</span>{% endif %}
-</p>
 
 {% if rows %}
 <table class="compact striped">
   <thead><tr>
-    <th>ok</th><th>시각 (KST)</th><th>category</th><th>name</th><th>slug</th><th>rc</th><th>trace_id</th><th>상세</th>
+    <th>ok</th><th>kind</th><th>started</th><th>duration</th><th>spans</th><th>attrs</th><th>trace_id</th>
   </tr></thead>
   <tbody>
-    {% for r in rows %}
+    {% for e in rows %}
     <tr>
       <td>
-        {% if r.ok %}<span class="badge ok">●</span>
+        {% if e.ok %}<span class="badge ok">●</span>
         {% else %}<span class="badge err">✗</span>{% endif %}
       </td>
-      <td class="muted mono" style="font-size:0.8rem;white-space:nowrap;">{{ r.ts_kst }}</td>
-      <td class="mono" style="font-size:0.85rem;">{{ r.category or '—' }}</td>
-      <td class="mono" style="font-size:0.85rem;">{{ r.name }}</td>
-      <td class="mono" style="font-size:0.8rem;max-width:24em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
-        {{ r.slug or '' }}
+      <td class="mono">{{ e.kind }}</td>
+      <td class="muted" style="font-size:0.8rem;">{{ e.t_start_str }}</td>
+      <td class="mono">{% if e.duration_ms is not none %}{{ '%.2f'|format(e.duration_ms / 1000) }} s{% else %}—{% endif %}</td>
+      <td class="mono">{{ e.n_spans or '—' }}</td>
+      <td class="muted" style="font-size:0.8rem;max-width:30em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+        {{ e.attrs_short }}
       </td>
-      <td class="mono">{% if r.rc is not none %}{{ r.rc }}{% else %}—{% endif %}</td>
-      <td class="mono" style="font-size:0.8rem;">
-        {% if r.trace_id %}<a href="/timings/{{ r.trace_id }}">{{ r.trace_id }}</a>{% else %}—{% endif %}
-      </td>
-      <td>
-        <details>
-          <summary class="muted" style="font-size:0.8rem;cursor:pointer;">JSON</summary>
-          <pre style="white-space:pre-wrap;font-size:0.75rem;margin:0.3rem 0;">{{ r.detail_json }}</pre>
-        </details>
+      <td class="mono">
+        {% if e.trace_id %}<a href="/timings/{{ e.trace_id }}">{{ e.trace_id }}</a>{% else %}—{% endif %}
       </td>
     </tr>
     {% endfor %}
@@ -74,5 +62,10 @@
 {% else %}
 <p class="muted">표시할 액션이 없습니다. 필터를 풀거나 dashboard 액션을 한 번 실행해보세요.</p>
 {% endif %}
+
+<p class="muted" style="font-size:0.8rem;margin:0.4rem 0;">
+  {{ rows|length }} 건 표시 / tail {{ total }} 줄 read
+  {% if total >= max_tail %}<span class="badge warn">tail 가득</span>{% endif %}
+</p>
 
 {% endblock %}

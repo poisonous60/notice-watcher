@@ -1,14 +1,16 @@
 """`/history` 페이지 — `output/control_audit.jsonl` 에 한 줄씩 append 된 dashboard 액션 로그를
-tail·파싱·필터해서 표로 표시.
+tail·파싱·필터해서 표로 표시. 행 형식은 `/timings` 와 동일 column 으로 맞춤.
 
 control_actions.audit() 호출자만이 이 파일에 씀. 매 액션 row 1줄 — append-only, 회전 X.
 파일이 너무 자라면 사용자가 직접 rotate 또는 truncate.
 
 설계:
 - 매 페이지 진입 시 마지막 N 줄만 read (`MAX_TAIL_LINES`). 큰 파일도 read 부담 X.
-- 행 클릭(또는 `trace_id` 컬럼) → `/timings/{trace_id}` 점프. shell.async_run 이 결과 dict 에
-  trace_id 추가, run_remote/run_push 가 audit detail 에 끼움 → 여기서 표시.
-- 필터: category (remote/push/save/users …), ok/fail, slug/args 검색 (free-text).
+- 행 dict 키는 `/timings` 와 동일: ok/kind/t_start_str/duration_ms/n_spans/attrs_short/trace_id.
+  audit 는 *완료 시점* 한 줄만 append 라 duration_ms·n_spans 데이터 없음 → 항상 None
+  (template 가 "—" 표시). column 만 맞춰서 두 페이지 layout 통일.
+- trace_id 가 있으면 `/timings/{trace_id}` 점프 링크 (shell.async_run 이 결과 dict 에 넣고
+  run_remote/run_push 가 audit detail 에 끼움).
 """
 from __future__ import annotations
 
@@ -27,16 +29,8 @@ _KST = timezone(timedelta(hours=9))
 
 
 def _tail_lines(path: Path, n: int) -> list[str]:
-    """파일 끝에서 N 줄만 read. 큰 파일도 RAM 절약 — chunk 거꾸로 읽기."""
     if not path.exists():
         return []
-    try:
-        size = path.stat().st_size
-    except OSError:
-        return []
-    if size == 0:
-        return []
-    # 단순 구현: 작은 audit log 라 통째 read 후 split 으로 충분. 100MB+ 되면 chunk reverse 로 바꿈.
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
@@ -59,11 +53,10 @@ def _parse_line(s: str) -> Optional[dict]:
 
 
 def _ts_to_kst_str(iso: str) -> str:
-    """ISO-8601 UTC → 'YYYY-MM-DD HH:MM:SS KST'. 파싱 실패 시 raw."""
+    """ISO-8601 UTC → 'YYYY-MM-DD HH:MM:SS'. 파싱 실패 시 raw."""
     if not iso:
         return ""
     try:
-        # `+00:00` suffix Python 3.11+ fromisoformat 인식. 옛 포맷도 한 번 시도.
         dt = datetime.fromisoformat(iso)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
@@ -73,26 +66,30 @@ def _ts_to_kst_str(iso: str) -> str:
 
 
 def _split_action(action: str) -> tuple[str, str]:
-    """`remote.poll-now-slug` → ('remote', 'poll-now-slug'). 점 없으면 ('', action)."""
     if "." in action:
         cat, _, name = action.partition(".")
         return cat, name
     return "", action
 
 
-def _slug_of(detail) -> Optional[str]:
-    """detail 에서 가능한 slug 추출 — args[0] 이 slug 인 verb 가 많음."""
+def _attrs_short(detail) -> str:
+    """detail dict → 'k=v  k=v ...' 한 줄. `/timings` 의 _attrs_short 동일 포맷.
+
+    `trace_id` 는 별 컬럼에도 표시되므로 attrs 에서 제외 (중복 회피).
+    """
     if not isinstance(detail, dict):
-        return None
-    if "slug" in detail and isinstance(detail["slug"], str):
-        return detail["slug"]
-    if "slugs" in detail and isinstance(detail["slugs"], str):
-        return detail["slugs"]
-    args = detail.get("args")
-    if isinstance(args, list) and args and isinstance(args[0], str):
-        # poll-now-slug, replay-deliveries, notify-target 등 args[0] = slug
-        return args[0]
-    return None
+        return ""
+    parts: list[str] = []
+    for k, v in detail.items():
+        if k == "trace_id":
+            continue
+        s = str(v)
+        if len(s) > 40:
+            s = s[:37] + "…"
+        parts.append(f"{k}={s}")
+        if sum(len(p) for p in parts) > 140:
+            break
+    return "  ".join(parts)
 
 
 CATEGORIES = ("remote", "push", "save", "users")
@@ -102,7 +99,7 @@ def load_rows(*, limit: int = 200, category: str = "",
               only_failed: bool = False, q: str = "") -> tuple[list[dict], int]:
     """audit jsonl tail → 필터 → 표시용 dict list. 두 번째 반환값 = 총 raw 줄 수.
 
-    최신 행이 위. limit 적용 후 잘림.
+    최신 행이 위. 행 dict 는 `/timings` 와 같은 키를 씀 — template 가 거의 동일 markup.
     """
     raw_lines = _tail_lines(AUDIT_PATH, MAX_TAIL_LINES)
     total = len(raw_lines)
@@ -115,45 +112,34 @@ def load_rows(*, limit: int = 200, category: str = "",
         if not d:
             continue
         action = str(d.get("action") or "")
-        cat, name = _split_action(action)
+        cat, _name = _split_action(action)
         if cat_filter and cat != cat_filter:
             continue
         ok = bool(d.get("ok"))
         if only_failed and ok:
             continue
         detail = d.get("detail")
-        slug = _slug_of(detail)
-        # detail 안의 trace_id (run_remote/run_push 가 끼워준 경우만 존재)
+
         trace_id = None
         if isinstance(detail, dict):
             tid = detail.get("trace_id")
             if isinstance(tid, str) and tid:
                 trace_id = tid
-        rc = None
-        if isinstance(detail, dict):
-            rcv = detail.get("rc")
-            if isinstance(rcv, int):
-                rc = rcv
 
         if q_lower:
-            # 자유 텍스트 검색 — slug/action/detail JSON 에 부분 매치
-            hay = (slug or "") + " " + action + " " + json.dumps(detail, ensure_ascii=False) \
-                if detail is not None else (slug or "") + " " + action
+            hay = action + " " + (json.dumps(detail, ensure_ascii=False)
+                                  if detail is not None else "")
             if q_lower not in hay.lower():
                 continue
 
         rows.append({
-            "ts_iso": d.get("ts") or "",
-            "ts_kst": _ts_to_kst_str(d.get("ts") or ""),
-            "category": cat,
-            "name": name,
-            "action": action,
             "ok": ok,
-            "rc": rc,
-            "slug": slug,
+            "kind": action,                              # remote.poll-now-slug 등 full action
+            "t_start_str": _ts_to_kst_str(d.get("ts") or ""),
+            "duration_ms": None,                         # audit 에 측정 없음
+            "n_spans": None,
+            "attrs_short": _attrs_short(detail),
             "trace_id": trace_id,
-            "detail_json": json.dumps(detail, ensure_ascii=False, indent=2)
-                if detail is not None else "",
         })
         if len(rows) >= limit:
             break

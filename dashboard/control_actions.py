@@ -85,7 +85,8 @@ async def run_remote(action: str, *args: str) -> dict:
 async def users_poll_now_slug(slugs_csv: str) -> dict:
     """M1 — 일부 slug 즉시 poll-now + notify (정상 pipeline; fan-out 발송)."""
     res = await run_remote("poll-now-slug", slugs_csv)
-    audit("users.poll_now_slug", ok=res["ok"], detail={"slugs": slugs_csv, "rc": res["rc"]})
+    audit("users.poll_now_slug", ok=res["ok"],
+          detail={"slugs": slugs_csv, "rc": res["rc"], "trace_id": res.get("trace_id")})
     return res
 
 
@@ -96,7 +97,8 @@ async def users_replay(slug: str, target_kind: str, target_id: str,
     res = await run_remote("replay-deliveries", *args)
     audit("users.replay", ok=res["ok"],
           detail={"slug": slug, "kind": target_kind, "id": target_id,
-                  "post": post_id, "bulk": post_id is None, "rc": res["rc"]})
+                  "post": post_id, "bulk": post_id is None, "rc": res["rc"],
+                  "trace_id": res.get("trace_id")})
     return res
 
 
@@ -104,7 +106,8 @@ async def users_notify_target(slug: str, target_kind: str, target_id: str) -> di
     """현 collected dir 의 새 글을 그 target 만 발송. (poll-now 동반 안 됨 — 이미 polling 된 상태 가정)."""
     res = await run_remote("notify-target", slug, target_kind, target_id)
     audit("users.notify_target", ok=res["ok"],
-          detail={"slug": slug, "kind": target_kind, "id": target_id, "rc": res["rc"]})
+          detail={"slug": slug, "kind": target_kind, "id": target_id, "rc": res["rc"],
+                  "trace_id": res.get("trace_id")})
     return res
 
 
@@ -119,12 +122,14 @@ async def users_m1_solo(slug: str, target_kind: str, target_id: str) -> dict:
     있으면 *모든* 구독자에 fan-out 됨 → 격리 발송 의도가 깨짐.
     """
     r1 = await run_remote("poll-now-slug-quiet", slug)
-    audit("users.m1_solo.poll", ok=r1["ok"], detail={"slug": slug, "rc": r1["rc"]})
+    audit("users.m1_solo.poll", ok=r1["ok"],
+          detail={"slug": slug, "rc": r1["rc"], "trace_id": r1.get("trace_id")})
     if not r1["ok"]:
         return r1
     r2 = await run_remote("notify-target", slug, target_kind, target_id)
     audit("users.m1_solo.notify", ok=r2["ok"],
-          detail={"slug": slug, "kind": target_kind, "id": target_id, "rc": r2["rc"]})
+          detail={"slug": slug, "kind": target_kind, "id": target_id, "rc": r2["rc"],
+                  "trace_id": r2.get("trace_id")})
     combined = {
         "ok": r2["ok"],
         "rc": r2["rc"],
@@ -152,7 +157,7 @@ async def users_announce(title: str, message: str, sent_by: str,
     res = await run_remote("announce-scoped", b64)
     audit("users.announce", ok=res["ok"],
           detail={"title": title[:80], "n_recipients": len(recipients),
-                  "size_b64": len(b64), "rc": res["rc"]})
+                  "size_b64": len(b64), "rc": res["rc"], "trace_id": res.get("trace_id")})
     return res
 
 
