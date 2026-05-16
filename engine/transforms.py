@@ -72,8 +72,8 @@ def _prepend(value: str, prefix: str) -> str:
     return f"{prefix}{value}"
 
 
-def _strip(value: str) -> str:
-    return value.strip()
+def _strip(value: str, chars: Optional[str] = None) -> str:
+    return value.strip(chars) if chars else value.strip()
 
 
 def _to_str(value: Any) -> str:

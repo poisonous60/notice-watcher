@@ -65,6 +65,7 @@ fields : 글 한 건에서 뽑을 필드들. **post_id 와 title 은 필수**. (
 - ["collapse_ws"]                          : 연속 공백 → 한 칸 + 양끝 trim.
 - ["strip_brackets"]                       : "[학사]" → "학사".
 - ["remove_prefix","No."]                  : 접두어 제거.
+- ["strip"] / ["strip","/"]                : 양끝 공백(arg 없음) 또는 양끝 지정 문자(arg=chars) 제거. URL path 의 슬래시 잘라낼 때 ["strip","/"].
 - ["replace"," ","T"] , ["append","+09:00"] , ["prepend","..."]
 - ["date_only_to_iso","+09:00"]            : "2026-05-11" → "2026-05-11T00:00:00+09:00".
 - ["unixtime_to_iso","Z","s"]              : 유닉스초 → ISO(UTC). ms 면 ["unixtime_to_iso","+09:00","ms"].

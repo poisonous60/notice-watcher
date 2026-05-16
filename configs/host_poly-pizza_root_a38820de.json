@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "site": "poly.pizza",
+  "board": "root",
+  "_source_url": "https://poly.pizza/",
+  "_note": "MUI SPA — 정적 HTML 은 skeleton, 실제 카드는 JS 렌더. last_config 는 article.content=[] 가 schema 거부 — body_empty_acceptable=true 와 결합 시 허용하도록 schema 픽스. 본 사이트는 3D 모델 카탈로그라 글 본문 없음 (body_empty_acceptable=true).",
+  "strategy": "playwright_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+  },
+  "timeout": 30.0,
+  "list": {
+    "url_template": "https://poly.pizza/",
+    "pagination": {"kind": "none"},
+    "wait_selector": "#featuredModels a[href^=\"/m/\"]",
+    "row_selector": "#featuredModels > div.MuiGrid-item",
+    "fields": {
+      "post_id": [{"from": "attr", "selector": "a[href^=\"/m/\"]", "attr": "href", "transform": [["regex_extract", "^/m/(.+)$"]]}],
+      "title": [{"from": "css", "selector": ".MuiCardHeader-title a", "text": true, "transform": [["collapse_ws"]]}],
+      "url": [{"from": "attr", "selector": "a[href^=\"/m/\"]", "attr": "href", "transform": [["urljoin", "https://poly.pizza"]]}],
+      "author": [{"from": "css", "selector": ".MuiCardHeader-subheader a", "text": true}]
+    }
+  },
+  "article": {
+    "body_empty_acceptable": true,
+    "content": []
+  }
+}

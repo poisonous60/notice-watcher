@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "site": "quibli.dustyroom.com",
+  "board": "root",
+  "_source_url": "https://quibli.dustyroom.com/",
+  "_note": "Quibli (Unity Stylized shader 플러그인) Jekyll 문서 사이트. 사이드바 nav 하위 문서 페이지를 글로 간주. last_config 는 transform ['strip','/'] 가 _strip arity error → 모든 row 가 None 으로 떨어져 0건. transforms.py 에서 _strip 에 chars 인자 받게 픽스 + 여기는 remove_prefix 로도 동등.",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9"
+  },
+  "timeout": 15.0,
+  "list": {
+    "url_template": "https://quibli.dustyroom.com/",
+    "pagination": {"kind": "none"},
+    "row_selector": "nav.nav__list ul.nav__items > li > ul > li > a",
+    "fields": {
+      "post_id": [{"from": "attr", "selector": ":self", "attr": "href", "transform": [["remove_prefix", "/"], ["regex_extract", "^([^/]+)"]]}],
+      "title": [{"from": "css", "selector": ":self", "text": true, "transform": [["collapse_ws"]]}],
+      "url": [{"from": "attr", "selector": ":self", "attr": "href", "transform": [["urljoin", "https://quibli.dustyroom.com/"]]}]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [{"from": "css", "selector": "section.page__content", "html": true}]
+  }
+}

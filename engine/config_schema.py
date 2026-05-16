@@ -270,7 +270,10 @@ def validate_config(cfg: dict) -> None:
         art = cfg.get("article")
         if art is not None:
             if "content" in art:
-                _check_fields({"content": art["content"]}, "article", errs)
+                content_val = art["content"]
+                body_optional = bool(art.get("body_empty_acceptable"))
+                if not (body_optional and isinstance(content_val, list) and not content_val):
+                    _check_fields({"content": content_val}, "article", errs)
             if "enrich" in art:
                 _check_fields(art["enrich"], "article.enrich", errs)
     else:

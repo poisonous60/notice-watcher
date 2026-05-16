@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "site": "itch.io",
+  "board": "game-assets",
+  "_source_url": "https://itch.io/game-assets/genre-platformer/tag-3d",
+  "_note": "browse_game_grid > game_cell. probe 가 #game_grid_0 (JS 가 동적 부여하는 id) 를 픽했지만 정적 HTML 엔 없음 → class 기반으로 교정. body_empty_acceptable=true — 에셋 카드 (외부 itch.io 서브도메인) aggregator.",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8"
+  },
+  "timeout": 15.0,
+  "list": {
+    "url_template": "https://itch.io/game-assets/genre-platformer/tag-3d",
+    "pagination": {"kind": "query_param", "page_param": "page"},
+    "row_selector": "div.browse_game_grid > div.game_cell",
+    "fields": {
+      "post_id": [{"from": "attr", "selector": ":self", "attr": "data-game_id"}],
+      "title": [{"from": "css", "selector": "a.title", "text": true, "transform": [["collapse_ws"]]}],
+      "url": [{"from": "attr", "selector": "a.title", "attr": "href"}],
+      "author": [{"from": "css", "selector": "div.game_author a", "text": true}],
+      "summary": [{"from": "attr", "selector": "div.game_text", "attr": "title"}],
+      "cover_image": [{"from": "attr", "selector": "img", "attr": "data-lazy_src"}]
+    }
+  },
+  "article": {
+    "body_empty_acceptable": true,
+    "content": [{"from": "css", "selector": "div.game_text", "text": true}]
+  }
+}
