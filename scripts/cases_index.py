@@ -227,9 +227,28 @@ def _extract_first_paragraph(text: str, cap: int = 200) -> str:
 
 
 def _git_commit_for_slug(slug: str) -> str | None:
+    return _git_log_field_for_slug(slug, "%H")
+
+
+def _git_commit_iso_time_for_slug(slug: str) -> str | None:
+    """slug 가 commit 메시지에 박힌 commit 의 committer 시각 (ISO 8601, UTC `Z`).
+    ts 컬럼 source-of-truth — frontmatter date midnight 보다 정밀 (정렬 안정성)."""
+    iso = _git_log_field_for_slug(slug, "%cI")
+    if not iso:
+        return None
+    try:
+        from datetime import datetime, timezone
+        dt = datetime.fromisoformat(iso).astimezone(timezone.utc)
+        # `YYYY-MM-DDTHH:MM:SSZ` — sqlite TEXT lex 정렬 == 시각 정렬.
+        return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    except (ValueError, TypeError):
+        return None
+
+
+def _git_log_field_for_slug(slug: str, fmt: str) -> str | None:
     try:
         r = subprocess.run(
-            ["git", "log", "-1", "--pretty=%H", "--grep", slug],
+            ["git", "log", "-1", f"--pretty={fmt}", "--grep", slug],
             cwd=str(ROOT),
             capture_output=True, text=True, timeout=10,
         )
@@ -249,11 +268,26 @@ def _fmt_layer_str(value) -> str | None:
     return str(value)
 
 
-def backfill_db(db_path: Path, cases: list[dict]) -> tuple[int, int, int]:
-    """frontmatter → case_runs row. (inserted, skipped_dup, warned) 반환."""
+def _ts_plus_seconds(base_iso: str, seconds: int) -> str:
+    """`YYYY-MM-DDTHH:MM:SSZ` + N초 — 같은 slug 의 outcome[i>0] 분리용."""
+    from datetime import datetime, timedelta, timezone
+    dt = datetime.strptime(base_iso, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    return (dt + timedelta(seconds=seconds)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def backfill_db(db_path: Path, cases: list[dict], *, rebuild: bool = False) -> tuple[int, int, int]:
+    """frontmatter → case_runs row. (inserted, skipped_dup, warned) 반환.
+
+    ts 는 *commit 시각* 우선 (`git log -1 --pretty=%cI --grep <slug>`) — frontmatter
+    `date` 의 자정 폴백은 commit 없을 때만. 같은 slug 의 여러 outcome 은 +i초.
+
+    `rebuild=True` 면 `case_runs` 전체 DELETE 후 재삽입 — 과거 자정 ts 정리용. 단
+    case_log 가 박은 audit row 도 같이 사라짐 (frontmatter 가 없는 row 는 복구 X)."""
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path))
     conn.executescript(_SCHEMA)
+    if rebuild:
+        conn.execute("DELETE FROM case_runs")
 
     inserted = 0
     skipped = 0
@@ -291,11 +325,13 @@ def backfill_db(db_path: Path, cases: list[dict]) -> tuple[int, int, int]:
         text = path.read_text(encoding="utf-8").lstrip("﻿")
         reason = _extract_first_paragraph(text)
         commit_sha = _git_commit_for_slug(slug)
+        commit_iso = _git_commit_iso_time_for_slug(slug)
         requested_by = fm.get("requested_by")
 
+        base_ts = commit_iso or f"{date}T00:00:00Z"
+
         for i, outcome in enumerate(outcomes):
-            # 같은 slug 의 두 row (rejected_with_policy + improved) 는 ts 1초 차로 박음
-            ts = f"{date}T00:00:{i:02d}Z"
+            ts = base_ts if i == 0 else _ts_plus_seconds(base_ts, i)
             try:
                 conn.execute(
                     """INSERT INTO case_runs
@@ -322,6 +358,9 @@ def main() -> int:
     ap.add_argument("--output", type=Path, default=None)
     ap.add_argument("--backfill-db", type=Path, default=None,
                     help="output/cases.sqlite3 같은 sqlite 경로 — frontmatter → case_runs row backfill")
+    ap.add_argument("--rebuild", action="store_true",
+                    help="--backfill-db 와 함께 — `case_runs` 전체 DELETE 후 재삽입. 과거 자정 ts 정리용. "
+                         "case_log audit row 도 같이 사라짐 (frontmatter 없는 row 복구 X)")
     args = ap.parse_args()
 
     cases_dir: Path = args.cases_dir
@@ -347,8 +386,9 @@ def main() -> int:
     print(f"[cases_index] {out_path.relative_to(ROOT)} — {len(cases)} 건 (skip {skipped})")
 
     if args.backfill_db:
-        ins, dup, warn = backfill_db(args.backfill_db, cases)
-        print(f"[backfill] {args.backfill_db} — INSERT {ins} / dup {dup} / warn {warn}")
+        ins, dup, warn = backfill_db(args.backfill_db, cases, rebuild=args.rebuild)
+        tag = "rebuild" if args.rebuild else "backfill"
+        print(f"[{tag}] {args.backfill_db} — INSERT {ins} / dup {dup} / warn {warn}")
 
     return 0
 

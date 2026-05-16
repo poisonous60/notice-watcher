@@ -2,7 +2,7 @@
 slug: host_google-com_search_9440e9f9
 url: https://www.google.com/search?sa=X&sca_esv=d27b705f235d78cd&sxsrf=ANbL-n5nYxvvoLZQf_qvbJovw6dbr9D4Hw:1778909863391&udm=2&fbs=ADc_l-bD_nyrjATWBKup7flJ4rea5XFXsPHwMjGsTekJ1HCohBAQ3Hh19DqzlO7wr7YUgTdO4_C3uXoTo1-SRivc_Swap6of3IufrklCc-R1r_cYZiN4MoktmDvuiC1PeD4nH8f3b94UIye9mkD9gJ2OhVe3exK-hbmw6eC71bKU8Iww7ZBWxXDSN4anKuWYzQn_6P9msObToyspvu095YuigmETY6lXxzyOSC7CqTlAUcF0IYHKDC4&q=%EB%8C%80%EB%82%98%EB%AC%B4&ved=2ahUKEwjMufrTi72UAxWpia8BHQuuKc4QtKgLegQIERAB&biw=1707&bih=791&dpr=1.5
 status: 🛠 엔진 픽스 (silent hang 2 개 잡음 — subprocess 손자 pipe inherit + playwright sync_api close timeout 부재)
-outcome: engine-fix
+outcome: improved
 date: 2026-05-16
 fix_layer: F
 failure_keys: [silent_hang, subprocess_pipe_inherit, playwright_close_no_timeout]
