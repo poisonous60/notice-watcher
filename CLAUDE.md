@@ -145,7 +145,7 @@ bash scripts/setup-hooks.sh   # 또는 pwsh scripts/setup-hooks.ps1
 
 자동 등록 실패 사이트 손-config 또는 probe/prompt/schema/엔진 코드 개선 시:
 - `.claude/skills/hand-config/SKILL.md` 모드 B 절차 따름
-- 5-질문 자가 점검 (가이드라인, 권장)
+- 자가 점검 가이드 (SKILL.md §6, 가이드라인, 권장)
 - `docs/cases/<slug>.md` 작성 + `python scripts/cases_index.py`
 - `Agent(subagent_type='hand-config-reviewer', model='sonnet')` 호출
 - pre-push hook 통과 후 push → N100 pull → restart

@@ -49,6 +49,15 @@ IP 바뀌었으면 `DEPLOY_HOST=aaaa@<새IP>` 환경변수.
 
 `show` 출력의 `last_feedback`(=`[FAIL] <체크>`), `last_config`(자동 생성된 마지막 시도 — selector/path 한두 개만 고치면 될 때도 많음), `output/probe/<slug>/` 의 `summary.txt`·`list_candidates.json`·`article_candidates.json`·`traffic.har`·`diagnosis.json` 을 본다. `docs/config 자동생성 실패 케이스.md` 의 §번호에 매칭해 원인 분류.
 
+**진단 직후 게이트 (필수)** — 다음 §2 분기 결정 전, `last_feedback` 의 실패 키와 probe artifact 신호를 보고 *자동 파이프라인 일반화 후보* 한 줄씩 enumerate 한다. 손-config (2e) 으로 바로 가지 X.
+
+- 2a 후보: URL 이 알려진 플랫폼 가족이거나 인식기 PATTERNS 한 줄 추가로 풀리나? (확인: `recognize('<URL>')`)
+- 2b 후보: probe `first_article_url` 이 사이드바/pagination 잘못 잡혔나? 진짜 글 URL 손에 있으면 `--article-url` 로 재시도 가능.
+- 2c 후보: probe artifact 에 *이미 있는 신호*인데 휴리스틱화 안 돼서 LLM 이 4회 retry 한 거 아닌가? (예: row url 외부 도메인 다수 / login redirect / SPA shell / pagination meta 등) → 휴리스틱 신규 또는 retry feedback hint 추가로 미래 같은 패턴 자동 처리.
+- 2d 후보: probe 자체가 잘못 동작 (글 페이지 render 가 sibling page 열음 / HAR 비어있음 / list_candidates 가 명백한 row 못 잡음) → probe/ 수정 + 재-probe.
+
+각 후보 한 줄 점검 (`X — 매칭 X 이유: …` 또는 `O — <적용 자리>`). 위에서 차례로 따져 첫 매칭. **2a~2d 중 매칭 0건이 *입증된* 후에만** 2e (손-config / 손어댑터) 로 진입. 입증 = "왜 안 되는지" 명시 — 그냥 "복잡해서" / "시간 없어서" 는 불충분.
+
 ## 2. 분기 — 위에서부터 차례로 따져 첫 매칭
 
 **핵심 원칙**: 같은 패턴이 미래에 또 큐에 쌓이지 않게, *자동 파이프라인 자체*를 개선하는 분기(2a~2d) 가
@@ -131,7 +140,7 @@ handwritten 만 가능: 클릭/스크롤로만 글이 뜨는 SPA, 강한 anti-bo
 ## 5. 검증 + N100 배포 (모든 분기 공통)
 
 1. `python scripts/probe_smoke.py` 그린.
-2. 자가 점검 6-질문 (↓ §6) — 비워도 commit 막진 X, 그저 생각해두는 게이트.
+2. 자가 점검 7-질문 (↓ §6) — 비워도 commit 막진 X, 그저 생각해두는 게이트.
 3. `docs/cases/<slug>.md` 작성 + `python scripts/cases_index.py`.
 4. (권장) `hand-config-reviewer` subagent 호출 (↓ §7). PASS 받으면.
 5. `docs/사이트별 등록 시도 기록.md` 갱신 (상태 이모지·원인·해결).
@@ -175,16 +184,21 @@ probe/prompt/schema/코드 손대기 전 다음 여섯 질문에 답해보면 �
 5. **case 파일 + commit msg** — 
    - `docs/cases/<slug>.md` 작성 (frontmatter 필수 4: slug·url·status·date; 선택: fix_layer·failure_keys·config_strategy·adapters_changed·engine_files_touched·tags 등).
    - `python scripts/cases_index.py` 실행해 INDEX.md 갱신.
-   - commit msg prefix 권장: `[fix-layer: E|D|C|B|A|F|none] <slug>` + 본문에 5-질문 답 요약.
+   - commit msg prefix 권장: `[fix-layer: E|D|C|B|A|F|none] <slug>` + 본문에 자가 점검 답 요약 (특히 §6 의 1번 fix-layer 매핑, 7번 일반화 시도/포기 사유).
 
 6. **새 패턴이면 smoke_test fixture 추가했나?** — 다음 둘 중 하나에 해당하면 fixture 동시 추가 의무:
    - **새 strategy 도입 (F-layer)**: `engine/strategies/<new>.py` 신규 추가 시 → `scripts/probe_smoke.py` 의 `REPS` 에 그 패턴을 *진짜로 보여주는* 새 entry 추가 + 그 URL probe → `output/probe/<new-slug>/` 산출 + `_stage2_check_digest` 안에 slug-specific 검증 분기 추가.
-     ※ fixture URL 선택 주의 — *진짜로 그 패턴을 보여주는* URL 인지 직접 probe 결과로 확인. (이 SKILL 의 6-질문 추가 trigger = 2026-05-15 `probe_smoke.py` 의 REPS fixture URL `endfield.gryphline.com/ko-kr/news` 잘못 박힘 사례 — Next.js prerender 라 클라이언트 XHR 안 함 → SPA+XHR 패턴 fixture 로 부적절. adapter 자체는 별도 도메인 `web-news.gryphline.com/api/bulletin` 직접 hit 라 정상.)
+     ※ fixture URL 선택 주의 — *진짜로 그 패턴을 보여주는* URL 인지 직접 probe 결과로 확인. (이 SKILL 의 §6 6번 질문 추가 trigger = 2026-05-15 `probe_smoke.py` 의 REPS fixture URL `endfield.gryphline.com/ko-kr/news` 잘못 박힘 사례 — Next.js prerender 라 클라이언트 XHR 안 함 → SPA+XHR 패턴 fixture 로 부적절. adapter 자체는 별도 도메인 `web-news.gryphline.com/api/bulletin` 직접 hit 라 정상.)
    - **새 휴리스틱 도입 (C-layer)**: `probe/extract.py` 또는 `probe/_heuristic.py` 에 새 `@heuristic(...)` 함수 추가 시 → `tests/probe_heuristics/test_<heuristic_name>.py` 동시 추가. stage 5 가 자동 picked-up 인데 fixture 없으면 의미 없음.
 
    기존 strategy/heuristic 수정만이면 skip.
 
-위 여섯 답이 없어도 commit 막지 X — 그저 *생각해보면 좋은* 질문. 진짜 검증은 reviewer subagent + pre-push hook.
+7. **probe 일반화 시도했나?** — 손-config (2e) 으로 끝낸 케이스면 *왜 2c/2d (probe 휴리스틱·artifact 수정) 또는 (D) retry feedback hint 로 일반화 안 됐는지* case 파일에 한 줄 적기. "이 row url host 가 외부 도메인 다수다 → 휴리스틱 신호로 박을 만하다" 같은 게 *2개째 비슷한 사이트* 들어왔을 때 즉시 알아채는 비용 절감. 단순 손-config 끝내고 미래에 같은 패턴 또 큐 쌓이게 두는 게 *기본*이면 누적 rot.
+   - 일반화 시도했으면 fix_layer 에 C / C+D / F 표기.
+   - 못 했으면 `_note` 또는 case body 에 "일반화 안 되는 이유: <코너 케이스 한 줄>" 명시. (예: "이 사이트만의 storage_state 필요" / "본문이 클라이언트 라우트라 server-render 없음, 신호는 휴리스틱화 가능하나 결과 활용처 없음")
+   - 미래 같은 패턴 사이트 2개째 들어오면 *그때* 일반화 — 1개째에 무리해서 일반화 안 해도 됨. 다만 *기록*은 1개째에 남겨야 알아챔.
+
+위 일곱 답이 없어도 commit 막지 X — 그저 *생각해보면 좋은* 질문. 진짜 검증은 reviewer subagent + pre-push hook.
 
 ## 7. 자가 review (commit 직전 — 권장)
 
@@ -207,7 +221,7 @@ Agent(
     ## (선택) 영향 사이트 손-실행
     [register.py --config 출력 비교]
     
-    위 변경을 6 검증 항목에 비추어 PASS/FAIL 판정.
+    위 변경을 검증 항목에 비추어 PASS/FAIL 판정.
   '''
 )
 ```

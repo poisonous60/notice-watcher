@@ -23,6 +23,9 @@ def hand_config_for_url(*, url: str, slug: Optional[str] = None,
     if job_id is not None:
         lines.append(f"관련 잡: #{job_id}")
     lines.append("")
+    lines.append("작성 전 — 먼저 자동 파이프라인 일반화 가능한지 점검: 분기 2a (인식기 확장) / "
+                 "2b (--article-url 재시도) / 2c (probe 휴리스틱 + retry feedback hint — 미래 같은 패턴 자동 처리) / "
+                 "2d (probe artifact 수정) 후보 중 매칭 있는지. 손-config (2e) 는 일반화 불가 시 마지막.")
     lines.append("작성 후 dev박스 configs/ 에 두고 N100 배포까지 진행해줘.")
     return "\n".join(lines)
 
@@ -45,7 +48,11 @@ def hand_config_triage_queue(*, failed_slugs: list[str]) -> str:
     for s in failed_slugs:
         lines.append(f"- {s}  (output/snapshot/poll_state/{s}.FAILED.json)")
     lines.append("")
-    lines.append("우선순위 정렬 → 각 항목 손 config 작성 → 배포.")
+    lines.append("각 항목 — 진단 후 손-config (2e) 바로 가지 말고 *자동 파이프라인 일반화 가능성* 먼저 검토. "
+                 "분기 2a (인식기 확장) / 2b (--article-url 재시도) / 2c (probe 휴리스틱 신호 + retry feedback hint — "
+                 "미래 같은 패턴 자동 처리) / 2d (probe artifact 수정) 후보 enumerate. 매칭 있으면 그쪽 우선. "
+                 "손-config 은 일반화 불가능한 진짜 코너 케이스에만.")
+    lines.append("우선순위 정렬 → 각 항목 처리 → 배포.")
     return "\n".join(lines)
 
 
