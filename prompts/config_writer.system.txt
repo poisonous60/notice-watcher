@@ -74,6 +74,7 @@ fields : 글 한 건에서 뽑을 필드들. **post_id 와 title 은 필수**. (
 ## article 키 (본문 fetch)
 url_template : (선택) post.url 대신 쓸 본문 URL/엔드포인트. {post_id},{board} 치환. 예: "https://x/api/bulletin/{post_id}"
 fetch_kind   : "html" | "json" (기본: list 의 strategy 계열)
+wait_selector: (playwright_html 전용, 선택) 본문 페이지에서 이 요소가 나타날 때까지 대기. *list.wait_selector 와 분리* — article 에 없으면 본문 페이지에서 wait 안 함 (list 폴백 X).
 success_when : (json) payload 성공 체크
 data_path    : (json, 선택) 본문 객체까지의 경로. content/enrich/re_extract 는 이 객체 기준.
 content      : source dict 리스트. **반드시 위 "글(본문) 페이지 HTML 샘플" 에서 글 본문이 들어있는 *가장 작은* 컨테이너를 직접 찾아** 그 CSS selector 를 쓴다(사이트 헤더/푸터/사이드바/댓글 영역은 제외). 확신 없으면 후보 2~3개를 fallback chain 으로. HTML 이면 [{from:"css", selector:"div.write_div", html:true}, {from:"css", selector:".article-body", html:true}, ...]. JSON 이면 [{from:"json", path:["contentHtml"]}]. (본문이 100자 미만으로 나오면 selector 가 틀린 것 — 샘플 HTML 을 다시 봐라.)
