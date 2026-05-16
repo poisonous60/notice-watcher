@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 25 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 29 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -11,6 +11,7 @@
 | [`naver-blog_ghangth_5a895e5f`](naver-blog_ghangth_5a895e5f.md) | ✅ 자동 (recognizer 신규 — naver-blog, naver-blog_dhyana69 와 같은 PR 에서 동시 풀림) | 2026-05-16 | F | posts_nonempty, list_url_none, candidates_zero | https://blog.naver.com/ghangth/221299970841 |
 | [`naver-blog_dhyana69_85ae2dd0`](naver-blog_dhyana69_85ae2dd0.md) | ✅ 자동 (recognizer 신규 — naver-blog 플랫폼 인식, NaverBlogRssAdapter 가 RSS 피드 직접 파싱) | 2026-05-16 | F | posts_nonempty, list_url_none, candidates_zero | https://m.blog.naver.com/PostView.nhn?blogId=dhyana69&logNo=150071320787&proxyReferer=https:%2F%2Fwww.google.co.kr%2F |
 | [`infra_learned_blacklist_2026-05-16`](infra_learned_blacklist_2026-05-16.md) | 🏗 인프라 (거부 패턴 자동 학습 시스템 — 한 사용자 거부 → 모두에게 적용, 등록 성공 = 자동 회수) | 2026-05-16 | F | learned_blacklist, host_path_pattern, auto_learn, auto_unlearn | (인프라 case — 특정 사이트 X. 트리거 = host_google-com_search_9440e9f9 의 후속 후속) |
+| [`host_theholocaustexp_the-nazi-rise-to-power_9f510466`](host_theholocaustexp_the-nazi-rise-to-power_9f510466.md) | 🚫 거부 (The Holocaust Explained 단일 article/subtopic page — 게시판 아님. 폴링 대상 X) | 2026-05-16 | none | article_body_len, embedded_subtopics, not_a_board | https://www.theholocaustexplained.org/the-nazi-rise-to-power/the-nazi-rise-to-power/the-role-of-economic-instability/ |
 | [`host_terms-naver-com_entry.naver_a297b3b0`](host_terms-naver-com_entry.naver_a297b3b0.md) | 🚫 거부 (단일 네이버 지식백과 항목 — 게시판 아님. 폴링 대상 X) | 2026-05-16 | none | posts_nonempty, list_url_none, candidates_zero, not_a_board | https://terms.naver.com/entry.naver?docId=3579743&cid=59054&categoryId=59061 |
 | [`host_scholar-google-_scholar_706d9c49`](host_scholar-google-_scholar_706d9c49.md) | 🔧 손 config (작동중, baseline 10, httpx_html) + (C) probe heuristic + (D) retry feedback hint | 2026-05-16 | C+D | article_body_len | https://scholar.google.com/scholar?hl=ko&as_sdt=0%2C5&q=harness&btnG= |
 | [`host_quibli-dustyroo_root_216cc634`](host_quibli-dustyroo_root_216cc634.md) | 🔧 손 config (httpx_html) + (F+A) transforms: _strip(value, chars=None) + prompt 한 줄 — LLM 의 ["strip","/"] 아릴리티 fix | 2026-05-16 | F+A | posts_nonempty_0, transform_strip_arity_error, silent_field_dropout | https://quibli.dustyroom.com/ |
@@ -21,6 +22,9 @@
 | [`host_ko-wikipedia-or_wiki_3e20b56a`](host_ko-wikipedia-or_wiki_3e20b56a.md) | 🚫 거부 (단일 위키 항목 페이지 — 게시판 아님. 폴링 대상 X) | 2026-05-16 | none | posts_nonempty, list_url_none, candidates_zero, not_a_board | https://ko.wikipedia.org/wiki/%EC%99%95%EC%88%98%EC%9D%B8 |
 | [`host_itch-io_game-assets_2596d376`](host_itch-io_game-assets_2596d376.md) | 🔧 손 config (httpx_html) — probe 가 JS 추가 id `#game_grid_0` 픽 → 정적 fetch 매칭 0 | 2026-05-16 | none | posts_nonempty_0, dynamic_id_selector, static_vs_headless_selector_drift | https://itch.io/game-assets/genre-platformer/tag-3d |
 | [`host_google-com_search_9440e9f9`](host_google-com_search_9440e9f9.md) | 🚫 거부 (board_shape_check anti-bot 구멍 보강 + REJECTED 마커 — 비-게시판 영구 거부) | 2026-05-16 | F | silent_hang, subprocess_pipe_inherit, playwright_close_no_timeout, board_shape_check, antibot_redirect, posts_nonempty | https://www.google.com/search?sa=X&sca_esv=d27b705f235d78cd&sxsrf=ANbL-n5nYxvvoLZQf_qvbJovw6dbr9D4Hw:1778909863391&udm=2&fbs=ADc_l-bD_nyrjATWBKup7flJ4rea5XFXsPHwMjGsTekJ1HCohBAQ3Hh19DqzlO7wr7YUgTdO4_C3uXoTo1-SRivc_Swap6of3IufrklCc-R1r_cYZiN4MoktmDvuiC1PeD4nH8f3b94UIye9mkD9gJ2OhVe3exK-hbmw6eC71bKU8Iww7ZBWxXDSN4anKuWYzQn_6P9msObToyspvu095YuigmETY6lXxzyOSC7CqTlAUcF0IYHKDC4&q=%EB%8C%80%EB%82%98%EB%AC%B4&ved=2ahUKEwjMufrTi72UAxWpia8BHQuuKc4QtKgLegQIERAB&biw=1707&bih=791&dpr=1.5 |
+| [`host_encyclopedia-us_content_fba2a7a9`](host_encyclopedia-us_content_fba2a7a9.md) | 🚫 거부 (USHMM Encyclopedia 단일 article page — 게시판 아님. 폴링 대상 X) | 2026-05-16 | none | post_id_stable_shape, trending_article_links, not_a_board | https://encyclopedia.ushmm.org/content/en/article/the-great-depression |
+| [`host_en-wikipedia-or_wiki_082a72a9`](host_en-wikipedia-or_wiki_082a72a9.md) | 🚫 거부 (단일 Wikipedia article page — 게시판 아님. 폴링 대상 X) | 2026-05-16 | none | post_id_stable_shape, in_article_wiki_links, not_a_board | https://en.wikipedia.org/wiki/Nazi_Party |
+| [`host_britannica-com_event_655a158c`](host_britannica-com_event_655a158c.md) | 🚫 거부 (Britannica 단일 article page — 게시판 아님. 폴링 대상 X) | 2026-05-16 | none | post_id_stable_shape, related_question_links, not_a_board | https://www.britannica.com/event/Great-Depression |
 | [`host_syosetu-colomo-_root_2ff18e94`](host_syosetu-colomo-_root_2ff18e94.md) | 🚫 거부 (게시판 형식 아님 — 사전 게이트 추가) | 2026-05-15 | F | schema, row_required_selector | https://syosetu.colomo.dev/ |
 | [`host_nte-perfectworl_kr_c8f4855a`](host_nte-perfectworl_kr_c8f4855a.md) | 🔧 손 config (작동중, baseline 3, httpx_html) | 2026-05-15 |  | article_body_len | https://nte.perfectworld.com/kr/article/news/index.html |
 | [`www.reddit.com_r_CosmicPrincessKaguya`](www.reddit.com_r_CosmicPrincessKaguya.md) | 🧩 손어댑터 (작동중, baseline 19, handwritten/RedditAdapter, flair="Fan Art") | 2026-05-12 |  |  | https://www.reddit.com/r/CosmicPrincessKaguya/ |
@@ -45,7 +49,7 @@
 | E+A+C+D | 1 |
 | F | 7 |
 | F+A | 1 |
-| none | 4 |
+| none | 8 |
 
 ### config_strategy 분포
 
@@ -55,10 +59,10 @@
 | handwritten | 7 |
 | httpx_html | 6 |
 | httpx_json | 4 |
-| none | 2 |
+| none | 6 |
 | playwright_html | 3 |
 
 ### 최근 90일 (≥ 2026-02-15)
 
-케이스 25 건.
+케이스 29 건.
 
