@@ -50,6 +50,7 @@ _POST_ID_RE = re.compile(r"^[\w\-./:%]{1,128}$")               # poll.py 의 _ST
 _BASE64_RE = re.compile(r"^[A-Za-z0-9+/=]{1,200000}$")         # base64 문자셋만; ≤200KB 페이로드
 _TRACE_ID_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")          # tracing.valid_trace_id 와 동일 — path-traversal 차단
 _TRACE_KIND_RE = re.compile(r"^[a-z0-9_]{1,32}$")
+_PATTERN_ID_RE = re.compile(r"^[a-f0-9]{1,12}$")              # learned_blacklist pattern id (sha1 12자)
 _TARGET_KIND = ("dm", "channel")
 
 
@@ -96,6 +97,7 @@ READABLE: dict[str, str] = {
     "env":      f"{DEPLOY_PATH_RAW}/.env",
     "timer":    "~/.config/systemd/user/notice-poll.timer",
     "config-toml": f"{DEPLOY_PATH_RAW}/config.toml",
+    "learned":  f"{DEPLOY_PATH_RAW}/output/learned_blacklist.json",
 }
 
 
@@ -247,6 +249,14 @@ def cmd_trace_fetch(trace_id: str) -> int:
     return _ssh(f"cat {DEPLOY_PATH_RAW}/output/traces/{trace_id}.jsonl")
 
 
+def cmd_unlearn(pattern_id: str) -> int:
+    """learned_blacklist 의 pattern entry 제거 (false positive 손-회수).
+    N100 의 `scripts/register.py --unlearn <id>` 호출 — atomic write 보장 + shell-quoting 안전.
+    pattern_id 는 [a-f0-9]{1,12} 만 (path-traversal/injection 차단)."""
+    pid = _require(pattern_id, _PATTERN_ID_RE, name="pattern_id")
+    return _ssh(_remote_python_cmd("scripts/register.py", "--unlearn", pid))
+
+
 def cmd_announce_scoped(b64: str) -> int:
     """base64-인코딩된 JSON 페이로드를 받아 N100 의 `scripts/announce.py --base64` 로 전달.
 
@@ -280,6 +290,7 @@ def list_actions() -> int:
     print("  replay-deliveries <slug> <kind> <id> [post]    M2/M3 replay (lock+직렬)")
     print("  notify-target <slug> <kind> <id>               collected → 그 target 만 발송")
     print("  announce-scoped <base64-json>                  좁힌 공지 발송")
+    print("  unlearn <pattern_id>                           learned_blacklist 패턴 제거")
     print("  trace-index <kind>                             output/traces/index.<kind>.jsonl tail")
     print("  trace-index-all                                모든 kind index 합본")
     print("  trace-fetch <trace_id>                         output/traces/<trace_id>.jsonl cat")
@@ -308,6 +319,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     sp = sub.add_parser("notify-target")
     sp.add_argument("slug"); sp.add_argument("target_kind"); sp.add_argument("target_id")
     sp = sub.add_parser("announce-scoped"); sp.add_argument("base64_payload")
+    sp = sub.add_parser("unlearn"); sp.add_argument("pattern_id", help="learned_blacklist pattern id ([a-f0-9]{1,12})")
     sp = sub.add_parser("trace-index"); sp.add_argument("kind", help="poll|notify|notify_idle|probe ...")
     sub.add_parser("trace-index-all")
     sp = sub.add_parser("trace-fetch"); sp.add_argument("trace_id")
@@ -336,6 +348,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         return cmd_notify_target(args.slug, args.target_kind, args.target_id)
     if args.cmd == "announce-scoped":
         return cmd_announce_scoped(args.base64_payload)
+    if args.cmd == "unlearn":
+        return cmd_unlearn(args.pattern_id)
     if args.cmd == "trace-index":
         return cmd_trace_index(args.kind)
     if args.cmd == "trace-index-all":

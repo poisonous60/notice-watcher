@@ -890,7 +890,19 @@ def _main_inner(argv) -> int:
                         "이 URL 을 render+HAR 로 미리 re-probe 해서 본문 JSON API 후보·렌더 DOM 을 확보하고 digest 의 article_sample 을 그걸로 맞춘 뒤 생성한다.")
     p.add_argument("--model", help="Gemini 모델 (기본 GEMINI_MODEL env 또는 gemini-2.5-flash)")
     p.add_argument("--force", action="store_true", help="기존 config 가 있어도 덮어씀")
+    p.add_argument("--unlearn", metavar="PATTERN_ID",
+                   help="learned_blacklist 의 pattern entry 제거 ([a-f0-9]{1,12}). 다른 인자 무시. "
+                        "REMOVED / NOT_FOUND 한 줄 print.")
     args = p.parse_args(argv)
+
+    if args.unlearn:
+        pid = args.unlearn.strip().lower()
+        if not re.fullmatch(r"[a-f0-9]{1,12}", pid):
+            print(f"[register --unlearn] invalid pattern_id: {args.unlearn!r}", file=sys.stderr)
+            return 4
+        ok = _clear_learned_by_id(pid)
+        print("REMOVED" if ok else "NOT_FOUND")
+        return 0 if ok else 1
 
     if args.list:
         return _list_sites(args.csv)

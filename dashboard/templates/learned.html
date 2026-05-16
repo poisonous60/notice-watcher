@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Learned blacklist · notice-watcher{% endblock %}
+{% block body %}
+<h2>🧠 Learned blacklist — 자동 학습된 거부 패턴</h2>
+<p class="muted">
+  봇 운영 중 거부된 URL 의 (host, path_prefix) 패턴이 자동으로 박힘. 같은 패턴 다음 시도는 probe 안 돌고 즉시 거부됨.
+  snapshot 기준 (<code>output/snapshot/learned_blacklist.json</code> — Pull 시 N100 에서 복사).
+  운영 자리: <code>output/learned_blacklist.json</code> (N100). dev box 의 손-config 등록 성공 시 매칭 패턴 자동 회수.
+</p>
+
+<form method="get" action="/learned" class="filters">
+  <div class="grid">
+    <label style="flex: 3;">
+      <span>검색 (host / path / reason / url / slug / id 어느 곳이든 substring)</span>
+      <input type="text" name="q" value="{{ cur.q }}" placeholder="google / search / board_shape_check / …" autofocus>
+    </label>
+    <label>
+      <span>&nbsp;</span>
+      <button type="submit">검색</button>
+    </label>
+  </div>
+</form>
+
+<p class="muted">
+  총 {{ stats.total }}건 (필터 후 {{ stats.shown }}건 표시) · 누적 거부 {{ stats.total_rejects }}회
+</p>
+
+{% if rows %}
+<table class="compact">
+  <thead>
+    <tr>
+      <th style="width: 90px">id</th>
+      <th>host_suffix</th>
+      <th>path_prefix</th>
+      <th style="width: 50px">count</th>
+      <th style="width: 150px">last_rejected_at</th>
+      <th>last_reason</th>
+      <th>last_url</th>
+      <th style="width: 100px">action</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+    <tr id="learned-row-{{ r.id }}">
+      <td><code>{{ r.id }}</code></td>
+      <td><code>{{ r.host_suffix or '(없음)' }}</code></td>
+      <td><code>{{ r.path_prefix or '(빈 path)' }}</code></td>
+      <td>{{ r.reject_count }}</td>
+      <td><time>{{ r.last_rejected_at_short }}</time></td>
+      <td title="{{ r.last_reason }}">{{ r.reason_short }}</td>
+      <td title="{{ r.last_url }}">
+        {% if r.last_url|is_http %}
+          <a href="{{ r.last_url }}" target="_blank" rel="noopener noreferrer">{{ r.url_short }}</a>
+        {% else %}
+          <span class="muted">{{ r.url_short }}</span>
+        {% endif %}
+      </td>
+      <td>
+        <button class="secondary"
+                hx-post="/learned/{{ r.id }}/unlearn"
+                hx-target="#learned-row-{{ r.id }}"
+                hx-swap="outerHTML"
+                hx-confirm="패턴 {{ r.id }} ({{ r.host_suffix }}{{ r.path_prefix }}) 풀어줄까요? 이후 같은 패턴 URL 은 다시 자동 거부 안 됨.">
+          🔓 unlearn
+        </button>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+  {% if stats.total == 0 %}
+  <p class="muted">학습된 패턴 없음. <code>Pull from N100</code> 로 snapshot 갱신했는지 확인.</p>
+  {% else %}
+  <p class="muted">검색 결과 없음. 검색어를 비우면 전체 {{ stats.total }}건 표시.</p>
+  {% endif %}
+{% endif %}
+{% endblock %}

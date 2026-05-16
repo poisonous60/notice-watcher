@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
 import subprocess
 import sys
@@ -121,14 +122,34 @@ def cmd_pull() -> int:
     else:
         sys.stderr.write(f"[inspect pull] usage.sqlite3 .backup 실패(skip): {out}\n")
 
+    # 4) learned_blacklist.json — 자동 학습된 거부 패턴. 없으면 skip (봇 운영 중 아직 거부 한 건도 없으면 정상).
+    learned_dst = SNAPSHOT_DIR / "learned_blacklist.json"
+    if learned_dst.exists():
+        try:
+            learned_dst.unlink()
+        except OSError:
+            pass
+    rc, out = _run(["scp", "-q", f"{DEPLOY_HOST}:{DEPLOY_PATH}/output/learned_blacklist.json",
+                    str(learned_dst)])
+    # 없으면 정상 — stderr 경고도 안 띄움.
+    if rc != 0 and not any(s in out for s in ("No such file", "matches no files", "not match")):
+        sys.stderr.write(f"[inspect pull] learned_blacklist scp 실패 (rc={rc}): {out}\n")
+
     # 요약
     n_db = (SNAPSHOT_DIR / "bot.sqlite3").stat().st_size if (SNAPSHOT_DIR / "bot.sqlite3").exists() else 0
     n_usage = (SNAPSHOT_DIR / "usage.sqlite3").stat().st_size if (SNAPSHOT_DIR / "usage.sqlite3").exists() else 0
     n_states = sum(1 for _ in (SNAPSHOT_DIR / "poll_state").glob("*.json"))
     n_cfgs = sum(1 for _ in CONFIGS_SNAPSHOT.glob("*.json"))
+    n_learned = 0
+    if learned_dst.exists():
+        try:
+            _ldata = json.loads(learned_dst.read_text(encoding="utf-8"))
+            n_learned = len(_ldata.get("patterns") or [])
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+            n_learned = 0
     print(f"[inspect pull] {DEPLOY_HOST}:{DEPLOY_PATH} → {SNAPSHOT_DIR} + {CONFIGS_SNAPSHOT}")
     print(f"  bot.sqlite3: {n_db:,} bytes   usage.sqlite3: {n_usage:,} bytes   "
-          f"poll_state: {n_states}개   configs: {n_cfgs}개")
+          f"poll_state: {n_states}개   configs: {n_cfgs}개   learned: {n_learned}건")
     return 0
 
 

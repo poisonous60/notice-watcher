@@ -1,0 +1,24 @@
+{# HTMX 부분 응답 — 패턴 unlearn 후 row 자리를 inline 결과로 교체 #}
+{% if ok and ("REMOVED" in output) %}
+<tr id="learned-row-{{ pattern_id }}">
+  <td colspan="8" class="muted">
+    ✅ <code>{{ pattern_id }}</code> 제거됨 (N100). {% if snapshot_removed %}snapshot 동기 OK.{% else %}snapshot 동기 실패 — Pull 한 번.{% endif %}
+  </td>
+</tr>
+{% elif ok and ("NOT_FOUND" in output) %}
+<tr id="learned-row-{{ pattern_id }}">
+  <td colspan="8" class="muted">
+    ⚠ <code>{{ pattern_id }}</code> 가 N100 에 이미 없음 (다른 경로로 풀린 듯). Pull 후 새로고침.
+  </td>
+</tr>
+{% else %}
+<tr id="learned-row-{{ pattern_id }}">
+  <td colspan="8">
+    ❌ unlearn 실패 — <code>{{ pattern_id }}</code>
+    <details>
+      <summary>출력 보기</summary>
+      <pre><code>{{ output or '(출력 없음)' }}</code></pre>
+    </details>
+  </td>
+</tr>
+{% endif %}

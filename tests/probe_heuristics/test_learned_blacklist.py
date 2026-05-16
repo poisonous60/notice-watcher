@@ -192,6 +192,15 @@ def run() -> list[tuple[str, bool, str]]:
             cases.append(("policy_serp_diff_query_also_rejected",
                           _reject_check("https://www.google.com/search?q=somethingelse") == "learned_rejected",
                           "검색어 바뀌어도 같은 패턴이라 거부됨 (사용자 의도)"))
+            # 메시지에서 운영 디테일 (pattern_id / unlearn 안내) 가 빠졌는지 — 사용자엔 노이즈.
+            try:
+                _check_policy("https://www.google.com/search?q=msg_test", "url")
+                cases.append(("policy_msg_no_admin_detail", False, "should have raised"))
+            except UrlRejected as e:
+                msg = e.msg
+                no_admin = ("/admin unlearn" not in msg) and ("운영자가" not in msg)
+                cases.append(("policy_msg_no_admin_detail", no_admin,
+                              f"msg leaked admin detail: {msg[:200]}"))
             cases.append(("policy_same_host_diff_path_passes",
                           _reject_check("https://www.google.com/forms/d/123") == "",
                           "host 같지만 path 다르면 통과"))

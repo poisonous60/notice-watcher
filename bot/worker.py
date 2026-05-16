@@ -172,8 +172,7 @@ async def _process_job(client, conn, job, dm_owner) -> None:
                         client, job["ack_channel_id"], job["ack_message_id"],
                         f"⚠️ 등록 거부 — `{slug}`\n"
                         "이 URL 은 게시판 형식이 아닌 것 같아요(반복되는 글 링크/목록 API/피드가 안 보임). "
-                        "게시판/공지 *목록* 페이지 URL 을 주세요. "
-                        "같은 host/path 패턴은 이후 자동으로 거부됩니다 (운영자가 풀기 전까지).")
+                        "게시판/공지 *목록* 페이지 URL 을 주세요.")
                 else:
                     append_triage_queue(url, slug, job["via"], req_by, tail)
                     err = _format_register_error(rc, tail)

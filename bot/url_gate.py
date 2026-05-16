@@ -191,10 +191,9 @@ def _learned_to_groups(patterns: list[dict]) -> list[dict]:
             continue
         reason = (p.get("last_reason") or "이전에 거부됨").strip()
         last_url = (p.get("last_url") or "").strip()
-        pat_id = (p.get("id") or "").strip()
-        message = (f"이전 시도에서 거부된 패턴이에요 — 사유: {reason}. "
-                   f"같은 패턴은 다른 사용자가 시도해도 거부됩니다 (운영자가 `/admin unlearn {pat_id or '<id>'}` 으로 풀기 전까지). "
-                   f"참고 URL: {last_url[:120]}" if last_url else
+        # 운영 디테일 (pattern_id / unlearn 안내) 은 사용자엔 노이즈 — 대시보드/admin 에서 다룸.
+        message = (f"이전 시도에서 거부된 패턴이에요 — 사유: {reason}. 참고 URL: {last_url[:120]}"
+                   if last_url else
                    f"이전 시도에서 거부된 패턴이에요 — 사유: {reason}.")
         group_raw = {
             "name": "learned_rejected",
