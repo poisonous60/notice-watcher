@@ -146,7 +146,8 @@ def blocking_register(url: str, article_url: Optional[str] = None,
         cmd.append("--no-recognize")
     child_env = {**os.environ, **env_for_child()}
     try:
-        with chromium_lock(timeout=settings.chromium_lock.bot_timeout):
+        with chromium_lock(timeout=settings.chromium_lock.bot_timeout,
+                           slots=settings.chromium_lock.slots):
             # start_new_session=True → register.py 를 새 process group leader 로. timeout 시
             # killpg 로 손자 (probe.py, playwright driver, chrome) 까지 전부 SIGKILL 해야
             # register stdout pipe 의 writer 가 다 닫혀 `for line in proc.stdout` 가 EOF 로 빠짐.

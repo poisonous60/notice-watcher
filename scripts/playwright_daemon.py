@@ -24,7 +24,7 @@ protocol (output/playwright_daemon/ 디렉토리):
 idle 정책: 매 POLL_INTERVAL_S 마다 endpoint 파일 mtime 검사 → IDLE_TIMEOUT_S 미갱신이면 자기 자신 stop.
 probe 가 connect 시 endpoint 파일 touch → idle 타이머 reset.
 
-N100 적용 안 함 (RAM 1-2GB 제약). dev 박스에서만 띄움.
+N100 (RAM 12GiB) + dev 박스 둘 다 적용 — `notice-pw-daemon.service` 가 `--no-idle` 로 항상 띄움.
 endpoint 파일 없으면 probe 는 기존대로 fresh launch — backwards-compatible.
 """
 from __future__ import annotations

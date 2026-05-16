@@ -49,7 +49,8 @@ def main(argv: list[str]) -> int:
         rc = 0
         try:
             with tr.span("chromium_lock_acquire"):
-                lock_ctx = chromium_lock(timeout=settings.chromium_lock.poll_timeout)
+                lock_ctx = chromium_lock(timeout=settings.chromium_lock.poll_timeout,
+                                         slots=settings.chromium_lock.slots)
                 lock_ctx.__enter__()
             try:
                 with tr.span("poll_subprocess"):

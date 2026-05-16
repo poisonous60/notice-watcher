@@ -249,20 +249,21 @@ owner 1인용·localhost 한정·인증 0. 페이지: `/subs` `/jobs` `/reports`
 
 자세한 내용: **[docs/대시보드 가이드.md](docs/%EB%8C%80%EC%8B%9C%EB%B3%B4%EB%93%9C%20%EA%B0%80%EC%9D%B4%EB%93%9C.md)**.
 
-## Chromium 데몬 (dev 박스 옵션)
+## Chromium 데몬 (N100 + dev 박스)
 
-probe 의 cold launch (~2-3s) 회피. CDP endpoint 띄워두고 probe 가 `connect_over_cdp` 로 attach.
+probe 의 cold launch (~2-3s) 회피 + worker pool 동시 진입 시 chromium 컨텍스트 share. CDP endpoint
+띄워두고 probe 가 `connect_over_cdp` 로 attach.
 
 ```bash
 python scripts/playwright_daemon.py             # foreground 시작
 python scripts/playwright_daemon.py status      # 상태
 python scripts/playwright_daemon.py stop        # graceful stop
 
-# systemd user unit (dev 박스):
+# systemd user unit (N100 + dev 박스 둘 다):
 systemctl --user enable --now notice-pw-daemon.service
 ```
 
-idle 정책: `IDLE_TIMEOUT_S` 미사용 시 자기 자신 stop. endpoint 파일 없으면 probe fresh launch — backwards-compatible. **N100 미적용** (RAM 1-2GB 제약).
+idle 정책: `IDLE_TIMEOUT_S` 미사용 시 자기 자신 stop. endpoint 파일 없으면 probe fresh launch — backwards-compatible. N100 은 `--no-idle` 로 systemd 가 상시 가동.
 
 ## LLM routing (Gemini ↔ OpenRouter)
 

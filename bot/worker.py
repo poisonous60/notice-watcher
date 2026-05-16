@@ -1,10 +1,15 @@
-"""백그라운드 잡 worker — register/re-probe 잡 큐를 FIFO 로 직렬 처리.
+"""백그라운드 잡 worker — register/re-probe 잡 큐를 pool_size 개 task 가 병렬 처리.
 
-- bot/main.py 의 setup_hook 에서 start() 호출 → 단일 asyncio task 로 영원히 돈다.
-- 잡 1개 처리 = chromium_lock 잡고 register.py subprocess (~30초+). 끝나면 ack 메시지 edit.
+- bot/main.py 의 setup_hook 에서 start() 호출 → settings.worker.pool_size 개 asyncio task 로 영원히 돈다.
+- 잡 1개 처리 = chromium_lock(slots=settings.chromium_lock.slots) 잡고 register.py subprocess (~30초+).
+  끝나면 ack 메시지 edit.
 - /watch 의 ack 는 채널 메시지 edit (interaction token 만료와 무관).
 - /preview 의 ack 는 followup DM (ephemeral interaction 의 한계로 채널 edit 안 됨).
 - re-probe 잡은 ack 없음 — 실패 시 OWNER DM (쿨다운).
+
+worker 끼리 race: claim_next_pending 은 SELECT-then-UPDATE WHERE status='pending' rowcount 가드라
+같은 잡 두 번 안 잡힘. DB conn 은 같은 asyncio thread 에서만 사용 — pool_size 개 task 가 같은 conn
+공유해도 sqlite3 same-thread 검증 통과.
 """
 from __future__ import annotations
 
@@ -31,41 +36,68 @@ from bot.site_ops import (
 
 log = logging.getLogger("bot.worker")
 
-_task: Optional[asyncio.Task] = None
+_tasks: list[asyncio.Task] = []
 
 # 같은 잡이 봇을 N회 이상 죽이면 자동 failed 처리 — 큐 맨앞에서 무한 점유 방지.
 ATTEMPTS_LIMIT = 5
 
 
 async def start(client, conn, *, dm_owner: Callable[..., Awaitable[None]]) -> None:
-    """봇 ready 직후 호출. running 잡 → pending 으로 reset 하고 단일 worker task 띄움.
+    """봇 ready 직후 호출. running 잡 → pending 으로 reset 하고 worker pool 띄움.
 
+    pool_size 개 task 가 같은 큐를 공유 (claim_next_pending race-safe).
     DB conn 은 main asyncio thread 에서만 사용 — sqlite3 의 same-thread 검증 통과를 위해
     worker 도 to_thread 안 거치고 직접 호출. sqlite WAL + 짧은 쿼리라 event loop block 미세.
     """
-    global _task
-    # _task guard 를 reset 보다 먼저 — on_ready 는 Discord gateway reconnect 마다 호출되는데,
+    global _tasks
+    # _tasks guard 를 reset 보다 먼저 — on_ready 는 Discord gateway reconnect 마다 호출되는데,
     # 살아있는 worker 가 처리 중인 running 잡을 reset 하면 같은 잡이 중복 처리되고
     # attempts 도 오해해서 +1 됨. worker 가 새로 뜨는 경우(첫 부팅)에만 reset.
-    if _task is not None and not _task.done():
-        log.info("worker 이미 실행 중 — reset/재시작 안 함 (on_ready reconnect 진입 추정)")
+    _tasks = [t for t in _tasks if not t.done()]
+    n = max(1, int(settings.worker.pool_size))
+    if len(_tasks) >= n:
+        log.info("worker 이미 실행 중 (%d task ≥ pool_size=%d) — reset/재시작 안 함 (on_ready reconnect 진입 추정)",
+                 len(_tasks), n)
+        return
+    if _tasks:
+        # 부분 생존 — 일부 task 가 BaseException 등으로 죽어 pool 이 줄어든 상태.
+        # 잡 reset 은 안 함(살아있는 worker 가 running 잡 처리 중일 수 있음) — 부족한 만큼만 top-up.
+        missing = n - len(_tasks)
+        log.warning("worker 부분 생존 (%d/%d alive) — %d 개 top-up", len(_tasks), n, missing)
+        for i in range(missing):
+            _tasks.append(asyncio.create_task(
+                _loop(client, conn, dm_owner), name=f"bot.worker.topup.{i}"))
         return
     n_reset = db.reset_running_to_pending(conn)
     if n_reset:
         log.info("worker start: %d개 running 잡을 pending 으로 reset (이전 인스턴스 잔재)", n_reset)
-    _task = asyncio.create_task(_loop(client, conn, dm_owner), name="bot.worker")
-    log.info("worker task 시작")
+    for i in range(n):
+        _tasks.append(asyncio.create_task(_loop(client, conn, dm_owner), name=f"bot.worker.{i}"))
+    log.info("worker task 시작 — pool_size=%d (chromium_lock.slots=%d)",
+             n, settings.chromium_lock.slots)
 
 
 async def stop() -> None:
-    global _task
-    if _task is not None:
-        _task.cancel()
+    """Best-effort cooperative stop — asyncio task 만 cancel.
+
+    경고: `_process_job` 안의 `asyncio.to_thread(blocking_register, ...)` 는 OS thread 에서 돌고
+    `chromium_lock` 도 그 thread 가 잡고 있음. asyncio cancel 은 thread 를 멈추지 않음 —
+    register.py subprocess + flock 은 subprocess 자체가 끝날 때까지 계속 살아 있다.
+    `stop()` await 가 풀려도 thread 가 백그라운드에서 lock 잡은 채 마저 도는 상태 가능.
+    프로세스 SIGTERM 직전 호출이면 thread 가 mid-subprocess 로 버려질 수 있음 — 이 경우
+    chromium_lock fd 는 interpreter shutdown 시 OS 가 회수, register.py subprocess 는 parent
+    종료 시 SIGHUP 또는 그대로 orphan (start_new_session=True 라 process group leader).
+    """
+    global _tasks
+    tasks = _tasks
+    _tasks = []
+    for t in tasks:
+        t.cancel()
+    for t in tasks:
         try:
-            await _task
+            await t
         except asyncio.CancelledError:
             pass
-        _task = None
 
 
 async def _loop(client, conn, dm_owner: Callable[..., Awaitable[None]]) -> None:
