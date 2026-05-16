@@ -2,6 +2,7 @@
 slug: host_scholar-google-_scholar_706d9c49
 url: https://scholar.google.com/scholar?hl=ko&as_sdt=0%2C5&q=harness&btnG=
 status: 🔧 손 config (작동중, baseline 10, httpx_html) + (C) probe heuristic + (D) retry feedback hint
+outcome: improved
 date: 2026-05-16
 requested_by: poi23619
 failure_keys: [article_body_len]

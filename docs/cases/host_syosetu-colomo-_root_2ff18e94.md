@@ -2,6 +2,7 @@
 slug: host_syosetu-colomo-_root_2ff18e94
 url: https://syosetu.colomo.dev/
 status: 🚫 거부 (게시판 형식 아님 — 사전 게이트 추가)
+outcome: rejected
 date: 2026-05-15
 fix_layer: F
 failure_keys: [schema, row_required_selector]

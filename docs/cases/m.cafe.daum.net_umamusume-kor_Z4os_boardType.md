@@ -2,6 +2,7 @@
 slug: m.cafe.daum.net_umamusume-kor_Z4os_boardType
 url: https://m.cafe.daum.net/umamusume-kor/Z4os?boardType=
 status: 🧩 손어댑터 (작동중, baseline 20, handwritten/DaumCafeAdapter)
+outcome: handcrafted
 date: 2026-05-12
 failure_keys: [posts_nonempty]
 config_strategy: handwritten

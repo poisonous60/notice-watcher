@@ -2,6 +2,7 @@
 slug: game.naver.com_lounge_Trickcal_board_3
 url: https://game.naver.com/lounge/Trickcal/board/3
 status: 🔧 손작성 config (작동중, baseline 25, httpx_json)
+outcome: handcrafted
 date: 2026-05-11
 failure_keys: [posts_nonempty]
 config_strategy: httpx_json

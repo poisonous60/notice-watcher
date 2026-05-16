@@ -2,6 +2,7 @@
 slug: endfield.gryphline.com_ko-kr_news
 url: https://endfield.gryphline.com/ko-kr/news
 status: ✅ 자동등록 (작동중, baseline 20, httpx_json)
+outcome: handcrafted
 date: 2026-05-11
 config_strategy: httpx_json
 ---

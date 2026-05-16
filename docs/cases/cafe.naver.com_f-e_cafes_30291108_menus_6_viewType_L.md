@@ -2,6 +2,7 @@
 slug: cafe.naver.com_f-e_cafes_30291108_menus_6_viewType_L
 url: https://cafe.naver.com/f-e/cafes/30291108/menus/6?viewType=L
 status: 🔧 손작성 config (작동중, baseline 33, handwritten/NaverCafeAdapter)
+outcome: handcrafted
 date: 2026-05-11
 failure_keys: [posts_nonempty]
 config_strategy: handwritten

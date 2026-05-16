@@ -2,6 +2,7 @@
 slug: www.reddit.com_r_CosmicPrincessKaguya
 url: https://www.reddit.com/r/CosmicPrincessKaguya/
 status: 🧩 손어댑터 (작동중, baseline 19, handwritten/RedditAdapter, flair="Fan Art")
+outcome: handcrafted
 date: 2026-05-12
 requested_by: 사용자(직접 요청)
 config_strategy: handwritten

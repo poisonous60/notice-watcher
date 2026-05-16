@@ -2,6 +2,7 @@
 slug: host_nte-perfectworl_kr_c8f4855a
 url: https://nte.perfectworld.com/kr/article/news/index.html
 status: 🔧 손 config (작동중, baseline 3, httpx_html)
+outcome: handcrafted
 date: 2026-05-15
 requested_by: poi23619
 failure_keys: [article_body_len]

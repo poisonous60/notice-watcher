@@ -205,8 +205,16 @@ probe/prompt/schema/코드 손대기 전 다음 여섯 질문에 답해보면 �
    - LLM 거동 영향 (C/A/B) 이면: 가장 최근 실패 케이스의 probe artifact 로 `register.py --reuse-probe` 1회 — 산출 config 동등 또는 더 좋은지.
 
 5. **case 파일 + commit msg** — 
-   - `docs/cases/<slug>.md` 작성 (frontmatter 필수 4: slug·url·status·date; 선택: fix_layer·failure_keys·config_strategy·adapters_changed·engine_files_touched·tags 등).
-   - `python scripts/cases_index.py` 실행해 INDEX.md 갱신.
+   - `docs/cases/<slug>.md` 작성. frontmatter:
+     - 필수: `slug`, `url`, `status` (이모지 + 1줄 narrative), `outcome` (DB 캐노니컬 — `improved|handcrafted|no_change|rejected|rejected_with_policy|error`), `date`
+     - 선택: `fix_layer`, `failure_keys`, `config_strategy`, `adapters_changed`, `engine_files_touched`, `tags`, `requested_by`
+   - `outcome` 분류 (§5.10 의 case_log 호출 outcome 과 동일):
+     - `improved` — fix_layer 기반 코드 일반화 (휴리스틱·prompt 룰·인식기·엔진) + 효과
+     - `handcrafted` — 손-config / 신규 손어댑터로 그 사이트만 작동 (fix_layer 키 X)
+     - `rejected` — 정책 거부 마커
+     - `rejected_with_policy` — no-change 인데 영구 기록 가치 정책 결정
+     - `no_change` — 시도했으나 효과 X (case .md 보통 X — narrative 가치 있을 때만)
+   - `python scripts/cases_index.py --backfill-db output/cases.sqlite3` 실행해 INDEX.md 갱신 + DB row sync.
    - commit msg prefix 권장: `[fix-layer: E|D|C|B|A|F|none] <slug>` + 본문에 자가 점검 답 요약 (특히 §6 의 1번 fix-layer 매핑, 7번 일반화 시도/포기 사유).
 
 6. **새 패턴이면 smoke_test fixture 추가했나?** — 다음 둘 중 하나에 해당하면 fixture 동시 추가 의무:

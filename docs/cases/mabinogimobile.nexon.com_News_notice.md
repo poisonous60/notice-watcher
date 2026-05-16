@@ -2,6 +2,7 @@
 slug: mabinogimobile.nexon.com_News_notice
 url: https://mabinogimobile.nexon.com/News/notice
 status: 🔧 손작성 config (작동중, baseline 10)
+outcome: handcrafted
 date: 2026-05-11
 failure_keys: [article_body_len]
 config_strategy: httpx_html

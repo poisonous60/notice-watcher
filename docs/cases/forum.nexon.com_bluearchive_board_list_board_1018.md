@@ -2,6 +2,7 @@
 slug: forum.nexon.com_bluearchive_board_list_board_1018
 url: https://forum.nexon.com/bluearchive/board_list?board=1018
 status: 🔧 손작성 config (작동중, baseline 30, httpx_json)
+outcome: handcrafted
 date: 2026-05-11
 failure_keys: [posts_nonempty]
 config_strategy: httpx_json

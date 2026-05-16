@@ -2,6 +2,7 @@
 slug: endfield_official
 url: https://web-news.gryphline.com/api/bulletin?lang=ko-kr&code=arknights_endfield_official
 status: ✅ 손작성 config (작동중, baseline 20, httpx_json)
+outcome: handcrafted
 date: 2026-05-11
 config_strategy: httpx_json
 tags: [reference, few-shot]

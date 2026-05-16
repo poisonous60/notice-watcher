@@ -165,32 +165,36 @@ def render_index(cases: list[dict], cases_dir: Path) -> str:
 
 
 def _classify_outcome(status: str, fm: dict) -> list[str]:
-    """frontmatter status + fix_layer → outcome 1개 또는 2개 (🚫+후속 분리).
+    """frontmatter outcome (명시) 우선 → status + fix_layer 폴백 (legacy).
 
-    fix_layer 가 있으면 코드 일반화가 일어났다는 신호 → improved 우선. 손-config 측면은
-    status 🔧 로 따로 보임 — DB row 의 outcome 은 가장 강한 신호 하나.
+    표준 형식 (`docs/case_runs DB 계획.md` rev 3):
+      frontmatter 에 `outcome: <improved|handcrafted|no_change|rejected|rejected_with_policy|error>`
+      명시 — DB row 가 그대로 박힘. case 파일이 source-of-truth.
 
-    매핑:
-      🚫 거부 + 본문에 "후속 완료" 또는 "시스템 차원"  → [rejected_with_policy, improved] 두 row
-      🚫 거부 (단순)                                   → rejected
-      fix_layer 있음 (A/B/C/D/F/G 등)                  → improved (코드 일반화)
-      ✅ 자동 (recognizer/probe 자동)                  → improved (engine_files_touched 비면 handcrafted 폴백)
-      🔧 / 🧩                                          → handcrafted (코드 일반화 X, 그 사이트만 작동)
-      ❌ FAILED                                         → error
-      기타                                              → error 폴백 (warn)
+    legacy 폴백 (outcome 명시 X 일 때):
+      fix_layer 있음 (A/B/C/D/F/G 등)        → improved (코드 일반화)
+      ✅ 자동 + engine_files_touched 있음    → improved
+      ✅ 손작성 / 🔧 / 🧩                    → handcrafted
+      🚫                                       → rejected
+      ❌ FAILED                                → error
+      기타                                     → error 폴백 (warn)
+
+    return list — 미래 split 케이스 대비 (현재 사용 X — 명시 outcome = 1 row).
     """
+    # 1. 명시 outcome 우선
+    explicit = fm.get("outcome")
+    if explicit:
+        if isinstance(explicit, str):
+            return [explicit]
+        if isinstance(explicit, list):
+            return [str(x) for x in explicit]
+
+    # 2. legacy 폴백
     s = status or ""
-
-    # 🚫 + 후속 = 거부 정책 + 시스템 차원 후속 두 동시
     if s.startswith("🚫"):
-        if "후속 완료" in s or "시스템 차원" in s:
-            return ["rejected_with_policy", "improved"]
         return ["rejected"]
-
-    # fix_layer 있으면 코드 일반화 일어남 — improved
     if fm.get("fix_layer"):
         return ["improved"]
-
     if s.startswith("✅"):
         if "자동" in s and "손작성" not in s:
             engine_touched = fm.get("engine_files_touched") or []
