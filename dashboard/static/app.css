@@ -663,6 +663,14 @@ table.row-grid td.meta {
   animation: span-row-flash-anim 1.6s ease-out;
 }
 
+/* 작은 아이콘 버튼 — table action 셀용. */
+.nw-icon-btn {
+  padding: 0.1rem 0.35rem;
+  font-size: 0.95rem;
+  line-height: 1;
+  min-width: 0;
+}
+
 /* /cases — 1-line 행 + hover popover. */
 .cases-table { table-layout: fixed; width: 100%; }
 .cases-table th,

@@ -26,48 +26,88 @@
 </p>
 
 {% if rows %}
-<table class="compact">
+<p class="muted">행 hover → 상세 (id · first_rejected_at · last_reason · last_url · last_slug).</p>
+
+<table class="cases-table compact">
+  <colgroup>
+    <col style="width: 140px">
+    <col style="width: 38%">
+    <col>
+    <col style="width: 60px">
+    <col style="width: 48px">
+  </colgroup>
   <thead>
     <tr>
-      <th style="width: 90px">id</th>
-      <th>host_suffix</th>
-      <th>path_prefix</th>
-      <th style="width: 50px">count</th>
-      <th style="width: 150px">last_rejected_at</th>
+      <th>last_rejected_at</th>
+      <th>host_suffix + path_prefix</th>
       <th>last_reason</th>
-      <th>last_url</th>
-      <th style="width: 100px">action</th>
+      <th>count</th>
+      <th></th>
     </tr>
   </thead>
   <tbody>
     {% for r in rows %}
-    <tr id="learned-row-{{ r.id }}">
-      <td><code>{{ r.id }}</code></td>
-      <td><code>{{ r.host_suffix or '(없음)' }}</code></td>
-      <td><code>{{ r.path_prefix or '(빈 path)' }}</code></td>
-      <td>{{ r.reject_count }}</td>
-      <td><time>{{ r.last_rejected_at_short }}</time></td>
-      <td title="{{ r.last_reason }}">{{ r.reason_short }}</td>
-      <td title="{{ r.last_url }}">
-        {% if r.last_url|is_http %}
-          <a href="{{ r.last_url }}" target="_blank" rel="noopener noreferrer">{{ r.url_short }}</a>
-        {% else %}
-          <span class="muted">{{ r.url_short }}</span>
-        {% endif %}
+    <tr id="learned-row-{{ r.id }}" class="cases-row">
+      <td class="mono nowrap"><time>{{ r.last_rejected_at_short }}</time></td>
+      <td class="cases-slug-cell">
+        <span class="cases-slug-text"><code>{{ r.host_suffix or '(없음)' }}</code><code>{{ r.path_prefix or '(빈 path)' }}</code></span>
+        {% if r.last_url|is_http %}<a class="cases-slug-link" href="{{ r.last_url }}" target="_blank" rel="noopener noreferrer">↗</a>{% endif %}
+        <div class="cases-popover">
+          <div class="cases-pop-row"><b>id</b> <code>{{ r.id }}</code></div>
+          <div class="cases-pop-row"><b>host_suffix</b> <code>{{ r.host_suffix or '(없음)' }}</code></div>
+          <div class="cases-pop-row"><b>path_prefix</b> <code>{{ r.path_prefix or '(빈 path)' }}</code></div>
+          <div class="cases-pop-row"><b>reject_count</b> {{ r.reject_count }}</div>
+          <div class="cases-pop-row"><b>first_rejected_at</b> <code>{{ r.first_rejected_at_short or '(없음)' }}</code></div>
+          <div class="cases-pop-row"><b>last_rejected_at</b> <code>{{ r.last_rejected_at_short or '(없음)' }}</code></div>
+          {% if r.last_slug %}<div class="cases-pop-row"><b>last_slug</b> <code>{{ r.last_slug }}</code></div>{% endif %}
+          {% if r.last_url %}
+          <div class="cases-pop-row"><b>last_url</b>
+            {% if r.last_url|is_http %}
+              <a href="{{ r.last_url }}" target="_blank" rel="noopener noreferrer">{{ r.last_url }}</a>
+            {% else %}
+              <code>{{ r.last_url }}</code>
+            {% endif %}
+          </div>
+          {% endif %}
+          {% if r.last_reason %}<div class="cases-pop-row"><b>last_reason</b> {{ r.last_reason }}</div>{% endif %}
+        </div>
       </td>
+      <td class="nowrap" title="{{ r.last_reason }}">{{ r.reason_short }}</td>
+      <td class="nowrap">{{ r.reject_count }}</td>
       <td>
-        <button class="secondary"
+        <button class="secondary nw-icon-btn"
+                title="unlearn — 이 패턴 풀기"
                 hx-post="/learned/{{ r.id }}/unlearn"
                 hx-target="#learned-row-{{ r.id }}"
                 hx-swap="outerHTML"
                 hx-confirm="패턴 {{ r.id }} ({{ r.host_suffix }}{{ r.path_prefix }}) 풀어줄까요? 이후 같은 패턴 URL 은 다시 자동 거부 안 됨.">
-          🔓 unlearn
+          🔓
         </button>
       </td>
     </tr>
     {% endfor %}
   </tbody>
 </table>
+
+<script>
+(function() {
+  function flipIfNeeded(tr) {
+    var pop = tr.querySelector('.cases-popover');
+    if (!pop) return;
+    pop.classList.remove('flip-up');
+    var popH = pop.scrollHeight || 320;
+    var rect = tr.getBoundingClientRect();
+    var spaceBelow = window.innerHeight - rect.bottom;
+    var spaceAbove = rect.top;
+    if (spaceBelow < popH + 16 && spaceAbove > spaceBelow) {
+      pop.classList.add('flip-up');
+    }
+  }
+  document.querySelectorAll('.cases-table tbody tr.cases-row').forEach(function(tr) {
+    tr.addEventListener('mouseenter', function() { flipIfNeeded(tr); });
+  });
+})();
+</script>
 {% else %}
   {% if stats.total == 0 %}
   <p class="muted">학습된 패턴 없음. 새로고침 시 자동 Pull 로 snapshot 갱신됩니다.</p>
