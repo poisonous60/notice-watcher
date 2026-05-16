@@ -42,7 +42,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from probe.paths import output_dir, url_to_slug  # noqa: E402
 from engine.digest import build_digest  # noqa: E402
-from engine.recognizers import recognize as recognize_platform  # noqa: E402
+from engine.recognizers import recognize as recognize_platform, recognize_reject  # noqa: E402
 from engine.tracing import start_trace, current_trace, env_for_child  # noqa: E402
 from generate import generate_config_validated, GenerationError  # noqa: E402
 from generate.routing import resolve as _resolve_route  # noqa: E402
@@ -143,6 +143,27 @@ def _is_antibot_redirect(u: Optional[str]) -> bool:
     except ValueError:
         return False
     return any(path.startswith(pfx) for pfx in _ANTIBOT_REDIRECT_PATH_PREFIXES)
+
+
+def _single_article_nav_only_check(digest: dict) -> tuple[bool, str]:
+    """probe digest 의 list_candidates.nav_only_same_host 가 True 면 single article 판정.
+    `_board_shape_check` *전* 호출 — board_shape 의 n_html_same 신호가 nav 안 사이드바 메뉴를
+    false-positive board 로 통과시키는 걸 차단 (theholocaustexplained 류).
+
+    인식기 PATTERNS_REJECT 가 *호스트 명시* fast-path 라면 이건 *unknown host* 의 구조 기반 fallback.
+    OG/LD 같은 명시 schema 신호 없어도 nav 외부 same-host repeating pattern 0건이면 거부.
+    """
+    lc = digest.get("list_candidates") or {}
+    nav = lc.get("nav_only_same_host")
+    if not isinstance(nav, dict) or not nav.get("nav_only_same_host"):
+        return True, ""
+    samples = nav.get("sample_nav_ancestors") or []
+    detail = (f"total_same_host={nav.get('total_same_host')} in_nav={nav.get('in_nav')} "
+              f"outside_nav={nav.get('outside_nav')} sample_nav={samples[:3]}")
+    return False, ("게시판 형식이 아닌 것 같다 — 같은 호스트로 가는 반복 링크가 *전부* nav/aside/header/footer "
+                   "(사이드바·topic-nav·메뉴) 안에만 있고 main content 의 글 목록이 없다. "
+                   "이건 단일 article/topic 페이지의 *주변 메뉴 링크* 들이지 폴링 대상 목록이 아님. "
+                   f"[신호: {detail}]")
 
 
 def _board_shape_check(digest: dict, url: str) -> tuple[bool, str]:
@@ -952,6 +973,20 @@ def _main_inner(argv) -> int:
         if not args.no_recognize:
             if (args.article_url or "").strip():
                 print("[register] 알림: --article-url 은 알려진 플랫폼으로 인식되면 무시됩니다(probe 를 건너뛰므로). 인식 안 되면 아래 probe 경로에서 그대로 적용됨.")
+            # 알려진 *단일 article URL* 호스트는 probe 도 돌리지 않고 즉시 거부 — 위키/지식백과/Britannica/USHMM.
+            # 매번 _board_shape_check 가 in-article 링크의 same-host 신호로 false-positive 통과시키는 걸 차단.
+            rej = recognize_reject(url)
+            if rej is not None:
+                name, reason = rej
+                print(f"[PHASE] recognize_reject ({name})", flush=True)
+                print(f"[register] ❌ 등록 거부 — {reason}")
+                print("[register] note: 게시판/공지 목록 페이지의 URL 을 주세요. 한 글 페이지의 in-text 참고 링크는 폴링 대상 아님.")
+                try:
+                    _save_rejected(slug, url, reason, note=f"recognizer={name} fast-path")
+                except Exception as e:  # noqa: BLE001
+                    print(f"[register] ⚠ REJECTED 마커 저장 실패: {e}", file=sys.stderr)
+                _prune_triage_queue(slug)
+                return 3
             tr = current_trace()
             print("[PHASE] recognize", flush=True)
             with tr.span("known_platform_try", attrs={"slug": slug, "url": url}) as sp:
@@ -981,6 +1016,19 @@ def _main_inner(argv) -> int:
         except Exception as e:  # noqa: BLE001
             print(f"[register] ⚠ learned_blacklist 학습 실패 (rc=2): {e}", file=sys.stderr)
         return 2
+
+    # single-article nav-only 게이트 — board_shape 가 nav 안 사이드바 메뉴를 same-host 신호로 false-positive
+    # 통과시키는 걸 차단. holocaustexplained 같은 *unknown host* 단일 article 페이지가 여기서 잡힌다.
+    # 인식기 PATTERNS_REJECT 가 *호스트 명시* fast-path 라면 이건 구조 기반 fallback.
+    ok_nav, nav_msg = _single_article_nav_only_check(digest)
+    if not ok_nav:
+        print(f"[register] {nav_msg}")
+        print("[register] ❌ 등록 거부 — 단일 article (nav-only same-host).")
+        try:
+            _learn_pattern(url, "single_article_nav_only 거부 (nav 안 사이드바 메뉴만 잡힘)", slug=slug)
+        except Exception as e:  # noqa: BLE001
+            print(f"[register] ⚠ learned_blacklist 학습 실패 (rc=3): {e}", file=sys.stderr)
+        return 3
 
     # board-shape 게이트 — gemini 부르기 전에 한 번 더. probe 가 같은 호스트로 가는 반복 글 링크/목록 API/피드를
     # 하나도 못 찾았으면 그냥 일반 페이지(랜딩/문서/단일 글) — gemini 4회 돌릴 가치 없음 + triage 큐 오염 방지.

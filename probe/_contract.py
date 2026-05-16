@@ -155,6 +155,11 @@ _ARTIFACTS: dict[str, ArtifactContract] = {
             _ContractField("body_empty_likely", type_hint="bool", required=False,
                            note="본문 없는 사이트 summary — row_external_host(external_ratio≥0.8) OR row_interactive_action(is_interactive_action=true) 둘 중 하나면 true. "
                                 "true 면 article.body_empty_acceptable:true 박고 article.content selector 시도 안 해도 됨 (retry 단축)."),
+            _ContractField("nav_only_same_host", type_hint="dict|null", required=False,
+                           note="같은-host repeating pattern 의 DOM ancestor 가 *전부* nav/aside/header/footer (또는 role=navigation/complementary/banner/contentinfo) 안인가 — single-article 페이지 신호. "
+                                "None=의미 있는 same-host pattern 0건. dict={base_host, total_same_host, in_nav, outside_nav, nav_only_same_host, sample_nav_ancestors}. "
+                                "nav_only_same_host=true 면 사이드바/topic-nav 메뉴만 잡혀 main content 의 board list 없음 → 폴링 의미 X. "
+                                "scripts/register.py `_single_article_nav_only_check` 가 board_shape 게이트 *전* 에 이 신호로 거부."),
         ),
     ),
 

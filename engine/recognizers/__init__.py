@@ -61,6 +61,29 @@ def _load() -> list[tuple[str, "re.Pattern", Callable[["re.Match", str], Optiona
 _RECOGNIZERS = _load()
 
 
+def _load_rejects() -> list[tuple[str, "re.Pattern", str]]:
+    """`PATTERNS_REJECT` 를 export 한 모듈을 모은다 — 단일 article URL fast-path 거부용.
+    builder 가 없고 (pattern, reason) tuple — recognize_reject 가 reason 반환."""
+    items: list[tuple[str, "re.Pattern", str]] = []
+    for mi in pkgutil.iter_modules(__path__):
+        if mi.name.startswith("_"):
+            continue
+        try:
+            mod = importlib.import_module(f"{__name__}.{mi.name}")
+        except Exception:  # noqa: BLE001
+            continue
+        rejects = getattr(mod, "PATTERNS_REJECT", None)
+        if not rejects:
+            continue
+        name = getattr(mod, "NAME", mi.name)
+        for pat, reason in rejects:
+            items.append((name, pat, reason))
+    return items
+
+
+_REJECTS = _load_rejects()
+
+
 def recognize(url: str) -> Optional[dict]:
     """url 이 알려진 플랫폼이면 그 config dict(`_recognized_platform` 키 포함), 아니면 None."""
     if not url:
@@ -78,6 +101,24 @@ def recognize(url: str) -> Optional[dict]:
             continue
         cfg["_recognized_platform"] = name
         return cfg
+    return None
+
+
+def recognize_reject(url: str) -> Optional[tuple[str, str]]:
+    """url 이 알려진 단일 article 호스트 패턴이면 (NAME, reason). 아니면 None.
+    `register.py` 가 probe 전에 호출 — 매칭 시 즉시 REJECTED + learned_blacklist 학습.
+    위키 한글 `분류:`/`특수기능:` 같은 URL-encoded path 의 negative lookahead 매칭을 위해
+    unquote 한 형태에 대해서만 검사 (raw % 이스케이프는 lookahead literal 과 매칭 안 되므로 통과 위험)."""
+    if not url:
+        return None
+    from urllib.parse import unquote
+    try:
+        decoded = unquote(url)
+    except Exception:  # noqa: BLE001
+        decoded = url
+    for name, pat, reason in _REJECTS:
+        if pat.search(decoded):
+            return name, reason
     return None
 
 

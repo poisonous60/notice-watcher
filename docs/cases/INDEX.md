@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 29 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 30 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -10,6 +10,7 @@
 | [`naver-cafe_31104609_1_c9b1f633`](naver-cafe_31104609_1_c9b1f633.md) | 🚫 등록 거부 (등록은 OK, 본문 추출 불가 — 정책상 우회 X) + 시스템 차원 후속 완료 | 2026-05-16 | F | body_empty_at_baseline, article_api_401_403 | https://cafe.naver.com/f-e/cafes/31104609/menus/1?viewType=L |
 | [`naver-blog_ghangth_5a895e5f`](naver-blog_ghangth_5a895e5f.md) | ✅ 자동 (recognizer 신규 — naver-blog, naver-blog_dhyana69 와 같은 PR 에서 동시 풀림) | 2026-05-16 | F | posts_nonempty, list_url_none, candidates_zero | https://blog.naver.com/ghangth/221299970841 |
 | [`naver-blog_dhyana69_85ae2dd0`](naver-blog_dhyana69_85ae2dd0.md) | ✅ 자동 (recognizer 신규 — naver-blog 플랫폼 인식, NaverBlogRssAdapter 가 RSS 피드 직접 파싱) | 2026-05-16 | F | posts_nonempty, list_url_none, candidates_zero | https://m.blog.naver.com/PostView.nhn?blogId=dhyana69&logNo=150071320787&proxyReferer=https:%2F%2Fwww.google.co.kr%2F |
+| [`infra_single_article_gate_2026-05-16`](infra_single_article_gate_2026-05-16.md) | 🏗 인프라 (단일 article page 자동 거부 게이트 — 인식기 fast-path + nav-only 구조 fallback) | 2026-05-16 | F+C | single_article_page, board_shape_false_positive, nav_only_same_host, recognizer_reject_fast_path | (인프라 case — 특정 사이트 X. 트리거 = beec51d 의 article-page 4건 손-거부 직후) |
 | [`infra_learned_blacklist_2026-05-16`](infra_learned_blacklist_2026-05-16.md) | 🏗 인프라 (거부 패턴 자동 학습 시스템 — 한 사용자 거부 → 모두에게 적용, 등록 성공 = 자동 회수) | 2026-05-16 | F | learned_blacklist, host_path_pattern, auto_learn, auto_unlearn | (인프라 case — 특정 사이트 X. 트리거 = host_google-com_search_9440e9f9 의 후속 후속) |
 | [`host_theholocaustexp_the-nazi-rise-to-power_9f510466`](host_theholocaustexp_the-nazi-rise-to-power_9f510466.md) | 🚫 거부 (The Holocaust Explained 단일 article/subtopic page — 게시판 아님. 폴링 대상 X) | 2026-05-16 | none | article_body_len, embedded_subtopics, not_a_board | https://www.theholocaustexplained.org/the-nazi-rise-to-power/the-nazi-rise-to-power/the-role-of-economic-instability/ |
 | [`host_terms-naver-com_entry.naver_a297b3b0`](host_terms-naver-com_entry.naver_a297b3b0.md) | 🚫 거부 (단일 네이버 지식백과 항목 — 게시판 아님. 폴링 대상 X) | 2026-05-16 | none | posts_nonempty, list_url_none, candidates_zero, not_a_board | https://terms.naver.com/entry.naver?docId=3579743&cid=59054&categoryId=59061 |
@@ -49,13 +50,14 @@
 | E+A+C+D | 1 |
 | F | 7 |
 | F+A | 1 |
+| F+C | 1 |
 | none | 8 |
 
 ### config_strategy 분포
 
 | strategy | count |
 |---|---|
-| (미기재) | 3 |
+| (미기재) | 4 |
 | handwritten | 7 |
 | httpx_html | 6 |
 | httpx_json | 4 |
@@ -64,5 +66,5 @@
 
 ### 최근 90일 (≥ 2026-02-15)
 
-케이스 29 건.
+케이스 30 건.
 

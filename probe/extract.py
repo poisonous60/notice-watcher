@@ -645,6 +645,88 @@ def list_row_external_host(
     }
 
 
+_NAV_TAGS = frozenset(("nav", "aside", "header", "footer"))
+_NAV_ROLES = frozenset(("navigation", "complementary", "banner", "contentinfo"))
+
+
+@heuristic
+def all_same_host_patterns_in_nav(
+    html: str,
+    html_candidates: list[dict],
+    *,
+    base_url: str,
+) -> Optional[dict]:
+    """모든 same-host repeating pattern 의 DOM ancestor 가 nav/aside/header/footer 안인가.
+    True 면 single article 신호 — board 페이지의 main list 는 nav 밖에 있음 (main/article body 안).
+    nav 안에만 같은-host 반복 링크가 있으면 = 사이드바/topic-nav/메뉴 = 폴링 의미 없음.
+
+    트리거 조건: total_same_host ≥ 1 AND outside_nav == 0.
+
+    출력:
+      None — 같은-host 의미 있는 row 후보 0건 (판정 불가 — 외부도메인 검색결과 등).
+      dict = {base_host, total_same_host, in_nav, outside_nav, nav_only_same_host, sample_nav_ancestors}
+        sample_nav_ancestors: 어떤 nav-tag 안이었는지 샘플 (debug/case 작성용).
+
+    `_single_article_nav_only_check` (scripts/register.py) 가 이 신호 보고 거부.
+    """
+    if not html or not html_candidates:
+        return None
+    from urllib.parse import urlsplit
+    base_host = (urlsplit(base_url or "").netloc or "").lower()
+    if not base_host:
+        return None
+    same_host = [c for c in html_candidates
+                 if (urlsplit(c.get("sample_url") or "").netloc or "").lower() == base_host]
+    if not same_host:
+        return None
+    soup = BeautifulSoup(html, "lxml")
+    in_nav = 0
+    outside_nav = 0
+    sample_nav: list[str] = []
+    for c in same_host:
+        sel = c.get("selector") or ""
+        if not sel:
+            continue
+        try:
+            el = soup.select_one(sel)
+        except Exception:  # noqa: BLE001  selector 문법 오류 시 skip
+            continue
+        if el is None:
+            continue
+        nav_anc = _find_nav_ancestor(el)
+        if nav_anc:
+            in_nav += 1
+            if len(sample_nav) < 4:
+                sample_nav.append(nav_anc)
+        else:
+            outside_nav += 1
+    total = in_nav + outside_nav
+    if total == 0:
+        return None
+    return {
+        "base_host": base_host,
+        "total_same_host": total,
+        "in_nav": in_nav,
+        "outside_nav": outside_nav,
+        "nav_only_same_host": outside_nav == 0,
+        "sample_nav_ancestors": sample_nav,
+    }
+
+
+def _find_nav_ancestor(el: Tag) -> Optional[str]:
+    p = el.parent
+    while p is not None and getattr(p, "name", None):
+        name = p.name
+        if name in _NAV_TAGS:
+            ide = "#" + p.get("id") if hasattr(p, "get") and p.get("id") else ""
+            return f"{name}{ide}"
+        role = p.get("role") if hasattr(p, "get") else None
+        if role in _NAV_ROLES:
+            return f"[role={role}]"
+        p = p.parent
+    return None
+
+
 # runtime_id_candidates: 사이트가 HTML 안에 *고정값으로 박아둔* ID/슬러그 후보.
 # URL path 만으론 안 보이지만 (예: cafe.naver.com/<slug> 는 cafe_id 가 없음) 페이지 HTML 안에 박혀
 # 있는 ID — `g_sClubId="31104609"`, `<meta property="og:url" content=".../boards/1018">`,
@@ -805,6 +887,7 @@ def write_list_candidates(
     runtime_ids: Optional[list[dict]] = None,
     row_external_host: Optional[dict] = None,
     row_interactive_action: Optional[dict] = None,
+    nav_only_same_host: Optional[dict] = None,
 ) -> None:
     # body_empty_likely summary — 본문이 본질적으로 없는 사이트 신호.
     # row_external_host (검색결과/aggregator) OR row_interactive_action (게임/투표/SPA) 중 하나라도 true 면 박힘.
@@ -833,6 +916,11 @@ def write_list_candidates(
         # 본문 없는 사이트 summary — row_external_host(>=0.8) OR row_interactive_action 둘 중 하나면 true.
         # LLM 이 이 키 보고 article.body_empty_acceptable=true 박음. retry 안 거치고 1st attempt 부터.
         "body_empty_likely": body_empty_likely,
+        # 같은-host repeating pattern 이 *전부* nav/aside/header/footer 안 — single-article 페이지 신호.
+        # board 페이지의 main list 는 nav 밖. nav-only 면 사이드바/topic-nav 만 잡힌 것 → 폴링 의미 없음.
+        # None=의미 있는 same-host pattern 0건. dict={base_host, total_same_host, in_nav, outside_nav, nav_only_same_host, sample_nav_ancestors}.
+        # register.py `_single_article_nav_only_check` 가 nav_only_same_host=true 면 board_shape 게이트 *전* 에 거부.
+        "nav_only_same_host": nav_only_same_host,
     }
     validate_payload("list_candidates.json", payload, allow_extra=False)
     (out_dir / "list_candidates.json").write_text(

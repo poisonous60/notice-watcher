@@ -21,6 +21,7 @@ from probe.diagnose import diagnose
 from probe.environment import capture as capture_environment, gdpi_advice
 from probe.discover import discover_feeds, read_robots
 from probe.extract import (
+    all_same_host_patterns_in_nav,
     html_repeating_patterns,
     pick_first_article_url,
     list_row_external_host,
@@ -374,6 +375,11 @@ def _run(args: argparse.Namespace, url: str, slug: str) -> int:
             row_interactive_action = list_row_interactive_action_text(
                 html_candidates=html_lists,
             )
+            nav_only_same_host = all_same_host_patterns_in_nav(
+                html=page_html or "",
+                html_candidates=html_lists,
+                base_url=url,
+            )
             write_list_candidates(
                 out_dir,
                 html_candidates=html_lists,
@@ -384,6 +390,7 @@ def _run(args: argparse.Namespace, url: str, slug: str) -> int:
                 runtime_ids=runtime_ids,
                 row_external_host=row_external_host,
                 row_interactive_action=row_interactive_action,
+                nav_only_same_host=nav_only_same_host,
             )
         print(f"  HTML 반복 패턴: {len(html_lists)}건")
         print(f"  JSON API 후보: {len(json_api_lists)}건 (관련도순)")
