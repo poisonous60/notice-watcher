@@ -8,6 +8,7 @@ import asyncio
 import collections
 import json
 import logging
+import signal
 import subprocess
 import sys
 import threading
@@ -131,16 +132,25 @@ def blocking_register(url: str, article_url: Optional[str] = None,
     child_env = {**os.environ, **env_for_child()}
     try:
         with chromium_lock(timeout=settings.chromium_lock.bot_timeout):
+            # start_new_session=True → register.py 를 새 process group leader 로. timeout 시
+            # killpg 로 손자 (probe.py, playwright driver, chrome) 까지 전부 SIGKILL 해야
+            # register stdout pipe 의 writer 가 다 닫혀 `for line in proc.stdout` 가 EOF 로 빠짐.
+            # 없으면 register 만 죽고 손자가 pipe 잡고 있어 봇 워커가 무한 block — job 영원 'running',
+            # triage 큐도 안 들어감.
             proc = subprocess.Popen(cmd, cwd=str(ROOT),
                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                     text=True, errors="replace", bufsize=1,
-                                    env=child_env)
+                                    env=child_env,
+                                    start_new_session=True)
             timed_out = threading.Event()
 
             def _kill_on_timeout() -> None:
                 if proc.poll() is None:
                     timed_out.set()
-                    proc.kill()
+                    try:
+                        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                    except (ProcessLookupError, PermissionError, OSError):
+                        proc.kill()
 
             killer = threading.Timer(settings.chromium_lock.register_subprocess_timeout, _kill_on_timeout)
             killer.start()

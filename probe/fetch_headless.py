@@ -5,7 +5,9 @@ playwright/playwright-stealth가 미설치면 `is_available() == False`로 skip 
 from __future__ import annotations
 
 import json
+import logging
 import re
+import threading
 import time
 from pathlib import Path
 from typing import Optional
@@ -14,6 +16,28 @@ from ._contract import validate_payload
 from ._heuristic import heuristic
 from .signals import classify
 from .types import Classification, Result
+
+log = logging.getLogger("probe.fetch_headless")
+
+
+def _bounded_close(closeable, *, label: str, timeout_s: float = 10.0) -> None:
+    """playwright context/browser `.close()` 는 timeout 인자가 없어 anti-bot challenge 페이지
+    (예: google `/sorry/index`) 가 HAR flush 도중 응답 안 하면 sync_api 가 영원 block 한다.
+    별 thread 에서 호출하고 timeout 안에 안 끝나면 포기 — 봇 worker 의 site_ops 가
+    process-group SIGKILL 로 leak 된 chromium 까지 정리하므로 leak 영구화 X."""
+    done = threading.Event()
+
+    def _go() -> None:
+        try:
+            closeable.close()
+        except Exception:  # noqa: BLE001
+            pass
+        finally:
+            done.set()
+
+    threading.Thread(target=_go, daemon=True, name=f"bounded_{label}").start()
+    if not done.wait(timeout_s):
+        log.warning("playwright %s timed out (%.0fs) — chromium leak 은 process-group kill 로 정리", label, timeout_s)
 
 
 def is_available() -> bool:
@@ -261,17 +285,14 @@ def fetch_with_capture(
                 except Exception as e:
                     error = f"{type(e).__name__}: {e}"
             finally:
-                # browser/context leak 방지 — new_context 실패해도 browser.close() 보장
+                # browser/context leak 방지 — new_context 실패해도 browser.close() 보장.
+                # _bounded_close 로 wrap — sync_api 의 close 가 anti-bot challenge 페이지(예: google
+                # /sorry/index) HAR flush 단계에서 무한 block 하는 케이스 방어. 호출자 (register.py
+                # 의 자식) 의 SIGKILL 이 chromium 도 정리.
                 if context is not None:
-                    try:
-                        context.close()  # HAR 저장
-                    except Exception:  # noqa: BLE001
-                        pass
+                    _bounded_close(context, label="context.close")  # HAR 저장
                 if browser is not None:
-                    try:
-                        browser.close()
-                    except Exception:  # noqa: BLE001
-                        pass
+                    _bounded_close(browser, label="browser.close")
     except Exception as e:
         error = f"{type(e).__name__}: {e}"
 
@@ -521,17 +542,14 @@ def fetch_article_by_click(
                 except Exception as e:  # noqa: BLE001
                     error = f"{type(e).__name__}: {e}"
             finally:
-                # browser/context leak 방지 — new_context 실패해도 browser.close() 보장
+                # browser/context leak 방지 — new_context 실패해도 browser.close() 보장.
+                # _bounded_close 로 wrap — sync_api 의 close 가 anti-bot challenge 페이지(예: google
+                # /sorry/index) HAR flush 단계에서 무한 block 하는 케이스 방어. 호출자 (register.py
+                # 의 자식) 의 SIGKILL 이 chromium 도 정리.
                 if context is not None:
-                    try:
-                        context.close()  # HAR 저장
-                    except Exception:  # noqa: BLE001
-                        pass
+                    _bounded_close(context, label="context.close")  # HAR 저장
                 if browser is not None:
-                    try:
-                        browser.close()
-                    except Exception:  # noqa: BLE001
-                        pass
+                    _bounded_close(browser, label="browser.close")
     except Exception as e:  # noqa: BLE001
         error = f"{type(e).__name__}: {e}"
 
