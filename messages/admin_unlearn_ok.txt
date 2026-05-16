@@ -1,0 +1,1 @@
+✅ 학습 패턴 `{{pat_id}}` 제거됨 — 이후 같은 host+path_prefix URL 은 다시 자동 거부 안 됨.

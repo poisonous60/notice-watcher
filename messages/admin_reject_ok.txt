@@ -1,0 +1,5 @@
+✅ `{{slug}}` 거부 마커 박힘.
+• reason: {{reason}}
+• note: {{note}}
+• marker: `{{marker}}`
+이후 같은 slug `/preview`·`/watch` 시 거부 응답.

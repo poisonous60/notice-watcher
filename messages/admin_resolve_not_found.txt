@@ -1,0 +1,1 @@
+❌ 신고 #{{report_id}} 가 없거나 이미 resolved.

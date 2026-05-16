@@ -1,0 +1,3 @@
+`/announce` — 현재 공지 수신 상태 표시.
+`/announce dm:false` — 내 DM 공지 끄기 / `dm:true` 로 다시 켜기.
+`/announce channel:false` — 이 채널 공지 끄기 (`Manage Channels` 권한 필요).

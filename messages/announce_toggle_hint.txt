@@ -1,0 +1,1 @@
+토글: `/announce dm:false` 로 DM 끄기, `/announce dm:true` 로 다시 켜기. 채널은 `Manage Channels` 권한자가 그 채널에서 `/announce channel:false`.

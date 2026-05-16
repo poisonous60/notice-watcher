@@ -1,0 +1,1 @@
+공지 끄기: /announce dm:false  ·  이 채널: /announce channel:false (Manage Channels 권한 필요)

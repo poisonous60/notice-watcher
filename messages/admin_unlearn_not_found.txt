@@ -1,0 +1,1 @@
+❌ pattern_id `{{pat_id}}` 못 찾음. `/admin learned` 로 확인.

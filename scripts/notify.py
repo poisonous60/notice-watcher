@@ -43,6 +43,7 @@ from generate import get_default_recorder, compute_cost, client_for, set_process
 from generate.prompts import load_prompt, render_prompt  # noqa: E402
 from bot import db  # noqa: E402
 from bot.config import bot_token  # noqa: E402
+from bot.messages import render as msg  # noqa: E402
 from bot.discord_rest import deliver, post_webhook, CannotDeliver, DiscordRestError  # noqa: E402
 from bot.runtime_config import settings  # noqa: E402
 from engine.tracing import start_trace, current_trace  # noqa: E402
@@ -192,20 +193,20 @@ def format_message(post: dict, summary: str) -> str:
     url = post.get("url") or ""
     date_short = (post.get("published_at") or "")[:10]
     cat = post.get("category")
-    head = f"📢 [{cat}] **{title}**" if cat else f"📢 **{title}**"
+    head = msg("notify_alert_head_cat", cat=cat, title=title) if cat else msg("notify_alert_head", title=title)
     lines = [head]
     if date_short:
-        lines.append(f"📅 {date_short}")
+        lines.append(msg("notify_alert_date", date=date_short))
     if url:
-        lines.append(f"🔗 <{url}>")
+        lines.append(msg("notify_alert_url", url=url))
     if summary:
-        lines.append(f"📝 {summary}")
+        lines.append(msg("notify_alert_summary", summary=summary))
     return "\n".join(lines)
 
 
 def digest_chunks(rows: list, *, max_len: int = 1850) -> list[str]:
     """pending 행들(slug,post_id,title,url,published_at,summary) → 다이제스트 메시지(들)."""
-    header = f"🗞️ **새 글 다이제스트** ({len(rows)}건)"
+    header = msg("notify_digest_header", count=len(rows))
     blocks: list[str] = []
     for r in rows:
         t = (r["title"] or "(제목 없음)").strip()
@@ -350,7 +351,7 @@ def send_heartbeats(conn, tok: Optional[str], collected_dir: Optional[Path],
             continue  # 폴링 안 됐거나 깨짐 — '없음'이라고 말하면 오해를 줌
         if (slug, r["target_id"]) in delivered_pairs:
             continue  # 이번에 새 글을 이미 보냈음
-        content = f"🔇 `{slug}` — 새 공지 없음 (확인: {when} KST)"
+        content = msg("notify_heartbeat", slug=slug, when=when)
         if dry_run or not tok:
             print(f"\n--- [HEARTBEAT → {r['target_kind']}:{r['target_id']}] ---\n{content}\n")
             if not tok and not dry_run:

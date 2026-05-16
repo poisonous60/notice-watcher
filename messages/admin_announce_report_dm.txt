@@ -1,0 +1,1 @@
+• DM: {{sent}}/{{total}} 성공  ·  실패 {{failed}}

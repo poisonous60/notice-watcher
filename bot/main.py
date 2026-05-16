@@ -33,6 +33,7 @@ from bot import admin as admin_mod, db, inspector, site_ops, url_gate, worker  #
 from bot.config import (  # noqa: E402
     admin_guild_id, bot_token, feedback_max_len, guild_id, owner_user_id, safe_browsing_api_key,
 )
+from bot.messages import render as msg  # noqa: E402
 from bot.runtime_config import settings  # noqa: E402
 from probe.paths import url_to_slug  # noqa: E402
 
@@ -78,14 +79,12 @@ def _check_rate_limit(user_id: Optional[str]) -> Optional[str]:
         cnt = db.count_user_register_jobs_since(
             _conn, user_id, (now - timedelta(hours=1)).isoformat())
         if cnt >= rl.per_user_per_hour:
-            return (f"⏱️ 너무 자주 요청하셨어요 — 시간당 {rl.per_user_per_hour}건 한도 초과 "
-                    f"(최근 1시간 {cnt}건). 잠시 후 다시 시도해 주세요.")
+            return msg("rate_limit_hourly", limit=rl.per_user_per_hour, cnt=cnt)
     if rl.per_user_per_day > 0:
         cnt = db.count_user_register_jobs_since(
             _conn, user_id, (now - timedelta(days=1)).isoformat())
         if cnt >= rl.per_user_per_day:
-            return (f"⏱️ 24시간 한도({rl.per_user_per_day}건)를 초과했어요 "
-                    f"(최근 24시간 {cnt}건). 내일 다시 시도해 주세요.")
+            return msg("rate_limit_daily", limit=rl.per_user_per_day, cnt=cnt)
     return None
 
 
@@ -96,8 +95,7 @@ def _check_queue_depth() -> Optional[str]:
         return None
     n = db.queue_pending_count(_conn)
     if n >= cap:
-        return (f"📥 봇 처리 큐가 가득 찼어요 ({n}/{cap}건 대기 중). "
-                f"잠시 후 다시 시도해 주세요.")
+        return msg("queue_full", n=n, cap=cap)
     return None
 
 
@@ -110,10 +108,12 @@ async def _gate_check(url: str, *, article_url: Optional[str], via: str,
     except url_gate.UrlRejected as e:
         log.info("[url_gate] reject %s (article=%s): %s — %s", url, article_url, e.reason, e.msg)
         if e.reason == "malicious":
-            await _dm_owner(f"⚠️ [url_gate] 악성 URL 등록 시도 차단\nURL: {url}\n사유: {e.msg}\n"
-                            f"요청: {(requested_by or {}).get('name', '?')} (via {via})", key="url_gate_malicious")
+            await _dm_owner(msg("url_gate_malicious_owner_dm", url=url, msg=e.msg,
+                                user_name=(requested_by or {}).get('name', '?'), via=via),
+                            key="url_gate_malicious")
         elif e.reason == "gsb_error":
-            await _dm_owner(f"⚠️ [url_gate] Safe Browsing 검사 실패 — {e.msg}\nURL: {url}", key="url_gate_gsb")
+            await _dm_owner(msg("url_gate_gsb_error_owner_dm", msg=e.msg, url=url),
+                            key="url_gate_gsb")
         return e.msg
     user_id = (requested_by or {}).get("id") if isinstance(requested_by, dict) else None
     err = _check_rate_limit(user_id) or _check_queue_depth()
@@ -165,21 +165,20 @@ async def watch(interaction: discord.Interaction, url: str, filter: Optional[str
     await interaction.response.defer(thinking=True)
     url = url.strip()
     if not re.match(r"^https?://", url):
-        await interaction.edit_original_response(content="❌ http(s):// 로 시작하는 URL 을 주세요.")
+        await interaction.edit_original_response(content=msg("validation_url_required"))
         return
     art = (article_url or "").strip() or None
     if art and not re.match(r"^https?://", art):
-        await interaction.edit_original_response(content="❌ article_url 은 http(s):// 로 시작하는 글 URL 이어야 해요.")
+        await interaction.edit_original_response(content=msg("validation_article_url_required"))
         return
 
     slug = url_to_slug(url)
     if site_ops.is_rejected(slug):
         info = site_ops.rejected_info(slug) or {}
         await interaction.edit_original_response(
-            content=f"❌ 이 사이트는 이전에 등록이 거부됐어요.\n"
-                    f"• 사유: {info.get('reason') or '-'}\n"
-                    f"• 메모: {info.get('note') or '없음'}\n"
-                    f"다시 등록을 원하시면 owner 에게 문의해 주세요.")
+            content=msg("rejected_site",
+                        reason=info.get('reason') or '-',
+                        note=info.get('note') or '없음'))
         return
     user_id = str(interaction.user.id)
     target_kind = "channel" if here else "dm"
@@ -194,32 +193,34 @@ async def watch(interaction: discord.Interaction, url: str, filter: Optional[str
                             target_kind=target_kind, target_id=target_id,
                             notify_empty=notify_empty)
         n = _baseline_count(slug)
-        head = (f"✅ 구독 추가 — `{slug}` (이미 등록된 사이트)\n"
-                f"• baseline {n if n is not None else '?'}건\n"
-                f"• 필터: {filter_prompt or '없음(새 글 전부)'}\n"
-                f"• 발송: 폴링 직후 즉시\n"
-                f"• 알림: {where}\n"
-                f"• 새 글 없을 때도 알림: {'예' if notify_empty else '아니오'}"
-                f"{_body_warning(slug)}")
-        await interaction.edit_original_response(content=head + "\n\n📋 예시 알림 만드는 중…")
+        head = msg("watch_already_registered_head",
+                   slug=slug,
+                   n=(n if n is not None else '?'),
+                   filter=(filter_prompt or '없음(새 글 전부)'),
+                   where=where,
+                   notify_empty=('예' if notify_empty else '아니오'),
+                   warn=_body_warning(slug))
+        await interaction.edit_original_response(
+            content=head + "\n\n" + msg("watch_example_loading_suffix"))
         example = await site_ops.make_example(slug)
         if example:
             await interaction.edit_original_response(
-                content=head + "\n\n📋 **예시 알림** (이런 형식으로 옵니다):\n" + example)
+                content=head + "\n\n" + msg("watch_example_present_prefix") + "\n" + example)
         else:
-            await interaction.edit_original_response(content=head + "\n\n(예시 알림 생성은 건너뜀 — 등록은 정상)")
+            await interaction.edit_original_response(
+                content=head + "\n\n" + msg("watch_example_skip"))
         return
 
     # 신규 사이트 — URL 게이트 → 큐 enqueue → worker 가 처리하면 ack 메시지 edit
     requested_by = {"id": user_id, "name": str(interaction.user)}
     err = await _gate_check(url, article_url=art, via="watch", requested_by=requested_by)
     if err:
-        await interaction.edit_original_response(content=f"⚠️ {err}")
+        await interaction.edit_original_response(content=msg("gate_rejected", err=err))
         return
 
     # interaction 응답을 채널 메시지로 promote → worker 가 token 만료와 무관하게 edit 가능
-    await interaction.edit_original_response(content="📥 큐 추가 중…")
-    msg = await interaction.original_response()
+    await interaction.edit_original_response(content=msg("enqueueing"))
+    ack_msg = await interaction.original_response()
     sub_payload = json.dumps({
         "user_id": user_id, "filter_prompt": filter_prompt, "schedule": "realtime",
         "target_kind": target_kind, "target_id": target_id, "notify_empty": bool(notify_empty),
@@ -227,15 +228,14 @@ async def watch(interaction: discord.Interaction, url: str, filter: Optional[str
     job_id, inserted = db.enqueue_job(
         _conn, kind="register", url=url, slug=slug, article_url=art,
         via="watch", requested_by=json.dumps(requested_by),
-        ack_channel_id=str(msg.channel.id), ack_message_id=str(msg.id),
+        ack_channel_id=str(ack_msg.channel.id), ack_message_id=str(ack_msg.id),
         sub_payload=sub_payload, dedupe=False,
     )
     pos = db.queue_position(_conn, job_id)
     if pos <= 1:
-        text = f"📥 큐 추가됨 (잡 #{job_id}) — 곧 처리 시작합니다. 끝나면 이 메시지로 알려드릴게요."
+        text = msg("watch_queued_first", job_id=job_id)
     else:
-        text = (f"📥 큐 추가됨 (잡 #{job_id}) — 현재 대기열 **{pos}번째**. "
-                f"이전 잡들이 끝나면 처리되고, 결과는 이 메시지로 알려드릴게요.")
+        text = msg("watch_queued_wait", job_id=job_id, pos=pos)
     await interaction.edit_original_response(content=text)
 
 
@@ -250,55 +250,55 @@ async def preview(interaction: discord.Interaction, url: str, article_url: Optio
     await interaction.response.defer(thinking=True)
     url = url.strip()
     if not re.match(r"^https?://", url):
-        await interaction.edit_original_response(content="❌ http(s):// 로 시작하는 URL 을 주세요.")
+        await interaction.edit_original_response(content=msg("validation_url_required"))
         return
     art = (article_url or "").strip() or None
     if art and not re.match(r"^https?://", art):
-        await interaction.edit_original_response(content="❌ article_url 은 http(s):// 로 시작하는 글 URL 이어야 해요.")
+        await interaction.edit_original_response(content=msg("validation_article_url_required"))
         return
 
     slug = url_to_slug(url)
     if site_ops.is_rejected(slug):
         info = site_ops.rejected_info(slug) or {}
         await interaction.edit_original_response(
-            content=f"❌ 이 사이트는 이전에 등록이 거부됐어요.\n"
-                    f"• 사유: {info.get('reason') or '-'}\n"
-                    f"• 메모: {info.get('note') or '없음'}\n"
-                    f"다시 등록을 원하시면 owner 에게 문의해 주세요.")
+            content=msg("rejected_site",
+                        reason=info.get('reason') or '-',
+                        note=info.get('note') or '없음'))
         return
     if _is_registered(slug):
         # 등록된 사이트 — 즉시 예시만
-        await interaction.edit_original_response(content="⏳ 최신 글 가져와 요약 중…")
+        await interaction.edit_original_response(content=msg("preview_analyzing"))
         example = await site_ops.make_example(slug)
         warn = _body_warning(slug)
         if example:
-            await interaction.edit_original_response(content="📋 **이 게시판 알림 예시:**\n" + example + warn)
+            await interaction.edit_original_response(
+                content=msg("preview_with_example", example=example, warn=warn))
         else:
-            await interaction.edit_original_response(content="⚠️ 예시를 만들지 못했어요(목록이 비었거나 본문 추출 실패)." + warn)
+            await interaction.edit_original_response(
+                content=msg("preview_no_example", warn=warn))
         return
 
     # 신규 사이트 — URL 게이트 → 큐 enqueue
     requested_by = {"id": str(interaction.user.id), "name": str(interaction.user)}
     err = await _gate_check(url, article_url=art, via="preview", requested_by=requested_by)
     if err:
-        await interaction.edit_original_response(content=f"⚠️ {err}")
+        await interaction.edit_original_response(content=msg("gate_rejected", err=err))
         return
 
-    await interaction.edit_original_response(content="📥 큐 추가 중…")
-    msg = await interaction.original_response()
+    await interaction.edit_original_response(content=msg("enqueueing"))
+    ack_msg = await interaction.original_response()
     job_id, inserted = db.enqueue_job(
         _conn, kind="register", url=url, slug=slug, article_url=art,
         via="preview", requested_by=json.dumps(requested_by),
-        ack_channel_id=str(msg.channel.id), ack_message_id=str(msg.id),
+        ack_channel_id=str(ack_msg.channel.id), ack_message_id=str(ack_msg.id),
         sub_payload=None,  # preview 는 subscription 안 만듦
         dedupe=False,
     )
     pos = db.queue_position(_conn, job_id)
     if pos <= 1:
-        text = f"📥 큐 추가됨 (잡 #{job_id}) — 곧 처리 시작합니다. 끝나면 이 메시지에 예시 알림이 뜹니다."
+        text = msg("preview_queued_first", job_id=job_id)
     else:
-        text = (f"📥 큐 추가됨 (잡 #{job_id}) — 현재 대기열 **{pos}번째**. "
-                f"끝나면 이 메시지에 예시 알림이 뜹니다.")
+        text = msg("preview_queued_wait", job_id=job_id, pos=pos)
     await interaction.edit_original_response(content=text)
 
 
@@ -327,22 +327,27 @@ async def unwatch(interaction: discord.Interaction, target: str):
     slug = url_to_slug(t) if re.match(r"^https?://", t) else t
     n = db.remove_subscription(_conn, user_id=str(interaction.user.id), slug=slug)
     if n:
-        await interaction.response.send_message(f"🔕 구독 해제: `{slug}` ({n}건)", ephemeral=True)
+        await interaction.response.send_message(msg("unwatch_removed", slug=slug, n=n), ephemeral=True)
     else:
-        await interaction.response.send_message(f"해당 구독 없음: `{slug}` — `/list` 로 확인해 주세요.", ephemeral=True)
+        await interaction.response.send_message(msg("unwatch_not_found", slug=slug), ephemeral=True)
 
 
 @tree.command(name="list", description="내 구독 목록")
 async def list_cmd(interaction: discord.Interaction):
     rows = db.list_subscriptions(_conn, user_id=str(interaction.user.id))
     if not rows:
-        await interaction.response.send_message("구독 없음. `/watch <url>` 로 추가하세요.", ephemeral=True)
+        await interaction.response.send_message(msg("list_empty"), ephemeral=True)
         return
-    lines = ["**내 구독:**"]
+    lines = [msg("list_header")]
     for r in rows:
         where = "DM" if r["target_kind"] == "dm" else f"<#{r['target_id']}>"
         ne = " — 새글없음알림:on" if r["notify_empty"] else ""  # connect() 가 항상 _migrate 하므로 컬럼은 늘 있음
-        lines.append(f"• `{r['slug']}` — 필터: {r['filter_prompt'] or '없음'} — {where}{ne} — 등록 {r['created_at'][:10]}")
+        lines.append(msg("list_item",
+                         slug=r['slug'],
+                         filter=(r['filter_prompt'] or '없음'),
+                         where=where,
+                         ne=ne,
+                         created_at=r['created_at'][:10]))
     await interaction.response.send_message("\n".join(lines)[:1900], ephemeral=True)
 
 
@@ -358,31 +363,34 @@ _FEEDBACK_MAX_LEN_AT_LOAD = feedback_max_len()  # description 은 등록 시점�
 )
 async def feedback_cmd(interaction: discord.Interaction, message: str):
     max_len = feedback_max_len()
-    msg = (message or "").strip()
-    if not msg:
-        await interaction.response.send_message("❌ message 가 비어있습니다.", ephemeral=True)
+    text = (message or "").strip()
+    if not text:
+        await interaction.response.send_message(msg("feedback_empty"), ephemeral=True)
         return
-    if len(msg) > max_len:
+    if len(text) > max_len:
         await interaction.response.send_message(
-            f"❌ 너무 깁니다 — {max_len}자 이내로 줄여 주세요. (현재 {len(msg)}자)",
+            msg("feedback_too_long", max_len=max_len, cur_len=len(text)),
             ephemeral=True,
         )
         return
     fid = db.add_feedback(
         _conn, user_id=str(interaction.user.id),
-        username=str(interaction.user), message=msg,
+        username=str(interaction.user), message=text,
     )
     await interaction.response.send_message(
-        f"✅ 의견 접수됨 (#{fid}). 읽어볼게요. 추가 의견은 다시 `/feedback`.",
+        msg("feedback_received", fid=fid),
         ephemeral=True,
     )
     # OWNER DM — 전문 그대로. send_chunked_dm 이 2000자 단위로 split.
     try:
         oid = owner_user_id()
         if oid and oid.isdigit():
-            body = (f"💬 새 의견 #{fid}\n"
-                    f"• from: {interaction.user} (id={interaction.user.id})\n"
-                    f"• at: {_now_iso()}\n\n{msg}")
+            body = msg("feedback_owner_dm",
+                       fid=fid,
+                       user=interaction.user,
+                       user_id=interaction.user.id,
+                       at_iso=_now_iso(),
+                       message=text)
             await admin_mod.send_chunked_dm(client, oid, body)
     except Exception as e:  # noqa: BLE001
         log.warning("feedback owner DM 실패: %r", e)
@@ -404,32 +412,31 @@ async def announce_cmd(interaction: discord.Interaction,
     # dm 토글 — bool 인자 제공 시
     if dm is not None:
         db.set_announce_optout(_conn, "dm", user_id, opted_out=not dm)
-        lines.append(f"📩 DM 공지: **{'ON' if dm else 'OFF'}** 로 설정됨.")
+        lines.append(msg("announce_dm_set", state='ON' if dm else 'OFF'))
 
     # channel 토글 — guild 안 + manage_channels 권한 + 채널에 봇이 알림 보내는 곳인지.
     # interaction.permissions 는 항상 Permissions 객체(DM 이면 빈, guild 채널이면 effective).
     if channel is not None:
         if not is_guild or not ch_id:
-            lines.append("❌ `channel:` 인자는 길드 채널에서만 사용 가능 (DM 에선 불가).")
+            lines.append(msg("announce_channel_in_dm"))
         elif not interaction.permissions.manage_channels:
-            lines.append("❌ 이 채널의 공지 설정은 `Manage Channels` 권한이 있는 사람만 변경 가능.")
+            lines.append(msg("announce_no_manage_channels"))
         else:
             db.set_announce_optout(_conn, "channel", ch_id, opted_out=not channel)
-            lines.append(f"📢 이 채널 공지: **{'ON' if channel else 'OFF'}** 로 설정됨.")
+            lines.append(msg("announce_channel_set", state='ON' if channel else 'OFF'))
 
     # 무인자 또는 토글 후 — 현재 상태 표시
     dm_off = db.get_announce_optout(_conn, "dm", user_id)
-    state = [f"📩 내 DM 공지: **{'OFF' if dm_off else 'ON'}**"]
+    state = [msg("announce_status_dm", state='OFF' if dm_off else 'ON')]
     if is_guild and ch_id:
         ch_off = db.get_announce_optout(_conn, "channel", ch_id)
-        state.append(f"📢 이 채널 공지: **{'OFF' if ch_off else 'ON'}**")
+        state.append(msg("announce_status_channel", state='OFF' if ch_off else 'ON'))
     if not lines:
-        lines.append("**현재 공지 설정**")
+        lines.append(msg("announce_current_header"))
     lines.append("")
     lines.extend(state)
     lines.append("")
-    lines.append("토글: `/announce dm:false` 로 DM 끄기, `/announce dm:true` 로 다시 켜기. "
-                 "채널은 `Manage Channels` 권한자가 그 채널에서 `/announce channel:false`.")
+    lines.append(msg("announce_toggle_hint"))
     await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
 
@@ -437,47 +444,16 @@ async def announce_cmd(interaction: discord.Interaction,
 async def help_cmd(interaction: discord.Interaction):
     embed = discord.Embed(
         title="📖 notice-watcher 명령어",
-        description="공지/게시판을 등록해 새 글이 올라오면 Discord 로 알려주는 봇.",
+        description=msg("help_embed_description"),
         color=0x5865F2,
     )
-    embed.add_field(
-        name="구독 관리",
-        value=(
-            "`/watch <url> [filter:] [here:] [notify_empty:] [article_url:]`\n"
-            "└ 게시판 URL 등록. filter 로 자연어 조건, here=true 면 이 채널에, 끄면 내 DM.\n"
-            "`/preview <url>` — 등록 없이 최신 글 한 건으로 알림 예시 보기.\n"
-            "`/list` — 내 구독 목록.\n"
-            "`/unwatch <slug 또는 url>` — 구독 해제 (slug 자동완성)."
-        ),
-        inline=False,
-    )
-    embed.add_field(
-        name="문제 신고 · 의견 · 상태",
-        value=(
-            "`/report <slug> <issue>` — 본인 구독에 문제 있을 때 신고. 관리자가 진단·해결.\n"
-            f"`/feedback <message>` — 자유 의견(slug 무관, 최대 {_FEEDBACK_MAX_LEN_AT_LOAD}자).\n"
-            "`/status` — 봇·폴링 상태 (가동시간, 잡 큐, 마지막 폴링 등)."
-        ),
-        inline=False,
-    )
-    embed.add_field(
-        name="공지 수신 설정",
-        value=(
-            "`/announce` — 현재 공지 수신 상태 표시.\n"
-            "`/announce dm:false` — 내 DM 공지 끄기 / `dm:true` 로 다시 켜기.\n"
-            "`/announce channel:false` — 이 채널 공지 끄기 (`Manage Channels` 권한 필요)."
-        ),
-        inline=False,
-    )
-    embed.add_field(
-        name="기타",
-        value=(
-            "`/help` — 이 안내.\n"
-            "모든 응답은 ephemeral (본인만 보임). 알림 발송은 폴링 직후 즉시."
-        ),
-        inline=False,
-    )
-    embed.set_footer(text="문제가 생기면 /report 로 신고해 주세요.")
+    embed.add_field(name="구독 관리", value=msg("help_field_subs_value"), inline=False)
+    embed.add_field(name="문제 신고 · 의견 · 상태",
+                    value=msg("help_field_report_value", max_len=_FEEDBACK_MAX_LEN_AT_LOAD),
+                    inline=False)
+    embed.add_field(name="공지 수신 설정", value=msg("help_field_announce_value"), inline=False)
+    embed.add_field(name="기타", value=msg("help_field_misc_value"), inline=False)
+    embed.set_footer(text=msg("help_footer"))
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
@@ -491,18 +467,18 @@ async def report_cmd(interaction: discord.Interaction, slug: str, issue: str):
     user_id = str(interaction.user.id)
     issue = (issue or "").strip()
     if not issue:
-        await interaction.response.send_message("❌ issue 설명이 비어있습니다.", ephemeral=True)
+        await interaction.response.send_message(msg("report_issue_empty"), ephemeral=True)
         return
     # slug 가 본인 구독이 아니면 거부 (자동완성 우회 입력 차단)
     own = {r["slug"] for r in db.list_subscriptions(_conn, user_id=user_id)}
     if slug not in own:
         await interaction.response.send_message(
-            f"❌ `{slug}` 은(는) 본인 구독 목록에 없습니다 — `/list` 로 확인해 주세요.", ephemeral=True)
+            msg("report_slug_not_owned", slug=slug), ephemeral=True)
         return
     report_id = db.add_report(_conn, user_id=user_id, username=str(interaction.user),
                               slug=slug, issue=issue[:1500])
     await interaction.response.send_message(
-        f"✅ 신고 접수됨 (#{report_id}, `{slug}`). 관리자가 확인 후 조치합니다. 다른 문제가 더 있으면 다시 `/report`.",
+        msg("report_received", report_id=report_id, slug=slug),
         ephemeral=True)
     # owner DM — 자동 진단 결과까지 함께. admin.send_chunked_dm 재사용(2000 chars split, 실패 시 False).
     try:
@@ -511,7 +487,7 @@ async def report_cmd(interaction: discord.Interaction, slug: str, issue: str):
         body = inspector.format_inspect_result(result) if result else f"신고 #{report_id} — inspect 실패"
         oid = owner_user_id()
         if oid and oid.isdigit():
-            await admin_mod.send_chunked_dm(client, oid, "🚩 새 신고\n\n" + body)
+            await admin_mod.send_chunked_dm(client, oid, msg("report_owner_dm_prefix") + body)
     except Exception as e:  # noqa: BLE001
         log.warning("report owner DM 실패: %r", e)
 
@@ -568,9 +544,9 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
     tb = _record_error("slash", error)
     try:
         if interaction.response.is_done():
-            await interaction.edit_original_response(content="⚠️ 처리 중 오류가 발생했어요. 잠시 후 다시 시도해 주세요.")
+            await interaction.edit_original_response(content=msg("error_slash_done"))
         else:
-            await interaction.response.send_message("⚠️ 처리 중 오류가 발생했어요.", ephemeral=True)
+            await interaction.response.send_message(msg("error_slash_ephemeral"), ephemeral=True)
     except Exception:  # noqa: BLE001
         pass
     await _dm_owner(f"[봇 에러] {LAST_ERROR['text']}\n```\n{tb[-1500:]}\n```")

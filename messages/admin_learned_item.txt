@@ -1,0 +1,2 @@
+- `{{pid}}` `{{host}}{{pp}}` · count={{cnt}} · {{last_ts}}
+   {{reason}}

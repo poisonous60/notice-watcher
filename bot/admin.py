@@ -24,11 +24,8 @@ from discord import app_commands
 
 from bot import db, inspector
 from bot.config import admin_guild_id, owner_user_id
+from bot.messages import render as msg
 
-ANNOUNCE_FOOTER = (
-    "공지 끄기: /announce dm:false  ·  "
-    "이 채널: /announce channel:false (Manage Channels 권한 필요)"
-)
 SEND_SLEEP = 0.5
 
 log = logging.getLogger("bot.admin")
@@ -63,14 +60,14 @@ def build_admin_tree(client: discord.Client, conn, *, admin_guild: discord.Objec
 
     async def _ack_and_dm(interaction: discord.Interaction, text: str) -> None:
         if not _is_owner(interaction):
-            await interaction.response.send_message("❌ owner 전용 명령입니다.", ephemeral=True)
+            await interaction.response.send_message(msg("admin_owner_only"), ephemeral=True)
             return
         await interaction.response.defer(thinking=True, ephemeral=True)
         ok = await send_chunked_dm(client, owner_user_id(), text)
         if ok:
-            await interaction.edit_original_response(content="✅ 결과를 DM 으로 보냈습니다.")
+            await interaction.edit_original_response(content=msg("admin_dm_sent"))
         else:
-            await interaction.edit_original_response(content="⚠️ DM 발송 실패 — 로그 확인.")
+            await interaction.edit_original_response(content=msg("admin_dm_failed"))
 
     admin = app_commands.Group(name="admin", description="owner 전용 디버그·triage 명령")
 
@@ -109,12 +106,12 @@ def build_admin_tree(client: discord.Client, conn, *, admin_guild: discord.Objec
         if all(x is None for x in (job_id, report_id, user_id, slug)):
             # any() 는 0 을 falsy 로 봐 job_id=0 같은 경계에서 잘못된 안내가 가능 — None 으로 엄격 비교.
             await interaction.response.send_message(
-                "❌ job_id / report_id / user_id / slug 중 하나는 필요.", ephemeral=True)
+                msg("admin_inspect_required"), ephemeral=True)
             return
         result = inspector.inspect(conn, paths, job_id=job_id, report_id=report_id,
                                    user_id=user_id, slug=slug)
         if result is None:
-            await interaction.response.send_message("❌ 일치하는 항목 없음.", ephemeral=True)
+            await interaction.response.send_message(msg("admin_inspect_no_match"), ephemeral=True)
             return
         await _ack_and_dm(interaction, inspector.format_inspect_result(result))
 
@@ -123,51 +120,51 @@ def build_admin_tree(client: discord.Client, conn, *, admin_guild: discord.Objec
     async def fetch_cmd(interaction: discord.Interaction, slug: str,
                         count: app_commands.Range[int, 1, 20] = 5):
         if not _is_owner(interaction):
-            await interaction.response.send_message("❌ owner 전용 명령입니다.", ephemeral=True)
+            await interaction.response.send_message(msg("admin_owner_only"), ephemeral=True)
             return
         await interaction.response.defer(thinking=True, ephemeral=True)
         result = inspector.inspect(conn, paths, slug=slug)
         if result is None:
-            await interaction.edit_original_response(content="❌ 일치하는 slug 없음.")
+            await interaction.edit_original_response(content=msg("admin_fetch_no_slug"))
             return
         try:
             sample = await inspector.fetch_sim(paths, slug, n=int(count))
         except Exception as e:  # noqa: BLE001
-            await interaction.edit_original_response(content=f"⚠️ fetch_sim 예외: {e!r}")
+            await interaction.edit_original_response(content=msg("admin_fetch_exception", exc=repr(e)))
             return
         if sample is None:
-            await interaction.edit_original_response(content="❌ config 없음 — fetch 못 함.")
+            await interaction.edit_original_response(content=msg("admin_fetch_no_config"))
             return
         inspector.update_with_fetch_sample(result, conn, paths, sample)
         ok = await send_chunked_dm(client, owner_user_id(), inspector.format_inspect_result(result))
         await interaction.edit_original_response(
-            content="✅ 결과를 DM 으로 보냈습니다." if ok else "⚠️ DM 발송 실패.")
+            content=msg("admin_dm_sent") if ok else msg("admin_fetch_dm_failed_short"))
 
     @admin.command(name="resolve", description="신고를 해결로 표시")
     @app_commands.describe(report_id="reports.id", note="해결 메모(선택)")
     async def resolve_cmd(interaction: discord.Interaction, report_id: int,
                           note: Optional[str] = None):
         if not _is_owner(interaction):
-            await interaction.response.send_message("❌ owner 전용 명령입니다.", ephemeral=True)
+            await interaction.response.send_message(msg("admin_owner_only"), ephemeral=True)
             return
         ok = db.resolve_report(conn, report_id, note)
         if ok:
             await interaction.response.send_message(
-                f"✅ 신고 #{report_id} resolved.", ephemeral=True)
+                msg("admin_resolve_ok", report_id=report_id), ephemeral=True)
         else:
             await interaction.response.send_message(
-                f"❌ 신고 #{report_id} 가 없거나 이미 resolved.", ephemeral=True)
+                msg("admin_resolve_not_found", report_id=report_id), ephemeral=True)
 
     @admin.command(name="reject", description="이 slug 의 자동 등록을 영구 거부 마커로 박음")
     @app_commands.describe(slug="거부할 slug", reason="거부 사유(짧게)", note="(선택) 자세한 메모")
     async def reject_cmd(interaction: discord.Interaction, slug: str, reason: str,
                          note: Optional[str] = None):
         if not _is_owner(interaction):
-            await interaction.response.send_message("❌ owner 전용 명령입니다.", ephemeral=True)
+            await interaction.response.send_message(msg("admin_owner_only"), ephemeral=True)
             return
         if not _SLUG_RE.fullmatch(slug):
             await interaction.response.send_message(
-                f"❌ slug 형식 오류 (영문/숫자/._%- 만): `{slug}`", ephemeral=True)
+                msg("admin_slug_format_error", slug=slug), ephemeral=True)
             return
         from scripts.register import _save_rejected  # lazy — import 시 sys.path 영향 회피
         sub_row = conn.execute(
@@ -176,41 +173,41 @@ def build_admin_tree(client: discord.Client, conn, *, admin_guild: discord.Objec
         url = sub_row["url"] if sub_row else "(미상)"
         p = _save_rejected(slug, url, reason, note=note)
         await interaction.response.send_message(
-            f"✅ `{slug}` 거부 마커 박힘.\n• reason: {reason}\n• note: {note or '없음'}\n"
-            f"• marker: `{p.name}`\n이후 같은 slug `/preview`·`/watch` 시 거부 응답.",
+            msg("admin_reject_ok", slug=slug, reason=reason, note=(note or '없음'),
+                marker=p.name),
             ephemeral=True)
 
     @admin.command(name="unreject", description="거부 마커 제거 (실수 복구).")
     @app_commands.describe(slug="거부 해제할 slug")
     async def unreject_cmd(interaction: discord.Interaction, slug: str):
         if not _is_owner(interaction):
-            await interaction.response.send_message("❌ owner 전용 명령입니다.", ephemeral=True)
+            await interaction.response.send_message(msg("admin_owner_only"), ephemeral=True)
             return
         if not _SLUG_RE.fullmatch(slug):
             await interaction.response.send_message(
-                f"❌ slug 형식 오류 (영문/숫자/._%- 만): `{slug}`", ephemeral=True)
+                msg("admin_slug_format_error", slug=slug), ephemeral=True)
             return
         from scripts.register import _clear_rejected
         ok = _clear_rejected(slug)
-        msg = (f"✅ `{slug}` 거부 마커 제거됨." if ok
-               else f"❌ `{slug}` 거부 마커가 없음.")
-        await interaction.response.send_message(msg, ephemeral=True)
+        text = (msg("admin_unreject_ok", slug=slug) if ok
+                else msg("admin_unreject_not_found", slug=slug))
+        await interaction.response.send_message(text, ephemeral=True)
 
     @admin.command(name="learned", description="자동 학습된 거부 패턴 목록 (host+path_prefix 단위).")
     async def learned_cmd(interaction: discord.Interaction):
         if not _is_owner(interaction):
-            await interaction.response.send_message("❌ owner 전용 명령입니다.", ephemeral=True)
+            await interaction.response.send_message(msg("admin_owner_only"), ephemeral=True)
             return
         from scripts.register import _list_learned
         patterns = _list_learned()
         if not patterns:
-            await interaction.response.send_message("학습된 거부 패턴 없음.", ephemeral=True)
+            await interaction.response.send_message(msg("admin_learned_empty"), ephemeral=True)
             return
         # 최근 거부 시각 내림차순.
         patterns_sorted = sorted(patterns,
                                  key=lambda p: str(p.get("last_rejected_at") or ""),
                                  reverse=True)
-        lines = [f"**학습된 거부 패턴 ({len(patterns_sorted)}건)**"]
+        lines = [msg("admin_learned_header", n=len(patterns_sorted))]
         for p in patterns_sorted[:50]:
             pid = (p.get("id") or "")[:12]
             host = p.get("host_suffix") or "(없음)"
@@ -220,32 +217,34 @@ def build_admin_tree(client: discord.Client, conn, *, admin_guild: discord.Objec
             reason = (p.get("last_reason") or "").replace("\n", " ")
             if len(reason) > 60:
                 reason = reason[:60] + "…"
-            lines.append(f"- `{pid}` `{host}{pp}` · count={cnt} · {last_ts}\n   {reason}")
+            lines.append(msg("admin_learned_item",
+                             pid=pid, host=host, pp=pp, cnt=cnt,
+                             last_ts=last_ts, reason=reason))
         if len(patterns_sorted) > 50:
-            lines.append(f"_(처음 50건만 표시 — 전체 {len(patterns_sorted)}건)_")
+            lines.append(msg("admin_learned_truncated", n=len(patterns_sorted)))
         await _ack_and_dm(interaction, "\n".join(lines))
 
     @admin.command(name="unlearn", description="학습된 거부 패턴을 풀어줌 (false positive 복구).")
     @app_commands.describe(pattern_id="`/admin learned` 의 id (12자 hash)")
     async def unlearn_cmd(interaction: discord.Interaction, pattern_id: str):
         if not _is_owner(interaction):
-            await interaction.response.send_message("❌ owner 전용 명령입니다.", ephemeral=True)
+            await interaction.response.send_message(msg("admin_owner_only"), ephemeral=True)
             return
         pat_id = pattern_id.strip().lower()
         if not re.fullmatch(r"[a-f0-9]{1,12}", pat_id):
             await interaction.response.send_message(
-                f"❌ pattern_id 형식 오류 (소문자 16진 1~12자): `{pattern_id}`", ephemeral=True)
+                msg("admin_unlearn_pattern_format", pattern_id=pattern_id), ephemeral=True)
             return
         from scripts.register import _clear_learned_by_id
         ok = _clear_learned_by_id(pat_id)
-        msg = (f"✅ 학습 패턴 `{pat_id}` 제거됨 — 이후 같은 host+path_prefix URL 은 다시 자동 거부 안 됨."
-               if ok else f"❌ pattern_id `{pat_id}` 못 찾음. `/admin learned` 로 확인.")
-        await interaction.response.send_message(msg, ephemeral=True)
+        text = (msg("admin_unlearn_ok", pat_id=pat_id) if ok
+                else msg("admin_unlearn_not_found", pat_id=pat_id))
+        await interaction.response.send_message(text, ephemeral=True)
 
     @admin.command(name="triage", description="처리 대기 backlog 요약 (신고/깨짐/실패/큐/의견).")
     async def triage_cmd(interaction: discord.Interaction):
         if not _is_owner(interaction):
-            await interaction.response.send_message("❌ owner 전용 명령입니다.", ephemeral=True)
+            await interaction.response.send_message(msg("admin_owner_only"), ephemeral=True)
             return
         summary = inspector.triage_summary(conn, paths)
         await _ack_and_dm(interaction, inspector.format_triage(summary))
@@ -255,20 +254,21 @@ def build_admin_tree(client: discord.Client, conn, *, admin_guild: discord.Objec
     async def feedback_list_cmd(interaction: discord.Interaction,
                                 count: app_commands.Range[int, 1, 50] = 10):
         if not _is_owner(interaction):
-            await interaction.response.send_message("❌ owner 전용 명령입니다.", ephemeral=True)
+            await interaction.response.send_message(msg("admin_owner_only"), ephemeral=True)
             return
         rows = db.list_feedback(conn, limit=int(count))
         if not rows:
-            await interaction.response.send_message("의견 없음.", ephemeral=True)
+            await interaction.response.send_message(msg("admin_feedback_empty"), ephemeral=True)
             return
-        out_lines = [f"**의견 목록 ({len(rows)}건)**"]
+        out_lines = [msg("admin_feedback_header", n=len(rows))]
         for r in rows:
             ts = (r["created_at"] or "")[:16]
             user = r["username"] or r["user_id"]
             preview = (r["message"] or "").replace("\n", " ")
             if len(preview) > 200:
                 preview = preview[:200] + "…"
-            out_lines.append(f"- #{r['id']} `{user}` · {ts}\n   {preview}")
+            out_lines.append(msg("admin_feedback_item",
+                                 fid=r['id'], user=user, ts=ts, preview=preview))
         await _ack_and_dm(interaction, "\n".join(out_lines))
 
     @admin.command(name="announce", description="봇 공지 발송 — preview 후 버튼으로 확인 발송.")
@@ -279,13 +279,13 @@ def build_admin_tree(client: discord.Client, conn, *, admin_guild: discord.Objec
     async def announce_cmd(interaction: discord.Interaction, message: str,
                            title: Optional[str] = None):
         if not _is_owner(interaction):
-            await interaction.response.send_message("❌ owner 전용 명령입니다.", ephemeral=True)
+            await interaction.response.send_message(msg("admin_owner_only"), ephemeral=True)
             return
-        title_s = (title or "📢 봇 업데이트").strip()[:256]
+        title_s = (title or msg("admin_announce_default_title")).strip()[:256]
         # discord slash 입력창은 Enter 가 제출이라 줄바꿈 입력 불가. literal `\n` (2글자) 를 실제 newline 으로 변환.
         message_s = message.strip().replace("\\n", "\n")
         if not message_s:
-            await interaction.response.send_message("❌ message 가 비어있습니다.", ephemeral=True)
+            await interaction.response.send_message(msg("admin_announce_message_empty"), ephemeral=True)
             return
         message_s = message_s[:4000]  # embed description 4096 한계 — footer 여유 96자
         dm_targets = db.announce_recipients_dm(conn)
@@ -297,7 +297,7 @@ def build_admin_tree(client: discord.Client, conn, *, admin_guild: discord.Objec
             sent_by_id=str(interaction.user.id),
         )
         await interaction.response.send_message(
-            content=f"**프리뷰** — 발송 대상: DM **{len(dm_targets)}명** · 채널 **{len(ch_targets)}개**",
+            content=msg("admin_announce_preview", dm_n=len(dm_targets), ch_n=len(ch_targets)),
             embed=embed, view=view, ephemeral=True,
         )
 
@@ -310,7 +310,7 @@ def build_admin_tree(client: discord.Client, conn, *, admin_guild: discord.Objec
 # --------------------------------------------------------------------------- #
 def _build_announce_embed(title: str, message: str) -> discord.Embed:
     embed = discord.Embed(title=title, description=message, color=0x5865F2)
-    embed.set_footer(text=ANNOUNCE_FOOTER)
+    embed.set_footer(text=msg("admin_announce_footer"))
     return embed
 
 
@@ -334,20 +334,20 @@ class AnnounceConfirmView(discord.ui.View):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if str(interaction.user.id) != self.sent_by_id:
             await interaction.response.send_message(
-                "❌ 이 confirm 은 호출자만 누를 수 있습니다.", ephemeral=True)
+                msg("admin_announce_confirm_authonly"), ephemeral=True)
             return False
         return True
 
     @discord.ui.button(label="발송", style=discord.ButtonStyle.danger)
     async def send_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         if self._used:
-            await interaction.response.send_message("이미 처리됨.", ephemeral=True)
+            await interaction.response.send_message(msg("admin_announce_already_processed"), ephemeral=True)
             return
         self._used = True
         for child in self.children:
             child.disabled = True
         await interaction.response.edit_message(
-            content="📤 발송 중… (DM/채널 발송 결과는 OWNER DM 으로)", view=self)
+            content=msg("admin_announce_sending"), view=self)
         task = asyncio.create_task(self._do_send())
         task.add_done_callback(self._on_send_done)
 
@@ -369,12 +369,12 @@ class AnnounceConfirmView(discord.ui.View):
     @discord.ui.button(label="취소", style=discord.ButtonStyle.secondary)
     async def cancel_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         if self._used:
-            await interaction.response.send_message("이미 처리됨.", ephemeral=True)
+            await interaction.response.send_message(msg("admin_announce_already_processed"), ephemeral=True)
             return
         self._used = True
         for child in self.children:
             child.disabled = True
-        await interaction.response.edit_message(content="🛑 발송 취소됨.", view=self)
+        await interaction.response.edit_message(content=msg("admin_announce_cancelled"), view=self)
         self.stop()
 
     async def on_timeout(self) -> None:
@@ -418,10 +418,12 @@ class AnnounceConfirmView(discord.ui.View):
                 channel_sent=ch_sent, channel_failed=ch_failed)
 
         report = [
-            f"📊 공지 #{ann_id} 발송 완료",
-            f"• 제목: {self.title}",
-            f"• DM: {dm_sent}/{len(self.dm_targets)} 성공  ·  실패 {dm_failed}",
-            f"• 채널: {ch_sent}/{len(self.ch_targets)} 성공  ·  실패 {ch_failed}",
+            msg("admin_announce_report_header", ann_id=ann_id),
+            msg("admin_announce_report_title", title=self.title),
+            msg("admin_announce_report_dm",
+                sent=dm_sent, total=len(self.dm_targets), failed=dm_failed),
+            msg("admin_announce_report_channel",
+                sent=ch_sent, total=len(self.ch_targets), failed=ch_failed),
         ]
         if dm_fail_log:
             report.append("\nDM 실패 상세:\n" + "\n".join(dm_fail_log[:20]))

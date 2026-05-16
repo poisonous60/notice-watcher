@@ -1,0 +1,5 @@
+`/watch <url> [filter:] [here:] [notify_empty:] [article_url:]`
+└ 게시판 URL 등록. filter 로 자연어 조건, here=true 면 이 채널에, 끄면 내 DM.
+`/preview <url>` — 등록 없이 최신 글 한 건으로 알림 예시 보기.
+`/list` — 내 구독 목록.
+`/unwatch <slug 또는 url>` — 구독 해제 (slug 자동완성).

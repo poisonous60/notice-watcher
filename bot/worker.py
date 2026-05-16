@@ -14,6 +14,7 @@ import logging
 from typing import Awaitable, Callable, Optional
 
 from bot import db
+from bot.messages import render as msg
 from bot.runtime_config import settings
 from bot.site_ops import (
     append_triage_queue,
@@ -106,9 +107,10 @@ async def _process_job(client, conn, job, dm_owner) -> None:
             if job["ack_channel_id"]:
                 await edit_channel_message(
                     client, job["ack_channel_id"], job["ack_message_id"],
-                    f"❌ 이 사이트는 등록이 거부됐어요 — `{slug}`\n"
-                    f"• 사유: {info.get('reason') or '-'}\n"
-                    f"• 메모: {info.get('note') or '없음'}")
+                    msg("worker_rejected_during",
+                        slug=slug,
+                        reason=info.get('reason') or '-',
+                        note=info.get('note') or '없음'))
             return
         # 동시에 두 사용자가 같은 신규 사이트를 enqueue 한 경우 — 두 번째 잡은 register subprocess 스킵.
         if kind == "register" and is_registered(slug):
@@ -120,7 +122,7 @@ async def _process_job(client, conn, job, dm_owner) -> None:
         # ack — 처리 시작 표시 (register 만). 곧 [PHASE] probe / recognize 가 와서 덮어쓴다.
         if kind == "register" and job["ack_channel_id"]:
             await edit_channel_message(client, job["ack_channel_id"], job["ack_message_id"],
-                                       f"🔎 사이트 분석 중… — `{slug}`")
+                                       msg("worker_phase_probe", slug=slug))
 
         # register subprocess 가 stdout 에 찍는 [PHASE] <label> 을 받아 ack 메시지를 갱신.
         # blocking_register 는 to_thread 위에서 도니까 콜백도 그 워커 스레드에서 호출됨 — asyncio
@@ -170,14 +172,12 @@ async def _process_job(client, conn, job, dm_owner) -> None:
                         log.warning("rc=3 _save_rejected 실패 — slug=%s err=%r", slug, _e)
                     await edit_channel_message(
                         client, job["ack_channel_id"], job["ack_message_id"],
-                        f"⚠️ 등록 거부 — `{slug}`\n"
-                        "이 URL 은 게시판 형식이 아닌 것 같아요(반복되는 글 링크/목록 API/피드가 안 보임). "
-                        "게시판/공지 *목록* 페이지 URL 을 주세요.")
+                        msg("worker_board_shape_fail", slug=slug))
                 else:
                     append_triage_queue(url, slug, job["via"], req_by, tail)
                     err = _format_register_error(rc, tail)
                     await edit_channel_message(client, job["ack_channel_id"], job["ack_message_id"],
-                                               f"⚠️ 자동 등록 실패 — `{slug}`\n{err}")
+                                               msg("worker_register_fail", slug=slug, err=err))
             else:
                 # re-probe 실패 — OWNER 에게만 알림
                 await dm_owner(
@@ -197,7 +197,7 @@ async def _process_job(client, conn, job, dm_owner) -> None:
             try:
                 await edit_channel_message(
                     client, job["ack_channel_id"], job["ack_message_id"],
-                    f"⚠️ 처리 중 예상치 못한 오류 — `{slug}`. 관리자에게 보고됨.")
+                    msg("worker_unexpected", slug=slug))
             except Exception:  # noqa: BLE001
                 pass
     finally:
@@ -220,34 +220,33 @@ def _phase_to_message(label: str, slug: str) -> Optional[str]:
               "generate max=4", "gemini_attempt 2/4", "baseline".
     None 반환 시 ack 갱신 안 함 (label 미인식)."""
     if label == "recognize":
-        return f"🔎 알려진 플랫폼 인식 시도 중… — `{slug}`"
+        return msg("worker_phase_recognize", slug=slug)
     if label == "probe":
-        return f"🔎 사이트 분석 중… — `{slug}`"
+        return msg("worker_phase_probe", slug=slug)
     if label == "preflight":
-        return f"🔎 사이트 분석 중… (글 페이지 추가 분석) — `{slug}`"
+        return msg("worker_phase_preflight", slug=slug)
     if label == "digest":
-        return f"🔎 사이트 분석 중… (분석 데이터 정리) — `{slug}`"
+        return msg("worker_phase_digest", slug=slug)
     if label.startswith("generate "):
-        return f"🛠 config 파일 만드는 중… — `{slug}`"
+        return msg("worker_phase_generate", slug=slug)
     if label.startswith("gemini_attempt "):
         spec = label[len("gemini_attempt "):].strip()
-        return f"🛠 config 파일 만드는 중… (시도 {spec}) — `{slug}`"
+        return msg("worker_phase_gemini_attempt", slug=slug, spec=spec)
     if label == "baseline":
-        return f"🧷 baseline(최근 글 목록) 수집 중… — `{slug}`"
+        return msg("worker_phase_baseline", slug=slug)
     return None
 
 
 def _format_register_error(rc: int, tail: str) -> str:
     if rc == -1:
-        return "다른 작업이 크롤러를 쓰는 중이라 락 대기 초과."
+        return msg("worker_err_lock_timeout")
     if rc == -2:
         secs = int(settings.chromium_lock.register_subprocess_timeout)
         mins = secs // 60
         unit = f"{mins}분" if secs % 60 == 0 else f"{secs}초"
-        return f"사이트 분석 시간 초과({unit}) — 너무 느리거나 막힌 사이트일 수 있습니다."
+        return msg("worker_err_subprocess_timeout", unit=unit)
     last = "\n".join((tail or "").strip().splitlines()[-6:])
-    return ("이 사이트는 자동 등록이 안 됩니다 — 손어댑터가 필요합니다 "
-            "(docs/사이트 어댑터 추가 가이드.md).\n```\n" + last + "\n```")
+    return msg("worker_err_needs_hand_adapter", tail=last)
 
 
 async def _post_register_success(client, conn, job) -> None:
@@ -273,21 +272,26 @@ async def _post_register_success(client, conn, job) -> None:
     warn = body_warning(slug)
     if sub:
         where = "이 채널" if sub["target_kind"] == "channel" else "내 DM"
-        head = (f"✅ 등록 완료 — `{slug}`\n"
-                f"• baseline {n if n is not None else '?'}건(이 글들은 '새 글' 아님)\n"
-                f"• 필터: {sub.get('filter_prompt') or '없음(새 글 전부)'}\n"
-                f"• 발송: 폴링 직후 즉시\n"
-                f"• 알림: {where}\n"
-                f"• 새 글 없을 때도 알림: {'예' if sub.get('notify_empty') else '아니오'}"
-                f"{warn}")
+        head = msg("worker_success_subscribed_head",
+                   slug=slug,
+                   n=(n if n is not None else '?'),
+                   filter=(sub.get('filter_prompt') or '없음(새 글 전부)'),
+                   where=where,
+                   notify_empty=('예' if sub.get('notify_empty') else '아니오'),
+                   warn=warn)
     else:
-        head = f"✅ 등록 완료 — `{slug}` (baseline {n if n is not None else '?'}건){warn}"
+        head = msg("worker_success_preview_head",
+                   slug=slug,
+                   n=(n if n is not None else '?'),
+                   warn=warn)
     await edit_channel_message(client, job["ack_channel_id"], job["ack_message_id"],
-                               head + "\n\n📋 예시 알림 만드는 중…")
+                               head + "\n\n" + msg("watch_example_loading_suffix"))
     example = await make_example(slug)
     if example:
-        await edit_channel_message(client, job["ack_channel_id"], job["ack_message_id"],
-                                   head + "\n\n📋 **예시 알림** (이런 형식으로 옵니다):\n" + example)
+        await edit_channel_message(
+            client, job["ack_channel_id"], job["ack_message_id"],
+            head + "\n\n" + msg("watch_example_present_prefix") + "\n" + example)
     else:
-        await edit_channel_message(client, job["ack_channel_id"], job["ack_message_id"],
-                                   head + "\n\n(예시 알림 생성은 건너뜀 — 등록은 정상)")
+        await edit_channel_message(
+            client, job["ack_channel_id"], job["ack_message_id"],
+            head + "\n\n" + msg("watch_example_skip"))

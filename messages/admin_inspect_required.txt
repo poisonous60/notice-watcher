@@ -1,0 +1,1 @@
+❌ job_id / report_id / user_id / slug 중 하나는 필요.

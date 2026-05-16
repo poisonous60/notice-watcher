@@ -1,0 +1,4 @@
+⚠️ [url_gate] 악성 URL 등록 시도 차단
+URL: {{url}}
+사유: {{msg}}
+요청: {{user_name}} (via {{via}})

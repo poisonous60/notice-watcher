@@ -1,0 +1,2 @@
+⚠️ [url_gate] Safe Browsing 검사 실패 — {{msg}}
+URL: {{url}}

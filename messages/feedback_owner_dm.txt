@@ -1,0 +1,5 @@
+💬 새 의견 #{{fid}}
+• from: {{user}} (id={{user_id}})
+• at: {{at_iso}}
+
+{{message}}

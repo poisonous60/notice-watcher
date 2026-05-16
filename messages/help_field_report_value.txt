@@ -1,0 +1,3 @@
+`/report <slug> <issue>` — 본인 구독에 문제 있을 때 신고. 관리자가 진단·해결.
+`/feedback <message>` — 자유 의견(slug 무관, 최대 {{max_len}}자).
+`/status` — 봇·폴링 상태 (가동시간, 잡 큐, 마지막 폴링 등).
