@@ -159,12 +159,21 @@ async def _process_job(client, conn, job, dm_owner) -> None:
                 req_by = json.loads(job["requested_by"]) if job["requested_by"] else None
                 # rc=3 (register.py 의 _board_shape_check 가 게시판 아님 단정) — triage 큐 오염 막기 위해 안 쌓는다.
                 # 사용자에겐 게시판/공지 페이지 URL 을 달라고 친절히 안내.
+                # + slug 단위 .REJECTED.json 마커 + host+path_prefix 패턴 자동 학습 (한 사용자 거부 → 모두에게 적용).
                 if rc == 3:
+                    try:
+                        from scripts.register import _save_rejected
+                        _save_rejected(slug, url,
+                                       reason="board_shape_check 게이트 거부 (probe 가 같은 호스트로 가는 board 신호 못 찾음)",
+                                       note=f"requested_by={req_by} via={job['via']}")
+                    except Exception as _e:  # noqa: BLE001
+                        log.warning("rc=3 _save_rejected 실패 — slug=%s err=%r", slug, _e)
                     await edit_channel_message(
                         client, job["ack_channel_id"], job["ack_message_id"],
                         f"⚠️ 등록 거부 — `{slug}`\n"
                         "이 URL 은 게시판 형식이 아닌 것 같아요(반복되는 글 링크/목록 API/피드가 안 보임). "
-                        "게시판/공지 *목록* 페이지 URL 을 주세요.")
+                        "게시판/공지 *목록* 페이지 URL 을 주세요. "
+                        "같은 host/path 패턴은 이후 자동으로 거부됩니다 (운영자가 풀기 전까지).")
                 else:
                     append_triage_queue(url, slug, job["via"], req_by, tail)
                     err = _format_register_error(rc, tail)

@@ -90,8 +90,12 @@ _CONTROL_RE = re.compile(r"[\x00-\x20\x7f-\x9f]")  # ASCII 제어문자·공백 
 
 # --------------------------------------------------------------------------- #
 # 스테이지 2 정책 블랙리스트 — bot/url_blacklist.json (없거나 깨지면 _DEFAULT_BLACKLIST 폴백)
+# + output/learned_blacklist.json (자동 학습 — register.py 의 _save_rejected 가 박음)
+# 두 자리 merge: 운영자가 손-편집한 bot/url_blacklist.json 이 위, 자동 학습된 output/learned_blacklist.json 이 아래.
+# 위에서부터 첫 매치로 거부 → 운영자 룰 우선, 학습 룰은 그 뒤.
 # --------------------------------------------------------------------------- #
 _BLACKLIST_PATH = Path(__file__).resolve().parent / "url_blacklist.json"
+_LEARNED_PATH = ROOT / "output" / "learned_blacklist.json"
 
 # url_blacklist.json 이 없거나 깨졌을 때 쓰는 내장 기본값. 배포 시 같은 내용의 url_blacklist.json 도 함께 둔다 — 그게 진실의 원천.
 _DEFAULT_BLACKLIST: list[dict] = [
@@ -124,13 +128,21 @@ _DEFAULT_BLACKLIST: list[dict] = [
     },
 ]
 
-# (mtime, 정규화된 그룹들, 상태문자열) — mtime 바뀌면 재로드. 이벤트 루프 스레드에서만 접근(락 불필요).
-_blacklist_cache: Optional[tuple[float, list[dict], str]] = None
+# ((cfg_mtime, learned_mtime), 정규화된 그룹들, 상태문자열) — 두 파일 중 어느 한쪽 mtime 이 바뀌면 reload.
+# 이벤트 루프 스레드에서만 접근(락 불필요).
+_blacklist_cache: Optional[tuple[tuple[float, float], list[dict], str]] = None
 _blacklist_last_error: Optional[str] = None  # 같은 에러를 매 검사마다 다시 로깅하지 않으려고
 
 
 def _normalize_groups(raw: object, source: str) -> list[dict]:
-    """raw('groups' 리스트)를 검증·정규화 → [{name, message, host_suffix:tuple, path_ext:tuple}, ...]. 잘못되면 ValueError."""
+    """raw('groups' 리스트)를 검증·정규화 → [{name, message, host_suffix:tuple, path_ext:tuple, path_prefix:tuple}, ...]. 잘못되면 ValueError.
+
+    필드:
+      - host_suffix: 'youtube.com' 처럼 (점 없이). 매치: host==X OR host.endswith('.'+X).
+      - path_ext: '.pdf' 처럼 확장자. 매치: path.endswith(X). (host 무관)
+      - path_prefix: '/search' 처럼 path 시작. 매치: path.startswith(X). 보통 host_suffix 와 함께 (AND).
+    그룹당 최소 하나는 비어있지 않아야 함. host_suffix + path_prefix 둘 다 있으면 AND 매치 (둘 다 매치해야 hit).
+    """
     if not isinstance(raw, list) or not raw:
         raise ValueError(f"{source}: 'groups' 가 비어있지 않은 리스트여야 함")
     out: list[dict] = []
@@ -142,48 +154,118 @@ def _normalize_groups(raw: object, source: str) -> list[dict]:
             raise ValueError(f"{source}: groups[{i}].name 누락/빈 문자열")
         if not isinstance(message, str) or not message.strip():
             raise ValueError(f"{source}: groups[{i}].message 누락/빈 문자열")
-        host_suffix, path_ext = g.get("host_suffix") or [], g.get("path_ext") or []
-        if not isinstance(host_suffix, list) or not isinstance(path_ext, list):
-            raise ValueError(f"{source}: groups[{i}].host_suffix/path_ext 는 리스트여야 함")
-        for fld, items in (("host_suffix", host_suffix), ("path_ext", path_ext)):
+        host_suffix = g.get("host_suffix") or []
+        path_ext = g.get("path_ext") or []
+        path_prefix = g.get("path_prefix") or []
+        if not isinstance(host_suffix, list) or not isinstance(path_ext, list) or not isinstance(path_prefix, list):
+            raise ValueError(f"{source}: groups[{i}].host_suffix/path_ext/path_prefix 는 리스트여야 함")
+        for fld, items in (("host_suffix", host_suffix), ("path_ext", path_ext), ("path_prefix", path_prefix)):
             for j, s in enumerate(items):
                 if not isinstance(s, str):
                     raise ValueError(f"{source}: groups[{i}].{fld}[{j}] 가 문자열이 아님 ({type(s).__name__})")
         hs = tuple(s.strip().lower().lstrip(".") for s in host_suffix if s.strip())
         pe = tuple("." + s.strip().lower().lstrip(".") for s in path_ext if s.strip())
-        if not hs and not pe:
-            raise ValueError(f"{source}: groups[{i}]({name}) 에 host_suffix 도 path_ext 도 없음")
-        out.append({"name": name.strip(), "message": message.strip(), "host_suffix": hs, "path_ext": pe})
+        # path_prefix 는 항상 '/' 로 시작 — 사용자가 'search' 만 적어도 '/search' 로 정규화.
+        pp = tuple(("/" + s.strip().lower().lstrip("/")) for s in path_prefix if s.strip())
+        if not hs and not pe and not pp:
+            raise ValueError(f"{source}: groups[{i}]({name}) 에 host_suffix/path_ext/path_prefix 중 하나라도 있어야 함")
+        out.append({"name": name.strip(), "message": message.strip(),
+                    "host_suffix": hs, "path_ext": pe, "path_prefix": pp})
     return out
 
 
 _DEFAULT_BLACKLIST_NORM = _normalize_groups(_DEFAULT_BLACKLIST, "_DEFAULT_BLACKLIST")  # 모듈 import 시 한 번 — 여기서 깨지면 코드 버그
 
 
+def _learned_to_groups(patterns: list[dict]) -> list[dict]:
+    """output/learned_blacklist.json 의 patterns → url_gate 정책 그룹 형식.
+    각 pattern 이 하나의 그룹이 됨 (개별 message 유지).
+    """
+    groups_raw: list[dict] = []
+    for p in patterns:
+        if not isinstance(p, dict):
+            continue
+        host = (p.get("host_suffix") or "").strip()
+        pp = (p.get("path_prefix") or "").strip()
+        if not host and not pp:
+            continue
+        reason = (p.get("last_reason") or "이전에 거부됨").strip()
+        last_url = (p.get("last_url") or "").strip()
+        pat_id = (p.get("id") or "").strip()
+        message = (f"이전 시도에서 거부된 패턴이에요 — 사유: {reason}. "
+                   f"같은 패턴은 다른 사용자가 시도해도 거부됩니다 (운영자가 `/admin unlearn {pat_id or '<id>'}` 으로 풀기 전까지). "
+                   f"참고 URL: {last_url[:120]}" if last_url else
+                   f"이전 시도에서 거부된 패턴이에요 — 사유: {reason}.")
+        group_raw = {
+            "name": "learned_rejected",
+            "message": message,
+            "host_suffix": [host] if host else [],
+            "path_prefix": [pp] if pp else [],
+            "path_ext": [],
+        }
+        groups_raw.append(group_raw)
+    return groups_raw
+
+
 def _load_blacklist() -> tuple[list[dict], str]:
-    """(정규화된 그룹 리스트, 상태문자열). 파일 없음/JSON·스키마 깨짐 → 내장 기본값."""
+    """(정규화된 그룹 리스트, 상태문자열). bot/url_blacklist.json + output/learned_blacklist.json 두 자리 merge.
+    운영자 룰 (bot/url_blacklist.json) 이 위, 학습 룰 (output/learned_blacklist.json) 이 아래 — 위에서부터 첫 매치.
+    각 파일 없음/JSON·스키마 깨짐 → 그 자리만 폴백 (다른 자리는 살림). bot/url_blacklist.json 깨지면 _DEFAULT_BLACKLIST.
+    """
     global _blacklist_cache, _blacklist_last_error
+    # 두 파일의 mtime 을 같이 본다 — 어느 한쪽이 바뀌어도 reload.
     try:
-        mtime = _BLACKLIST_PATH.stat().st_mtime
+        cfg_mtime = _BLACKLIST_PATH.stat().st_mtime
     except OSError:
-        return _DEFAULT_BLACKLIST_NORM, "내장 기본값 (url_blacklist.json 없음)"
-    if _blacklist_cache is not None and _blacklist_cache[0] == mtime:
-        return _blacklist_cache[1], _blacklist_cache[2]
+        cfg_mtime = -1.0
     try:
-        data = json.loads(_BLACKLIST_PATH.read_text(encoding="utf-8"))
-        if not isinstance(data, dict) or "groups" not in data:
-            raise ValueError('최상위가 {"groups": [...]} 객체여야 함')
-        groups = _normalize_groups(data["groups"], "url_blacklist.json")
-        status = f"url_blacklist.json ({len(groups)} groups)"
-        _blacklist_last_error = None
-    except Exception as e:  # noqa: BLE001
-        emsg = f"{type(e).__name__}: {e}"
-        if emsg != _blacklist_last_error:
-            log.warning("url_blacklist.json 로드/검증 실패 — 내장 기본값 사용: %s", emsg)
-            _blacklist_last_error = emsg
-        groups = _DEFAULT_BLACKLIST_NORM
-        status = f"⚠ url_blacklist.json 로드 실패({type(e).__name__}) — 내장 기본값"
-    _blacklist_cache = (mtime, groups, status)
+        learned_mtime = _LEARNED_PATH.stat().st_mtime
+    except OSError:
+        learned_mtime = -1.0
+    cache_key = (cfg_mtime, learned_mtime)
+    if _blacklist_cache is not None and _blacklist_cache[0] == cache_key:
+        return _blacklist_cache[1], _blacklist_cache[2]
+
+    status_parts: list[str] = []
+    # 1) bot/url_blacklist.json (운영자 룰)
+    if cfg_mtime < 0:
+        cfg_groups = _DEFAULT_BLACKLIST_NORM
+        status_parts.append("내장 기본값 (url_blacklist.json 없음)")
+    else:
+        try:
+            data = json.loads(_BLACKLIST_PATH.read_text(encoding="utf-8"))
+            if not isinstance(data, dict) or "groups" not in data:
+                raise ValueError('최상위가 {"groups": [...]} 객체여야 함')
+            cfg_groups = _normalize_groups(data["groups"], "url_blacklist.json")
+            status_parts.append(f"url_blacklist.json ({len(cfg_groups)} groups)")
+            _blacklist_last_error = None
+        except Exception as e:  # noqa: BLE001
+            emsg = f"{type(e).__name__}: {e}"
+            if emsg != _blacklist_last_error:
+                log.warning("url_blacklist.json 로드/검증 실패 — 내장 기본값 사용: %s", emsg)
+                _blacklist_last_error = emsg
+            cfg_groups = _DEFAULT_BLACKLIST_NORM
+            status_parts.append(f"⚠ url_blacklist.json 로드 실패({type(e).__name__}) — 내장 기본값")
+
+    # 2) output/learned_blacklist.json (자동 학습 룰)
+    learned_groups: list[dict] = []
+    if learned_mtime >= 0:
+        try:
+            ldata = json.loads(_LEARNED_PATH.read_text(encoding="utf-8"))
+            patterns = (ldata.get("patterns") if isinstance(ldata, dict) else None) or []
+            if not isinstance(patterns, list):
+                raise ValueError("'patterns' 가 리스트가 아님")
+            raw_groups = _learned_to_groups(patterns)
+            if raw_groups:
+                learned_groups = _normalize_groups(raw_groups, "learned_blacklist.json")
+                status_parts.append(f"learned_blacklist.json ({len(learned_groups)} patterns)")
+        except Exception as e:  # noqa: BLE001
+            log.warning("learned_blacklist.json 로드 실패 — 무시하고 진행: %s", e)
+            status_parts.append(f"⚠ learned_blacklist.json 로드 실패({type(e).__name__})")
+
+    groups = list(cfg_groups) + learned_groups
+    status = " + ".join(status_parts) if status_parts else "내장 기본값"
+    _blacklist_cache = (cache_key, groups, status)
     return groups, status
 
 
@@ -266,13 +348,34 @@ def _host_matches(host: str, suffixes: tuple[str, ...]) -> bool:
     return any(host == s or host.endswith("." + s) for s in suffixes)
 
 
+def _path_matches_prefix(path: str, prefixes: tuple[str, ...]) -> bool:
+    """path 가 prefix 중 하나로 시작하면 True. prefix 는 항상 '/' 로 시작 (정규화됨).
+    `path` 는 urlsplit(u).path — query string (`?...`) 은 이미 분리돼 있어 path 에 안 포함."""
+    return any(path == pp or path.startswith(pp + "/") or path == pp.rstrip("/")
+               for pp in prefixes)
+
+
 def _check_policy(u: str, label: str) -> None:
     p = urlsplit(u)
     host = (p.hostname or "").lower().rstrip(".")  # 끝의 FQDN 점 제거
     path = (p.path or "").lower()
     for g in _load_blacklist()[0]:
-        if g["host_suffix"] and _host_matches(host, g["host_suffix"]):
-            _reject(g["name"], f"{_lbl(label)}{g['message']}")
+        # 그룹 안의 매치 조건 우선순위:
+        #   host_suffix + path_prefix 둘 다 있으면 AND (둘 다 매치해야 hit). 학습 패턴 (google.com/search 같이) 정밀 매치에 씀.
+        #   host_suffix 만 → host 단독 매치.
+        #   path_prefix 만 → path 단독 매치 (host 무관 — 보통 host 와 함께 쓰지만 정책상 허용).
+        #   path_ext → path 끝 확장자.
+        hs_match = bool(g.get("host_suffix")) and _host_matches(host, g["host_suffix"])
+        pp_match = bool(g.get("path_prefix")) and _path_matches_prefix(path, g["path_prefix"])
+        if g.get("host_suffix") and g.get("path_prefix"):
+            if hs_match and pp_match:
+                _reject(g["name"], f"{_lbl(label)}{g['message']}")
+        elif g.get("host_suffix"):
+            if hs_match:
+                _reject(g["name"], f"{_lbl(label)}{g['message']}")
+        elif g.get("path_prefix"):
+            if pp_match:
+                _reject(g["name"], f"{_lbl(label)}{g['message']}")
         if g["path_ext"] and path.endswith(g["path_ext"]):
             _reject(g["name"], f"{_lbl(label)}{g['message']}")
 

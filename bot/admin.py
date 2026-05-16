@@ -196,6 +196,52 @@ def build_admin_tree(client: discord.Client, conn, *, admin_guild: discord.Objec
                else f"❌ `{slug}` 거부 마커가 없음.")
         await interaction.response.send_message(msg, ephemeral=True)
 
+    @admin.command(name="learned", description="자동 학습된 거부 패턴 목록 (host+path_prefix 단위).")
+    async def learned_cmd(interaction: discord.Interaction):
+        if not _is_owner(interaction):
+            await interaction.response.send_message("❌ owner 전용 명령입니다.", ephemeral=True)
+            return
+        from scripts.register import _list_learned
+        patterns = _list_learned()
+        if not patterns:
+            await interaction.response.send_message("학습된 거부 패턴 없음.", ephemeral=True)
+            return
+        # 최근 거부 시각 내림차순.
+        patterns_sorted = sorted(patterns,
+                                 key=lambda p: str(p.get("last_rejected_at") or ""),
+                                 reverse=True)
+        lines = [f"**학습된 거부 패턴 ({len(patterns_sorted)}건)**"]
+        for p in patterns_sorted[:50]:
+            pid = (p.get("id") or "")[:12]
+            host = p.get("host_suffix") or "(없음)"
+            pp = p.get("path_prefix") or "(빈 path)"
+            cnt = p.get("reject_count") or 0
+            last_ts = (p.get("last_rejected_at") or "")[:16]
+            reason = (p.get("last_reason") or "").replace("\n", " ")
+            if len(reason) > 60:
+                reason = reason[:60] + "…"
+            lines.append(f"- `{pid}` `{host}{pp}` · count={cnt} · {last_ts}\n   {reason}")
+        if len(patterns_sorted) > 50:
+            lines.append(f"_(처음 50건만 표시 — 전체 {len(patterns_sorted)}건)_")
+        await _ack_and_dm(interaction, "\n".join(lines))
+
+    @admin.command(name="unlearn", description="학습된 거부 패턴을 풀어줌 (false positive 복구).")
+    @app_commands.describe(pattern_id="`/admin learned` 의 id (12자 hash)")
+    async def unlearn_cmd(interaction: discord.Interaction, pattern_id: str):
+        if not _is_owner(interaction):
+            await interaction.response.send_message("❌ owner 전용 명령입니다.", ephemeral=True)
+            return
+        pat_id = pattern_id.strip().lower()
+        if not re.fullmatch(r"[a-f0-9]{1,12}", pat_id):
+            await interaction.response.send_message(
+                f"❌ pattern_id 형식 오류 (소문자 16진 1~12자): `{pattern_id}`", ephemeral=True)
+            return
+        from scripts.register import _clear_learned_by_id
+        ok = _clear_learned_by_id(pat_id)
+        msg = (f"✅ 학습 패턴 `{pat_id}` 제거됨 — 이후 같은 host+path_prefix URL 은 다시 자동 거부 안 됨."
+               if ok else f"❌ pattern_id `{pat_id}` 못 찾음. `/admin learned` 로 확인.")
+        await interaction.response.send_message(msg, ephemeral=True)
+
     @admin.command(name="triage", description="처리 대기 backlog 요약 (신고/깨짐/실패/큐/의견).")
     async def triage_cmd(interaction: discord.Interaction):
         if not _is_owner(interaction):

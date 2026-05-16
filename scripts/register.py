@@ -26,10 +26,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -223,13 +226,181 @@ def _save_state(slug: str, url: str, config_path: Path, post_ids: list[str],
         if mp.exists():
             mp.unlink()
     _prune_triage_queue(slug)
+    # 등록 성공 = "이 URL 의 host+path_prefix 패턴은 작동함" 증거. 같은 패턴 학습된 거부 룰이 있으면 자동 회수.
+    # path_prefix 정확 매치만 — 다른 path 의 학습은 영향 X (예: google.com/search 룰이 있고 google.com/forms 등록해도 /search 룰 안 풀림).
+    # 실패해도 등록 자체는 성공이니 swallow.
+    try:
+        removed = _unlearn_pattern_if_match(url)
+        if removed:
+            print(f"[register] learned_blacklist: 매칭 패턴 자동 회수 — id={removed} (등록 성공 = 패턴 작동 증거)")
+    except Exception as e:  # noqa: BLE001
+        print(f"[register] ⚠ learned_blacklist 자동 회수 실패 — 등록은 성공: {e}", file=sys.stderr)
     return p
+
+
+# --------------------------------------------------------------------------- #
+# learned_blacklist — 자동 학습 거부 패턴 (host + path_prefix 단위, 영구).
+# 한 사용자의 거부 → 모두에게 적용. dev 박스에서 손-config 으로 작동시키면 자동 회수.
+# 저장 자리: output/learned_blacklist.json (output/ 룰 — N100 작성 가능, git 추적 X).
+# 봇 url_gate 가 mtime cache 로 자동 reload → 큐 처리 중 앞 작업 거부가 뒤 작업에 즉시 반영.
+# --------------------------------------------------------------------------- #
+LEARNED_PATH = ROOT / "output" / "learned_blacklist.json"
+
+
+def _pattern_id(host: str, path_prefix: str) -> str:
+    """host + path_prefix 의 안정적 12자 hash. 같은 (host, path_prefix) 는 같은 id."""
+    h = hashlib.sha1(f"{host}|{path_prefix}".encode("utf-8")).hexdigest()
+    return h[:12]
+
+
+def _extract_url_pattern(url: str) -> Optional[tuple[str, str]]:
+    """URL → (host_suffix, path_prefix). path_prefix 는 path 의 첫 segment (보수적 — host 의 다른 서비스 안 막음).
+    path 가 '/' 또는 빈 문자열이면 path_prefix=''. host 없으면 None.
+
+    예:
+      https://www.google.com/search?q=대나무   → ('www.google.com', '/search')
+      https://search.naver.com/search.naver  → ('search.naver.com', '/search.naver')
+      https://example.com/                   → ('example.com', '')
+      https://example.com                    → ('example.com', '')
+    """
+    try:
+        p = urlsplit(url)
+    except (ValueError, AttributeError):
+        return None
+    host = (p.hostname or "").strip().lower().rstrip(".")
+    if not host:
+        return None
+    path = (p.path or "").strip()
+    # path 의 첫 segment 만 — 보수적.
+    seg = ""
+    if path and path != "/":
+        parts = [s for s in path.split("/") if s]
+        if parts:
+            seg = "/" + parts[0]
+    return (host, seg)
+
+
+def _read_learned() -> dict:
+    """learned_blacklist.json 읽기. 없거나 깨지면 빈 구조 반환."""
+    try:
+        data = json.loads(LEARNED_PATH.read_text(encoding="utf-8"))
+        if isinstance(data, dict) and isinstance(data.get("patterns"), list):
+            return data
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        pass
+    return {"version": 1, "patterns": []}
+
+
+def _write_learned_atomic(data: dict) -> None:
+    """temp file + os.replace 로 atomic write. 부분 쓰기로 인한 reader 깨짐 방지.
+    같은 디렉토리 안에서 tmp 생성 (cross-device rename 회피)."""
+    LEARNED_PATH.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=".learned_blacklist.", suffix=".json", dir=str(LEARNED_PATH.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, LEARNED_PATH)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _learn_pattern(url: str, reason: str, slug: Optional[str] = None) -> Optional[dict]:
+    """URL 의 host + path_prefix 를 learned_blacklist 에 박음. 이미 있는 entry 면 count 증가 + last_* 갱신.
+    돌려준 dict 은 박힌/갱신된 pattern entry. URL 이 invalid 면 None.
+
+    부르는 자리:
+      - `_save_rejected` 마지막에 자동 호출 (모든 REJECTED 마커는 패턴도 박음)
+      - `bot/worker.py` 의 rc=3 처리 분기에서 `_save_rejected` 거치며 호출됨
+    """
+    extracted = _extract_url_pattern(url)
+    if extracted is None:
+        return None
+    host, path_prefix = extracted
+    pat_id = _pattern_id(host, path_prefix)
+    now = _now_iso()
+    data = _read_learned()
+    patterns = data.setdefault("patterns", [])
+    existing = None
+    for p in patterns:
+        if isinstance(p, dict) and p.get("id") == pat_id:
+            existing = p
+            break
+    if existing is not None:
+        existing["last_rejected_at"] = now
+        existing["reject_count"] = int(existing.get("reject_count") or 0) + 1
+        existing["last_reason"] = reason
+        existing["last_url"] = url
+        if slug:
+            existing["last_slug"] = slug
+        entry = existing
+    else:
+        entry = {
+            "id": pat_id,
+            "host_suffix": host,
+            "path_prefix": path_prefix,
+            "first_rejected_at": now,
+            "last_rejected_at": now,
+            "reject_count": 1,
+            "last_reason": reason,
+            "last_url": url,
+            "last_slug": slug,
+        }
+        patterns.append(entry)
+    data["version"] = 1
+    _write_learned_atomic(data)
+    return entry
+
+
+def _unlearn_pattern_if_match(url: str) -> list[str]:
+    """URL 의 host + path_prefix 매칭하는 learned entry 를 모두 제거.
+    `_save_state` (등록 성공) 가 호출 — "이 URL 이 작동한다 = 같은 패턴은 거부 룰 풀어줌".
+    돌려준 list 는 제거된 pattern id 들. 매칭 X 면 빈 list.
+    """
+    extracted = _extract_url_pattern(url)
+    if extracted is None:
+        return []
+    host, path_prefix = extracted
+    pat_id = _pattern_id(host, path_prefix)
+    data = _read_learned()
+    patterns = data.get("patterns") or []
+    removed = [p["id"] for p in patterns if isinstance(p, dict) and p.get("id") == pat_id]
+    if not removed:
+        return []
+    data["patterns"] = [p for p in patterns if not (isinstance(p, dict) and p.get("id") == pat_id)]
+    data["version"] = 1
+    _write_learned_atomic(data)
+    return removed
+
+
+def _list_learned() -> list[dict]:
+    """learned_blacklist 의 patterns 리스트. 디버깅/admin 용."""
+    return _read_learned().get("patterns") or []
+
+
+def _clear_learned_by_id(pat_id: str) -> bool:
+    """pattern id 로 learned entry 제거 (운영자 손-회수). 없었으면 False."""
+    data = _read_learned()
+    patterns = data.get("patterns") or []
+    new = [p for p in patterns if not (isinstance(p, dict) and p.get("id") == pat_id)]
+    if len(new) == len(patterns):
+        return False
+    data["patterns"] = new
+    data["version"] = 1
+    _write_learned_atomic(data)
+    return True
 
 
 def _save_rejected(slug: str, url: str, reason: str, note: Optional[str] = None) -> Path:
     """`.REJECTED.json` 마커. 봇 `is_rejected(slug)`=True 가 되어 `/preview`·`/watch` 가 자동경로
     안 타고 "이전에 거부됨" 메시지로 응답. `is_registered` 와 분리 — REJECTED 는 polling 대상도 아님.
     같은 slug 의 `.FAILED.json` 마커가 있었으면 함께 제거 (REJECTED 가 우선).
+
+    + 같은 URL 의 host+path_prefix 패턴을 `output/learned_blacklist.json` 에 자동 학습 (한 명의 거부 → 모두에게 적용).
+    이 자동 학습은 atomic write — `output/` 가 없으면 만들어줌.
 
     `slug` 는 `[A-Za-z0-9._%-]+` 만 (path traversal 방어) — admin/스크립트 외 호출 없지만 보수적으로.
     """
@@ -248,6 +419,11 @@ def _save_rejected(slug: str, url: str, reason: str, note: Optional[str] = None)
     if fp.exists():
         fp.unlink()
     _prune_triage_queue(slug)
+    # 자동 패턴 학습 — host+path_prefix 단위. 실패해도 REJECTED 마커는 이미 박혔으니 swallow.
+    try:
+        _learn_pattern(url, reason, slug=slug)
+    except Exception as e:  # noqa: BLE001
+        print(f"[register] ⚠ learned_blacklist 학습 실패 — REJECTED 마커는 박힘: {e}", file=sys.stderr)
     return p
 
 
