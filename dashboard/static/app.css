@@ -320,6 +320,13 @@ pre.tail {
   word-break: break-word;
 }
 
+.failed-box {
+  border-left: 3px solid var(--nw-err-fg);
+  padding-left: 1rem;
+  background: var(--nw-err-bg);
+  color: var(--nw-err-fg);
+}
+
 .fetch-results {
   margin-top: 1rem;
   padding: 0.75rem;

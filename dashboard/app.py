@@ -118,6 +118,29 @@ async def triage_page(request: Request, conn=Depends(get_conn)):
                    summary=summary, recent=rows, quick=quick_prompts, active="triage")
 
 
+@app.get("/triage/failed", response_class=HTMLResponse)
+async def triage_failed_page(request: Request):
+    """자동등록 실패(FAILED.json) 큐 한눈 — snapshot 의 `*.FAILED.json` 들을 한 줄씩 표로.
+
+    한 행만; last_feedback / last_config 원문은 `/subs/<slug>` 상세에서 본다.
+    """
+    items: list[dict] = []
+    for slug in state.failed_slugs():
+        d = state.failed_payload(slug) or {}
+        lines = [ln.strip() for ln in (d.get("last_feedback") or "").splitlines() if ln.strip()]
+        first_fail = next((ln for ln in lines if "[FAIL]" in ln), lines[0] if lines else "")
+        items.append({
+            "slug": slug,
+            "url": d.get("url") or "",
+            "failed_at": (d.get("failed_at") or "")[:19],
+            "reason": d.get("reason") or "",
+            "first_fail": first_fail,
+        })
+    items.sort(key=lambda r: r["failed_at"], reverse=True)
+    return _render("triage_failed.html", request,
+                   items=items, active="triage")
+
+
 # --------------------------------------------------------------------------- #
 # Jobs
 # --------------------------------------------------------------------------- #
@@ -178,7 +201,9 @@ async def subs_list(request: Request, q: Optional[str] = None,
     if conn is None:
         return _no_snapshot(request)
     paths = state.snapshot_paths()
-    slugs = state.unique_slugs(conn)
+    # 자동등록 *실패* 만 한 slug 는 subscriptions 테이블에 행이 없다 — DB-only 목록이면 누락 →
+    # /subs 가 활성+FAILED 둘 다 보이도록 합집합. (FAILED 큐 상세는 /triage/failed)
+    slugs = sorted(set(state.unique_slugs(conn)) | set(state.failed_slugs()))
     rows = []
     for s in slugs:
         subs = db.subscriptions_for_slug(conn, s)
@@ -194,6 +219,10 @@ async def subs_list(request: Request, q: Optional[str] = None,
                 pass
         # 검색 노출용 user_id 목록 (중복 제거)
         user_ids = sorted({str(s_row["user_id"]) for s_row in subs})
+        sample_url = subs[0]["url"] if subs else None
+        if sample_url is None and failed_marker.exists():
+            fp = state.failed_payload(s) or {}
+            sample_url = fp.get("url")
         rows.append({
             "slug": s,
             "n_subs": len(subs),
@@ -201,7 +230,7 @@ async def subs_list(request: Request, q: Optional[str] = None,
             "has_state": st_path.exists(),
             "failed": failed_marker.exists(),
             "broken": broken,
-            "sample_url": (subs[0]["url"] if subs else None),
+            "sample_url": sample_url,
             "user_ids": user_ids,
         })
     rows.sort(key=lambda r: (-r["broken"], not r["failed"], r["slug"]))
@@ -221,6 +250,7 @@ async def subs_list(request: Request, q: Optional[str] = None,
 
 @app.get("/subs/{slug}", response_class=HTMLResponse)
 async def sub_detail(request: Request, slug: str = Depends(require_slug),
+                     from_: Optional[str] = Query(None, alias="from"),
                      conn=Depends(get_conn)):
     if conn is None:
         return _no_snapshot(request)
@@ -236,9 +266,12 @@ async def sub_detail(request: Request, slug: str = Depends(require_slug),
         sample_url = result.latest_job.get("url")
     p_redo = prompts.hand_config_redo_slug(slug=slug, url=sample_url)
     p_diag = prompts.diagnose_slug(slug=slug)
+    # 뒤로가기 — 어디서 왔는지에 따라. 기본은 /subs.
+    back = {"triage": ("/triage/failed", "FAILED 큐")}.get(from_ or "", ("/subs", "Subs"))
     return _render("sub_detail.html", request,
                    result=result, slug=slug, failed=failed_payload,
-                   p_redo=p_redo, p_diag=p_diag, active="subs")
+                   p_redo=p_redo, p_diag=p_diag,
+                   back_href=back[0], back_label=back[1], active="subs")
 
 
 # --------------------------------------------------------------------------- #

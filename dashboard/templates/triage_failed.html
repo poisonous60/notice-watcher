@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}FAILED 큐 — notice-watcher{% endblock %}
+{% block body %}
+
+<p><a href="/">← Triage</a></p>
+<h2>🛠 자동등록 실패 (FAILED) — {{ items | length }}건</h2>
+<p class="muted">
+  봇·polling 이 자동 등록 시도 실패 → <code>output/poll_state/&lt;slug&gt;.FAILED.json</code> 으로 쌓인 큐.
+  처리: hand-config 스킬 모드 B (probe 진단 → 손 config / 손 adapter → <code>register --config</code> → N100 배포).
+</p>
+
+{% if not items %}
+<p class="muted">현재 FAILED 큐 비어 있음. ✨</p>
+{% else %}
+<table class="compact striped">
+  <thead>
+    <tr>
+      <th>slug</th>
+      <th>failed_at</th>
+      <th>reason</th>
+      <th>[FAIL] / 첫 줄</th>
+      <th>url</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for it in items %}
+    <tr>
+      <td class="mono" style="white-space:nowrap;">
+        <a href="/subs/{{ it.slug | urlencode }}?from=triage">{{ it.slug }}</a>
+        {% if it.url and is_http_url(it.url) %} <a href="{{ it.url }}" target="_blank" rel="noopener noreferrer" title="원본 URL 새 탭 열기">↗</a>{% endif %}
+      </td>
+      <td style="white-space:nowrap;">{{ it.failed_at or '—' }}</td>
+      <td style="max-width:18em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+        <span title="{{ it.reason }}">{{ it.reason or '—' }}</span>
+      </td>
+      <td style="max-width:32em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+        <span title="{{ it.first_fail }}">{{ it.first_fail or '—' }}</span>
+      </td>
+      <td class="mono" style="max-width:22em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+        <span title="{{ it.url }}">{{ it.url or '—' }}</span>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% endblock %}

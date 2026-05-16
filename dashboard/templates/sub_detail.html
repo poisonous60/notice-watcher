@@ -2,13 +2,13 @@
 {% block title %}{{ slug }} — notice-watcher{% endblock %}
 {% block body %}
 
-<p><a href="/subs">← Subs</a></p>
+<p><a href="{{ back_href or '/subs' }}">← {{ back_label or 'Subs' }}</a></p>
 <h2>🔗 <code>{{ slug }}</code></h2>
 
 {% if failed %}
-<article style="border-left:3px solid #d32f2f;padding-left:1rem;background:#fff5f5;">
+<article class="failed-box">
   <strong>⚠ 자동등록 실패 (FAILED.json):</strong>
-  <pre style="font-size:0.82rem;white-space:pre-wrap;">{{ failed | tojson(indent=2) }}</pre>
+  <pre class="tail" style="font-size:0.82rem;white-space:pre-wrap;">{{ failed | tojson(indent=2) }}</pre>
 </article>
 {% endif %}
 
@@ -50,9 +50,9 @@
 <details>
   <summary>config / state JSON</summary>
   <h4>config</h4>
-  <pre class="tail" style="background:#f4f4f4;color:#222;">{{ result.config | tojson(indent=2) if result.config else '(없음)' }}</pre>
+  <pre class="tail">{{ result.config | tojson(indent=2) if result.config else '(없음)' }}</pre>
   <h4>state</h4>
-  <pre class="tail" style="background:#f4f4f4;color:#222;">{{ result.state | tojson(indent=2) if result.state else '(없음)' }}</pre>
+  <pre class="tail">{{ result.state | tojson(indent=2) if result.state else '(없음)' }}</pre>
 </details>
 
 <h3>🔬 Fetch 시뮬</h3>
