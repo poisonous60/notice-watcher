@@ -33,6 +33,9 @@ log = logging.getLogger("bot.worker")
 
 _task: Optional[asyncio.Task] = None
 
+# 같은 잡이 봇을 N회 이상 죽이면 자동 failed 처리 — 큐 맨앞에서 무한 점유 방지.
+ATTEMPTS_LIMIT = 5
+
 
 async def start(client, conn, *, dm_owner: Callable[..., Awaitable[None]]) -> None:
     """봇 ready 직후 호출. running 잡 → pending 으로 reset 하고 단일 worker task 띄움.
@@ -41,12 +44,15 @@ async def start(client, conn, *, dm_owner: Callable[..., Awaitable[None]]) -> No
     worker 도 to_thread 안 거치고 직접 호출. sqlite WAL + 짧은 쿼리라 event loop block 미세.
     """
     global _task
+    # _task guard 를 reset 보다 먼저 — on_ready 는 Discord gateway reconnect 마다 호출되는데,
+    # 살아있는 worker 가 처리 중인 running 잡을 reset 하면 같은 잡이 중복 처리되고
+    # attempts 도 오해해서 +1 됨. worker 가 새로 뜨는 경우(첫 부팅)에만 reset.
+    if _task is not None and not _task.done():
+        log.info("worker 이미 실행 중 — reset/재시작 안 함 (on_ready reconnect 진입 추정)")
+        return
     n_reset = db.reset_running_to_pending(conn)
     if n_reset:
         log.info("worker start: %d개 running 잡을 pending 으로 reset (이전 인스턴스 잔재)", n_reset)
-    if _task is not None and not _task.done():
-        log.info("worker 이미 실행 중 — 재시작 안 함")
-        return
     _task = asyncio.create_task(_loop(client, conn, dm_owner), name="bot.worker")
     log.info("worker task 시작")
 
@@ -148,25 +154,44 @@ async def _process_job(client, conn, job, dm_owner) -> None:
             await _post_register_success(client, conn, job)
             return
 
+        # 자동 fail — 같은 잡이 봇을 ATTEMPTS_LIMIT 회 이상 죽였으면 큐 맨앞 점유 그만 두고 끝냄.
+        # claim_next_pending 직후라 status='running' → mark_job_finished 의 가드 통과.
+        if attempts > ATTEMPTS_LIMIT:
+            log.warning("잡 #%d attempts=%d 가 한도 %d 초과 — 자동 failed 처리",
+                        job_id, attempts, ATTEMPTS_LIMIT)
+            db.mark_job_finished(conn, job_id, ok=False, rc=-5,
+                                 tail=f"(자동 fail — 재시작 {attempts}회로 한도 {ATTEMPTS_LIMIT} 초과)")
+            if kind == "register" and job["ack_channel_id"]:
+                await edit_channel_message(
+                    client, job["ack_channel_id"], job["ack_message_id"],
+                    msg("worker_attempts_exceeded", slug=slug, attempts=attempts))
+            await dm_owner(
+                f"❌ 잡 #{job_id} `{slug}` 가 재시작 {attempts}회로 한도 초과 — 자동 failed. "
+                "처리 중 봇이 반복 죽는 원인 조사 필요",
+                key=f"job-attempts-exceeded:{job_id}",
+            )
+            return
+
         # 봇 재시작으로 재실행된 잡 (attempts>0) → 사용자 향 재시작 안내 우선 띄움.
         # 이전 인스턴스가 ack 메시지를 phase 중간 상태(예: "사전 확인 중…")로 남겨두고 죽었을 수 있어서,
         # 다음 phase edit 가 phase 를 거꾸로 돌리는 것처럼 보이기 전에 명시적으로 "재시작 → 처음부터" 안내.
-        # register 만 ack 보유 → reprobe 는 skip.
+        # register 만 ack 보유 → reprobe 는 사용자 ack 없이 OWNER DM 만.
         if attempts > 0 and kind == "register" and job["ack_channel_id"]:
             await edit_channel_message(
                 client, job["ack_channel_id"], job["ack_message_id"],
                 msg("worker_restarted", slug=slug, attempts=attempts))
-            # 잡 하나가 두 번 이상 재시작됐으면 무한 재시작 루프 가능성 — OWNER 에 알림.
-            if attempts >= 2:
-                await dm_owner(
-                    f"⚠️ 잡 #{job_id} `{slug}` 가 재시작 {attempts}회 — 처리 중 봇이 반복 죽는지 확인 필요",
-                    key=f"job-restart:{job_id}",
-                )
+        # OWNER DM 은 kind 무관 — reprobe 도 무한 재시작 가능성 관측해야 함.
+        if attempts >= 2:
+            await dm_owner(
+                f"⚠️ 잡 #{job_id} `{slug}` (kind={kind}) 가 재시작 {attempts}회 — "
+                "처리 중 봇이 반복 죽는지 확인 필요",
+                key=f"job-restart:{job_id}",
+            )
 
         # ack — 처리 시작 표시 (register 만). 곧 [PHASE] probe / recognize 가 와서 덮어쓴다.
-        # attempts>0 이면 위에서 이미 재시작 안내를 띄웠으므로 이 즉시 덮어쓰기 skip —
-        # 1~2초 뒤 subprocess 의 [PHASE] probe 콜백이 자연스럽게 갈음한다.
-        if attempts == 0 and kind == "register" and job["ack_channel_id"]:
+        # attempts>0 이어서 worker_restarted 가 위에 떴어도, 이 phase_probe 가 곧 덮어써서
+        # 재시작 안내가 영구 stuck 되는 위험 차단 (사용자는 "재시작…" 잠깐 → "사이트 분석 중…" 흐름).
+        if kind == "register" and job["ack_channel_id"]:
             await edit_channel_message(client, job["ack_channel_id"], job["ack_message_id"],
                                        msg("worker_phase_probe", slug=slug))
 

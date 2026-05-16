@@ -191,9 +191,15 @@ def _migrate(conn: sqlite3.Connection) -> None:
     # 봇 재시작으로 인한 잡 재실행 횟수 추적 (옛 DB 에 추가).
     # reset_running_to_pending 이 running 잡을 pending 으로 되돌릴 때마다 +1.
     # worker 는 attempts>0 인 잡 시작 시 ack 에 재시작 안내 메시지를 띄움.
+    # ALTER TABLE 자체는 두 프로세스가 동시에 PRAGMA 후 ALTER 하면 "duplicate column" 으로 한쪽이
+    # 죽을 수 있어 — N100 단일 봇이라 실제 race 거의 없지만, 방어적으로 OperationalError swallow.
     jobs_cols = {r[1] for r in conn.execute("PRAGMA table_info(jobs)").fetchall()}
     if "attempts" not in jobs_cols:
-        conn.execute("ALTER TABLE jobs ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0")
+        try:
+            conn.execute("ALTER TABLE jobs ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0")
+        except sqlite3.OperationalError as e:
+            if "duplicate column" not in str(e).lower():
+                raise
     conn.commit()
 
 
