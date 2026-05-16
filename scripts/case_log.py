@@ -80,16 +80,25 @@ def _derive_files_changed() -> Optional[list[str]]:
 
 
 def _lookup_url_and_requester(slug: str) -> tuple[Optional[str], Optional[str]]:
-    """FAILED.json 또는 triage_queue.jsonl 에서 slug 매칭하는 url + requested_by lookup."""
+    """FAILED.json / 성공 후 .json / triage_queue.jsonl 에서 slug 매칭하는 url + requested_by lookup.
+
+    hand-config 성공 후엔 FAILED.json 이 사라지므로 같은 디렉터리의 `<slug>.json`
+    (정상 poll_state) 도 폴백으로 살핀다 — 그래야 후속 `case_log save` 가 url NULL 로
+    들어가지 않는다 (Cases 대시보드 ↗ 링크 비활성 회피).
+    """
     url, requester = None, None
 
-    failed = ROOT / "output" / "poll_state" / f"{slug}.FAILED.json"
-    if failed.exists():
-        try:
-            d = json.loads(failed.read_text(encoding="utf-8"))
-            url = d.get("url") or url
-        except (OSError, json.JSONDecodeError):
-            pass
+    poll_dir = ROOT / "output" / "poll_state"
+    for fname in (f"{slug}.FAILED.json", f"{slug}.json"):
+        cand = poll_dir / fname
+        if cand.exists():
+            try:
+                d = json.loads(cand.read_text(encoding="utf-8"))
+                url = d.get("url") or url
+                if url:
+                    break
+            except (OSError, json.JSONDecodeError):
+                pass
 
     triage = ROOT / "output" / "triage_queue.jsonl"
     if triage.exists():
