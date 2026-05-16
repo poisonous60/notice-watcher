@@ -1,4 +1,9 @@
-{% if res.ok %}
+{% if res.skipped %}
+<div class="pull-result ok">
+  ⏳ Pull 진행 중 (이전 요청 살아 있음 — 이번 요청은 skip)
+  <p class="muted">완료되면 새로고침해서 최신 snapshot 반영하세요.</p>
+</div>
+{% elif res.ok %}
 <div class="pull-result ok">
   ✅ Pull 완료
   <details>
