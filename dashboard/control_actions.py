@@ -230,9 +230,9 @@ def known_models() -> list[str]:
         if k.startswith("_"):
             continue
         if ":" in k and "/" not in k.split(":", 1)[0]:
-            # 'gemini:...' 또는 'openrouter:...' 형식만
+            # 'gemini:...' / 'openrouter:...' / 'codex:...' 형식만
             prefix = k.split(":", 1)[0]
-            if prefix in ("gemini", "openrouter"):
+            if prefix in ("gemini", "openrouter", "codex"):
                 out.append(k)
     return sorted(set(out))
 
@@ -248,7 +248,7 @@ def validate_routing(data: dict) -> Optional[str]:
         if not isinstance(v, str) or ":" not in v:
             return f"{k}: 값 형식이 'provider:model' 가 아님 → {v!r}"
         provider = v.split(":", 1)[0].strip()
-        if provider not in ("gemini", "openrouter"):
+        if provider not in ("gemini", "openrouter", "codex"):
             return f"{k}: 알 수 없는 provider {provider!r}"
     return None
 

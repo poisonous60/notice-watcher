@@ -3,6 +3,7 @@
   "_per_default": "1M",
   "_note_3_0_flash_lite": "Google에 'gemini-3.0-flash-lite' 라는 정확한 ID는 없음. 가장 근접한 GA 모델은 gemini-3.1-flash-lite. 3.0 라인은 preview (gemini-3-flash-preview) 만 존재.",
   "_note_openrouter": "OpenRouter 는 비-Gemini 모델용 (예: anthropic/*, openai/*, qwen/*). Gemini 는 google direct 사용. OpenRouter 키 발급 후 routing.json 에 'openrouter:<vendor>/<model>' 형식으로 매핑.",
+  "_note_codex": "Codex (ChatGPT Plus OAuth) 는 구독제 — 토큰당 청구 X. 5h 윈도우 메시지 한도 (60~350 / mini). prompt/completion 0 으로 cost=0 표시 — dashboard 가 '$0.00' 출력.",
 
   "gemini:gemini-2.5-flash":           {"prompt": 0.30,  "completion": 2.50, "per": "1M"},
   "gemini:gemini-2.5-flash-lite":      {"prompt": 0.10,  "completion": 0.40, "per": "1M"},
@@ -11,5 +12,8 @@
   "gemini-2.5-flash":                  {"prompt": 0.30,  "completion": 2.50, "per": "1M"},
   "gemini-2.5-flash-lite":             {"prompt": 0.10,  "completion": 0.40, "per": "1M"},
   "gemini-3-flash-preview":            {"prompt": 0.50,  "completion": 3.00, "per": "1M"},
-  "gemini-3.1-flash-lite":             {"prompt": 0.25,  "completion": 1.50, "per": "1M"}
+  "gemini-3.1-flash-lite":             {"prompt": 0.25,  "completion": 1.50, "per": "1M"},
+
+  "codex:gpt-5.4-mini":                {"prompt": 0.0,   "completion": 0.0,  "per": "1M"},
+  "codex:gpt-5.4":                     {"prompt": 0.0,   "completion": 0.0,  "per": "1M"}
 }
