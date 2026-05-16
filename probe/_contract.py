@@ -160,6 +160,11 @@ _ARTIFACTS: dict[str, ArtifactContract] = {
                                 "None=의미 있는 same-host pattern 0건. dict={base_host, total_same_host, in_nav, outside_nav, nav_only_same_host, sample_nav_ancestors}. "
                                 "nav_only_same_host=true 면 사이드바/topic-nav 메뉴만 잡혀 main content 의 board list 없음 → 폴링 의미 X. "
                                 "scripts/register.py `_single_article_nav_only_check` 가 board_shape 게이트 *전* 에 이 신호로 거부."),
+            _ContractField("article_meta_signals", type_hint="dict|null", required=False,
+                           note="페이지가 *단일 article* 임을 선언한 명시 meta 신호 — og:type=article + schema.org JSON-LD `@type` (NewsArticle/Article/BlogPosting/...) + microdata itemtype. "
+                                "None=신호 0건. dict={has_og_article, schema_article_types, has_microdata_article, is_article_page, signals}. "
+                                "is_article_page=true AND first_article_url 의 path-prefix 가 input URL 과 *다르면* `_meta_article_diverging_check` 가 거부 — "
+                                "보드 페이지가 우연히 article 마크업 박은 경우(omate 등)는 first_article 이 같은 path-prefix 라 통과 (false-positive 차단)."),
         ),
     ),
 

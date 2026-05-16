@@ -169,6 +169,53 @@ def _single_article_nav_only_check(digest: dict) -> tuple[bool, str]:
                    f"[신호: {detail}]")
 
 
+def _first_path_segment(u: Optional[str]) -> str:
+    """URL → 첫 path segment (lowercased). 없으면 ''."""
+    if not u:
+        return ""
+    try:
+        path = (urlsplit(u).path or "").strip()
+    except (ValueError, AttributeError):
+        return ""
+    if not path or path == "/":
+        return ""
+    parts = [s for s in path.split("/") if s]
+    return parts[0].lower() if parts else ""
+
+
+def _meta_article_diverging_check(digest: dict, url: str) -> tuple[bool, str]:
+    """probe digest 의 article_meta_signals.is_article_page=True AND first_article_url 의
+    첫 path-segment 가 input URL 과 *다르면* single-article 페이지 판정.
+
+    `_single_article_nav_only_check` 직후, `_board_shape_check` *전* 호출 — meta 가 article 임을
+    선언했고 probe 가 '진짜 글 후보' 로 input 과 *다른 섹션* 의 URL 을 잡았다면 input 은 그 섹션의
+    article 페이지일 가능성 큼. board 페이지가 우연히 og:type=article 박은 경우(omate 등)는
+    first_article 이 같은 section/path-prefix → 통과 (false-positive 차단).
+
+    skip_learn 처리: 이 gate 가 잡는 사이트는 보드/article 이 같은 첫 segment 공유할 수 있어
+    (예: nature 가 인식기 미커버 였을 때) `_learn_pattern` 호출 X. REJECTED 마커만 박음 — 호출자
+    가 `_save_rejected(..., learn=False)` 로 처리.
+    """
+    lc = digest.get("list_candidates") or {}
+    meta = lc.get("article_meta_signals")
+    if not isinstance(meta, dict) or not meta.get("is_article_page"):
+        return True, ""
+    fau = lc.get("first_article_url")
+    if not fau:
+        return True, ""
+    inp_seg = _first_path_segment(url)
+    fau_seg = _first_path_segment(fau)
+    if not inp_seg or not fau_seg:
+        return True, ""
+    if inp_seg == fau_seg:
+        return True, ""
+    signals = meta.get("signals") or []
+    return False, (f"단일 article 페이지로 보임 — meta 가 article 임을 선언({signals[:3]})하고 "
+                   f"probe 가 잡은 '진짜 글 후보' 는 *다른 섹션* 에 있음 "
+                   f"(input first-segment=/{inp_seg}/ ≠ first_article /{fau_seg}/). "
+                   f"input URL: {url}  /  first_article_url: {fau}")
+
+
 def _board_shape_check(digest: dict, url: str) -> tuple[bool, str]:
     """probe digest 만으로 '게시판 형식 같은가' 판정 — gemini 부르기 전에.
     어떤 board 신호도 같은 호스트로 안 잡히면 '게시판 아님' 단정 (rc=3 로 거부).
@@ -418,13 +465,16 @@ def _clear_learned_by_id(pat_id: str) -> bool:
     return True
 
 
-def _save_rejected(slug: str, url: str, reason: str, note: Optional[str] = None) -> Path:
+def _save_rejected(slug: str, url: str, reason: str, note: Optional[str] = None, *, learn: bool = True) -> Path:
     """`.REJECTED.json` 마커. 봇 `is_rejected(slug)`=True 가 되어 `/preview`·`/watch` 가 자동경로
     안 타고 "이전에 거부됨" 메시지로 응답. `is_registered` 와 분리 — REJECTED 는 polling 대상도 아님.
     같은 slug 의 `.FAILED.json` 마커가 있었으면 함께 제거 (REJECTED 가 우선).
 
-    + 같은 URL 의 host+path_prefix 패턴을 `output/learned_blacklist.json` 에 자동 학습 (한 명의 거부 → 모두에게 적용).
-    이 자동 학습은 atomic write — `output/` 가 없으면 만들어줌.
+    + learn=True (default): 같은 URL 의 host+path_prefix 패턴을 `output/learned_blacklist.json` 에
+      자동 학습 (한 명의 거부 → 모두에게 적용). 이 자동 학습은 atomic write — `output/` 가 없으면 만들어줌.
+    + learn=False: REJECTED 마커만 박고 learned_blacklist 학습 *X*. `recognize_reject` 의
+      `skip_learn=True` 패턴 (보드/article 이 같은 첫 path segment 공유 — nature/iln-ieee/jobplanet 등)
+      처리용 — path_prefix(=첫 segment) 차단이 보드 URL 까지 막는 걸 회피.
 
     `slug` 는 `[A-Za-z0-9._%-]+` 만 (path traversal 방어) — admin/스크립트 외 호출 없지만 보수적으로.
     """
@@ -438,16 +488,18 @@ def _save_rejected(slug: str, url: str, reason: str, note: Optional[str] = None)
         "reason": reason,
         "note": note,
         "rejected_at": _now_iso(),
+        "learned": learn,
     }, ensure_ascii=False, indent=2), encoding="utf-8")
     fp = STATE_DIR / f"{slug}.FAILED.json"
     if fp.exists():
         fp.unlink()
     _prune_triage_queue(slug)
-    # 자동 패턴 학습 — host+path_prefix 단위. 실패해도 REJECTED 마커는 이미 박혔으니 swallow.
-    try:
-        _learn_pattern(url, reason, slug=slug)
-    except Exception as e:  # noqa: BLE001
-        print(f"[register] ⚠ learned_blacklist 학습 실패 — REJECTED 마커는 박힘: {e}", file=sys.stderr)
+    if learn:
+        # 자동 패턴 학습 — host+path_prefix 단위. 실패해도 REJECTED 마커는 이미 박혔으니 swallow.
+        try:
+            _learn_pattern(url, reason, slug=slug)
+        except Exception as e:  # noqa: BLE001
+            print(f"[register] ⚠ learned_blacklist 학습 실패 — REJECTED 마커는 박힘: {e}", file=sys.stderr)
     return p
 
 
@@ -976,16 +1028,16 @@ def _main_inner(argv) -> int:
         if not args.no_recognize:
             if (args.article_url or "").strip():
                 print("[register] 알림: --article-url 은 알려진 플랫폼으로 인식되면 무시됩니다(probe 를 건너뛰므로). 인식 안 되면 아래 probe 경로에서 그대로 적용됨.")
-            # 알려진 *단일 article URL* 호스트는 probe 도 돌리지 않고 즉시 거부 — 위키/지식백과/Britannica/USHMM.
+            # 알려진 *단일 article URL* 호스트는 probe 도 돌리지 않고 즉시 거부 — 위키/지식백과/Britannica/USHMM/nature/iln-ieee/jobplanet.
             # 매번 _board_shape_check 가 in-article 링크의 same-host 신호로 false-positive 통과시키는 걸 차단.
             rej = recognize_reject(url)
             if rej is not None:
-                name, reason = rej
+                name, reason, skip_learn = rej
                 print(f"[PHASE] recognize_reject ({name})", flush=True)
                 print(f"[register] ❌ 등록 거부 — {reason}")
                 print("[register] note: 게시판/공지 목록 페이지의 URL 을 주세요. 한 글 페이지의 in-text 참고 링크는 폴링 대상 아님.")
                 try:
-                    _save_rejected(slug, url, reason, note=f"recognizer={name} fast-path")
+                    _save_rejected(slug, url, reason, note=f"recognizer={name} fast-path", learn=not skip_learn)
                 except Exception as e:  # noqa: BLE001
                     print(f"[register] ⚠ REJECTED 마커 저장 실패: {e}", file=sys.stderr)
                 _prune_triage_queue(slug)
@@ -1031,6 +1083,21 @@ def _main_inner(argv) -> int:
             _learn_pattern(url, "single_article_nav_only 거부 (nav 안 사이드바 메뉴만 잡힘)", slug=slug)
         except Exception as e:  # noqa: BLE001
             print(f"[register] ⚠ learned_blacklist 학습 실패 (rc=3): {e}", file=sys.stderr)
+        return 3
+
+    # single-article meta+diverging 게이트 — og:type=article / schema.org NewsArticle 선언했고
+    # probe '진짜 글 후보' 가 *다른 섹션* 인 페이지 (예: nature.com 의 `/articles/<doi>` — input 은 /articles/X,
+    # first_article 은 /naturecareers/job/X). `_single_article_nav_only_check` 가 outside_nav=1 때문에 못 잡는 사이트.
+    # learned_blacklist *학습 X* — 보드/article 이 같은 첫 segment 공유할 수 있어 path_prefix 차단이 보드까지 막을 위험.
+    ok_meta, meta_msg = _meta_article_diverging_check(digest, url)
+    if not ok_meta:
+        print(f"[register] {meta_msg}")
+        print("[register] ❌ 등록 거부 — 단일 article (meta 선언 + 발산 first_article).")
+        try:
+            _save_rejected(slug, url, "meta_article_diverging 거부 (og/schema article + first_article 다른 섹션)",
+                           note="gate: _meta_article_diverging_check", learn=False)
+        except Exception as e:  # noqa: BLE001
+            print(f"[register] ⚠ REJECTED 마커 저장 실패 (rc=3): {e}", file=sys.stderr)
         return 3
 
     # board-shape 게이트 — gemini 부르기 전에 한 번 더. probe 가 같은 호스트로 가는 반복 글 링크/목록 API/피드를

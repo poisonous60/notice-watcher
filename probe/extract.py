@@ -856,6 +856,102 @@ def runtime_id_candidates(html: str, *, max_per_source: int = 20) -> list[dict]:
     return out
 
 
+# schema.org 의 single-article 타입들 — JSON-LD `@type` 또는 microdata `itemtype` 의 끝부분 매칭.
+# https://schema.org/CreativeWork 의 article-shaped 하위 타입. board/list 형식은 제외 (ItemList, Collection 등).
+_SCHEMA_ARTICLE_TYPES = frozenset((
+    "article", "newsarticle", "blogposting", "scholarlyarticle",
+    "techarticle", "report", "socialmediaposting", "discussionforumposting",
+    "review", "medicalscholarlyarticle", "analysisnewsarticle", "opinionnewsarticle",
+    "reportagenewsarticle", "backgroundnewsarticle", "satiricalarticle",
+))
+
+
+@heuristic
+def article_meta_signals(html: str) -> Optional[dict]:
+    """페이지가 *단일 article* 임을 선언하는 명시적 meta 신호 추출.
+    schema.org JSON-LD `@type` (NewsArticle/Article/BlogPosting/...) + og:type=article + microdata itemtype.
+
+    출력:
+      None — 신호 0건 (페이지가 article 페이지인지 알 수 없음 — 보드/landing/검색결과 모두 가능).
+      dict = {has_og_article: bool, schema_article_types: [str], has_microdata_article: bool,
+              is_article_page: bool, signals: [str]}
+        is_article_page=True 면 위 3 신호 중 *하나라도* 매칭됨. 보드 페이지가 NewsArticle 마크업
+        쓰는 일은 드물어 (보통 ItemList/Collection) — false-positive 위험 낮음.
+
+    register.py 의 `_meta_article_diverging_check` 가 이 신호 + first_article_url path 발산 검사 결합하여
+    `recognize_reject` 미커버 호스트의 단일 article 페이지를 잡음. board 페이지가 *우연히* og:type=article
+    을 박은 경우(omate 등) 는 first_article_url 이 input 과 같은 path-prefix → 통과.
+    """
+    if not html:
+        return None
+    soup = BeautifulSoup(html, "lxml")
+    signals: list[str] = []
+
+    has_og_article = False
+    og = soup.find("meta", attrs={"property": re.compile(r"^og:type$", re.I)})
+    if og and (og.get("content") or "").strip().lower() == "article":
+        has_og_article = True
+        signals.append("og:type=article")
+
+    schema_types: list[str] = []
+    for sc in soup.find_all("script", attrs={"type": re.compile(r"application/ld\+json", re.I)}):
+        raw = sc.string or sc.get_text() or ""
+        if not raw.strip():
+            continue
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        for node in _walk_schema_types(data):
+            t = (node or "").strip().lower()
+            if t and t in _SCHEMA_ARTICLE_TYPES:
+                schema_types.append(node.strip() if isinstance(node, str) else str(node))
+    if schema_types:
+        signals.append(f"schema.org/{schema_types[0]}")
+
+    has_microdata = False
+    for el in soup.find_all(attrs={"itemtype": True}):
+        it = (el.get("itemtype") or "").strip().lower().rstrip("/")
+        # itemtype 는 보통 https://schema.org/NewsArticle 같은 풀 URL — 끝 segment 만 비교.
+        tail = it.rsplit("/", 1)[-1]
+        if tail in _SCHEMA_ARTICLE_TYPES:
+            has_microdata = True
+            signals.append(f"microdata/{tail}")
+            break
+
+    if not signals:
+        return None
+    return {
+        "has_og_article": has_og_article,
+        "schema_article_types": schema_types[:5],
+        "has_microdata_article": has_microdata,
+        "is_article_page": True,
+        "signals": signals[:5],
+    }
+
+
+def _walk_schema_types(node, _depth: int = 0):
+    """JSON-LD blob 안의 모든 `@type` scalar 를 yield. dict/list 양쪽 재귀. 최대 depth 8.
+    `@type` 가 list 일 수도 있음 (`["NewsArticle","Article"]`) — 그 안 각 entry yield."""
+    if _depth > 8:
+        return
+    if isinstance(node, dict):
+        t = node.get("@type")
+        if isinstance(t, str):
+            yield t
+        elif isinstance(t, list):
+            for x in t:
+                if isinstance(x, str):
+                    yield x
+        for v in node.values():
+            if isinstance(v, (dict, list)):
+                yield from _walk_schema_types(v, _depth + 1)
+    elif isinstance(node, list):
+        for v in node:
+            if isinstance(v, (dict, list)):
+                yield from _walk_schema_types(v, _depth + 1)
+
+
 def _walk_id_keys(node, prefix: str = "", _depth: int = 0):
     """__NEXT_DATA__ JSON 안 *Id/_id 키 + scalar 값 (정수 또는 짧은 슬러그) 만 yield. 최대 depth 6."""
     if _depth > 6:
@@ -888,6 +984,7 @@ def write_list_candidates(
     row_external_host: Optional[dict] = None,
     row_interactive_action: Optional[dict] = None,
     nav_only_same_host: Optional[dict] = None,
+    article_meta_signals: Optional[dict] = None,
 ) -> None:
     # body_empty_likely summary — 본문이 본질적으로 없는 사이트 신호.
     # row_external_host (검색결과/aggregator) OR row_interactive_action (게임/투표/SPA) 중 하나라도 true 면 박힘.
@@ -921,6 +1018,11 @@ def write_list_candidates(
         # None=의미 있는 same-host pattern 0건. dict={base_host, total_same_host, in_nav, outside_nav, nav_only_same_host, sample_nav_ancestors}.
         # register.py `_single_article_nav_only_check` 가 nav_only_same_host=true 면 board_shape 게이트 *전* 에 거부.
         "nav_only_same_host": nav_only_same_host,
+        # 페이지가 자신이 *단일 article* 임을 선언한 명시 meta 신호 — og:type=article + schema.org NewsArticle/Article/... + microdata.
+        # None=신호 0건. dict={has_og_article, schema_article_types, has_microdata_article, is_article_page, signals}.
+        # register.py `_meta_article_diverging_check` 가 is_article_page=true AND first_article_url 의 path-prefix 가
+        # input URL 과 *다르면* 거부 — 보드가 article 마크업 *우연히* 박은 사이트(omate 등)는 first_article 이 같은 path-prefix 라 통과.
+        "article_meta_signals": article_meta_signals,
     }
     validate_payload("list_candidates.json", payload, allow_extra=False)
     (out_dir / "list_candidates.json").write_text(

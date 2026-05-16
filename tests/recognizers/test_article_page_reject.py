@@ -93,6 +93,46 @@ def run() -> list[tuple[str, bool, str]]:
     out = recognize_reject("https://en.wikipediaa.org/wiki/Test")
     cases.append(("wikipedia_typo_passes", out is None, f"got {out!r}"))
 
+    # 19. nature.com 단일 article — skip_learn=True (보드 `/articles?type=news` 가 같은 first segment)
+    out = recognize_reject("https://www.nature.com/articles/d41586-018-05791-w")
+    cases.append(("nature_article",
+                  out is not None and out[0] == "article_page_reject" and "nature.com" in out[1] and out[2] is True,
+                  f"got {out!r}"))
+
+    # 20. nature.com 보드 (쿼리 있는 list) — 통과
+    out = recognize_reject("https://www.nature.com/articles?type=news")
+    cases.append(("nature_board_with_query_passes", out is None, f"got {out!r}"))
+
+    # 21. nature.com 다른 섹션 보드 — 통과
+    out = recognize_reject("https://www.nature.com/news")
+    cases.append(("nature_news_section_passes", out is None, f"got {out!r}"))
+
+    # 22. iln.ieee.org ContentDetails — skip_learn=True (보드 `/Public/trainingcatalog.aspx` 가 같은 `/Public`)
+    out = recognize_reject("https://iln.ieee.org/Public/ContentDetails.aspx?id=9D3FE9C6144F4C298ABDE18D84EDB93C")
+    cases.append(("iln_ieee_content_details",
+                  out is not None and "iln.ieee.org" in out[1] and out[2] is True,
+                  f"got {out!r}"))
+
+    # 23. iln.ieee.org 보드 (trainingcatalog) — 통과
+    out = recognize_reject("https://iln.ieee.org/Public/trainingcatalog.aspx")
+    cases.append(("iln_ieee_catalog_passes", out is None, f"got {out!r}"))
+
+    # 24. jobplanet news-<N> 기사 — skip_learn=True (보드 `/contents/news` 가 같은 `/contents`)
+    out = recognize_reject("https://www.jobplanet.co.kr/contents/news-616")
+    cases.append(("jobplanet_news_article",
+                  out is not None and "jobplanet" in out[1] and out[2] is True,
+                  f"got {out!r}"))
+
+    # 25. jobplanet 보드 `/contents/news` (트레일링 -N 없음) — 통과
+    out = recognize_reject("https://www.jobplanet.co.kr/contents/news")
+    cases.append(("jobplanet_board_passes", out is None, f"got {out!r}"))
+
+    # 26. 기존 위키 패턴은 skip_learn=False (2-tuple 호환 — 호스트 전체가 article-only)
+    out = recognize_reject("https://en.wikipedia.org/wiki/Nazi_Party")
+    cases.append(("wikipedia_skip_learn_false",
+                  out is not None and out[2] is False,
+                  f"got {out!r}"))
+
     return cases
 
 
