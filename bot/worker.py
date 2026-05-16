@@ -203,6 +203,13 @@ async def _process_job(client, conn, job, dm_owner) -> None:
                     await edit_channel_message(
                         client, job["ack_channel_id"], job["ack_message_id"],
                         msg("worker_board_shape_fail", slug=slug))
+                elif rc == 2:
+                    # policy_check 거부 (BLOCKED/LOGIN_REQUIRED) — 차단 우회는 정책상 금지 →
+                    # 손어댑터 안내·tail dump 모두 거짓 신호. 짧은 한 줄 안내로 대체.
+                    append_triage_queue(url, slug, job["via"], req_by, tail)
+                    await edit_channel_message(
+                        client, job["ack_channel_id"], job["ack_message_id"],
+                        msg("worker_policy_blocked", slug=slug))
                 else:
                     append_triage_queue(url, slug, job["via"], req_by, tail)
                     err = _format_register_error(rc, tail)
