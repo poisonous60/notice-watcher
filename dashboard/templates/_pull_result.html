@@ -5,15 +5,11 @@
 </div>
 {% elif res.ok %}
 <div class="pull-result ok">
-  ✅ Pull 완료
+  ✅ Pull 완료 — 다음 페이지 이동 시 최신 snapshot 반영됨.
   <details>
     <summary>출력 보기</summary>
     <pre>{{ res.output }}</pre>
   </details>
-  <p class="muted">페이지 새로고침하면 최신 snapshot 반영.
-    <button type="button" class="secondary" onclick="location.reload()"
-            style="margin:0;padding:0.2rem 0.6rem;width:auto;font-size:0.85rem;">새로고침</button>
-  </p>
 </div>
 {% else %}
 <div class="pull-result err">
