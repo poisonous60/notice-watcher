@@ -22,17 +22,22 @@ covers = ["learned_blacklist_register", "learned_blacklist_urlgate"]
 
 
 def _redirect_paths(tmp_dir: Path) -> tuple[Path, dict]:
-    """register.LEARNED_PATH 와 url_gate._LEARNED_PATH 를 tmp 로 redirect.
-    원본 값을 dict 으로 돌려줘서 cleanup 에 사용."""
+    """register.LEARNED_PATH, register.STATE_DIR, url_gate._LEARNED_PATH 를 tmp 로 redirect.
+    원본 값을 dict 으로 돌려줘서 cleanup 에 사용. STATE_DIR redirect 가 빠지면 _save_failed
+    호출이 실제 output/poll_state/ 에 .FAILED.json 박아 오염 — 반드시 redirect."""
     from scripts import register
     from bot import url_gate
     learned_tmp = tmp_dir / "learned_blacklist.json"
+    state_tmp = tmp_dir / "poll_state"
+    state_tmp.mkdir(parents=True, exist_ok=True)
     saved = {
-        "register": register.LEARNED_PATH,
-        "url_gate": url_gate._LEARNED_PATH,
+        "register_learned": register.LEARNED_PATH,
+        "register_state": register.STATE_DIR,
+        "url_gate_learned": url_gate._LEARNED_PATH,
         "cache": url_gate._blacklist_cache,
     }
     register.LEARNED_PATH = learned_tmp
+    register.STATE_DIR = state_tmp
     url_gate._LEARNED_PATH = learned_tmp
     url_gate._blacklist_cache = None
     return learned_tmp, saved
@@ -41,8 +46,9 @@ def _redirect_paths(tmp_dir: Path) -> tuple[Path, dict]:
 def _restore_paths(saved: dict) -> None:
     from scripts import register
     from bot import url_gate
-    register.LEARNED_PATH = saved["register"]
-    url_gate._LEARNED_PATH = saved["url_gate"]
+    register.LEARNED_PATH = saved["register_learned"]
+    register.STATE_DIR = saved["register_state"]
+    url_gate._LEARNED_PATH = saved["url_gate_learned"]
     url_gate._blacklist_cache = saved["cache"]
 
 
@@ -143,7 +149,8 @@ def run() -> list[tuple[str, bool, str]]:
             cases.append(("clear_by_id_empties", len(_list_learned()) == 0, ""))
             cases.append(("clear_by_id_absent", _clear_learned_by_id("zzzzzzzzzzzz") is False, ""))
 
-            # 10b. _save_failed 학습 hook — gemini/policy 실패 경로도 learned 박힘
+            # 10b. _save_failed 학습 hook — gemini/policy 실패 경로도 learned 박힘.
+            # STATE_DIR 도 redirect 됐으니 .FAILED.json 은 tmp 안에 박힘 (실제 poll_state 오염 X).
             from scripts.register import _save_failed
             _save_failed("host_test_failpath", "https://example-fail.com/board/list?p=1",
                          reason="gemini 생성+검증 3회 실패 (sim)",
@@ -153,14 +160,9 @@ def run() -> list[tuple[str, bool, str]]:
                      for p in patterns)
             cases.append(("save_failed_learns_pattern", ok,
                           f"after _save_failed, patterns={[(p['host_suffix'], p['path_prefix']) for p in patterns]}"))
-            # cleanup
+            # cleanup learned (STATE_DIR 의 .FAILED.json 은 tmp 안이라 TemporaryDirectory 가 자동 정리)
             for p in _list_learned():
                 _clear_learned_by_id(p["id"])
-            # FAILED.json 파일도 직접 만들지 X, _save_failed 가 만든 거 정리.
-            from scripts.register import STATE_DIR
-            failed_p = STATE_DIR / "host_test_failpath.FAILED.json"
-            if failed_p.exists():
-                failed_p.unlink()
 
             # ----- url_gate 통합 ----- #
             from bot import url_gate
