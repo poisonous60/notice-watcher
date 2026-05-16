@@ -124,7 +124,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     started_at      TEXT,
     finished_at     TEXT,
     result_rc       INTEGER,
-    result_tail     TEXT
+    result_tail     TEXT,
+    attempts        INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status, id);
 CREATE INDEX IF NOT EXISTS idx_jobs_slug ON jobs(slug);
@@ -187,6 +188,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE announcements ADD COLUMN recipient_targets TEXT")
     # deliveries 의 target_id 기준 lookup/삭제 인덱스 (옛 DB 에 추가).
     conn.execute("CREATE INDEX IF NOT EXISTS idx_deliveries_target ON deliveries(target_id, slug)")
+    # 봇 재시작으로 인한 잡 재실행 횟수 추적 (옛 DB 에 추가).
+    # reset_running_to_pending 이 running 잡을 pending 으로 되돌릴 때마다 +1.
+    # worker 는 attempts>0 인 잡 시작 시 ack 에 재시작 안내 메시지를 띄움.
+    jobs_cols = {r[1] for r in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+    if "attempts" not in jobs_cols:
+        conn.execute("ALTER TABLE jobs ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0")
     conn.commit()
 
 
@@ -513,9 +520,13 @@ def count_user_register_jobs_since(conn: sqlite3.Connection, user_id: str, since
 
 
 def reset_running_to_pending(conn: sqlite3.Connection) -> int:
-    """봇 재시작 직후 호출 — 이전 worker 가 들고 있던 running 잡들을 pending 으로 되돌림."""
+    """봇 재시작 직후 호출 — 이전 worker 가 들고 있던 running 잡들을 pending 으로 되돌림.
+    attempts 컬럼 +1 — worker 가 다음 처리 시작 시 사용자 향 재시작 안내를 띄우는 트리거."""
     def _do():
-        cur = conn.execute("UPDATE jobs SET status='pending', started_at=NULL WHERE status='running'")
+        cur = conn.execute(
+            "UPDATE jobs SET status='pending', started_at=NULL, attempts=attempts+1 "
+            "WHERE status='running'"
+        )
         conn.commit()
         return cur.rowcount
     return _retry(_do)

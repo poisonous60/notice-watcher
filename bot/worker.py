@@ -106,7 +106,10 @@ async def _process_job(client, conn, job, dm_owner) -> None:
     url = job["url"]
     slug = job["slug"]
     article_url = job["article_url"]
-    log.info("잡 #%d 시작 — kind=%s slug=%s url=%s", job_id, kind, slug, url)
+    # attempts>0 = 이전 인스턴스가 running 상태로 죽었고 reset_running_to_pending 이 +1 한 뒤 재claim 된 잡.
+    # 옛 DB 행은 attempts 컬럼이 없을 수 있어 keys() 체크로 안전 fetch.
+    attempts = int(job["attempts"]) if "attempts" in job.keys() else 0
+    log.info("잡 #%d 시작 — kind=%s slug=%s url=%s attempts=%d", job_id, kind, slug, url, attempts)
     # probe trace 시작 — register.py subprocess 가 env 로 trace_id 받아 inner spans 추가.
     # job kind "register" → trace kind "probe", job kind "reprobe" → trace kind "probe_reprobe".
     trace_kind = "probe_reprobe" if kind == "reprobe" else "probe"
@@ -145,8 +148,25 @@ async def _process_job(client, conn, job, dm_owner) -> None:
             await _post_register_success(client, conn, job)
             return
 
+        # 봇 재시작으로 재실행된 잡 (attempts>0) → 사용자 향 재시작 안내 우선 띄움.
+        # 이전 인스턴스가 ack 메시지를 phase 중간 상태(예: "사전 확인 중…")로 남겨두고 죽었을 수 있어서,
+        # 다음 phase edit 가 phase 를 거꾸로 돌리는 것처럼 보이기 전에 명시적으로 "재시작 → 처음부터" 안내.
+        # register 만 ack 보유 → reprobe 는 skip.
+        if attempts > 0 and kind == "register" and job["ack_channel_id"]:
+            await edit_channel_message(
+                client, job["ack_channel_id"], job["ack_message_id"],
+                msg("worker_restarted", slug=slug, attempts=attempts))
+            # 잡 하나가 두 번 이상 재시작됐으면 무한 재시작 루프 가능성 — OWNER 에 알림.
+            if attempts >= 2:
+                await dm_owner(
+                    f"⚠️ 잡 #{job_id} `{slug}` 가 재시작 {attempts}회 — 처리 중 봇이 반복 죽는지 확인 필요",
+                    key=f"job-restart:{job_id}",
+                )
+
         # ack — 처리 시작 표시 (register 만). 곧 [PHASE] probe / recognize 가 와서 덮어쓴다.
-        if kind == "register" and job["ack_channel_id"]:
+        # attempts>0 이면 위에서 이미 재시작 안내를 띄웠으므로 이 즉시 덮어쓰기 skip —
+        # 1~2초 뒤 subprocess 의 [PHASE] probe 콜백이 자연스럽게 갈음한다.
+        if attempts == 0 and kind == "register" and job["ack_channel_id"]:
             await edit_channel_message(client, job["ack_channel_id"], job["ack_message_id"],
                                        msg("worker_phase_probe", slug=slug))
 
