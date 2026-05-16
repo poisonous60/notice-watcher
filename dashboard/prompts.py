@@ -44,7 +44,7 @@ def hand_config_redo_slug(*, slug: str, url: Optional[str] = None) -> str:
 
 def hand_config_triage_queue(*, failed_slugs: list[str]) -> str:
     n = len(failed_slugs)
-    lines = [f"FAILED 큐 일괄 처리해줘 (skill: hand-config 모드 B — triage). 총 {n}건.", ""]
+    lines = [f"FAILED 큐 일괄 처리해줘 (skill: hand-config — triage). 총 {n}건.", ""]
     lines.append("대상 slug:")
     for s in failed_slugs:
         lines.append(f"- {s}  (output/snapshot/poll_state/{s}.FAILED.json)")
@@ -55,6 +55,9 @@ def hand_config_triage_queue(*, failed_slugs: list[str]) -> str:
                  "2c (probe 휴리스틱 + retry feedback hint) / 2d (probe artifact 수정) 후보 한 줄씩 enumerate. "
                  "매칭 있으면 같은 PR 에 박음. 0 이면 case 파일에 이유.")
     lines.append("우선순위 정렬 → 각 항목 처리 → 배포.")
+    lines.append("")
+    lines.append("REJECT된 사이트라도 구조를 분석하여 probe를 개선, 이후 손config 의존도를 줄여야 함.")
+    lines.append("특수한 경우나 tradeoff가 명확한 경우에 한해 probe 개선을 스킵하고 case log에 이유를 명확히 남김.")
     return "\n".join(lines)
 
 

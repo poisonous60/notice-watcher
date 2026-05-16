@@ -62,6 +62,15 @@
 - **원인**: register/poll/다른 `/watch` 가 동시에 chromium 을 쓰려 함 (락 대기) / 사이트가 너무 느림 / probe 가 멈춤.
 - **대응**: 잠시 후 다시. 폴링 시각(매일 08:20 KST)과 겹쳤으면 그것만 피해도 됨. 계속 시간초과면 그 사이트가 비정상적으로 느린 것.
 
+### 2g. 단일 article URL / list URL 부재 — `not_a_board` 패턴 (게시판이 아닌 페이지를 `/watch` 했음)
+사용자가 *글 하나* 의 URL(위키 항목, 백과사전 entry, 검색결과, 뉴스 단일 기사 등) 또는 *목록이 없는 페이지* 를 `/watch` 한 경우. probe 가 `list_url=None`·`candidates=0`·`first_article_url` 이 in-page 관련 링크/사이드바를 잡아 → Gemini 가 엉뚱한 selector 만들고 0건 추출 → 4회 retry 실패. failure_keys 분류: `not_a_board`, `list_url_none`, `candidates_zero`, `single_article_page` (`docs/cases/INDEX.md` 7+ 건 — britannica/en-wiki/encyclopedia-us/holocaust/ko-wiki/terms-naver/google-search).
+
+- **자동 차단 (게이트 1: 인식기 fast-path)** — `engine/recognizers/article_page_reject.py` 의 `PATTERNS_REJECT` 가 알려진 백과/사전 호스트의 단일 article URL 패턴을 `recognize_reject` 단계에서 거부 (config 생성 X, reject reason 만 반환). wikipedia/terms.naver/britannica/encyclopedia.ushmm 커버.
+- **자동 차단 (게이트 2: nav-only 구조 fallback)** — `probe/extract.py:all_same_host_patterns_in_nav` 가 same-host repeating pattern 의 DOM ancestor 가 *전부* nav/aside/header/footer 안인지 검사. `nav_only_same_host=true` 면 `scripts/register.py:_single_article_nav_only_check` 가 board_shape 게이트 *전* 에 거부. 인식기 미커버 호스트의 단일 article 페이지를 잡음.
+- **자동 차단 (게이트 3: meta 신호 + path 발산)** — `probe/extract.py:article_meta_signals` (og:type=article + schema.org NewsArticle/Article/... + microdata) + `_meta_article_diverging_check` (first_article_url 의 path-prefix 가 input URL 과 다름) 결합. 보드가 article 마크업 *우연히* 박은 사이트(omate 등) 는 path-prefix 동일이라 통과 (false-positive 차단).
+- **대응 (게이트 안 잡힌 새 호스트)**: 손-거부 처리 후 `engine/recognizers/article_page_reject.py:PATTERNS_REJECT` 에 호스트 패턴 추가 (같은 호스트 다음 사용자가 자동 차단되도록). 자세히는 [`docs/cases/infra_single_article_gate_2026-05-16.md`](cases/infra_single_article_gate_2026-05-16.md).
+- **참고: `omate` 류 false-positive 회수** — 사용자가 *글 페이지 URL* 을 줬지만 사이트가 articleView↔articleList 변환 가능하면 손-config 로 list URL 박음 (`docs/cases/host_omate-kr_news_3ff5e0f9.md`).
+
 ---
 
 ## 3. "되긴 됐는데 이상함" — 자동 등록은 성공했지만 품질 문제 (소프트 경고)
