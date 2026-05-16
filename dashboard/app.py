@@ -814,8 +814,9 @@ async def settings_page(request: Request):
 @app.post("/actions/pull", response_class=HTMLResponse)
 async def actions_pull(request: Request):
     res = await act.run_pull()
-    if res.get("ok"):
-        return Response(status_code=204, headers={"HX-Refresh": "true"})
+    # HX-Refresh 헤더는 쓰지 않는다 — 자동 Pull (hx-trigger="load") 환경에서
+    # 페이지 reload 가 다시 load 이벤트를 발사해 무한 루프를 만든다. 결과 partial 만
+    # 반환하면 #pull-result 안에 메시지만 교체되고 페이지는 그대로.
     return _partial("_pull_result.html", request, res=res)
 
 
