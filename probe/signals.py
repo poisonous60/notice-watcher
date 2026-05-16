@@ -60,6 +60,17 @@ _GEO_BODY_MARKERS = (
     "not available in your region",
 )
 
+# inline <script>/<style> 안 문자열 (alert 메시지·i18n 사전·주석 등) 이 콘텐츠 마커로 잘못
+# 매치되는 경우가 흔하다 (예: NCS 의 fn_layerNcsS_loginCheck() 내 alert("로그인이 필요한 서비스...")).
+# marker 검사 전에 한 번 제거하고 visible text 로만 본다.
+_SCRIPT_STYLE_RE = re.compile(
+    r"<(script|style|noscript)\b[^>]*>.*?</\1>", re.DOTALL | re.IGNORECASE
+)
+
+
+def _strip_scripts(s: str) -> str:
+    return _SCRIPT_STYLE_RE.sub("", s)
+
 
 def classify(
     *,
@@ -86,22 +97,23 @@ def classify(
 
     headers_lower = {k.lower(): v for k, v in (headers or {}).items()}
     body_text = body or ""
-    body_short_lc = body_text[:8000].lower()
+    visible_text = _strip_scripts(body_text)
+    body_short_lc = visible_text[:8000].lower()
 
     # 1) LOGIN_REQUIRED — 페이지 전체가 로그인을 강요할 때만
     if redirected_to_login or (final_url and _LOGIN_REDIRECT_RE.search(final_url)):
         notable.append("redirected to login")
         return Classification.LOGIN_REQUIRED, notable
-    # 강한 마커: 거의 확실한 로그인 페이지
-    if any(m in body_text.lower() for m in (s.lower() for s in _LOGIN_BODY_MARKERS_STRONG)):
+    # 강한 마커: 거의 확실한 로그인 페이지 (visible text — inline JS/CSS 제외)
+    if any(m in visible_text.lower() for m in (s.lower() for s in _LOGIN_BODY_MARKERS_STRONG)):
         notable.append("strong login marker in body")
         return Classification.LOGIN_REQUIRED, notable
     # 약한 마커: 본문이 짧을 때만 (페이지 전체가 안내문 한 줄)
-    if any(m in body_text for m in _LOGIN_BODY_MARKERS_WEAK) and len(body_text) < 4000:
+    if any(m in visible_text for m in _LOGIN_BODY_MARKERS_WEAK) and len(visible_text) < 4000:
         notable.append("weak login marker + short body")
         return Classification.LOGIN_REQUIRED, notable
     # 로그인 form / password input — 본문이 짧을 때만 (메인 콘텐츠 페이지에 검색 form 등이 우연히 매치되는 경우 방지)
-    if _LOGIN_FORM_RE.search(body_text or "") and len(body_text) < 6000:
+    if _LOGIN_FORM_RE.search(visible_text) and len(visible_text) < 6000:
         notable.append("login form + short body")
         return Classification.LOGIN_REQUIRED, notable
 
@@ -113,7 +125,7 @@ def classify(
     if status == 451:
         notable.append("HTTP 451 Unavailable For Legal Reasons")
         return Classification.BLOCKED_GEO, notable
-    if any(m in body_text for m in _GEO_BODY_MARKERS):
+    if any(m in visible_text for m in _GEO_BODY_MARKERS):
         notable.append("geo block marker in body")
         return Classification.BLOCKED_GEO, notable
 
@@ -138,7 +150,7 @@ def classify(
     # 약한 마커: bad_status 또는 짧은 본문과 결합되어야 분류 근거
     if not bot_signal:
         for marker in _BOT_BODY_MARKERS_WEAK:
-            if marker.lower() in body_short_lc and (bad_status or len(body_text) < 4000):
+            if marker.lower() in body_short_lc and (bad_status or len(visible_text) < 4000):
                 bot_signal = True
                 notable.append(f"weak bot marker + bad context: {marker}")
                 break

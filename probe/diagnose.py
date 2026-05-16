@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from typing import Optional
 
+from .baseline import is_baseline_blocked
 from .types import Classification, Diagnosis, Result
 
 
@@ -25,7 +26,10 @@ def diagnose(
 ) -> Diagnosis:
     notes: list[str] = []
     baseline_classes = [r.classification for r in baseline.values()]
-    baseline_ok = all(c == Classification.OK for c in baseline_classes)
+    # B1(/) 또는 B2(/robots.txt) 중 *하나라도* OK 면 IP/도메인 차단 아님.
+    # robots.txt 404 같은 흔한 케이스에서 all() 룰이 False positive 를 내던 모순을
+    # baseline.is_baseline_blocked() 의 정의와 통일.
+    baseline_ok = not is_baseline_blocked(baseline)
     baseline_bot_only = (
         bool(baseline_classes)
         and all(c == Classification.BLOCKED_BOT for c in baseline_classes)

@@ -2,13 +2,14 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 13 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 14 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
 | [`naver-cafe_gutterlife_all_e0009e69`](cafe.naver.com_home.md) | ✅ 자동 (recognizer 확장 — cafe 홈 URL 인식, NaverCafeAdapter 가 cafe_slug→cafe_id 런타임 해소) | 2026-05-16 | F | posts_nonempty | https://cafe.naver.com/gutterlife |
 | [`naver-cafe_31104609_1_c9b1f633`](naver-cafe_31104609_1_c9b1f633.md) | 🚫 등록 거부 (등록은 OK, 본문 추출 불가 — 정책상 우회 X) + 시스템 차원 후속 완료 | 2026-05-16 | F | body_empty_at_baseline, article_api_401_403 | https://cafe.naver.com/f-e/cafes/31104609/menus/1?viewType=L |
 | [`host_scholar-google-_scholar_706d9c49`](host_scholar-google-_scholar_706d9c49.md) | 🔧 손 config (작동중, baseline 10, httpx_html) + (C) probe heuristic + (D) retry feedback hint | 2026-05-16 | C+D | article_body_len | https://scholar.google.com/scholar?hl=ko&as_sdt=0%2C5&q=harness&btnG= |
+| [`host_ncs-go-kr_blind_ddd2b021`](host_ncs-go-kr_blind_ddd2b021.md) | ✅ 해결 (probe 룰 정정 + 손-config) | 2026-05-16 | C | classify_login_false_positive, baseline_ok_mismatch, posts_nonempty, post_id_unique | https://www.ncs.go.kr/blind/bl04/RecrtNotifList.do?searchNcsLclasCd=20&searchNcsMclasCd=01&searchNcsSclasCd=&searchNcsSubdCd=&searchStatus=&searchStartDt=&searchEndDt=&searchDstin=&searchType=&searchField=&searchCondition=0&searchKeyword= |
 | [`host_syosetu-colomo-_root_2ff18e94`](host_syosetu-colomo-_root_2ff18e94.md) | 🚫 거부 (게시판 형식 아님 — 사전 게이트 추가) | 2026-05-15 | F | schema, row_required_selector | https://syosetu.colomo.dev/ |
 | [`host_nte-perfectworl_kr_c8f4855a`](host_nte-perfectworl_kr_c8f4855a.md) | 🔧 손 config (작동중, baseline 3, httpx_html) | 2026-05-15 |  | article_body_len | https://nte.perfectworld.com/kr/article/news/index.html |
 | [`www.reddit.com_r_CosmicPrincessKaguya`](www.reddit.com_r_CosmicPrincessKaguya.md) | 🧩 손어댑터 (작동중, baseline 19, handwritten/RedditAdapter, flair="Fan Art") | 2026-05-12 |  |  | https://www.reddit.com/r/CosmicPrincessKaguya/ |
@@ -27,6 +28,7 @@
 | layer | count |
 |---|---|
 | (미기재) | 9 |
+| C | 1 |
 | C+D | 1 |
 | F | 3 |
 
@@ -38,8 +40,9 @@
 | handwritten | 5 |
 | httpx_html | 3 |
 | httpx_json | 4 |
+| playwright_html | 1 |
 
 ### 최근 90일 (≥ 2026-02-15)
 
-케이스 13 건.
+케이스 14 건.
 

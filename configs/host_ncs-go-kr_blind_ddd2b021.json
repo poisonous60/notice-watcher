@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "_source_url": "https://www.ncs.go.kr/blind/bl04/RecrtNotifList.do?searchNcsLclasCd=20&searchNcsMclasCd=01&searchNcsSclasCd=&searchNcsSubdCd=&searchStatus=&searchStartDt=&searchEndDt=&searchDstin=&searchType=&searchField=&searchCondition=0&searchKeyword=",
+  "_note": "NCS 블라인드 채용공고 목록 (bl04). list HTML 안에 <table class=boardtable_list> 가 두 번 등장(헤더 table + 데이터 table 분리) → row_selector 만으로는 같은 row 가 두 번 뽑힘. ul[id^=ul_] 가진 tr 만 잡도록 :has() 로 필터. post_id 는 onclick='fn_view(id)' 가 아니라 같은 row 안 ul 의 id 속성에서 추출 (안정).",
+  "site": "ncs.go.kr",
+  "board": "blind-bl04",
+  "strategy": "playwright_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9"
+  },
+  "timeout": 20.0,
+  "polite_sleep": {"min": 5, "max": 10},
+  "list": {
+    "url_template": "https://www.ncs.go.kr/blind/bl04/RecrtNotifList.do?searchNcsLclasCd=20&searchNcsMclasCd=01&searchNcsSclasCd=&searchNcsSubdCd=&searchStatus=&searchStartDt=&searchEndDt=&searchDstin=&searchType=&searchField=&searchCondition=0&searchKeyword=",
+    "wait_selector": "table.boardtable_list ul[id^=\"ul_\"]",
+    "row_selector": "table.boardtable_list tr:has(ul[id^=\"ul_\"])",
+    "fields": {
+      "post_id": [
+        {
+          "from": "css",
+          "selector": "ul[id^=\"ul_\"]",
+          "attr": "id",
+          "transform": [["remove_prefix", "ul_"]]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "td.ta_l a.Boardtit",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ],
+      "url": [
+        {
+          "from": "template",
+          "value": "https://www.ncs.go.kr/blind/bl04/RecrtNotifDetail.do?searchNcsLclasCd=20&searchNcsMclasCd=01&searchNcsSclasCd=&searchNcsSubdCd=&searchStatus=&searchStartDt=&searchEndDt=&searchDstin=&searchType=&searchField=&searchCondition=0&searchKeyword=&recrtNo={post_id}"
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "td.fs12",
+          "text": true,
+          "transform": [
+            ["regex_extract", "^(\\d{4}-\\d{2}-\\d{2})"],
+            ["date_only_to_iso", "+09:00"]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "wait_selector": "div.board_table02",
+    "content": [
+      {"from": "css", "selector": "div.board_table02", "html": true}
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "h2.board_tit",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ]
+    }
+  }
+}
