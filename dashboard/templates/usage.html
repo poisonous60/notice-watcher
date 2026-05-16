@@ -112,7 +112,7 @@
   <tbody>
     {% for r in recent %}
     <tr>
-      <td class="mono">{{ r.ts[:19].replace('T',' ') }}</td>
+      <td class="mono">{{ r.ts_kst }}</td>
       <td class="mono">{{ r.call_site }}</td>
       <td class="mono" style="max-width:18em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
         {% if r.slug %}<a href="/subs/{{ r.slug | urlencode }}" title="{{ r.slug }}">{{ r.slug }}</a>{% endif %}

@@ -16,6 +16,21 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
+_KST = timezone(timedelta(hours=9))
+
+
+def _ts_to_kst_str(iso: str) -> str:
+    """ISO-8601 UTC → 'YYYY-MM-DD HH:MM:SS' (KST). 파싱 실패 시 raw."""
+    if not iso:
+        return ""
+    try:
+        dt = datetime.fromisoformat(iso)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(_KST).strftime("%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return iso
+
 
 def open_usage_conn(path: Path) -> Optional[sqlite3.Connection]:
     if not path.exists():
@@ -110,7 +125,10 @@ def usage_recent(conn: sqlite3.Connection, *, since_iso: Optional[str],
         ORDER BY ts DESC, id DESC
         LIMIT ?
     """
-    return [dict(r) for r in conn.execute(q, params + [int(limit)]).fetchall()]
+    rows = [dict(r) for r in conn.execute(q, params + [int(limit)]).fetchall()]
+    for r in rows:
+        r["ts_kst"] = _ts_to_kst_str(r.get("ts") or "")
+    return rows
 
 
 def usage_daily_series(conn: sqlite3.Connection, *, days: int = 14) -> dict:
