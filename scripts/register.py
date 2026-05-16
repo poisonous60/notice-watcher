@@ -106,6 +106,10 @@ def _policy_check(digest: dict, url: str) -> tuple[bool, list[str]]:
         if "cert_or_dns_broken" in verdict:
             return False, [f"목록 페이지 접근 단계 이전에 SSL 인증서/DNS 가 깨짐 (verdict={digest.get('verdict')!r}). "
                            "사이트가 사라졌거나 운영 오설정 — 등록 거부."]
+        if "target_not_found" in verdict:
+            return False, [f"입력 URL 의 글이 존재하지 않음 — 모든 진입 시도가 HTTP 404 "
+                           f"(verdict={digest.get('verdict')!r}). 도메인 자체는 정상이므로 사이트 차단이 아니라 "
+                           "URL 이 잘못됐거나 글이 삭제된 것 — 게시판 목록 URL 또는 다른 글 URL 로 재시도."]
         return False, [f"목록 페이지에 정적으로도 headless 로도 접근 실패 (verdict={digest.get('verdict')!r}). "
                        "차단(BLOCKED) 사이트로 보임 — 차단 우회는 하지 않음. 등록 거부."]
     # robots Disallow — 경고만 (와일드카드 * / 끝앵커 $ 도 처리)

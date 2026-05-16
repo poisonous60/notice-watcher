@@ -182,6 +182,23 @@ def diagnose(
     elif headless_ok:
         verdict_parts.append("JS 실행 필요 (Cloudflare 등)")
 
+    # baseline 은 OK 인데 target URL 시도가 *전부 NOT_FOUND* 면 사이트 차단이 아니라 그 URL 자체가
+    # 없음 (잘못된 URL 또는 글이 삭제됨). register.py 의 BLOCKED 메시지와 구분하기 위해 별도 verdict.
+    if baseline_ok and not verdict_parts:
+        target_results: list[Result] = list(static_results)
+        if headless is not None:
+            target_results.append(headless)
+        if captured_retry is not None:
+            target_results.append(captured_retry)
+        if s1l is not None:
+            target_results.append(s1l)
+        if target_results and all(r.classification == Classification.NOT_FOUND for r in target_results):
+            verdict_parts.append("TARGET_NOT_FOUND")
+            notes.append(
+                "baseline(도메인 루트) 은 OK 인데 입력 URL 의 모든 진입 시도가 404 — "
+                "사이트 차단이 아니라 그 URL 의 글이 존재하지 않음 (잘못된 URL 또는 삭제됨)."
+            )
+
     verdict = " / ".join(verdict_parts) if verdict_parts else "분류 보류"
 
     return Diagnosis(

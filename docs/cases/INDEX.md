@@ -2,10 +2,11 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 37 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 38 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
+| [`host_d4m0n-tistory-c_10_dd865fee`](host_d4m0n-tistory-c_10_dd865fee.md) | ✅ 일반화 완료 (probe verdict TARGET_NOT_FOUND 분리 — 같은 패턴 미래 자동 처리) | 2026-05-17 | C+D | target_not_found_misclassified_as_blocked, verdict_target_404_falls_through | https://d4m0n.tistory.com/10 |
 | [`naver-cafe_gutterlife_all_e0009e69`](cafe.naver.com_home.md) | ✅ 자동 (recognizer 확장 — cafe 홈 URL 인식, NaverCafeAdapter 가 cafe_slug→cafe_id 런타임 해소) | 2026-05-16 | F | posts_nonempty | https://cafe.naver.com/gutterlife |
 | [`naver-cafe_31104609_1_c9b1f633`](naver-cafe_31104609_1_c9b1f633.md) | 🚫 등록 거부 (등록은 OK, 본문 추출 불가 — 정책상 우회 X) + 시스템 차원 후속 완료 | 2026-05-16 | F | body_empty_at_baseline, article_api_401_403 | https://cafe.naver.com/f-e/cafes/31104609/menus/1?viewType=L |
 | [`naver-blog_ghangth_5a895e5f`](naver-blog_ghangth_5a895e5f.md) | ✅ 자동 (recognizer 신규 — naver-blog, naver-blog_dhyana69 와 같은 PR 에서 동시 풀림) | 2026-05-16 | F | posts_nonempty, list_url_none, candidates_zero | https://blog.naver.com/ghangth/221299970841 |
@@ -52,7 +53,7 @@
 |---|---|
 | (미기재) | 11 |
 | C | 1 |
-| C+D | 1 |
+| C+D | 2 |
 | C+F | 1 |
 | E | 1 |
 | E+A+C+D | 1 |
@@ -65,7 +66,7 @@
 
 | strategy | count |
 |---|---|
-| (미기재) | 11 |
+| (미기재) | 12 |
 | handwritten | 7 |
 | httpx_html | 6 |
 | httpx_json | 4 |
@@ -74,5 +75,5 @@
 
 ### 최근 90일 (≥ 2026-02-15)
 
-케이스 37 건.
+케이스 38 건.
 
