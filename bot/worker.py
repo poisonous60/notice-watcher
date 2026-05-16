@@ -78,6 +78,26 @@ async def _loop(client, conn, dm_owner: Callable[..., Awaitable[None]]) -> None:
             await asyncio.sleep(settings.worker.idle_poll_seconds)
 
 
+async def _drain_phase_edits(futures: list) -> None:
+    """on_phase 가 run_coroutine_threadsafe 로 fire-and-forget 한 edit 코루틴 future 들을
+    await 로 settle. 호출 후 list 비움.
+
+    이유: phase edit 와 final edit 가 동시에 loop 에 있으면 Discord REST 도착 순서가 비결정 →
+    final 이 먼저 가고 phase 가 나중에 가서 final 을 덮어쓰는 race 가 생긴다 (예: digest phase
+    edit 가 board_shape_fail edit 보다 늦게 land → 사용자가 "분석 데이터 정리" 메시지에 stuck).
+    final edit 직전에 호출해 phase edit 들이 먼저 Discord 에 도달하도록 보장.
+    """
+    if not futures:
+        return
+    for fut in futures:
+        try:
+            await asyncio.wrap_future(fut)
+        except Exception:  # noqa: BLE001
+            # 개별 edit 실패는 edit_channel_message 가 이미 warning 로깅 + False 반환 — swallow.
+            pass
+    futures.clear()
+
+
 async def _process_job(client, conn, job, dm_owner) -> None:
     import sys as _sys
     from engine.tracing import start_trace
@@ -97,6 +117,11 @@ async def _process_job(client, conn, job, dm_owner) -> None:
     }
     trace_cm = start_trace(trace_kind, attrs=trace_attrs)
     _job_exc: Optional[BaseException] = None
+    # on_phase 가 run_coroutine_threadsafe 로 fire-and-forget 한 edit 코루틴들의 future.
+    # fire-and-forget 라 final edit_channel_message 보다 *나중에* Discord 도달해서 final 을
+    # 덮어쓰는 race 가 있었음 (예: digest phase edit 가 board_shape_fail edit 보다 늦게 land
+    # → 사용자가 "분석 데이터 정리" 에 stuck). final edit 직전 await 로 settle 시킴.
+    phase_edit_futures: list = []
     try:
         # __enter__ 는 try 안 — 만약 raise 하면 finally 가 안 부서지고 __exit__ skip.
         trace_cm.__enter__()
@@ -138,16 +163,20 @@ async def _process_job(client, conn, job, dm_owner) -> None:
                 msg = _phase_to_message(label, slug)
                 if msg is None:
                     return
-                asyncio.run_coroutine_threadsafe(
+                fut = asyncio.run_coroutine_threadsafe(
                     edit_channel_message(client, ch_id, msg_id, msg),
                     loop,
                 )
+                phase_edit_futures.append(fut)
 
         # reprobe 면 recognizer 우회 — 깨진 사이트를 같은 fast-path 로 무한 재진입하는 거 차단.
         rc, tail = await asyncio.to_thread(
             blocking_register, url, article_url, no_recognize=(kind == "reprobe"),
             on_phase=on_phase,
         )
+        # fire-and-forget 한 phase edit 들을 모두 settle — 아래 final edit 보다 *나중에* Discord
+        # 에 도달해서 final 을 덮어쓰는 race 차단.
+        await _drain_phase_edits(phase_edit_futures)
         ok = (rc == 0) and is_registered(slug)
         db.mark_job_finished(conn, job_id, ok=ok, rc=rc, tail=tail)
         log.info("잡 #%d 종료 — rc=%d ok=%s", job_id, rc, ok)
@@ -196,6 +225,9 @@ async def _process_job(client, conn, job, dm_owner) -> None:
             pass
         if kind == "register" and job["ack_channel_id"]:
             try:
+                # to_thread 가 raise 한 경우 drain 안 됐을 수 있음 — phase edit 가 unexpected 보다
+                # 늦게 land 해서 덮어쓰는 race 차단.
+                await _drain_phase_edits(phase_edit_futures)
                 await edit_channel_message(
                     client, job["ack_channel_id"], job["ack_message_id"],
                     msg("worker_unexpected", slug=slug))
