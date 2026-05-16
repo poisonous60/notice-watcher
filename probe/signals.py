@@ -82,6 +82,7 @@ def classify(
     error: Optional[str] = None,
     baseline_blocked: bool = False,
     is_method_incompatible: bool = False,
+    is_robots_txt: bool = False,
 ) -> tuple[Classification, list[str]]:
     """단일 응답을 분류한다. notable[]에 감지된 신호 메시지를 함께 반환."""
     notable: list[str] = []
@@ -164,6 +165,9 @@ def classify(
 
     # 5) OK
     if status is not None and 200 <= status < 400:
+        # robots.txt 는 원래 짧다 (수십~수백 바이트가 정상) — size 임계 적용 X
+        if is_robots_txt:
+            return Classification.OK, notable
         # UA/헤더 필터로 빈 응답을 받은 경우 (디시는 헤더 없으면 0 bytes 반환) → 봇 차단으로 처리
         if len(body_text) < 200:
             notable.append(f"suspiciously empty body ({len(body_text)} bytes) — UA/header filter suspected")

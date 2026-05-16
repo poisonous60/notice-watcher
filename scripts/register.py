@@ -103,6 +103,9 @@ def _policy_check(digest: dict, url: str) -> tuple[bool, list[str]]:
         return False, [f"로그인 필요 사이트 (verdict={digest.get('verdict')!r}) — 자동 등록 미지원. "
                        "로그인은 사용자가 한 번 수동으로(Playwright headful) 해야 하며 이번 단계 범위 밖."]
     if not _entry_matrix_has_ok_list(digest):
+        if "cert_or_dns_broken" in verdict:
+            return False, [f"목록 페이지 접근 단계 이전에 SSL 인증서/DNS 가 깨짐 (verdict={digest.get('verdict')!r}). "
+                           "사이트가 사라졌거나 운영 오설정 — 등록 거부."]
         return False, [f"목록 페이지에 정적으로도 headless 로도 접근 실패 (verdict={digest.get('verdict')!r}). "
                        "차단(BLOCKED) 사이트로 보임 — 차단 우회는 하지 않음. 등록 거부."]
     # robots Disallow — 경고만 (와일드카드 * / 끝앵커 $ 도 처리)

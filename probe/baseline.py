@@ -30,7 +30,8 @@ def _ping(client: httpx.Client, url: str, target_label: str) -> Result:
 
     duration_ms = int((time.perf_counter() - started) * 1000)
     cls, notable = classify(
-        status=status, body=body, headers=headers, error=error
+        status=status, body=body, headers=headers, error=error,
+        is_robots_txt=(target_label == "B2"),
     )
     return Result(
         strategy=target_label,

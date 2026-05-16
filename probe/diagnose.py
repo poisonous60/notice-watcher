@@ -10,6 +10,25 @@ from .extract import static_vs_headless_check
 from .types import Classification, Diagnosis, Result
 
 
+_CERT_OR_DNS_ERROR_MARKERS = (
+    "CERTIFICATE_VERIFY_FAILED",
+    "Hostname mismatch",
+    "SSL: ",
+    "ERR_CERT_",
+    "[Errno -2]",                      # getaddrinfo failed
+    "[Errno -3]",
+    "Name or service not known",
+    "nodename nor servname provided",
+    "Temporary failure in name resolution",
+)
+
+
+def _is_cert_or_dns_error(err: Optional[str]) -> bool:
+    if not err:
+        return False
+    return any(m in err for m in _CERT_OR_DNS_ERROR_MARKERS)
+
+
 def diagnose(
     *,
     slug: str,
@@ -35,8 +54,21 @@ def diagnose(
         bool(baseline_classes)
         and all(c == Classification.BLOCKED_BOT for c in baseline_classes)
     )
+    # SSL cert mismatch / DNS resolution 실패 — 사이트 자체가 죽었거나 운영 오설정.
+    # 차단(BLOCKED)이 아니므로 별도 verdict 로 분리해서 register 메시지가 정확하게 나오게 한다.
+    baseline_cert_broken = bool(baseline_classes) and all(
+        c == Classification.UNKNOWN_ERROR for c in baseline_classes
+    ) and any(
+        _is_cert_or_dns_error(r.error) for r in baseline.values()
+    )
     if baseline_bot_only:
         notes.append("baseline 도메인 루트도 봇 보호(Cloudflare 등)로 막힘 — 사이트 자체 정책, IP 차단은 아님")
+    elif baseline_cert_broken:
+        sample = next((r.error for r in baseline.values() if _is_cert_or_dns_error(r.error)), "")
+        notes.append(
+            "baseline ping 이 SSL 인증서/DNS 단계에서 실패 — 사이트 운영 오설정 또는 사이트가 사라졌을 가능성. "
+            f"샘플 에러: {sample}"
+        )
     elif not baseline_ok:
         notes.append("baseline ping 일부 실패 — IP/도메인 차단 의심")
 
@@ -139,6 +171,8 @@ def diagnose(
     verdict_parts = []
     if baseline_bot_only:
         verdict_parts.append("CLOUDFLARE_PROTECTED_SITE")
+    elif baseline_cert_broken:
+        verdict_parts.append("CERT_OR_DNS_BROKEN")
     elif not baseline_ok:
         verdict_parts.append("BASELINE_BLOCKED")
     if static_ok and not any("Cloudflare" in n for r in static_results for n in r.notable):

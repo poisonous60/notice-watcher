@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 30 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 33 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -11,9 +11,12 @@
 | [`naver-blog_ghangth_5a895e5f`](naver-blog_ghangth_5a895e5f.md) | ✅ 자동 (recognizer 신규 — naver-blog, naver-blog_dhyana69 와 같은 PR 에서 동시 풀림) | 2026-05-16 | F | posts_nonempty, list_url_none, candidates_zero | https://blog.naver.com/ghangth/221299970841 |
 | [`naver-blog_dhyana69_85ae2dd0`](naver-blog_dhyana69_85ae2dd0.md) | ✅ 자동 (recognizer 신규 — naver-blog 플랫폼 인식, NaverBlogRssAdapter 가 RSS 피드 직접 파싱) | 2026-05-16 | F | posts_nonempty, list_url_none, candidates_zero | https://m.blog.naver.com/PostView.nhn?blogId=dhyana69&logNo=150071320787&proxyReferer=https:%2F%2Fwww.google.co.kr%2F |
 | [`infra_single_article_gate_2026-05-16`](infra_single_article_gate_2026-05-16.md) | 🏗 인프라 (단일 article page 자동 거부 게이트 — 인식기 fast-path + nav-only 구조 fallback) | 2026-05-16 | F+C | single_article_page, board_shape_false_positive, nav_only_same_host, recognizer_reject_fast_path | (인프라 case — 특정 사이트 X. 트리거 = beec51d 의 article-page 4건 손-거부 직후) |
+| [`infra_probe_baseline_classifier_2026-05-16`](infra_probe_baseline_classifier_2026-05-16.md) | 🏗 인프라 (probe baseline classifier — robots.txt 오분류 + SSL cert 에러 verdict 분리) | 2026-05-16 | C+F | classifier_short_body_false_positive, baseline_cert_lumped_into_blocked, register_message_misleading | (인프라 case — 특정 사이트 X. 트리거 = triage 큐의 techethics-ieee + standardsuniversity 2건 진단 중 발견) |
 | [`infra_learned_blacklist_2026-05-16`](infra_learned_blacklist_2026-05-16.md) | 🏗 인프라 (거부 패턴 자동 학습 시스템 — 한 사용자 거부 → 모두에게 적용, 등록 성공 = 자동 회수) | 2026-05-16 | F | learned_blacklist, host_path_pattern, auto_learn, auto_unlearn | (인프라 case — 특정 사이트 X. 트리거 = host_google-com_search_9440e9f9 의 후속 후속) |
 | [`host_theholocaustexp_the-nazi-rise-to-power_9f510466`](host_theholocaustexp_the-nazi-rise-to-power_9f510466.md) | 🚫 거부 (The Holocaust Explained 단일 article/subtopic page — 게시판 아님. 폴링 대상 X) | 2026-05-16 | none | article_body_len, embedded_subtopics, not_a_board | https://www.theholocaustexplained.org/the-nazi-rise-to-power/the-nazi-rise-to-power/the-role-of-economic-instability/ |
 | [`host_terms-naver-com_entry.naver_a297b3b0`](host_terms-naver-com_entry.naver_a297b3b0.md) | 🚫 거부 (단일 네이버 지식백과 항목 — 게시판 아님. 폴링 대상 X) | 2026-05-16 | none | posts_nonempty, list_url_none, candidates_zero, not_a_board | https://terms.naver.com/entry.naver?docId=3579743&cid=59054&categoryId=59061 |
+| [`host_techethics-ieee_about_bdcbf970`](host_techethics-ieee_about_bdcbf970.md) | ❌ 거부 (Cloudflare JA3 fingerprint 차단 + URL 이 단일 about 페이지) | 2026-05-16 |  | cloudflare_ja3_block, headless_blocked, single_about_page | https://techethics.ieee.org/about/ |
+| [`host_standardsuniver_e-magazine_0e5263ea`](host_standardsuniver_e-magazine_0e5263ea.md) | ❌ 거부 (SSL cert hostname mismatch + 원본 URL 사라짐 — 302 다른 페이지) | 2026-05-16 |  | ssl_cert_hostname_mismatch, dead_url_302_redirect, single_article_page | https://www.standardsuniversity.org/e-magazine/march-2017/ethics-and-technology/ |
 | [`host_scholar-google-_scholar_706d9c49`](host_scholar-google-_scholar_706d9c49.md) | 🔧 손 config (작동중, baseline 10, httpx_html) + (C) probe heuristic + (D) retry feedback hint | 2026-05-16 | C+D | article_body_len | https://scholar.google.com/scholar?hl=ko&as_sdt=0%2C5&q=harness&btnG= |
 | [`host_quibli-dustyroo_root_216cc634`](host_quibli-dustyroo_root_216cc634.md) | 🔧 손 config (httpx_html) + (F+A) transforms: _strip(value, chars=None) + prompt 한 줄 — LLM 의 ["strip","/"] 아릴리티 fix | 2026-05-16 | F+A | posts_nonempty_0, transform_strip_arity_error, silent_field_dropout | https://quibli.dustyroom.com/ |
 | [`host_poly-pizza_root_a38820de`](host_poly-pizza_root_a38820de.md) | 🔧 손 config (playwright_html) + (E) schema: body_empty_acceptable + content=[] 허용 | 2026-05-16 | E | schema_empty_fallback_chain, body_empty_acceptable_content_mismatch | https://poly.pizza/ |
@@ -43,9 +46,10 @@
 
 | layer | count |
 |---|---|
-| (미기재) | 9 |
+| (미기재) | 11 |
 | C | 1 |
 | C+D | 1 |
+| C+F | 1 |
 | E | 1 |
 | E+A+C+D | 1 |
 | F | 7 |
@@ -57,7 +61,7 @@
 
 | strategy | count |
 |---|---|
-| (미기재) | 4 |
+| (미기재) | 7 |
 | handwritten | 7 |
 | httpx_html | 6 |
 | httpx_json | 4 |
@@ -66,5 +70,5 @@
 
 ### 최근 90일 (≥ 2026-02-15)
 
-케이스 30 건.
+케이스 33 건.
 
