@@ -36,8 +36,8 @@ async def _pull_inner() -> dict[str, Any]:
 async def run_pull() -> dict[str, Any]:
     """`python scripts/inspect_subs.py pull` 을 별도 프로세스로 실행. stdout/stderr·rc 캡처해 반환.
 
-    UI 흐름: HTMX POST 가 await → 정상 완료는 app.py 가 204 로 응답해 swap 안 됨.
-    실패/skip 일 때만 `#pull-result` 에 partial 주입. 자동 페이지 갱신 없음 (무한 루프 방지).
+    UI 흐름: HTMX POST 가 await → 정상 완료·skip 은 app.py 가 204 로 응답해 swap 안 됨.
+    실패(ok=False) 일 때만 `#pull-result` 에 partial 주입. 자동 페이지 갱신 없음 (무한 루프 방지).
     보통 5~30 초 (SSH + scp). Windows 호환성은 `dashboard.shell.async_run` 이 담당.
     """
     global _pull_task

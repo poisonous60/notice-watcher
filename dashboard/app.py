@@ -814,12 +814,11 @@ async def settings_page(request: Request):
 @app.post("/actions/pull", response_class=HTMLResponse)
 async def actions_pull(request: Request):
     res = await act.run_pull()
-    # 정상 완료 (ok=True, not skipped) 면 빈 204 반환 — HTMX 는 204 시 swap 을
-    # 건너뛰므로 #pull-result 그대로 빔. 사용자에게 노이즈 안 줌.
-    # 실패/skip 일 때만 partial 로 알린다.
+    # 정상 완료·skip 모두 204 반환 — HTMX 는 204 시 swap 안 함 → #pull-result 그대로 빔.
+    # 실패(ok=False) 일 때만 partial 로 알린다.
     # HX-Refresh 헤더는 절대 쓰지 않는다 — 자동 Pull (hx-trigger="load") 환경에서
     # 페이지 reload 가 다시 load 이벤트를 발사해 무한 루프를 만든다.
-    if res.get("ok") and not res.get("skipped"):
+    if res.get("ok"):
         return Response(status_code=204)
     return _partial("_pull_result.html", request, res=res)
 
