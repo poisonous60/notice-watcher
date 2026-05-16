@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "site": "piku.co.kr",
+  "board": "w",
+  "strategy": "playwright_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+    "Accept-Language": "ko-KR,ko;q=0.9"
+  },
+  "timeout": 15,
+  "nav_timeout_ms": 30000,
+  "idle_timeout_ms": 10000,
+  "quiet_ms": 800,
+  "list": {
+    "url_template": "https://www.piku.co.kr/w/search/order=hot",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "div.row.equal > div.col-xs-6, div.row.equal > div.col-xs-12",
+    "row_required_selector": "div.product-desc",
+    "wait_selector": "div.product-desc",
+    "fields": {
+      "post_id": [
+        {"from": "css", "selector": "div.product-desc", "attr": "data-id"}
+      ],
+      "title": [
+        {"from": "css", "selector": "a.product-name", "text": true}
+      ],
+      "url": [
+        {"from": "css", "selector": "a.btn-danger", "attr": "href"}
+      ],
+      "summary": [
+        {"from": "css", "selector": "div.small.m-t-xs", "text": true}
+      ]
+    }
+  },
+  "article": {
+    "url_template": "https://www.piku.co.kr/w/{post_id}",
+    "fetch_kind": "html",
+    "wait_selector": "head meta[name=\"description\"]",
+    "content": [
+      {"from": "css", "selector": "div.modal-content", "html": true},
+      {
+        "from": "concat",
+        "parts": [
+          {"from": "css", "selector": "head title", "text": true},
+          {"const": "\n\n"},
+          {"from": "css", "selector": "head meta[name=\"description\"]", "attr": "content"},
+          {"const": "\n\n"},
+          {"from": "css", "selector": "head meta[property=\"og:description\"]", "attr": "content"}
+        ]
+      }
+    ],
+    "enrich": {
+      "title": [
+        {"from": "css", "selector": "head meta[property=\"og:title\"]", "attr": "content"}
+      ]
+    }
+  },
+  "_source_url": "https://www.piku.co.kr/w/search/order=hot",
+  "_note": "piku.co.kr 이상형 월드컵 hot 랭킹 — '글'=게임. 본문=div.modal-content (게임 소개+라운드 버튼) html, fallback=<head> title+meta description+og:description concat. CF 챌린지가 nav 마다 ~30% 재발화(N100 측정 3회 중 2회 list 성공)라 polite_sleep 길게/wait_selector div.product-desc/quiet 800ms/idle 10s 로 안정화. 자동 시도(last_config) 는 strategy=playwright_html 인데 wait_selector div.row.equal>div.col-xs-6 가 일부 article 페이지에서 안 떠 article_body_len=0 으로 떨어짐."
+}
