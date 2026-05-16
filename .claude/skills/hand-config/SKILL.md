@@ -49,14 +49,19 @@ IP 바뀌었으면 `DEPLOY_HOST=aaaa@<새IP>` 환경변수.
 
 `show` 출력의 `last_feedback`(=`[FAIL] <체크>`), `last_config`(자동 생성된 마지막 시도 — selector/path 한두 개만 고치면 될 때도 많음), `output/probe/<slug>/` 의 `summary.txt`·`list_candidates.json`·`article_candidates.json`·`traffic.har`·`diagnosis.json` 을 본다. `docs/config 자동생성 실패 케이스.md` 의 §번호에 매칭해 원인 분류.
 
-**진단 직후 게이트 (필수)** — 다음 §2 분기 결정 전, `last_feedback` 의 실패 키와 probe artifact 신호를 보고 *자동 파이프라인 일반화 후보* 한 줄씩 enumerate 한다. 손-config (2e) 으로 바로 가지 X.
+**진단 직후 — 두 트랙 동시 검토 (필수)**. 두 트랙 모두 *각 케이스마다* 진행 — 한쪽이 다른 쪽 막는 게이트 X.
 
-- 2a 후보: URL 이 알려진 플랫폼 가족이거나 인식기 PATTERNS 한 줄 추가로 풀리나? (확인: `recognize('<URL>')`)
-- 2b 후보: probe `first_article_url` 이 사이드바/pagination 잘못 잡혔나? 진짜 글 URL 손에 있으면 `--article-url` 로 재시도 가능.
-- 2c 후보: probe artifact 에 *이미 있는 신호*인데 휴리스틱화 안 돼서 LLM 이 4회 retry 한 거 아닌가? (예: row url 외부 도메인 다수 / login redirect / SPA shell / pagination meta 등) → 휴리스틱 신규 또는 retry feedback hint 추가로 미래 같은 패턴 자동 처리.
-- 2d 후보: probe 자체가 잘못 동작 (글 페이지 render 가 sibling page 열음 / HAR 비어있음 / list_candidates 가 명백한 row 못 잡음) → probe/ 수정 + 재-probe.
+- **트랙 A (사용자 향 — 사이트 즉시 작동)**: 사용자가 등록 요청한 사이트가 *지금 안 됨* → 작동시켜야 함. 2a~2d 중 매칭 있으면 그게 곧 트랙 A 해결 수단; 없으면 2e (손-config / 손어댑터) 로 작동시킴. 트랙 A 는 *항상* 결과물 있음 (사이트 작동 또는 거부 마커).
 
-각 후보 한 줄 점검 (`X — 매칭 X 이유: …` 또는 `O — <적용 자리>`). 위에서 차례로 따져 첫 매칭. **2a~2d 중 매칭 0건이 *입증된* 후에만** 2e (손-config / 손어댑터) 로 진입. 입증 = "왜 안 되는지" 명시 — 그냥 "복잡해서" / "시간 없어서" 는 불충분.
+- **트랙 B (미래 향 — 같은 패턴 자동 처리)**: 진단 중 *probe 일반화 가능성* 별개로 검토. 손-config 으로 트랙 A 끝낸 케이스도 트랙 B 검토는 의무. 후보:
+  - 2a: URL 이 알려진 플랫폼 가족이거나 인식기 PATTERNS 한 줄 추가로 풀리나? (확인: `recognize('<URL>')`)
+  - 2b: probe `first_article_url` 이 사이드바/pagination 잘못 잡혔나? 진짜 글 URL 손에 있으면 `--article-url` 로 재시도 가능.
+  - 2c: probe artifact 에 *이미 있는 신호*인데 휴리스틱화 안 돼서 LLM 이 4회 retry 한 거 아닌가? (예: row url 외부 도메인 다수 / login redirect / SPA shell / pagination meta 등) → 휴리스틱 신규 또는 retry feedback hint 추가로 미래 같은 패턴 자동 처리.
+  - 2d: probe 자체가 잘못 동작 (글 페이지 render 가 sibling page 열음 / HAR 비어있음 / list_candidates 가 명백한 row 못 잡음) → probe/ 수정 + 재-probe.
+
+각 후보 한 줄 점검 (`X — 매칭 X 이유: …` 또는 `O — <적용 자리>`). 매칭 있으면 *같은 PR* 에 트랙 A 와 함께 박는다. 매칭 0건이면 case 파일 본문 또는 `_note` 에 한 줄 이유 명시 ("이 사이트만의 storage_state 필요" / "신호는 휴리스틱화 가능하나 활용처 없음" 등). 미래 2개째 비슷한 사이트 들어왔을 때 즉시 알아채는 비용 절감.
+
+예시: `host_scholar-google-_scholar_706d9c49` (commit `0b130b2`) — 트랙 A 손-config `configs/host_scholar-google-_scholar_706d9c49.json` + 트랙 B (C) `probe/extract.py:list_row_external_host` + (D) `generate/validate.py:_external_host_hint`. 동시.
 
 ## 2. 분기 — 위에서부터 차례로 따져 첫 매칭
 
@@ -193,10 +198,10 @@ probe/prompt/schema/코드 손대기 전 다음 여섯 질문에 답해보면 �
 
    기존 strategy/heuristic 수정만이면 skip.
 
-7. **probe 일반화 시도했나?** — 손-config (2e) 으로 끝낸 케이스면 *왜 2c/2d (probe 휴리스틱·artifact 수정) 또는 (D) retry feedback hint 로 일반화 안 됐는지* case 파일에 한 줄 적기. "이 row url host 가 외부 도메인 다수다 → 휴리스틱 신호로 박을 만하다" 같은 게 *2개째 비슷한 사이트* 들어왔을 때 즉시 알아채는 비용 절감. 단순 손-config 끝내고 미래에 같은 패턴 또 큐 쌓이게 두는 게 *기본*이면 누적 rot.
-   - 일반화 시도했으면 fix_layer 에 C / C+D / F 표기.
-   - 못 했으면 `_note` 또는 case body 에 "일반화 안 되는 이유: <코너 케이스 한 줄>" 명시. (예: "이 사이트만의 storage_state 필요" / "본문이 클라이언트 라우트라 server-render 없음, 신호는 휴리스틱화 가능하나 결과 활용처 없음")
-   - 미래 같은 패턴 사이트 2개째 들어오면 *그때* 일반화 — 1개째에 무리해서 일반화 안 해도 됨. 다만 *기록*은 1개째에 남겨야 알아챔.
+7. **트랙 A + 트랙 B 둘 다 진행했나?** — 트랙 A (사용자 향, 사이트 즉시 작동 — 손-config / 손어댑터 / 인식기 확장 / probe 수정 / 거부 마커 중 하나) 는 *항상* 결과물 있어야 함 (사용자 사이트 안 돌게 두는 건 SKILL 실패). 트랙 B (미래 향, probe 일반화 — 2a~2d 후보 검토) 는 *케이스마다 검토 의무*, 매칭 있으면 같은 PR 에 박음.
+   - 둘 다 했으면 fix_layer 에 두 자리 표기 (예: `C+D` = probe 휴리스틱 + retry feedback + 별도 손-config 함께. 손-config 자체는 fix_layer 키 X — case file status 에 🔧 으로 표시).
+   - 트랙 B 매칭 0이면 `_note` 또는 case body 에 "일반화 안 되는 이유: <코너 케이스 한 줄>" 명시. (예: "이 사이트만의 storage_state 필요" / "신호는 휴리스틱화 가능하나 활용처 없음 — 미래 2번째 케이스 들어오면 박을 자리만 메모")
+   - 미래 같은 패턴 사이트 2개째 들어오면 *그때* 트랙 B 실제 코드 박아도 늦지 X. 다만 1개째에 *후보 자리 기록* 안 남기면 못 알아챔 — case file 이 기록 매개체.
 
 위 일곱 답이 없어도 commit 막지 X — 그저 *생각해보면 좋은* 질문. 진짜 검증은 reviewer subagent + pre-push hook.
 
