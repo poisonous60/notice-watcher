@@ -77,7 +77,10 @@
     {% for r in recent %}
     <tr>
       <td><a href="/jobs/{{ r.id }}">#{{ r.id }}</a></td>
-      <td class="mono">{{ r.slug or "" }}</td>
+      <td class="mono">
+        {% if r.slug %}<a href="/subs/{{ r.slug | urlencode }}">{{ r.slug }}</a>{% endif %}
+        {% if r.url and is_http_url(r.url) %} <a href="{{ r.url }}" target="_blank" rel="noopener noreferrer" title="원본 URL 새 탭 열기">↗</a>{% endif %}
+      </td>
       <td>
         {% set s = r.status or "" %}
         <span class="badge {{ 'ok' if s=='ok' else ('error' if s in ('error','failed') else '') }}">{{ s }}</span>
@@ -87,7 +90,7 @@
         {% set rb = r.requested_by %}
         {% if rb is mapping %}{{ rb.get('name', '?') }}{% else %}?{% endif %}
       </td>
-      <td>{{ (r.finished_at or r.created_at or "")[:16] }}</td>
+      <td style="white-space:nowrap;">{{ (r.finished_at or r.created_at or "")[:16] }}</td>
     </tr>
     {% endfor %}
   </tbody>

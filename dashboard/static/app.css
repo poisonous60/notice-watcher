@@ -656,3 +656,71 @@ table.row-grid td.meta {
 #spans-table tr.span-row-flash > td {
   animation: span-row-flash-anim 1.6s ease-out;
 }
+
+/* /cases — 1-line 행 + hover popover. */
+.cases-table { table-layout: fixed; width: 100%; }
+.cases-table th,
+.cases-table td {
+  white-space: nowrap !important;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+  line-height: 1.4;
+  padding: 0.25rem 0.5rem;
+}
+.cases-table tr.cases-row { height: 1.9rem; }
+.cases-table .cases-slug-cell {
+  position: relative;
+  overflow: visible;  /* popover 가 셀 밖으로 escape */
+  max-width: 320px;
+}
+.cases-table .cases-slug-text {
+  display: inline-block;
+  max-width: calc(100% - 1.5rem);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.cases-table .cases-slug-link { margin-left: 0.3rem; }
+.cases-popover {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 100;
+  min-width: 420px;
+  max-width: 720px;
+  margin-top: 0.2rem;
+  padding: 0.6rem 0.8rem;
+  background: var(--nw-surface);
+  color: var(--nw-fg);
+  border: 1px solid var(--nw-border);
+  border-radius: 6px;
+  box-shadow: var(--nw-shadow);
+  font-size: 0.85rem;
+  line-height: 1.45;
+  white-space: normal;
+  word-break: break-all;
+  transition: opacity 0.08s;
+}
+.cases-row:hover .cases-popover,
+.cases-popover:hover {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* viewport 하단 근처 행 popover 위쪽 flip — JS 가 .flip-up 토글. */
+.cases-popover.flip-up {
+  top: auto;
+  bottom: 100%;
+  margin-top: 0;
+  margin-bottom: 0.2rem;
+}
+.cases-pop-row { margin: 0.2rem 0; }
+.cases-pop-row b { color: var(--nw-muted); margin-right: 0.4rem; font-weight: 600; }
+.cases-pop-files { margin: 0.2rem 0 0 1rem; padding: 0; }
+.cases-pop-files li { margin: 0; }

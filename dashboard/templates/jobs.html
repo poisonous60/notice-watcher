@@ -44,6 +44,7 @@
       <td><a href="/jobs/{{ r.id }}">#{{ r.id }}</a></td>
       <td class="mono">
         {% if r.slug %}<a href="/subs/{{ r.slug | urlencode }}">{{ r.slug }}</a>{% endif %}
+        {% if r.url and is_http_url(r.url) %} <a href="{{ r.url }}" target="_blank" rel="noopener noreferrer" title="원본 URL 새 탭 열기">↗</a>{% endif %}
       </td>
       <td>
         {% set s = r.status or "" %}
@@ -57,7 +58,7 @@
       <td class="mono" style="max-width:30em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
         <span title="{{ r.url or '' }}">{{ r.url or "" }}</span>
       </td>
-      <td>{{ (r.finished_at or r.created_at or "")[:16] }}</td>
+      <td style="white-space:nowrap;">{{ (r.finished_at or r.created_at or "")[:16] }}</td>
     </tr>
     {% else %}
     <tr><td colspan="7" class="muted">검색 결과 없음.</td></tr>

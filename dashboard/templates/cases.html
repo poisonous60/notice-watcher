@@ -87,9 +87,19 @@
   </div>
 </form>
 
-<p class="muted">{{ rows|length }} row (cap 500).</p>
+<p class="muted">{{ rows|length }} row (cap 500). 행 hover → 상세 (reason · failure_keys · files · url).</p>
 
-<table>
+<table class="cases-table compact">
+  <colgroup>
+    <col style="width: 140px">
+    <col>
+    <col style="width: 100px">
+    <col style="width: 140px">
+    <col style="width: 80px">
+    <col style="width: 60px">
+    <col style="width: 70px">
+    <col style="width: 90px">
+  </colgroup>
   <thead>
     <tr>
       <th>ts</th>
@@ -97,38 +107,74 @@
       <th>skill</th>
       <th>outcome</th>
       <th>layer</th>
-      <th>failure_keys</th>
       <th>files</th>
-      <th>reason</th>
       <th>case</th>
       <th>commit</th>
     </tr>
   </thead>
   <tbody>
     {% for r in rows %}
-    <tr>
-      <td><code>{{ r.ts }}</code></td>
-      <td><code>{{ r.slug }}</code>{% if r.url and is_http_url(r.url) %} · <a href="{{ r.url }}" target="_blank" rel="noopener noreferrer">↗</a>{% endif %}</td>
-      <td>{{ r.skill }}</td>
-      <td>{{ r.outcome_label }}</td>
-      <td>{% if r.fix_layer %}<code>{{ r.fix_layer }}</code>{% endif %}</td>
-      <td>
-        {% for k in r.failure_keys %}<code>{{ k }}</code>{% if not loop.last %} {% endif %}{% endfor %}
+    <tr class="cases-row">
+      <td class="mono nowrap">{{ r.ts[:16] if r.ts else '' }}</td>
+      <td class="cases-slug-cell">
+        <span class="cases-slug-text"><code>{{ r.slug }}</code></span>
+        {% if r.url and is_http_url(r.url) %}<a class="cases-slug-link" href="{{ r.url }}" target="_blank" rel="noopener noreferrer">↗</a>{% endif %}
+        <div class="cases-popover">
+          <div class="cases-pop-row"><b>slug</b> <code>{{ r.slug }}</code></div>
+          {% if r.url %}<div class="cases-pop-row"><b>url</b> <code>{{ r.url }}</code></div>{% endif %}
+          <div class="cases-pop-row"><b>outcome</b> {{ r.outcome_label }}{% if r.fix_layer %} · <b>layer</b> <code>{{ r.fix_layer }}</code>{% endif %}</div>
+          {% if r.failure_keys %}
+          <div class="cases-pop-row"><b>failure_keys</b>
+            {% for k in r.failure_keys %}<code>{{ k }}</code>{% if not loop.last %} {% endif %}{% endfor %}
+          </div>
+          {% endif %}
+          {% if r.files_changed %}
+          <div class="cases-pop-row"><b>files ({{ r.files_changed|length }})</b>
+            <ul class="cases-pop-files">
+              {% for f in r.files_changed %}<li><code>{{ f }}</code></li>{% endfor %}
+            </ul>
+          </div>
+          {% endif %}
+          {% if r.reason %}<div class="cases-pop-row"><b>reason</b> {{ r.reason }}</div>{% endif %}
+          {% if r.requested_by %}<div class="cases-pop-row"><b>requested_by</b> <code>{{ r.requested_by }}</code></div>{% endif %}
+          {% if r.commit_sha %}<div class="cases-pop-row"><b>commit</b> <code>{{ r.commit_sha }}</code></div>{% endif %}
+        </div>
       </td>
-      <td title="{{ r.files_changed|join('\n') }}">{{ r.files_changed|length }}</td>
-      <td>{{ r.reason_short }}</td>
-      <td>
-        {% if r.case_md_slug %}
+      <td class="nowrap">{{ r.skill }}</td>
+      <td class="nowrap">{{ r.outcome_label }}</td>
+      <td class="nowrap">{% if r.fix_layer %}<code>{{ r.fix_layer }}</code>{% endif %}</td>
+      <td class="nowrap" title="{{ r.files_changed|join('\n') }}">{{ r.files_changed|length }}</td>
+      <td class="nowrap">
+        {% if r.case_md_slug and r.case_md_exists %}
           <a href="/cases/{{ r.case_md_slug }}/md">📄 md</a>
         {% endif %}
       </td>
-      <td>
-        {% if r.commit_sha %}
-          <code>{{ r.commit_sha[:8] }}</code>
-        {% endif %}
+      <td class="mono nowrap">
+        {% if r.commit_sha %}{{ r.commit_sha[:8] }}{% endif %}
       </td>
     </tr>
     {% endfor %}
   </tbody>
 </table>
+
+<script>
+(function() {
+  function flipIfNeeded(tr) {
+    var pop = tr.querySelector('.cases-popover');
+    if (!pop) return;
+    pop.classList.remove('flip-up');
+    // 강제로 한 번 layout 측정 — display 가 hover 로 block 되기 전 height 추정
+    var popH = pop.scrollHeight || 320;
+    var rect = tr.getBoundingClientRect();
+    var spaceBelow = window.innerHeight - rect.bottom;
+    var spaceAbove = rect.top;
+    if (spaceBelow < popH + 16 && spaceAbove > spaceBelow) {
+      pop.classList.add('flip-up');
+    }
+  }
+  document.querySelectorAll('.cases-table tbody tr.cases-row').forEach(function(tr) {
+    tr.addEventListener('mouseenter', function() { flipIfNeeded(tr); });
+  });
+})();
+</script>
 {% endblock %}

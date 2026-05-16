@@ -17,9 +17,23 @@ from fastapi.responses import HTMLResponse
 from bot.case_runs_meta import OUTCOMES, OUTCOME_LABELS, escape_like
 from dashboard import state
 
+try:
+    import markdown as _markdown
+except ImportError:  # dev box 의존성 (`requirements-dashboard.txt`) 미설치 시 graceful
+    _markdown = None
+
+_MD_EXTENSIONS = ["fenced_code", "tables", "sane_lists", "toc", "nl2br"]
+
+
+def _render_markdown(body: str) -> Optional[str]:
+    """case .md 본문 → HTML. markdown lib 없으면 None (템플릿이 raw fallback)."""
+    if _markdown is None:
+        return None
+    return _markdown.markdown(body, extensions=_MD_EXTENSIONS, output_format="html5")
+
 
 def _row_to_view(row) -> dict[str, Any]:
-    """sqlite Row → 템플릿 친화 dict (JSON 필드 unpack)."""
+    """sqlite Row → 템플릿 친화 dict (JSON 필드 unpack + md 파일 존재 확인)."""
     d = dict(row)
     for jcol in ("failure_keys", "files_changed"):
         raw = d.get(jcol)
@@ -33,6 +47,8 @@ def _row_to_view(row) -> dict[str, Any]:
     d["outcome_label"] = OUTCOME_LABELS.get(d.get("outcome") or "", d.get("outcome") or "")
     reason = d.get("reason") or ""
     d["reason_short"] = (reason[:120] + "…") if len(reason) > 120 else reason
+    md_slug = d.get("case_md_slug")
+    d["case_md_exists"] = bool(md_slug and state.cases_md_path(md_slug) is not None)
     return d
 
 
@@ -157,4 +173,8 @@ def register(app, templates, _render):
         if p is None:
             raise HTTPException(status_code=404, detail="case .md 없음 또는 slug 안전 X")
         body = p.read_text(encoding="utf-8").lstrip("﻿")
-        return _render("case_md.html", request, slug=slug, body=body, active="cases")
+        body_html = _render_markdown(body)
+        return _render(
+            "case_md.html", request,
+            slug=slug, body=body, body_html=body_html, active="cases",
+        )

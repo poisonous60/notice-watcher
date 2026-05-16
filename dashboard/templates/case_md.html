@@ -3,6 +3,17 @@
 {% block body %}
 <p><a href="/cases">← Cases</a></p>
 <h2>📄 {{ slug }}</h2>
-<p class="muted">파일: <code>docs/cases/{{ slug }}.md</code> (raw markdown — 렌더 X, autoescape 보호 + monospace).</p>
+<p class="muted">파일: <code>docs/cases/{{ slug }}.md</code> ·
+  <a href="?raw=1">raw</a> | <details style="display:inline"><summary style="display:inline">렌더 정보</summary>
+  markdown lib 로 HTML 렌더 (fenced_code · tables · sane_lists · toc · nl2br). lib 미설치 시 raw fallback.
+  </details>
+</p>
+{% if body_html %}
+<article class="case-md">
+  {{ body_html | safe }}
+</article>
+{% else %}
+<p class="muted">⚠ markdown 렌더러 없음 — raw 표시. <code>pip install -r requirements-dashboard.txt</code> 필요.</p>
 <pre style="white-space: pre-wrap; word-wrap: break-word; padding: 1em; background: var(--pico-card-background-color, #fafafa); border-radius: 4px;">{{ body }}</pre>
+{% endif %}
 {% endblock %}
