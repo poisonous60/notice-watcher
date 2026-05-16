@@ -212,12 +212,15 @@ def cmd_notify_target(slug: str, target_kind: str, target_id: str) -> int:
     _require_kind(target_kind)
     _require(target_id, _TARGET_ID_RE, name="target_id")
     # notify.py 가 collected dir 의 *.new.json 중 그 slug 의 글을 그 target 에게만 발송.
+    # `--heartbeat` 켜는 이유: 새 글 0건이고 그 target 의 구독이 notify_empty=1 이면 "새 공지 없음"
+    # 한 줄도 발송. m1_solo 액션이 침묵 안 하게 (dashboard UX).
     # poll-now 를 별도로 부르고 싶으면 replay-deliveries / poll-now-slug 를 먼저.
     return _ssh(_remote_python_cmd(
         "scripts/notify.py",
         "--only-target-kind", target_kind,
         "--only-target-id", target_id,
         "--no-digest",
+        "--heartbeat",
     ))
 
 

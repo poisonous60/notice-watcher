@@ -5,11 +5,15 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+
+# Timings/Usage 탭 무용 방지 — dashboard 호출은 거의 항상 trace 보고 싶음. 끄고 싶으면 `TRACE_ENABLED=0`.
+os.environ.setdefault("TRACE_ENABLED", "1")
 
 
 def main(argv: list[str]) -> int:
