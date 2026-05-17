@@ -23,6 +23,13 @@ _CERT_OR_DNS_ERROR_MARKERS = (
 )
 
 
+# notes 에 박히는 static_vs_headless trigger 메시지 *고정 prefix*. scripts/register.py 가 substring 매치로
+# hint 트리거 — 메시지 reword 시 silent skip 방지를 위해 *상수* 로 export. 메시지 본문 수정 가능하지만
+# 이 prefix 만은 *그대로* 유지해야 register.py 의 _extra_signal_hints 가 잡는다.
+STATIC_INSUFFICIENT_SIZE_PREFIX = "정적 응답이 빈 shell"        # rule 1 = 강한 신호 (size + row-signal)
+STATIC_INSUFFICIENT_REPEAT_PREFIX = "정적 응답 vs Playwright DOM"  # rule 2 = 약한 신호 (selector-level repeat diff)
+
+
 def _is_cert_or_dns_error(err: Optional[str]) -> bool:
     if not err:
         return False
@@ -102,7 +109,7 @@ def diagnose(
                         # 강한 신호 — 정적 응답이 진짜 빈 shell. static_ok 무효화.
                         static_ok = []
                         notes.append(
-                            "정적 응답이 빈 shell — Playwright 응답이 정적보다 "
+                            f"{STATIC_INSUFFICIENT_SIZE_PREFIX} — Playwright 응답이 정적보다 "
                             f"{static_vs_headless.get('ratio'):.1f}배 크고 row-like 요소 "
                             f"({static_vs_headless.get('row_signal_headless')} vs "
                             f"{static_vs_headless.get('row_signal_static')}) 만 잡힘. "
@@ -113,7 +120,7 @@ def diagnose(
                         # static_ok 무효화 X (정적 httpx 로도 작동할 수 있음 — JSON island 직접 파싱 등).
                         # notes 로 LLM 에 *고려* 만 시킴.
                         notes.append(
-                            "⚠ 정적 응답 vs Playwright DOM 비교: headless 에만 mosaic/tile 류 반복 패턴 "
+                            f"⚠ {STATIC_INSUFFICIENT_REPEAT_PREFIX} 비교: headless 에만 mosaic/tile 류 반복 패턴 "
                             f"{static_vs_headless.get('repeat_anchors_headless')}개 추가됨 "
                             f"(정적 {static_vs_headless.get('repeat_anchors_static')}). "
                             "정적 HTML 의 <script id=*-json-data> 같은 JSON island 에서 클라이언트 JS 가 tile 렌더 가능성 — "

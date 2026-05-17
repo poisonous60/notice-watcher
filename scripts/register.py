@@ -42,6 +42,10 @@ from urllib.parse import urlsplit
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from probe.paths import output_dir, url_to_slug  # noqa: E402
+from probe.diagnose import (  # noqa: E402
+    STATIC_INSUFFICIENT_SIZE_PREFIX as _BLANK_SHELL_NOTE_KW,
+    STATIC_INSUFFICIENT_REPEAT_PREFIX as _JS_MOSAIC_NOTE_KW,
+)
 from engine.digest import build_digest  # noqa: E402
 from engine.recognizers import recognize as recognize_platform, recognize_reject  # noqa: E402
 from engine.tracing import start_trace, current_trace, env_for_child  # noqa: E402
@@ -960,8 +964,8 @@ def _extra_signal_hints(digest: dict) -> list[str]:
     notes = digest.get("notes") or []
     lc = digest.get("list_candidates") or {}
 
-    blank_shell = any("정적 응답이 빈 shell" in n for n in notes)
-    js_mosaic = any(("정적 응답 vs Playwright DOM" in n) for n in notes)
+    blank_shell = any(_BLANK_SHELL_NOTE_KW in n for n in notes)
+    js_mosaic = any(_JS_MOSAIC_NOTE_KW in n for n in notes)
     if blank_shell:
         out.append(
             "⚠ probe: **정적 응답이 빈 shell — Playwright DOM 에만 글 목록/카드가 그려진다** "
