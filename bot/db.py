@@ -460,12 +460,18 @@ def enqueue_job(conn: sqlite3.Connection, *,
 def claim_next_pending(conn: sqlite3.Connection) -> Optional[sqlite3.Row]:
     """가장 오래된 pending 잡 하나를 running 으로 표시하고 반환. 없으면 None.
 
+    pool_size>1 + per-slug 직렬화: slug 이 이미 다른 worker 의 running 잡이면 *그 잡은 스킵* 하고
+    다음 pending 후보로 넘어감. 모든 pending slug 이 in-flight 면 None — 호출자가 idle sleep 후 재시도.
+    FIFO 는 *non-blocked* pending 들 사이에서 유지. running 끝난 slug 의 pending 도 FIFO id 순.
+
     SELECT-then-UPDATE 패턴 (Python sqlite3 의 implicit 트랜잭션과 충돌 없도록 BEGIN IMMEDIATE 피함).
     UPDATE WHERE status='pending' 조건으로 race 가드 — 다른 워커가 같은 잡 채갔으면 rowcount=0, 다음 잡으로.
     """
     for _ in range(8):
         row = conn.execute(
-            "SELECT id FROM jobs WHERE status='pending' ORDER BY id ASC LIMIT 1"
+            "SELECT id FROM jobs WHERE status='pending' "
+            "AND slug NOT IN (SELECT slug FROM jobs WHERE status='running') "
+            "ORDER BY id ASC LIMIT 1"
         ).fetchone()
         if row is None:
             return None
