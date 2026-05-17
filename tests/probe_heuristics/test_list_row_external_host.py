@@ -99,4 +99,65 @@ def run() -> list[tuple[str, bool, str]]:
                   and out["external_ratio"] == 0.8,
                   f"got {out!r}"))
 
+    # 9. multi_host_hub: 3+ unique external hosts + ratio≥0.95 → True (tistory root 류).
+    cands = [
+        {"selector": "li.r", "child_count": 10, "sample_url": "https://a.tistory.com/post/1",
+         "href_common_prefix": "https://", "href_is_js": None},
+        {"selector": "li.r", "child_count": 10, "sample_url": "https://b.tistory.com/post/2",
+         "href_common_prefix": "https://", "href_is_js": None},
+        {"selector": "li.r", "child_count": 10, "sample_url": "https://policy.daum.net/policy/info",
+         "href_common_prefix": "https://", "href_is_js": None},
+    ]
+    out = list_row_external_host(cands, base_url="https://www.tistory.com/")
+    cases.append(("multi_host_hub_tistory_positive",
+                  out is not None and out["multi_host_hub"] is True
+                  and len(out["unique_external_hosts"]) == 3
+                  and out["external_ratio"] == 1.0,
+                  f"got {out!r}"))
+
+    # 10. multi_host_hub: 단일 external host (single sponsor) → False — poly-pizza FP 가드.
+    cands = [
+        {"selector": "li", "child_count": 10,
+         "sample_url": "https://wawasensei.dev/courses/react?utm=PolyPizza",
+         "href_common_prefix": "https://", "href_is_js": None},
+    ]
+    out = list_row_external_host(cands, base_url="https://poly.pizza/")
+    cases.append(("multi_host_hub_poly_pizza_negative",
+                  out is not None and out["multi_host_hub"] is False
+                  and len(out["unique_external_hosts"]) == 1
+                  and out["external_ratio"] == 1.0,
+                  f"got {out!r}"))
+
+    # 11. multi_host_hub: 2 unique hosts → False (임계 3 미달).
+    cands = [
+        {"selector": "li", "child_count": 10, "sample_url": "https://a.com/x",
+         "href_common_prefix": "https://", "href_is_js": None},
+        {"selector": "li", "child_count": 10, "sample_url": "https://b.com/y",
+         "href_common_prefix": "https://", "href_is_js": None},
+    ]
+    out = list_row_external_host(cands, base_url="https://hub.example.com/")
+    cases.append(("multi_host_hub_two_hosts_below_threshold",
+                  out is not None and out["multi_host_hub"] is False
+                  and len(out["unique_external_hosts"]) == 2,
+                  f"got {out!r}"))
+
+    # 12. multi_host_hub: 3 unique hosts but ratio 0.6 — base path 가 깊어서 internal 행이 같은 호스트 카운트됨.
+    cands = [
+        {"selector": "li.r", "child_count": 10, "sample_url": "https://a.com/x",
+         "href_common_prefix": "https://", "href_is_js": None},
+        {"selector": "li.r", "child_count": 10, "sample_url": "https://b.com/y",
+         "href_common_prefix": "https://", "href_is_js": None},
+        {"selector": "li.r", "child_count": 10, "sample_url": "https://c.com/z",
+         "href_common_prefix": "https://", "href_is_js": None},
+        {"selector": "li.r", "child_count": 10, "sample_url": "https://hub.example.com/post/1",
+         "href_common_prefix": "/post/", "href_is_js": None},
+        {"selector": "li.r", "child_count": 10, "sample_url": "https://hub.example.com/post/2",
+         "href_common_prefix": "/post/", "href_is_js": None},
+    ]
+    out = list_row_external_host(cands, base_url="https://hub.example.com/list")
+    cases.append(("multi_host_hub_ratio_below_threshold",
+                  out is not None and out["multi_host_hub"] is False
+                  and out["external_ratio"] == 0.6,
+                  f"got {out!r}"))
+
     return cases

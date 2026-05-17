@@ -667,8 +667,14 @@ def list_row_external_host(
     필터: child_count ≥ 5 (의미 있는 반복 패턴) + sample_url 이 http(s) + sibling-page 패턴 제외
     (href_common_prefix 가 base_url 의 path 와 시작 일치 = pagination/sidebar 링크).
 
-    출력: {base_host, total_count, external_count, external_ratio, sample_external_urls} 또는 None.
+    출력: {base_host, total_count, external_count, external_ratio, sample_external_urls,
+           unique_external_hosts, multi_host_hub} 또는 None.
     None = 의미 있는 row 후보 0건.
+
+    multi_host_hub: True 면 *플랫폼 hub root* — `unique_external_hosts ≥ 3 AND external_ratio ≥ 0.95`.
+    tistory root (3+ unique blog 호스트) / 기사 aggregator hub 패턴. 단일 sponsor link (poly-pizza
+    total=1) / single wiki mirror (github-wiki-see external_count=1) 같은 false-positive 안 잡힘.
+    register.py 가 이 신호 보면 사전 REJECTED 마커 (인식기 fast-path 없는 새 hub 호스트 자동 cover).
     """
     from urllib.parse import urlsplit
     base_host = urlsplit(base_url or "").netloc
@@ -678,6 +684,7 @@ def list_row_external_host(
     total = 0
     external = 0
     ext_samples: list[str] = []
+    ext_hosts: set[str] = set()
     for c in html_candidates or []:
         if int(c.get("child_count") or 0) < 5:
             continue
@@ -697,16 +704,20 @@ def list_row_external_host(
         total += 1
         if sp.netloc and sp.netloc != base_host:
             external += 1
+            ext_hosts.add(sp.netloc)
             if len(ext_samples) < 5:
                 ext_samples.append(u)
     if total == 0:
         return None
+    ratio = round(external / total, 3)
     return {
         "base_host": base_host,
         "total_count": total,
         "external_count": external,
-        "external_ratio": round(external / total, 3),
+        "external_ratio": ratio,
         "sample_external_urls": ext_samples,
+        "unique_external_hosts": sorted(ext_hosts),
+        "multi_host_hub": (len(ext_hosts) >= 3 and ratio >= 0.95),
     }
 
 

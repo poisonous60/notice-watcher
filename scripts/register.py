@@ -221,6 +221,34 @@ def _meta_article_diverging_check(digest: dict, url: str) -> tuple[bool, str]:
                    f"input URL: {url}  /  first_article_url: {fau}")
 
 
+def _multi_host_hub_check(digest: dict, url: str) -> tuple[bool, str]:
+    """probe digest 의 list_candidates.row_external_host.multi_host_hub=True 면 *플랫폼 hub root* 판정.
+    `unique_external_hosts ≥ 3 AND external_ratio ≥ 0.95` (tistory root / brunch hub / 기사 aggregator 류).
+
+    `_board_shape_check` *직전* 호출 — board_shape 의 same-host 신호 0 이라 어차피 잡힐 수 있지만,
+    명시적 hub 거부가 거부 사유를 정확히 알리고 (`board_shape_check` 의 "반복 글 링크 못 찾았다" 보다 정확),
+    learn=False 처리 (호스트 자체는 game 게시판이 *서브경로* 에 있을 수 있어 path_prefix 차단 위험 — tistory
+    의 경우 `*.tistory.com` 의 개별 blog 게시판이 진짜 보드. root 만 hub).
+
+    누적 케이스: tistory root (3 unique blog hosts), 인식기 미커버 다른 platform hub (brunch/steemit/medium).
+    poly-pizza (단일 sponsor link total=1) / github-wiki-see (single external mirror) 같은 false-positive
+    안 잡힘 — `unique_external_hosts ≥ 3` 임계가 가드.
+    """
+    lc = digest.get("list_candidates") or {}
+    reh = lc.get("row_external_host")
+    if not isinstance(reh, dict) or not reh.get("multi_host_hub"):
+        return True, ""
+    unique_hosts = reh.get("unique_external_hosts") or []
+    ratio = reh.get("external_ratio")
+    samples = reh.get("sample_external_urls") or []
+    detail = (f"unique_external_hosts={len(unique_hosts)} ({unique_hosts[:5]}) "
+              f"external_ratio={ratio} samples={samples[:3]}")
+    return False, ("플랫폼 hub root 같음 — 글 행 링크가 *여러 외부 도메인* 으로 분산됨 "
+                   "(자기 도메인 컨텐츠 없음). tistory root / brunch hub / 기사 aggregator hub 류. "
+                   "개별 blog/서브경로는 보드일 수 있지만 root 페이지는 폴링 대상 아님. "
+                   f"[신호: {detail}]")
+
+
 def _board_shape_check(digest: dict, url: str) -> tuple[bool, str]:
     """probe digest 만으로 '게시판 형식 같은가' 판정 — gemini 부르기 전에.
     어떤 board 신호도 같은 호스트로 안 잡히면 '게시판 아님' 단정 (rc=3 로 거부).
@@ -1215,6 +1243,20 @@ def _main_inner(argv) -> int:
         try:
             _save_rejected(slug, url, "meta_article_diverging 거부 (og/schema article + first_article 다른 섹션)",
                            note="gate: _meta_article_diverging_check", learn=False)
+        except Exception as e:  # noqa: BLE001
+            print(f"[register] ⚠ REJECTED 마커 저장 실패 (rc=3): {e}", file=sys.stderr)
+        return 3
+
+    # multi-host hub 게이트 — list row 의 글 링크가 ≥3 unique 외부 호스트로 분산 + external_ratio ≥0.95.
+    # tistory root / brunch hub / 기사 aggregator 패턴. _board_shape_check 보다 정확한 거부 사유.
+    # learn=False — 호스트의 서브경로 (`*.tistory.com/<blog>`) 는 진짜 보드일 수 있어 path_prefix 차단 위험.
+    ok_hub, hub_msg = _multi_host_hub_check(digest, url)
+    if not ok_hub:
+        print(f"[register] {hub_msg}")
+        print("[register] ❌ 등록 거부 — multi-host hub root.")
+        try:
+            _save_rejected(slug, url, "multi_host_hub 거부 (3+ unique external hosts, ratio≥0.95)",
+                           note="gate: _multi_host_hub_check", learn=False)
         except Exception as e:  # noqa: BLE001
             print(f"[register] ⚠ REJECTED 마커 저장 실패 (rc=3): {e}", file=sys.stderr)
         return 3
