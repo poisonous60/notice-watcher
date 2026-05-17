@@ -9,7 +9,7 @@
 _Avoid_: probe 개선 루프 (probe 만이 아님), hand-config 워크플로 (실행 단위 강조 부족), 자가개선 사이클 (너무 추상), 자가개선 인프라 (인프라 자체와 혼동), bug-fix workflow (다른 카테고리 — 아래 참조).
 
 **bug-fix workflow**:
-*코드 버그* (.BUG.json 마커, rc=-1/-2/-99) 가 들어왔을 때 traceback 분석 → bot/scripts/engine 코드 자체 수정 → 테스트 → commit + push + N100 pull + 재시작 → `.BUG.json` clear. 사이트 구조 문제 아니라 시스템 측 결함. hand-config pipeline 과 별도.
+*코드 버그* (.BUG.json 마커, rc=-1/-2/-3/-5/-99) 가 들어왔을 때 traceback 분석 → bot/scripts/engine 코드 자체 수정 → 테스트 → commit + push + N100 pull + 재시작 → `.BUG.json` clear. 사이트 구조 문제 아니라 시스템 측 결함. hand-config pipeline 과 별도.
 _Avoid_: hand-config pipeline (등록 실패는 사이트 인식 못 한 케이스, 버그는 timeout/예외).
 
 **interaction 응답**:
@@ -42,9 +42,24 @@ worker 가 큐에서 잡 꺼내 처리 시작할 때 (`_process_job_inner` 첫 �
 - `.json` (no suffix) — 등록 성공 state (polling 대상)
 - `.FAILED.json` — 자동 등록 실패 (LLM gen 실패 등), hand-config 풀리면 제거
 - `.REJECTED.json` — 영구 거부 (board_shape rc=3 / policy rc=2 / admin reject)
-- `.BUG.json` — timeout/예외 (rc=-1/-2/-99). operator 가 root cause 고친 후 또는 Claude Code 가 수정 + 푸는 마커
+- `.BUG.json` — timeout/예외 (rc=-1/-2/-3/-5/-99). operator 가 root cause 고친 후 또는 Claude Code 가 수정 + 푸는 마커
 
 `is_rejected(slug)` = REJECTED+FAILED+BUG 셋 중 하나라도 있으면 True (subprocess 재시도 차단).
+
+**fail_kind** (대시보드 `/jobs` 1차 분류, `result_rc` 단독으로 파생):
+- `done` (rc=0) — 등록 성공
+- `gen_fail` (rc=1, `.FAILED.json`) — LLM gen+검증 실패 → hand-config pipeline 대상
+- `policy_reject` (rc=2, `.REJECTED.json`) — `_policy_check` 거부 (LOGIN_REQUIRED / BLOCKED_*)
+- `gate_reject` (rc=3, `.REJECTED.json`) — recognizer / nav_only / meta_diverging / multi_host_hub / board_shape 게이트 거부
+- `bug` (rc=-1/-2/-3/-99, `.BUG.json`) — 시스템 결함 → bug-fix workflow 대상
+
+marker 보다 한 단계 더 세분화 — `.REJECTED.json` 한 마커가 `policy_reject`/`gate_reject` 둘로 갈림 (rc 로 구분).
+_Avoid_: "fail_category" / "error_type" / "reject_kind" — 어휘 떠다님.
+
+**fail_subkind** (대시보드 `/jobs` 2차 분류, `result_tail` regex 파생):
+fail_kind 안의 sub. gen_fail → `[FAIL] <check>` 이름 (`posts_nonempty` / `article_body_len` / `published_at_iso` / `post_id_*` / `title_nonempty` / `gemini_api`); policy_reject → `login_required` / `blocked_bot/ip/geo`; gate_reject → `recognizer:<name>` / `nav_only` / `meta_diverging` / `multi_host_hub` / `board_shape`; bug → `chromium_lock_timeout` / `subprocess_timeout` / `subprocess_exception` / `worker_exception`.
+
+`/jobs` 셀 2줄째에 작은 회색 글로 표시, hover 에 풀 reason text. DB 컬럼 X — `bot/fail_taxonomy.py:classify_fail()` 가 읽을 때 파생 (ADR 0002).
 
 ## Flagged ambiguities
 

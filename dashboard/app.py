@@ -187,11 +187,22 @@ async def jobs_list(request: Request, count: int = Query(50, ge=1, le=200),
     if conn is None:
         return _no_snapshot(request)
     offset = (page - 1) * count
-    rows = inspector.recent_jobs(conn, limit=count + 1, offset=offset)
+    from bot.fail_taxonomy import BASE_STATUS_VALUES
+    # base status (pending/running/done/failed) → SQL pushdown. fail_kind (gen_fail/policy_reject/gate_reject/bug)
+    # → SQL pushdown 'failed' + Python sub-filter (page 폭 안 행에서 fail_kind 매칭 — 윈도우 밖 누락 가능,
+    # 다음 페이지 가면 그 다음 50건 failed 안에서 다시 매칭).
+    sql_status: Optional[str]
+    if status and status in BASE_STATUS_VALUES:
+        sql_status = status
+    elif status:
+        sql_status = "failed"
+    else:
+        sql_status = None
+    rows = inspector.recent_jobs(conn, limit=count + 1, offset=offset, status=sql_status)
     has_next = len(rows) > count
     rows = rows[:count]
-    if status:
-        rows = [r for r in rows if (r.get("status") or "") == status]
+    if status and status not in BASE_STATUS_VALUES:
+        rows = [r for r in rows if r.get("fail_kind") == status]
     if q:
         ql = q.strip().lower()
         def _match(r):
@@ -218,10 +229,15 @@ async def job_detail(request: Request, job_id: int, conn=Depends(get_conn)):
     if result is None:
         return HTMLResponse("<p>잡 없음.</p>", status_code=404)
     j = result.latest_job or {}
-    fail_reason = None
-    if j.get("status") in ("error", "failed") or (j.get("result_rc") not in (None, 0)):
-        tail = (j.get("result_tail") or "").strip().splitlines()
-        fail_reason = tail[-1][:200] if tail else f"status={j.get('status')} rc={j.get('result_rc')}"
+    from bot.fail_taxonomy import classify_fail
+    j_kind, j_sub, j_reason = classify_fail(j.get("status"), j.get("result_rc"), j.get("result_tail"))
+    # hand-config 프롬프트에 넘기는 fail_reason — 풀 라인 (subkind 가 있으면 subkind 도 prefix 로).
+    if j_kind in ("done", "pending", "running"):
+        fail_reason = None
+    else:
+        fail_reason = j_reason or f"status={j.get('status')} rc={j.get('result_rc')}"
+        if j_sub:
+            fail_reason = f"[{j_kind}:{j_sub}] {fail_reason}"
     p_handconfig = prompts.hand_config_for_url(
         url=j.get("url") or "",
         slug=result.slug,
@@ -229,7 +245,9 @@ async def job_detail(request: Request, job_id: int, conn=Depends(get_conn)):
         job_id=job_id,
     )
     return _render("job_detail.html", request,
-                   result=result, job=j, p_handconfig=p_handconfig, active="jobs")
+                   result=result, job=j, p_handconfig=p_handconfig,
+                   fail_kind=j_kind, fail_subkind=j_sub, fail_reason_short=j_reason,
+                   active="jobs")
 
 
 # --------------------------------------------------------------------------- #

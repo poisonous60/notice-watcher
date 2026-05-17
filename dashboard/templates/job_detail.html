@@ -18,8 +18,12 @@
   <dt>status</dt>
   <dd>
     {% set s = job.status or "" %}
-    <span class="badge {{ 'ok' if s=='ok' else ('error' if s in ('error','failed') else '') }}">{{ s }}</span>
-    rc={{ job.result_rc }}
+    {% set k = fail_kind or s %}
+    {% set cls = 'ok' if k=='done' else ('warn' if k in ('running','gen_fail') else ('error' if k in ('policy_reject','gate_reject','bug','unknown') else '')) %}
+    <span class="badge {{ cls }}">{{ k }}</span>
+    {% if fail_subkind %} <code class="mono muted">{{ fail_subkind }}</code>{% endif %}
+    <span class="muted">· status={{ s }} · rc={{ job.result_rc }}</span>
+    {% if fail_reason_short %}<div class="muted" style="font-size:0.85rem;margin-top:0.2rem;">{{ fail_reason_short }}</div>{% endif %}
   </dd>
   <dt>via</dt><dd><code>{{ job.via }}</code></dd>
   <dt>요청자</dt>

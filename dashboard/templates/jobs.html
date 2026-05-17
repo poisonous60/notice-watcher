@@ -19,11 +19,13 @@
   <label style="margin:0;">status
     <select name="status">
       <option value="" {{ 'selected' if not filter_status else '' }}>전체</option>
-      <option value="ok" {{ 'selected' if filter_status=='ok' else '' }}>ok</option>
-      <option value="error" {{ 'selected' if filter_status=='error' else '' }}>error</option>
-      <option value="failed" {{ 'selected' if filter_status=='failed' else '' }}>failed</option>
-      <option value="running" {{ 'selected' if filter_status=='running' else '' }}>running</option>
       <option value="pending" {{ 'selected' if filter_status=='pending' else '' }}>pending</option>
+      <option value="running" {{ 'selected' if filter_status=='running' else '' }}>running</option>
+      <option value="done" {{ 'selected' if filter_status=='done' else '' }}>done</option>
+      <option value="gen_fail" {{ 'selected' if filter_status=='gen_fail' else '' }}>gen_fail</option>
+      <option value="policy_reject" {{ 'selected' if filter_status=='policy_reject' else '' }}>policy_reject</option>
+      <option value="gate_reject" {{ 'selected' if filter_status=='gate_reject' else '' }}>gate_reject</option>
+      <option value="bug" {{ 'selected' if filter_status=='bug' else '' }}>bug</option>
     </select>
   </label>
 </form>
@@ -46,9 +48,11 @@
         {% if r.slug %}<a href="/subs/{{ r.slug | urlencode }}">{{ r.slug }}</a>{% endif %}
         {% if r.url and is_http_url(r.url) %} <a href="{{ r.url }}" target="_blank" rel="noopener noreferrer" title="원본 URL 새 탭 열기">↗</a>{% endif %}
       </td>
-      <td>
-        {% set s = r.status or "" %}
-        <span class="badge {{ 'ok' if s=='ok' else ('error' if s in ('error','failed') else '') }}">{{ s }}</span>
+      <td title="{{ r.fail_reason_short or '' }}">
+        {% set k = r.fail_kind or (r.status or '') %}
+        {% set cls = 'ok' if k=='done' else ('warn' if k in ('running','gen_fail') else ('error' if k in ('policy_reject','gate_reject','bug','unknown') else '')) %}
+        <span class="badge {{ cls }}">{{ k }}</span>
+        {% if r.fail_subkind %}<div class="mono muted" style="font-size:0.72rem;line-height:1.1;margin-top:0.15rem;">{{ r.fail_subkind }}</div>{% endif %}
       </td>
       <td>{{ r.via or "" }}</td>
       <td>

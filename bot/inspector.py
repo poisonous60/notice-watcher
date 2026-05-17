@@ -58,11 +58,18 @@ def _row_to_dict(row: Optional[sqlite3.Row]) -> Optional[dict]:
     return dict(row) if row is not None else None
 
 
-def recent_jobs(conn: sqlite3.Connection, limit: int = 20, offset: int = 0) -> list[dict]:
+def recent_jobs(conn: sqlite3.Connection, limit: int = 20, offset: int = 0,
+                status: Optional[str] = None) -> list[dict]:
     """최근 register 잡 (kind='register'). 각 항목: id/slug/url/status/finished_at/via/requested_by(parsed)
-    /sub_payload(parsed). preview 잡은 sub_payload=None."""
+    /sub_payload(parsed) + `fail_kind`/`fail_subkind`/`fail_reason_short` (`bot.fail_taxonomy.classify_fail`
+    파생). preview 잡은 sub_payload=None.
+
+    `status` 인자는 SQL pushdown — base status (pending/running/done/failed) 한정. fail_kind sub 필터링은
+    호출자(`dashboard/app.py:jobs_list`)가 결과 dict 의 `fail_kind` 로 추가 필터.
+    """
+    from bot.fail_taxonomy import classify_fail
     out: list[dict] = []
-    for r in db.recent_register_jobs(conn, limit=limit, offset=offset):
+    for r in db.recent_register_jobs(conn, limit=limit, offset=offset, status=status):
         d = dict(r)
         rb = d.get("requested_by")
         if rb:
@@ -76,6 +83,10 @@ def recent_jobs(conn: sqlite3.Connection, limit: int = 20, offset: int = 0) -> l
                 d["sub_payload"] = json.loads(sp)
             except json.JSONDecodeError:
                 pass
+        kind, sub, reason = classify_fail(d.get("status"), d.get("result_rc"), d.get("result_tail"))
+        d["fail_kind"] = kind
+        d["fail_subkind"] = sub
+        d["fail_reason_short"] = reason
         out.append(d)
     return out
 

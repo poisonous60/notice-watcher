@@ -573,11 +573,21 @@ def jobs_summary(conn: sqlite3.Connection) -> dict:
 
 
 def recent_register_jobs(conn: sqlite3.Connection, limit: int = 20,
-                         offset: int = 0) -> list[sqlite3.Row]:
-    """사용자 `/watch`·`/preview` 가 만든 잡만(=kind='register') 최신 순. inspector.recent_jobs 가 호출."""
+                         offset: int = 0,
+                         status: Optional[str] = None) -> list[sqlite3.Row]:
+    """사용자 `/watch`·`/preview` 가 만든 잡만(=kind='register') 최신 순. inspector.recent_jobs 가 호출.
+
+    `status` (pending/running/done/failed) 가 주어지면 SQL `WHERE status=?` pushdown — Python 쪽
+    post-filter 가 LIMIT 윈도우 밖 행 누락하는 문제 방지 (대시보드 `/jobs?status=X`).
+    """
+    if status is None:
+        return conn.execute(
+            "SELECT * FROM jobs WHERE kind='register' ORDER BY id DESC LIMIT ? OFFSET ?",
+            (limit, offset),
+        ).fetchall()
     return conn.execute(
-        "SELECT * FROM jobs WHERE kind='register' ORDER BY id DESC LIMIT ? OFFSET ?",
-        (limit, offset),
+        "SELECT * FROM jobs WHERE kind='register' AND status=? ORDER BY id DESC LIMIT ? OFFSET ?",
+        (status, limit, offset),
     ).fetchall()
 
 
