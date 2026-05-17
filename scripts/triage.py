@@ -195,25 +195,57 @@ def cmd_pull(skip_later: bool = False) -> int:
     OUTPUT.mkdir(parents=True, exist_ok=True)
     later = _load_later() if skip_later else set()
 
-    # 1a) N100 의 현재 FAILED.json slug 목록을 먼저 받는다 — local 의 stale (N100 에서 이미 REJECTED 로
-    # 전환됐는데 옛 FAILED 가 local 에 남은 것) 자동 정리. scp 는 reverse-delete 안 함 → 명시 sync 필요.
-    rc_ls, out_ls = _run(["ssh", DEPLOY_HOST, f"cd {DEPLOY_PATH} && ls output/poll_state/*{_FAILED_SUFFIX} 2>/dev/null || true"])
+    # 1a) N100 의 현재 FAILED.json slug + triage_queue.jsonl 존재 여부를 *한 번의 ssh* 로 받는다 —
+    # local 의 stale (N100 에서 이미 REJECTED 로 전환됐는데 옛 FAILED 가 local 에 남은 것) 자동 정리.
+    # scp 는 reverse-delete 안 함 → 명시 sync 필요.
+    #
+    # 사전 안전 장치 — ssh 실패 (네트워크/권한/DEPLOY_PATH 오타) 시 remote 가 empty 라 *오해* 해서 모든 local
+    # FAILED 를 stale 로 판정해 일괄 삭제하는 사고 방지. 두 sentinel (__OK__/__QOK__) 가 *둘 다* 출력에
+    # 있어야 remote 응답이 신뢰 가능. 하나라도 없으면 sync delete 자체를 skip — local 보존이 default-safe.
+    sentinel_ok = "__TRIAGE_PULL_OK__"
+    sentinel_qok = "__TRIAGE_QUEUE_OK__"
+    sentinel_qmiss = "__TRIAGE_QUEUE_MISSING__"
+    remote_cmd = (
+        f"cd {DEPLOY_PATH} && "
+        f"(ls output/poll_state/*{_FAILED_SUFFIX} 2>/dev/null; echo {sentinel_ok}) && "
+        f"(test -f output/triage_queue.jsonl && echo {sentinel_qok} || echo {sentinel_qmiss})"
+    )
+    rc_ls, out_ls = _run(["ssh", DEPLOY_HOST, remote_cmd])
+    remote_response_trusted = (rc_ls == 0 and sentinel_ok in out_ls
+                                and (sentinel_qok in out_ls or sentinel_qmiss in out_ls))
     remote_failed: set[str] = set()
-    if rc_ls == 0:
+    remote_queue_missing = False
+    if remote_response_trusted:
         for line in out_ls.splitlines():
-            name = Path(line.strip()).name
+            line = line.strip()
+            if not line or line == sentinel_ok or line.startswith("__TRIAGE_"):
+                continue
+            name = Path(line).name
             if name.endswith(_FAILED_SUFFIX):
                 remote_failed.add(name)
+        remote_queue_missing = sentinel_qmiss in out_ls
+    else:
+        sys.stderr.write(f"[triage pull] ⚠ remote 응답 검증 실패 (rc={rc_ls}, sentinel 누락) — "
+                         f"sync delete skip, local 보존. ssh/DEPLOY_HOST/DEPLOY_PATH 확인.\n")
+
     pruned_stale = 0
     pruned_stale_slugs: list[str] = []
-    for fp in STATE_DIR.glob(f"*{_FAILED_SUFFIX}"):
-        if fp.name not in remote_failed:
+    if remote_response_trusted:
+        for fp in STATE_DIR.glob(f"*{_FAILED_SUFFIX}"):
+            if fp.name not in remote_failed:
+                try:
+                    fp.unlink()
+                    pruned_stale += 1
+                    pruned_stale_slugs.append(fp.name[: -len(_FAILED_SUFFIX)])
+                except OSError as e:
+                    sys.stderr.write(f"[triage pull] stale {fp.name} 삭제 실패: {e}\n")
+        # triage_queue 도 reverse-delete: N100 에 파일 자체가 사라졌으면 local 도 삭제 (N100 _prune_triage_queue
+        # 가 last entry 지우면 파일 unlink 함 — local 에만 잔재 시 영구 stale 위험).
+        if remote_queue_missing and QUEUE.exists():
             try:
-                fp.unlink()
-                pruned_stale += 1
-                pruned_stale_slugs.append(fp.name[: -len(_FAILED_SUFFIX)])
+                QUEUE.unlink()
             except OSError as e:
-                sys.stderr.write(f"[triage pull] stale {fp.name} 삭제 실패: {e}\n")
+                sys.stderr.write(f"[triage pull] stale triage_queue.jsonl 삭제 실패: {e}\n")
 
     # 1b) <slug>.FAILED.json 들 — 원격 셸이 glob 확장. 매치 0개면 scp 가 비0 으로 끝남(에러 아님).
     rc, out = _run(["scp", "-q", f"{DEPLOY_HOST}:{DEPLOY_PATH}/output/poll_state/*{_FAILED_SUFFIX}", f"{STATE_DIR}{os.sep}"])

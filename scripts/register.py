@@ -561,9 +561,16 @@ def _save_rejected(slug: str, url: str, reason: str, note: Optional[str] = None,
         "rejected_at": _now_iso(),
         "learned": learn,
     }, ensure_ascii=False, indent=2), encoding="utf-8")
-    fp = STATE_DIR / f"{slug}.FAILED.json"
-    if fp.exists():
-        fp.unlink()
+    # 형제 marker / state 일괄 정리 — REJECTED 가 우선순위 최고 (marker_kind: rejected > bug > failed) 라
+    # 이전 카테고리 마커는 stale. <slug>.json (정상 state) 도 — REJECTED 는 영구 거부 = 폴링 의미 X.
+    # _load_states 가 marker 형제 sibling 체크 안 해 stale state 가 폴링되는 사고 방지 (codex 발견).
+    for sibling_suffix in (".FAILED.json", ".BUG.json", ".json"):
+        sp = STATE_DIR / f"{slug}{sibling_suffix}"
+        if sp.exists():
+            try:
+                sp.unlink()
+            except OSError as e:
+                sys.stderr.write(f"[register] _save_rejected: {sp.name} 삭제 실패 — REJECTED 마커는 박힘: {e}\n")
     _prune_triage_queue(slug)
     if learn:
         # 자동 패턴 학습 — host+path_prefix 단위. 실패해도 REJECTED 마커는 이미 박혔으니 swallow.
@@ -617,6 +624,16 @@ def _save_bug(slug: str, url: str, rc: int, reason: str, tail: str = "") -> Path
         "reason": reason,
         "tail": (tail or "")[-4000:],
     }, ensure_ascii=False, indent=2), encoding="utf-8")
+    # 형제 FAILED.json 정리 — BUG 가 hand-config triage 대상 *아니므로* (bug-fix workflow 영역), FAILED 잔재 +
+    # triage_queue.jsonl entry 가 dashboard `/triage/failed` 에 stale 표시 + 사용자 안내 어긋남 (codex 발견).
+    # REJECTED.json 은 *건드리지 X* — marker_kind 우선순위 (rejected > bug) 라 REJECTED 가 final 결정.
+    fp = STATE_DIR / f"{slug}.FAILED.json"
+    if fp.exists():
+        try:
+            fp.unlink()
+        except OSError as e:
+            sys.stderr.write(f"[register] _save_bug: {fp.name} 삭제 실패 — BUG 마커는 박힘: {e}\n")
+    _prune_triage_queue(slug)
     return p
 
 
@@ -1285,10 +1302,14 @@ def _main_inner(argv) -> int:
     if not ok_nav:
         print(f"[register] {nav_msg}")
         print("[register] ❌ 등록 거부 — 단일 article (nav-only same-host).")
+        # manual `register.py "<url>"` 직호출 경로에서도 REJECTED 마커 박힘 (codex 발견: 옛 코드는 _learn_pattern
+        # 만 호출 — learned 됐는데 marker 없는 orphan 상태. worker 경로에서만 _save_rejected 가 사후 처리됐음).
+        # learn=True — 호스트 명시 fast-path 못 잡는 unknown host 단일 article. path_prefix 차단 안전.
         try:
-            _learn_pattern(url, "single_article_nav_only 거부 (nav 안 사이드바 메뉴만 잡힘)", slug=slug)
+            _save_rejected(slug, url, "single_article_nav_only 거부 (nav 안 사이드바 메뉴만 잡힘)",
+                           note="gate: _single_article_nav_only_check", learn=True)
         except Exception as e:  # noqa: BLE001
-            print(f"[register] ⚠ learned_blacklist 학습 실패 (rc=3): {e}", file=sys.stderr)
+            print(f"[register] ⚠ REJECTED 마커 저장 실패 (rc=3): {e}", file=sys.stderr)
         return 3
 
     # single-article meta+diverging 게이트 — og:type=article / schema.org NewsArticle 선언했고
@@ -1326,12 +1347,13 @@ def _main_inner(argv) -> int:
     if not ok_board:
         print(f"[register] {board_msg}")
         print("[register] ❌ 등록 거부 — 게시판 형식 아님.")
-        # board_shape 거부 = 비-게시판. 학습 — bot/worker.py 의 rc=3 분기가 _save_rejected 도 추가로 부르지만
-        # _learn_pattern 은 같은 패턴 idempotent (count 증가만) 이라 중복 호출 안전.
+        # board_shape 거부 = 비-게시판. manual 직호출 경로에서도 REJECTED 마커 박힘 (codex 발견: 옛 코드는
+        # _learn_pattern 만 — learned 됐는데 marker 없는 orphan). learn=True — 호스트 path_prefix 차단 OK.
         try:
-            _learn_pattern(url, "board_shape_check 거부 (게시판 형식 아님)", slug=slug)
+            _save_rejected(slug, url, "board_shape_check 거부 (게시판 형식 아님)",
+                           note="gate: _board_shape_check", learn=True)
         except Exception as e:  # noqa: BLE001
-            print(f"[register] ⚠ learned_blacklist 학습 실패 (rc=3): {e}", file=sys.stderr)
+            print(f"[register] ⚠ REJECTED 마커 저장 실패 (rc=3): {e}", file=sys.stderr)
         return 3
 
     # preflight: gemini 부르기 전에 정보 수집을 끝낸다 (옛 escalation 의 "N회 실패 후" 대신 "처음부터").

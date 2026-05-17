@@ -299,13 +299,18 @@ async def _process_job_inner(client, conn, job, dm_owner) -> None:
                 # 사용자에겐 게시판/공지 페이지 URL 을 달라고 친절히 안내.
                 # + slug 단위 .REJECTED.json 마커 + host+path_prefix 패턴 자동 학습 (한 사용자 거부 → 모두에게 적용).
                 if rc == 3:
-                    try:
-                        from scripts.register import _save_rejected
-                        _save_rejected(slug, url,
-                                       reason="board_shape_check 게이트 거부 (probe 가 같은 호스트로 가는 board 신호 못 찾음)",
-                                       note=f"requested_by={req_by} via={job['via']}")
-                    except Exception as _e:  # noqa: BLE001
-                        log.warning("rc=3 _save_rejected 실패 — slug=%s err=%r", slug, _e)
+                    # register.py 내 4 rc=3 분기 (nav_only / meta_diverging / multi_host_hub / board_shape)
+                    # 가 *각자* `_save_rejected` 로 구체적 reason 의 REJECTED 마커 박음. 여기 worker 의
+                    # _save_rejected 는 generic reason 으로 *덮어쓰지* 않도록 marker 없을 때만 fallback.
+                    from bot.site_ops import STATE_DIR as _STATE_DIR
+                    if not (_STATE_DIR / f"{slug}.REJECTED.json").exists():
+                        try:
+                            from scripts.register import _save_rejected
+                            _save_rejected(slug, url,
+                                           reason="rc=3 fallback (register 내 marker 박힘 실패 — generic 거부 사유)",
+                                           note=f"requested_by={req_by} via={job['via']}")
+                        except Exception as _e:  # noqa: BLE001
+                            log.warning("rc=3 _save_rejected fallback 실패 — slug=%s err=%r", slug, _e)
                     await edit_channel_message(
                         client, job["ack_channel_id"], job["ack_message_id"],
                         msg("worker_board_shape_fail", slug=slug))

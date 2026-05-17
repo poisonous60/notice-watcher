@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 54 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 55 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -14,6 +14,7 @@
 | [`infra_probe_static_drift_url_penalty_2026-05-17`](infra_probe_static_drift_url_penalty_2026-05-17.md) | 🏗 인프라 (probe 휴리스틱 lift — static_vs_headless rule 2 + first_article_url query penalty) | 2026-05-17 | C+A | static_vs_headless_repeat_diff, first_article_url_query_heavy, prompt_static_insufficient_signal, deferred_heuristic_moving_target | (인프라 case — 특정 사이트 X. 트리거 = 사용자 비판 "5건째도 보류 6건째도 보류 — 언제 박는데" 의 트랙 B 부분) |
 | [`infra_multi_host_hub_reject_2026-05-17`](infra_multi_host_hub_reject_2026-05-17.md) | 🏗 인프라 (multi-host hub 사전 거부 게이트 — tistory root 류 자동 reject) | 2026-05-17 | C+F+A | multi_host_hub_root, deferred_heuristic_moving_target, tistory_root, plat_hub_unknown_host | (인프라 case — 특정 사이트 X. 트리거 = _deferred_heuristics.md 의 `_multi_host_hub_check` lift) |
 | [`infra_extra_signal_hints_2026-05-17`](infra_extra_signal_hints_2026-05-17.md) | 🏗 인프라 (probe 가 이미 잡은 신호를 LLM prompt 의 별도 hint 블록으로 강조) | 2026-05-17 | F | retry_same_failure_loop, static_shell_ignored, body_empty_likely_buried, llm_ignores_meta_notes | (인프라 case — 특정 사이트 X. 트리거 = retry 메커니즘 진단 후 1차 prompt 강화) |
+| [`infra_codex_triage_bughunt_6findings_2026-05-17`](infra_codex_triage_bughunt_6findings_2026-05-17.md) | 🏗 인프라 (state machine 일관성 6 finding 일괄 fix + 회귀 테스트) | 2026-05-17 | F | marker_lifecycle_inconsistency, migrate_marker_corruption, ssh_failure_silent_prune, save_rejected_sibling_leak, save_bug_no_cleanup, rc3_manual_orphan | (인프라 case — codex bughunt 후 6 findings 일괄 fix) |
 | [`infra_article_page_reject_3_2026-05-17`](infra_article_page_reject_3_2026-05-17.md) | 🏗 인프라 (article_page_reject 패턴 5 호스트 추가 + 자가 점검 §6.7 보류 결정 1) | 2026-05-17 | F | not_a_board, single_article_page, multi_host_hub, mdn_docs, wiki_mirror, encyclopedia, cloudflare_blocked, tistory_root | (인프라 case — 트리거 = 5 건 동시 처리: mdn/github-wiki-see/ktword/openai/tistory) |
 | [`host_tistory-com_root_c59077fa`](host_tistory-com_root_c59077fa.md) | ❌ 거부 (Tistory 메인 멀티-블로그 hub — 게시판 아님) | 2026-05-17 | F | not_a_board, multi_host_hub, post_id_stable_shape, tistory_root | https://www.tistory.com/ |
 | [`host_sumo-dlr-de_docs_3634ca61`](host_sumo-dlr-de_docs_3634ca61.md) | ❌ 거부 (mkdocs-style 정적 docs site — 게시판 아님) | 2026-05-17 | F | not_a_board, static_docs_site, same_page_anchor_first_article, post_id_unique | https://sumo.dlr.de/docs/Definition_of_Vehicles,_Vehicle_Types,_and_Routes.html |
@@ -75,7 +76,7 @@
 | C+F+A | 1 |
 | E | 1 |
 | E+A+C+D | 1 |
-| F | 21 |
+| F | 22 |
 | F+A | 1 |
 | F+C | 3 |
 | none | 9 |
@@ -84,7 +85,7 @@
 
 | strategy | count |
 |---|---|
-| (미기재) | 26 |
+| (미기재) | 27 |
 | handwritten | 8 |
 | httpx_html | 6 |
 | httpx_json | 4 |
@@ -93,5 +94,5 @@
 
 ### 최근 90일 (≥ 2026-02-16)
 
-케이스 54 건.
+케이스 55 건.
 

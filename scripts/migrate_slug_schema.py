@@ -50,6 +50,12 @@ LOCK_FILE = ROOT / "output" / ".migrate-slug.lock"
 
 _DB_TABLES = ["subscriptions", "jobs", "deliveries", "pending", "reports"]
 
+# poll_state/ 안의 marker suffix — `.json` (등록 성공 state) + 세 가지 marker.
+# build_mapping 이 stem 추출 시 모두 strip 해야 mapping key 가 *slug 그 자체* 가 됨.
+# rename_state 가 rename 시에도 모든 suffix 형태 처리해야 marker 손실 방지.
+_MARKER_SUFFIXES = (".FAILED", ".REJECTED", ".BUG")
+_STATE_FILE_SUFFIXES = (".json", ".FAILED.json", ".REJECTED.json", ".BUG.json")
+
 
 # --------------------------------------------------------------------------- #
 # 1) 매핑 빌드
@@ -69,12 +75,16 @@ def build_mapping(state_dir: Path, configs_dir: Path,
     """
     mapping: dict[str, dict] = {}
 
-    # (1) poll_state/*.json (FAILED.json 포함)
+    # (1) poll_state/*.json — `.json` 등록 성공 state + `.FAILED.json` / `.REJECTED.json` / `.BUG.json` 마커.
+    #     marker suffix 는 *모두* strip 해 stem=slug 로 만들어야 mapping key 가 일관. 안 그러면 stem 에 `.REJECTED`
+    #     남아 rename_state 가 marker 파일을 normal state file 로 변환하는 critical 버그 발생 (codex 발견).
     if state_dir.exists():
         for p in state_dir.glob("*.json"):
             stem = p.name[:-len(".json")]
-            if stem.endswith(".FAILED"):
-                stem = stem[:-len(".FAILED")]
+            for marker in _MARKER_SUFFIXES:
+                if stem.endswith(marker):
+                    stem = stem[:-len(marker)]
+                    break
             d = _read_json(p)
             if d and d.get("url"):
                 url = d["url"]
@@ -185,11 +195,11 @@ def rename_config(configs_dir: Path, old: str, new: str) -> bool:
 
 
 def rename_state(state_dir: Path, configs_dir: Path, old: str, new: str) -> bool:
-    """poll_state/<old>.json → <new>.json + 내부 `slug` 와 `config_path` 필드 재기록.
-    .FAILED.json 도 함께 처리.
+    """poll_state/<old>{.json|.FAILED.json|.REJECTED.json|.BUG.json} → <new>{같은 suffix} +
+    내부 `slug` 와 `config_path` 필드 재기록. marker 4종 모두 같은 suffix 보존 — 안 그러면 marker 손실.
     """
     moved_any = False
-    for suffix in (".json", ".FAILED.json"):
+    for suffix in _STATE_FILE_SUFFIXES:
         src = state_dir / f"{old}{suffix}"
         dst = state_dir / f"{new}{suffix}"
         if not src.exists():
