@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import hashlib
 import json
 import os
@@ -383,6 +384,35 @@ def _write_learned_atomic(data: dict) -> None:
         raise
 
 
+_LEARNED_LOCK_PATH = LEARNED_PATH.parent / ".learned_blacklist.lock"
+
+
+@contextlib.contextmanager
+def _learned_lock():
+    """cross-process flock — _learn_pattern / _unlearn_pattern 의 read-modify-write 직렬화.
+
+    worker pool 동시 N register.py subprocess 가 모두 같은 learned_blacklist.json 에 박을 때
+    read-modify-write race 로 patterns lost 방지 (atomic replace 는 *파일 교체* 만 atomic, RMW 는 X).
+    Linux/macOS 는 fcntl.flock — Windows 는 no-op (dev 박스는 동시 register.py X).
+    """
+    LEARNED_PATH.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        import fcntl  # type: ignore
+    except ImportError:
+        yield
+        return
+    fd = os.open(str(_LEARNED_LOCK_PATH), os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        os.close(fd)
+
+
 def _learn_pattern(url: str, reason: str, slug: Optional[str] = None) -> Optional[dict]:
     """URL 의 host + path_prefix 를 learned_blacklist 에 박음. 이미 있는 entry 면 count 증가 + last_* 갱신.
     돌려준 dict 은 박힌/갱신된 pattern entry. URL 이 invalid 면 None.
@@ -397,36 +427,39 @@ def _learn_pattern(url: str, reason: str, slug: Optional[str] = None) -> Optiona
     host, path_prefix = extracted
     pat_id = _pattern_id(host, path_prefix)
     now = _now_iso()
-    data = _read_learned()
-    patterns = data.setdefault("patterns", [])
-    existing = None
-    for p in patterns:
-        if isinstance(p, dict) and p.get("id") == pat_id:
-            existing = p
-            break
-    if existing is not None:
-        existing["last_rejected_at"] = now
-        existing["reject_count"] = int(existing.get("reject_count") or 0) + 1
-        existing["last_reason"] = reason
-        existing["last_url"] = url
-        if slug:
-            existing["last_slug"] = slug
-        entry = existing
-    else:
-        entry = {
-            "id": pat_id,
-            "host_suffix": host,
-            "path_prefix": path_prefix,
-            "first_rejected_at": now,
-            "last_rejected_at": now,
-            "reject_count": 1,
-            "last_reason": reason,
-            "last_url": url,
-            "last_slug": slug,
-        }
-        patterns.append(entry)
-    data["version"] = 1
-    _write_learned_atomic(data)
+    # cross-process flock — 동시 worker 의 register.py subprocess 들이 같은 file 에 동시
+    # read-modify-write 시 patterns lost 방지.
+    with _learned_lock():
+        data = _read_learned()
+        patterns = data.setdefault("patterns", [])
+        existing = None
+        for p in patterns:
+            if isinstance(p, dict) and p.get("id") == pat_id:
+                existing = p
+                break
+        if existing is not None:
+            existing["last_rejected_at"] = now
+            existing["reject_count"] = int(existing.get("reject_count") or 0) + 1
+            existing["last_reason"] = reason
+            existing["last_url"] = url
+            if slug:
+                existing["last_slug"] = slug
+            entry = existing
+        else:
+            entry = {
+                "id": pat_id,
+                "host_suffix": host,
+                "path_prefix": path_prefix,
+                "first_rejected_at": now,
+                "last_rejected_at": now,
+                "reject_count": 1,
+                "last_reason": reason,
+                "last_url": url,
+                "last_slug": slug,
+            }
+            patterns.append(entry)
+        data["version"] = 1
+        _write_learned_atomic(data)
     return entry
 
 
@@ -440,14 +473,16 @@ def _unlearn_pattern_if_match(url: str) -> list[str]:
         return []
     host, path_prefix = extracted
     pat_id = _pattern_id(host, path_prefix)
-    data = _read_learned()
-    patterns = data.get("patterns") or []
-    removed = [p["id"] for p in patterns if isinstance(p, dict) and p.get("id") == pat_id]
-    if not removed:
-        return []
-    data["patterns"] = [p for p in patterns if not (isinstance(p, dict) and p.get("id") == pat_id)]
-    data["version"] = 1
-    _write_learned_atomic(data)
+    # cross-process flock — _learn_pattern 과 같은 락. 동시 RMW lost-update 방지.
+    with _learned_lock():
+        data = _read_learned()
+        patterns = data.get("patterns") or []
+        removed = [p["id"] for p in patterns if isinstance(p, dict) and p.get("id") == pat_id]
+        if not removed:
+            return []
+        data["patterns"] = [p for p in patterns if not (isinstance(p, dict) and p.get("id") == pat_id)]
+        data["version"] = 1
+        _write_learned_atomic(data)
     return removed
 
 
@@ -1069,11 +1104,15 @@ def _main_inner(argv) -> int:
         print(f"[register] {m}")
     if not ok_policy:
         print("[register] ❌ 등록 거부 (위 사유).")
-        # policy 거부 = LOGIN_REQUIRED / BLOCKED. 같은 host+path_prefix 재시도해도 똑같이 막힘 — 학습.
+        # policy 거부 = LOGIN_REQUIRED / BLOCKED. 같은 host+path_prefix 재시도해도 똑같이 막힘.
+        # `.REJECTED.json` 마커 박음 (worker 의 is_rejected(slug) 가드가 same-slug 2nd 잡 즉시 거부)
+        # + _learn_pattern 자동 호출 (host+path_prefix 학습, url_gate 단에서 차단). learn=True 가 default.
         try:
-            _learn_pattern(url, f"policy_check 거부: {'; '.join(msgs)[:200]}", slug=slug)
+            _save_rejected(slug, url,
+                           reason=f"policy_check 거부: {'; '.join(msgs)[:200]}",
+                           note="policy_check rc=2 (BLOCKED/LOGIN_REQUIRED)")
         except Exception as e:  # noqa: BLE001
-            print(f"[register] ⚠ learned_blacklist 학습 실패 (rc=2): {e}", file=sys.stderr)
+            print(f"[register] ⚠ REJECTED 마커 저장 실패 (rc=2): {e}", file=sys.stderr)
         return 2
 
     # single-article nav-only 게이트 — board_shape 가 nav 안 사이드바 메뉴를 same-host 신호로 false-positive
