@@ -83,7 +83,7 @@
       </td>
       <td title="{{ r.fail_reason_short or '' }}" style="white-space:nowrap;">
         {% set k = r.fail_kind or (r.status or '') %}
-        {% set cls = 'ok' if k=='done' else ('warn' if k in ('running','gen_fail') else ('error' if k in ('policy_reject','gate_reject','bug','unknown') else '')) %}
+        {% set cls = 'ok' if k=='done' else ('warn' if k in ('running','gate_reject') else ('error' if k in ('gen_fail','policy_reject','bug','unknown') else '')) %}
         <span class="badge {{ cls }}">{{ k }}</span>{% if r.fail_subkind %} <span class="mono muted" style="font-size:0.72rem;">{{ r.fail_subkind }}</span>{% endif %}
       </td>
       <td>{{ r.via or "" }}</td>

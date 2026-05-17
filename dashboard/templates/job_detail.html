@@ -19,7 +19,7 @@
   <dd>
     {% set s = job.status or "" %}
     {% set k = fail_kind or s %}
-    {% set cls = 'ok' if k=='done' else ('warn' if k in ('running','gen_fail') else ('error' if k in ('policy_reject','gate_reject','bug','unknown') else '')) %}
+    {% set cls = 'ok' if k=='done' else ('warn' if k in ('running','gate_reject') else ('error' if k in ('gen_fail','policy_reject','bug','unknown') else '')) %}
     <span class="badge {{ cls }}">{{ k }}</span>
     {% if fail_subkind %} <code class="mono muted">{{ fail_subkind }}</code>{% endif %}
     <span class="muted">· status={{ s }} · rc={{ job.result_rc }}</span>
