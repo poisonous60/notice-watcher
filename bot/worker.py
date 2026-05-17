@@ -192,15 +192,18 @@ async def _process_job_inner(client, conn, job, dm_owner) -> None:
         # __enter__ 는 try 안 — 만약 raise 하면 finally 가 안 부서지고 __exit__ skip.
         trace_cm.__enter__()
         # is_blocked 가드 (진입~claim race 흡수) — REJECTED/FAILED/BUG 마커 중 하나라도 있으면 즉시 종결.
-        # 같은 slug 의 첫 잡이 영구 거부 / 자동 등록 실패 / BUG 박은 직후 두 번째 잡이 claim 된 케이스 등.
-        if kind == "register" and is_blocked(slug):
+        # register: 같은 slug 첫 잡이 영구 거부/자동등록 실패/BUG 박은 직후 두 번째 잡이 claim 된 케이스.
+        # reprobe: poll.py 가 BUG 마커 체크하지만 race (마커 박히기 전 enqueue 된 잡 + 마커 후 claim) 가능 →
+        #   여기서도 가드. ADR 0001 의 "재시도 안 함" 계약을 reprobe 경로에도 강제.
+        if is_blocked(slug):
             kind_m = marker_kind(slug)
             info = blocked_info(slug) or {}
-            log.info("잡 #%d blocked (%s) — register subprocess 스킵 (slug=%s)", job_id, kind_m, slug)
+            log.info("잡 #%d blocked (%s, kind=%s) — subprocess 스킵 (slug=%s)",
+                     job_id, kind_m, kind, slug)
             rc_map = {"rejected": -4, "bug": -6, "failed": -7}
             db.mark_job_finished(conn, job_id, ok=False, rc=rc_map.get(kind_m, -4),
                                  tail=f"({kind_m} marker present)")
-            if job["ack_channel_id"]:
+            if kind == "register" and job["ack_channel_id"]:
                 if kind_m == "bug":
                     text = msg("blocked_bug", slug=slug)
                 else:

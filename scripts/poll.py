@@ -257,15 +257,23 @@ async def _process_site(st: dict, *, page_size: int, max_new_articles: int,
         st["last_status"] = res["status"]
         lines.append(f"  ⚠ 깨짐 신호 #{st['consecutive_breakage']}: {res['note']}")
         if st["consecutive_breakage"] >= settings.poll.breakage_threshold and not no_reprobe:
-            lines.append(f"  → 연속 {st['consecutive_breakage']}회 → reprobe 잡 enqueue (봇 worker 가 폴링 후 처리)")
-            ok, msg = _enqueue_reprobe(st)
-            lines.append(f"  {msg}")
-            if ok:
-                res["note"] += f" | {msg}"
-                st["last_status"] = "reprobe_enqueued"
+            # `.BUG.json` 마커 박힌 slug 은 reprobe enqueue 안 함 — bug-fix workflow 가 root cause
+            # 풀고 마커 clear 할 때까지 자동 재시도 차단 (ADR 0001 의 "재시도 안 함" 계약).
+            bug_marker = STATE_DIR / f"{slug}.BUG.json"
+            if bug_marker.exists():
+                lines.append(f"  ⏸ 연속 {st['consecutive_breakage']}회지만 BUG 마커 존재 — reprobe 스킵 (운영자 점검 대기)")
+                st["last_status"] = "reprobe_skipped_bug"
+                res["note"] += " | reprobe skipped (BUG marker)"
             else:
-                st["last_status"] = "reprobe_enqueue_failed"
-                res["note"] += f" | {msg}"
+                lines.append(f"  → 연속 {st['consecutive_breakage']}회 → reprobe 잡 enqueue (봇 worker 가 폴링 후 처리)")
+                ok, msg = _enqueue_reprobe(st)
+                lines.append(f"  {msg}")
+                if ok:
+                    res["note"] += f" | {msg}"
+                    st["last_status"] = "reprobe_enqueued"
+                else:
+                    st["last_status"] = "reprobe_enqueue_failed"
+                    res["note"] += f" | {msg}"
         elif no_reprobe and st["consecutive_breakage"] >= settings.poll.breakage_threshold:
             lines.append("  (--no-reprobe — reprobe 큐 enqueue 생략, 리포트만)")
     else:
