@@ -63,13 +63,26 @@ def is_registered(slug: str) -> bool:
 
 
 def is_rejected(slug: str) -> bool:
-    """owner 가 `_save_rejected` 로 박은 영구 거부 마커. 같은 slug 의 자동 등록 시도 자체를
-    안 받음. `/preview`·`/watch` 가 이 체크를 `_is_registered` 보다 *먼저* 해야 함."""
-    return (STATE_DIR / f"{slug}.REJECTED.json").exists()
+    """이전 시도에서 거부 또는 실패한 적 있는 slug. 같은 slug 의 자동 등록 시도 자체를 안 받음.
+    `/preview`·`/watch` 가 이 체크를 `_is_registered` 보다 *먼저* 해야 함.
+
+    `.REJECTED.json` = 영구 거부 마커 (board_shape rc=3 / policy rc=2 / admin reject) — `_save_rejected` 가 박음.
+    `.FAILED.json` = 자동 등록 실패 마커 (LLM gen 실패 등) — `_save_failed` 가 박음, hand-config 풀리면 제거.
+
+    둘 다 "재시도해도 같은 결과" 이거나 "operator 손길 기다리는 중" 이라 worker 가 같은 slug 의
+    다음 큐잡을 fresh subprocess 로 돌리지 않도록 차단. `_save_state` (등록 성공) 가 둘 다 자동 정리.
+    """
+    return ((STATE_DIR / f"{slug}.REJECTED.json").exists()
+            or (STATE_DIR / f"{slug}.FAILED.json").exists())
 
 
 def rejected_info(slug: str) -> Optional[dict]:
+    # REJECTED 우선 — 같은 slug 에 둘 다 있는 비정상 케이스에서 영구 거부 사유 우선 표시.
     p = STATE_DIR / f"{slug}.REJECTED.json"
+    if not p.exists():
+        # FAILED 마커 fallback — `_save_failed` 가 박은 형식.
+        # 형식: {"slug", "url", "failed_at", "reason", "last_config", "last_feedback"} — "reason" 필드 호환.
+        p = STATE_DIR / f"{slug}.FAILED.json"
     try:
         return json.loads(p.read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001
