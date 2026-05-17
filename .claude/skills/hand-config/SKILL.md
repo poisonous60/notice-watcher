@@ -60,10 +60,11 @@ IP 바뀌었으면 `DEPLOY_HOST=aaaa@<새IP>` 환경변수.
 2. **`diagnosis.json` 의 `verdict`** (digest 에 표면화됨)
 3. **`docs/config 자동생성 실패 케이스.md` 매칭 §번호** + 1줄 근거
 4. **분기 후보 (2a~2e)** + 그 선택 1줄 이유
+5. **누적 cross-check** — 진단한 failure_keys 각각에 대해 `python scripts/cases_index.py query --failure-key <key> [--failure-key <key2> ...] --json` 1회 호출 + JSON 결과 인용. 같은 진단의 root-cause 신호 (예: `static_vs_headless`, `diverging_first_article`) 가 case body 에 흔적 있으면 `--signal "<regex>"` 도 동시 호출. 그리고 `python scripts/cases_index.py query --deferred --json` 으로 deferred 후보 트리거 상태 확인. **한 label 의 `track_b_trigger=true` 면 트랙 B 진입 강제 — deferred 보류 불가, 같은 PR 에 휴리스틱·인식기·prompt 박음**. 0건이면 명시 ("누적 0건 — 첫 사례, deferred OK").
 
-artifact 없는 §0 신규 진입 (link 만 받은 첫 시도) 케이스는 예외 — `[§0 entry, no artifact yet]` 한 줄 명시 후 §0 절차로.
+artifact 없는 §0 신규 진입 (link 만 받은 첫 시도) 케이스는 예외 — `[§0 entry, no artifact yet]` 한 줄 명시 후 §0 절차로. 5번 (누적 cross-check) 도 skip (failure_keys 없음).
 
-`show` 가 자동으로 prepend 하는 digest (diagnosis / list_candidates / HAR) 가 인용 source. 그 외 정보 필요하면 `Read` 로 보강 가능하지만 위 4개는 *항상* 인용해야 함.
+`show` 가 자동으로 prepend 하는 digest (diagnosis / list_candidates / HAR) 가 1~4 인용 source. 5 는 `cases_index.py query` 출력 source. 그 외 정보 필요하면 `Read` 로 보강 가능하지만 위 5개는 *항상* 인용해야 함.
 
 ## 2. 분기 — 위에서부터 차례로 따져 첫 매칭 (2a~2d 가 2e 보다 우선)
 
@@ -202,7 +203,7 @@ probe/prompt/schema/코드 손대기 전 다음 여섯 질문에 답해보면 �
 
    원칙: **위에서부터 차례로 따져 첫 매칭**. (E)/(D) 로 잡힐 것을 (C)/(A) 에 박지 X. ambiguous 면 비워두고 진행.
 
-2. **이전 케이스 있나?** — `Grep '<failure_key 또는 root_cause>' docs/cases/` 또는 `Read docs/cases/INDEX.md`. 있으면 그때 어느 자리에 박았나 — 일관 유지. 다른 자리에 박을 거면 이유 명시.
+2. **이전 케이스 있나?** — `python scripts/cases_index.py query --failure-key <key> [--signal <regex>] [--deferred] [--json]` (Grep 대신 — failure_keys frontmatter 직접 인덱싱, 본문 grep, deferred 트리거 매칭 한 번에). 누적 ≥3 = `track_b_trigger=true` → 트랙 B 진입 강제. 박을 때 어느 자리에 박았나 일관 유지. 다른 자리에 박을 거면 이유 명시. 강제 게이트는 §2 진입 전 (위 §2 진입 전 강제 인용 5번) — 여기 §6.2 는 검토 시 재확인용.
 
 3. **누구 깰까?** — 21+ configs 중 영향 사이트 enumerate. 0개 가능하지만 *왜 0개인지* 한 줄 적기.
 

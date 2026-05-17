@@ -21,6 +21,13 @@
     python scripts/cases_index.py --cases-dir DIR # 다른 디렉토리에서 읽기
     python scripts/cases_index.py --backfill-db PATH  # output/cases.sqlite3 에 row backfill
 
+    python scripts/cases_index.py query --failure-key <key>     # 같은 failure_key 누적 case
+    python scripts/cases_index.py query --signal "<regex>"      # case .md 본문 grep
+    python scripts/cases_index.py query --fix-layer <L>         # 같은 fix_layer
+    python scripts/cases_index.py query --deferred              # _deferred_heuristics.md trigger 매칭
+    SKILL hand-config §6.2 강제 게이트 — 매 case 처리 §2 진입 전에 진단한 failure_keys 마다 호출.
+    누적 ≥3 면 트랙 B 자동 진입 (deferred 보류 불가).
+
 `--check` 는 만들지 않음 — pre-push 강제 시 UX friction (typo fix 도 regen 강제) 발생.
 """
 from __future__ import annotations
@@ -352,7 +359,136 @@ def backfill_db(db_path: Path, cases: list[dict], *, rebuild: bool = False) -> t
     return inserted, skipped, warned
 
 
+def _read_all_cases(cases_dir: Path) -> list[dict]:
+    paths = sorted(p for p in cases_dir.glob("*.md") if p.name != "INDEX.md" and not p.name.startswith("_"))
+    out: list[dict] = []
+    for p in paths:
+        c = parse_case(p)
+        if c is not None:
+            out.append(c)
+    return out
+
+
+def _case_summary_line(fm: dict) -> str:
+    slug = fm.get("slug") or fm["_path"].stem
+    date = str(fm.get("date") or "????-??-??")
+    outcome = fm.get("outcome") or "(미기재)"
+    layer = _fmt_layer(fm.get("fix_layer")) or "none"
+    return f"  - {slug}  {date}  {outcome}  fix_layer={layer}"
+
+
+def run_query(argv: list[str]) -> int:
+    qp = argparse.ArgumentParser(
+        prog="cases_index.py query",
+        description="SKILL hand-config §6.2 cross-case lookup. 누적 ≥3 면 트랙 B 자동 진입.",
+    )
+    qp.add_argument("--cases-dir", type=Path, default=DEFAULT_CASES_DIR)
+    qp.add_argument("--failure-key", action="append", default=[],
+                    help="failure_keys 안에 이 키가 있는 case (반복 OK = OR)")
+    qp.add_argument("--signal", action="append", default=[],
+                    help="case .md 본문에 매칭되는 regex (반복 OK = OR, multi-line, case-insensitive)")
+    qp.add_argument("--fix-layer", action="append", default=[],
+                    help="fix_layer 가 이 값 (반복 OK = OR)")
+    qp.add_argument("--status-emoji", default=None,
+                    help="status 가 이 이모지로 시작하는 case (예: 🔧/✅/🚫/❌)")
+    qp.add_argument("--deferred", action="store_true",
+                    help="docs/cases/_deferred_heuristics.md trigger 줄과 케이스 매칭")
+    qp.add_argument("--json", action="store_true",
+                    help="기계 가독 JSON 출력 (skill 자동 게이트용)")
+    args = qp.parse_args(argv)
+
+    cases_dir: Path = args.cases_dir
+    if not cases_dir.is_dir():
+        print(f"cases 디렉토리 없음: {cases_dir}", file=sys.stderr)
+        return 2
+
+    all_cases = _read_all_cases(cases_dir)
+    results: dict[str, list[dict]] = {}
+
+    for fk in args.failure_key:
+        matched = [c for c in all_cases if fk in (c.get("failure_keys") or [])]
+        results[f"failure_key={fk}"] = matched
+
+    for sig in args.signal:
+        pat = re.compile(sig, re.I | re.M)
+        matched = [c for c in all_cases if pat.search(c["_path"].read_text(encoding="utf-8"))]
+        results[f"signal={sig}"] = matched
+
+    for fl in args.fix_layer:
+        matched: list[dict] = []
+        for c in all_cases:
+            v = c.get("fix_layer")
+            if v is None:
+                continue
+            vs = [str(x) for x in (v if isinstance(v, (list, tuple)) else [v])]
+            if fl in vs:
+                matched.append(c)
+        results[f"fix_layer={fl}"] = matched
+
+    if args.status_emoji:
+        em = args.status_emoji
+        matched = [c for c in all_cases if str(c.get("status") or "").startswith(em)]
+        results[f"status_emoji={em}"] = matched
+
+    if args.deferred:
+        deferred_path = cases_dir / "_deferred_heuristics.md"
+        if not deferred_path.exists():
+            print(f"_deferred_heuristics.md 없음: {deferred_path}", file=sys.stderr)
+        else:
+            text = deferred_path.read_text(encoding="utf-8")
+            # 후보 한 줄 형식: `- **<name>** — <신호> — <잡힐 case> — <사유> — <트리거> — commit ...`
+            for line in text.splitlines():
+                m = re.match(r"-\s+\*\*`?([^`*]+)`?\*\*\s+—\s+(.+)$", line.strip())
+                if not m:
+                    continue
+                name = m.group(1).strip()
+                rest = m.group(2)
+                # signal 부분만 자유 추출 — 본문 grep 으로 매칭 위해 첫 두 segment 만 사용
+                segs = [s.strip() for s in rest.split("—")]
+                signal = segs[0] if segs else ""
+                # 본문에 후보 이름 또는 첫 키워드 grep
+                key_tokens = re.findall(r"`([^`]+)`", line) + [name]
+                matched = []
+                for c in all_cases:
+                    body = c["_path"].read_text(encoding="utf-8")
+                    if any(tok in body for tok in key_tokens if len(tok) > 3):
+                        matched.append(c)
+                results[f"deferred:{name}"] = matched
+
+    if not results:
+        print("질의 항목 없음 — --failure-key/--signal/--fix-layer/--status-emoji/--deferred 중 1개 필요.", file=sys.stderr)
+        return 2
+
+    if args.json:
+        out = {
+            label: {
+                "count": len(matches),
+                "slugs": [c.get("slug") or c["_path"].stem for c in matches],
+                "track_b_trigger": len(matches) >= 3,
+            }
+            for label, matches in results.items()
+        }
+        print(json.dumps(out, ensure_ascii=False, indent=2))
+        return 0
+
+    for label, matches in results.items():
+        n = len(matches)
+        trigger = " ⚠ 트랙 B 진입 (N≥3)" if n >= 3 else ""
+        print(f"\n[query] {label} → {n}건{trigger}")
+        for c in sorted(matches, key=lambda x: str(x.get("date") or ""), reverse=True):
+            print(_case_summary_line(c))
+            keys = c.get("failure_keys")
+            if keys:
+                print(f"    keys: {_fmt_list(keys)}")
+    print()
+    return 0
+
+
 def main() -> int:
+    # query sub-command — sys.argv[1] 검사 (argparse subparser 안 흔드는 쪽)
+    if len(sys.argv) > 1 and sys.argv[1] == "query":
+        return run_query(sys.argv[2:])
+
     ap = argparse.ArgumentParser(description="docs/cases/*.md → docs/cases/INDEX.md")
     ap.add_argument("--cases-dir", type=Path, default=DEFAULT_CASES_DIR)
     ap.add_argument("--output", type=Path, default=None)
