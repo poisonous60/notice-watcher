@@ -35,7 +35,7 @@ description: >-
 ```
 python scripts/triage.py pull --skip-later   # N100 → 로컬 (FAILED.json + triage_queue.jsonl + 실패 slug 의 probe/); dashboard '나중에' 토글 slug 제외
 python scripts/triage.py list --skip-later   # 받아온 실패 목록 표 (Later 숨김)
-python scripts/triage.py show <slug>         # 그 slug 의 .FAILED.json(reason/last_feedback/last_config) + 요청자 + probe 산출물 목록
+python scripts/triage.py show <slug>         # 그 slug 의 .FAILED.json + 요청자 + probe digest (diagnosis / list_candidates / HAR slice 자동 출력)
 ```
 
 `--skip-later` 가 제외하는 slug 는 dashboard `/triage/failed` 의 '나중에' 토글로 결정 (`output/triage_later.json`, dev box only). 후순위로 미뤘다는 신호 — 같은 dev 박스에서 dashboard 와 동일 큐 공유. Later 라도 명시적으로 처리하고 싶으면 `show <slug>` 또는 인자 빼고 호출.
@@ -51,6 +51,19 @@ IP 바뀌었으면 `DEPLOY_HOST=aaaa@<새IP>` 환경변수.
 각 후보 한 줄 점검 (`X — 이유` 또는 `O — 자리`). 매칭 시 같은 PR. 0건이면 case body 에 이유 1줄.
 
 예시: `host_scholar-google-_scholar_706d9c49` (commit `0b130b2`) — 트랙 A 손-config + 트랙 B (C) `probe/extract.py:list_row_external_host` + (D) `generate/validate.py:_external_host_hint`. 동시.
+
+### §2 진입 전 — 강제 인용 (skim 방지)
+
+`triage.py show <slug>` 출력 받은 *바로 다음 assistant 메시지* 에서, **§2 분기에 해당하는 코드 변경 (Edit/Write — 인식기·probe·prompt·config 손대기 또는 손-config 작성) 보내기 전에**, 같은 메시지 안에 다음 4개 명시 출력해야 함. 인용 없이 §2 진입 X — 가설 헛디딤(β) 의 직접 차단. (인용과 그 다음 Edit/Write 사이에 추가 Read/Bash 보강은 OK — 단, *4개 인용은 첫 메시지에서 끝* 내고 그 뒤에 보강.)
+
+1. **`last_feedback` 첫 `[FAIL]` 줄** (`triage.py show` 출력에서 verbatim)
+2. **`diagnosis.json` 의 `verdict`** (digest 에 표면화됨)
+3. **`docs/config 자동생성 실패 케이스.md` 매칭 §번호** + 1줄 근거
+4. **분기 후보 (2a~2e)** + 그 선택 1줄 이유
+
+artifact 없는 §0 신규 진입 (link 만 받은 첫 시도) 케이스는 예외 — `[§0 entry, no artifact yet]` 한 줄 명시 후 §0 절차로.
+
+`show` 가 자동으로 prepend 하는 digest (diagnosis / list_candidates / HAR) 가 인용 source. 그 외 정보 필요하면 `Read` 로 보강 가능하지만 위 4개는 *항상* 인용해야 함.
 
 ## 2. 분기 — 위에서부터 차례로 따져 첫 매칭 (2a~2d 가 2e 보다 우선)
 

@@ -7,7 +7,7 @@
 
 흐름:  python scripts/triage.py pull [--skip-later]   # N100 → 로컬 (FAILED.json + triage_queue.jsonl + 각 실패 slug 의 probe/)
        python scripts/triage.py list [--skip-later]   # 로컬에 받아온 실패 목록 표
-       python scripts/triage.py show <slug>           # 그 slug 의 .FAILED.json(사유·last_config) + probe 산출물 위치 + 요청자
+       python scripts/triage.py show <slug>           # 그 slug 의 .FAILED.json + 요청자 + probe digest (diagnosis/list_candidates/HAR slice)
    → 그다음 hand-config 스킬 "모드 B(triage)" 로 사이트별 처리(probe 고치거나 손 config/손어댑터 작성 → register --config → N100 배포).
 
 `--skip-later` : dashboard `/triage/failed` 에서 '나중에' 토글한 slug 제외 (`output/triage_later.json` 공유).
@@ -91,6 +91,102 @@ def _load_failed(slug: str) -> dict:
 def _first_fail_line(last_feedback: str) -> str:
     lines = [l.strip() for l in (last_feedback or "").splitlines() if l.strip()]
     return next((l for l in lines if "[FAIL]" in l), lines[0] if lines else "")
+
+
+def _truncate(s, n: int = 100) -> str:
+    s = "" if s is None else str(s)
+    s = s.replace("\n", " ").replace("\r", " ").replace("\t", " ")
+    return s if len(s) <= n else s[: n - 1] + "…"
+
+
+def _load_probe_json(pd: Path, name: str) -> dict | list | None:
+    fp = pd / name
+    if not fp.exists():
+        return None
+    try:
+        return json.loads(fp.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _print_list_candidates_digest(pd: Path) -> None:
+    """§2b/§2c 판정 anchor — first_article_url + 상위 후보 한 줄씩."""
+    lc = _load_probe_json(pd, "list_candidates.json")
+    if not isinstance(lc, dict):
+        return
+    print(f"\n=== list_candidates.json digest ===")
+    fau = lc.get("first_article_url")
+    print(f"  first_article_url : {_truncate(fau or '(없음 — §2b 신호)', 140)}")
+    html = lc.get("html_repeating_patterns") or []
+    api = lc.get("traffic_json_api_candidates") or []
+    hyd = lc.get("hydration_list_candidates") or []
+    inline = lc.get("inline_js_data_candidates") or []
+    print(f"  후보 수            : html={len(html)} api={len(api)} hydration={len(hyd)} inline_js={len(inline)}")
+    for i, p in enumerate(html[:3], 1):
+        if not isinstance(p, dict):
+            continue
+        sel = _truncate(p.get("selector"), 60)
+        cc = p.get("child_count")
+        ft = _truncate(p.get("first_text"), 50)
+        sample = _truncate(p.get("sample_url"), 80)
+        print(f"  html[{i}] cc={cc} sel={sel}")
+        print(f"         text={ft}")
+        print(f"         sample={sample}")
+    for i, p in enumerate(api[:2], 1):
+        if not isinstance(p, dict):
+            continue
+        print(f"  api[{i}] url={_truncate(p.get('url'), 90)}  count_guess={p.get('count_guess')}")
+
+
+def _print_diagnosis_digest(pd: Path) -> None:
+    d = _load_probe_json(pd, "diagnosis.json")
+    if not isinstance(d, dict):
+        return
+    print(f"\n=== diagnosis.json digest ===")
+    keys = ("verdict", "recommended_strategy", "recommended_headers", "recommended_polling_interval_sec", "list_candidates_summary", "article_entry_ok")
+    for k in keys:
+        if k in d:
+            print(f"  {k:<36}: {_truncate(d.get(k), 200)}")
+    notes = d.get("notes") or []
+    if isinstance(notes, list) and notes:
+        print(f"  notes ({min(3, len(notes))}/{len(notes)}):")
+        for n in notes[:3]:
+            print(f"    - {_truncate(n, 180)}")
+
+
+def _print_har_digest(pd: Path) -> None:
+    """4xx/5xx + 차단 sniff. HAR 큰 파일이라 파싱 1회로 끝."""
+    fp = pd / "traffic.har"
+    if not fp.exists():
+        return
+    try:
+        d = json.loads(fp.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    entries = ((d.get("log") or {}).get("entries")) or []
+    if not entries:
+        return
+    n = len(entries)
+    err4_count = err5_count = 0
+    err4_first = err5_first = None  # 첫 sample 만 보관 — 큰 HAR 에서 list 누적 안 함
+    for e in entries:
+        st = ((e.get("response") or {}).get("status")) or 0
+        if 400 <= st < 500:
+            err4_count += 1
+            if err4_first is None:
+                err4_first = (st, (e.get("request") or {}).get("url", ""))
+        elif st >= 500:
+            err5_count += 1
+            if err5_first is None:
+                err5_first = (st, (e.get("request") or {}).get("url", ""))
+    print(f"\n=== traffic.har digest ===")
+    print(f"  총 요청: {n}   4xx: {err4_count}   5xx: {err5_count}")
+    if err4_first:
+        st, url = err4_first
+        print(f"  첫 4xx: {st}  {_truncate(url, 120)}")
+    if err5_first:
+        st, url = err5_first
+        print(f"  첫 5xx: {st}  {_truncate(url, 120)}")
 
 
 # --------------------------------------------------------------------------- #
@@ -212,10 +308,12 @@ def cmd_show(slug: str) -> int:
 
     pd = PROBE_DIR / slug
     if pd.exists():
-        print(f"\n=== probe 산출물: {pd} ===")
-        for f in sorted(pd.iterdir()):
-            print(f"  {f.name}")
-        print(f"  → summary.txt / list_candidates.json / article_candidates.json / traffic.har / diagnosis.json 부터 본다.")
+        # §2 분기 anchor 들 — full file Read 대신 핵심 slice 만 자동 표면화 (claude skim 방지 + 누적 토큰 절약).
+        _print_diagnosis_digest(pd)
+        _print_list_candidates_digest(pd)
+        _print_har_digest(pd)
+        print(f"\n=== probe 산출물 디렉토리: {pd} ===")
+        print(f"  (위 digest 만으로 부족하면: summary.txt / article_candidates.json / list.html / article.html 등을 Read)")
     else:
         url = d.get("url") or (qs[-1].get("url") if qs else None)
         print(f"\n(probe 산출물 {pd} 없음 — `pull` 가 가져왔어야 함. 직접: python scripts/probe.py \"{url or '<URL>'}\")")

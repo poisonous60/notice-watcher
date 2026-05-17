@@ -36,6 +36,9 @@ docs/tmp_log.md
 .claude/skills/caveman-review/
 .claude/skills/caveman-stats/
 
+# rollback snapshot (dev box local only — tag `hand-config-pre-grill-*` 으로 영구 보존)
+.claude/skills-backup/
+
 # dev-only scripts (not deployed per docs/운영 메모.md §8)
 scripts/demo_*.py
 scripts/collect_all.py
