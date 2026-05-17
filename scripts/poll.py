@@ -206,9 +206,11 @@ def _load_states(only: set[str] | None) -> list[dict]:
     if not STATE_DIR.exists():
         return out
     for p in sorted(STATE_DIR.glob("*.json")):
-        # .FAILED.json (자동 등록 실패) / .REJECTED.json (영구 거부 marker — board_shape·BLOCKED·admin)
-        # 둘 다 정상 state 형식 아님 — config_path 등 없음. 폴링 대상 X.
-        if p.name.endswith(".FAILED.json") or p.name.endswith(".REJECTED.json"):
+        # .FAILED.json (자동 등록 실패) / .REJECTED.json (영구 거부 marker) / .BUG.json (코드 버그 마커)
+        # 셋 다 정상 state 형식 아님 — config_path 등 없음. 폴링 대상 X.
+        if (p.name.endswith(".FAILED.json")
+                or p.name.endswith(".REJECTED.json")
+                or p.name.endswith(".BUG.json")):
             continue
         try:
             st = json.loads(p.read_text(encoding="utf-8"))

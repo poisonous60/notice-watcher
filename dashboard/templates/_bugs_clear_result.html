@@ -1,0 +1,24 @@
+{# HTMX 부분 응답 — BUG 마커 clear 후 row 자리를 inline 결과로 교체 #}
+{% if ok and ("REMOVED" in output) %}
+<tr id="bugs-row-{{ slug }}">
+  <td colspan="6" class="muted">
+    ✅ <code>{{ slug }}</code> BUG 마커 제거됨 (N100). {% if snapshot_removed %}snapshot 동기 OK.{% else %}snapshot 동기 실패 — 새로고침해서 자동 Pull.{% endif %}
+  </td>
+</tr>
+{% elif ok and ("NOT_FOUND" in output) %}
+<tr id="bugs-row-{{ slug }}">
+  <td colspan="6" class="muted">
+    ⚠ <code>{{ slug }}</code> 가 N100 에 이미 없음 (다른 경로로 풀린 듯). 새로고침.
+  </td>
+</tr>
+{% else %}
+<tr id="bugs-row-{{ slug }}">
+  <td colspan="6">
+    ❌ Clear 실패 — <code>{{ slug }}</code>
+    <details>
+      <summary>출력 보기</summary>
+      <pre><code>{{ output or '(출력 없음)' }}</code></pre>
+    </details>
+  </td>
+</tr>
+{% endif %}

@@ -257,6 +257,17 @@ def cmd_unlearn(pattern_id: str) -> int:
     return _ssh(_remote_python_cmd("scripts/register.py", "--unlearn", pid))
 
 
+_SLUG_RE = re.compile(r"^[A-Za-z0-9._%-]+$")
+
+
+def cmd_clear_bug(slug: str) -> int:
+    """`.BUG.json` 마커 제거 — bug-fix workflow 마지막 step (대시보드 Clear 버튼).
+    N100 의 `scripts/register.py --clear-bug <slug>` 호출.
+    slug 는 [A-Za-z0-9._%-]+ 만 (path-traversal/injection 차단)."""
+    s = _require(slug, _SLUG_RE, name="slug")
+    return _ssh(_remote_python_cmd("scripts/register.py", "--clear-bug", s))
+
+
 def cmd_announce_scoped(b64: str) -> int:
     """base64-인코딩된 JSON 페이로드를 받아 N100 의 `scripts/announce.py --base64` 로 전달.
 
@@ -291,6 +302,7 @@ def list_actions() -> int:
     print("  notify-target <slug> <kind> <id>               collected → 그 target 만 발송")
     print("  announce-scoped <base64-json>                  좁힌 공지 발송")
     print("  unlearn <pattern_id>                           learned_blacklist 패턴 제거")
+    print("  clear-bug <slug>                               .BUG.json 마커 제거 (bug-fix workflow)")
     print("  trace-index <kind>                             output/traces/index.<kind>.jsonl tail")
     print("  trace-index-all                                모든 kind index 합본")
     print("  trace-fetch <trace_id>                         output/traces/<trace_id>.jsonl cat")
@@ -320,6 +332,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     sp.add_argument("slug"); sp.add_argument("target_kind"); sp.add_argument("target_id")
     sp = sub.add_parser("announce-scoped"); sp.add_argument("base64_payload")
     sp = sub.add_parser("unlearn"); sp.add_argument("pattern_id", help="learned_blacklist pattern id ([a-f0-9]{1,12})")
+    sp = sub.add_parser("clear-bug"); sp.add_argument("slug", help="`.BUG.json` 마커가 박힌 slug")
     sp = sub.add_parser("trace-index"); sp.add_argument("kind", help="poll|notify|notify_idle|probe ...")
     sub.add_parser("trace-index-all")
     sp = sub.add_parser("trace-fetch"); sp.add_argument("trace_id")
@@ -350,6 +363,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         return cmd_announce_scoped(args.base64_payload)
     if args.cmd == "unlearn":
         return cmd_unlearn(args.pattern_id)
+    if args.cmd == "clear-bug":
+        return cmd_clear_bug(args.slug)
     if args.cmd == "trace-index":
         return cmd_trace_index(args.kind)
     if args.cmd == "trace-index-all":

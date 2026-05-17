@@ -104,6 +104,28 @@ def failed_payload(slug: str) -> Optional[dict]:
         return None
 
 
+def bug_slugs() -> list[str]:
+    """state_dir 의 `*.BUG.json` → slug 목록 (코드 버그 / 시스템 측 결함으로 막힌)."""
+    paths = snapshot_paths()
+    if not paths.state_dir.exists():
+        return []
+    out = []
+    for f in paths.state_dir.glob("*.BUG.json"):
+        out.append(f.name[: -len(".BUG.json")])
+    return sorted(out)
+
+
+def bug_payload(slug: str) -> Optional[dict]:
+    paths = snapshot_paths()
+    p = paths.state_dir / f"{slug}.BUG.json"
+    if not p.exists():
+        return None
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
 def unique_slugs(conn) -> list[str]:
     """현재 누군가 구독중인 distinct slug."""
     rows = conn.execute("SELECT DISTINCT slug FROM subscriptions ORDER BY slug").fetchall()

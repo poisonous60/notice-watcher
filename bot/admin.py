@@ -193,6 +193,45 @@ def build_admin_tree(client: discord.Client, conn, *, admin_guild: discord.Objec
                 else msg("admin_unreject_not_found", slug=slug))
         await interaction.response.send_message(text, ephemeral=True)
 
+    @admin.command(name="bugs", description="`.BUG.json` 마커 목록 (시스템 측 결함으로 막힌 slug).")
+    async def bugs_cmd(interaction: discord.Interaction):
+        if not _is_owner(interaction):
+            await interaction.response.send_message(msg("admin_owner_only"), ephemeral=True)
+            return
+        from scripts.register import _list_bugs
+        bugs = _list_bugs()
+        if not bugs:
+            await interaction.response.send_message(msg("admin_bugs_empty"), ephemeral=True)
+            return
+        lines = [msg("admin_bugs_header", n=len(bugs))]
+        for b in bugs[:50]:
+            reason = (b.get("reason") or "").replace("\n", " ")
+            if len(reason) > 60:
+                reason = reason[:60] + "…"
+            lines.append(msg("admin_bugs_item",
+                             slug=b.get("slug", "?"),
+                             rc=b.get("rc", "?"),
+                             count=b.get("count", 1),
+                             last_at=(b.get("last_at") or "")[:16],
+                             reason=reason))
+        await _ack_and_dm(interaction, "\n".join(lines))
+
+    @admin.command(name="clear_bug", description="BUG 마커 제거 — bug-fix workflow 마지막 step.")
+    @app_commands.describe(slug="BUG 마커 제거할 slug")
+    async def clear_bug_cmd(interaction: discord.Interaction, slug: str):
+        if not _is_owner(interaction):
+            await interaction.response.send_message(msg("admin_owner_only"), ephemeral=True)
+            return
+        if not _SLUG_RE.fullmatch(slug):
+            await interaction.response.send_message(
+                msg("admin_slug_format_error", slug=slug), ephemeral=True)
+            return
+        from scripts.register import _clear_bug
+        ok = _clear_bug(slug)
+        text = (msg("admin_clear_bug_ok", slug=slug) if ok
+                else msg("admin_clear_bug_not_found", slug=slug))
+        await interaction.response.send_message(text, ephemeral=True)
+
     @admin.command(name="learned", description="자동 학습된 거부 패턴 목록 (host+path_prefix 단위).")
     async def learned_cmd(interaction: discord.Interaction):
         if not _is_owner(interaction):

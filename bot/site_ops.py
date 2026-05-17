@@ -55,38 +55,59 @@ def config_path_for(slug: str) -> Optional[Path]:
 
 
 def is_registered(slug: str) -> bool:
-    """polling 대상으로 등록됐는지. `state.json` 있고 `.FAILED.json` / `.REJECTED.json` 둘 다 없을 때 True.
-    REJECTED 마커가 있으면 False — 옛 등록 state 가 남아 있더라도 polling/봇 fast-path 가 안 타게."""
+    """polling 대상으로 등록됐는지. `state.json` 있고 `.FAILED.json`/`.REJECTED.json`/`.BUG.json` 모두 없을 때 True.
+    어느 마커라도 있으면 False — 옛 state 가 남아 있더라도 polling/봇 fast-path 가 안 타게."""
     return ((STATE_DIR / f"{slug}.json").exists()
             and not (STATE_DIR / f"{slug}.FAILED.json").exists()
-            and not (STATE_DIR / f"{slug}.REJECTED.json").exists())
+            and not (STATE_DIR / f"{slug}.REJECTED.json").exists()
+            and not (STATE_DIR / f"{slug}.BUG.json").exists())
 
 
-def is_rejected(slug: str) -> bool:
-    """이전 시도에서 거부 또는 실패한 적 있는 slug. 같은 slug 의 자동 등록 시도 자체를 안 받음.
-    `/preview`·`/watch` 가 이 체크를 `_is_registered` 보다 *먼저* 해야 함.
-
-    `.REJECTED.json` = 영구 거부 마커 (board_shape rc=3 / policy rc=2 / admin reject) — `_save_rejected` 가 박음.
-    `.FAILED.json` = 자동 등록 실패 마커 (LLM gen 실패 등) — `_save_failed` 가 박음, hand-config 풀리면 제거.
-
-    둘 다 "재시도해도 같은 결과" 이거나 "operator 손길 기다리는 중" 이라 worker 가 같은 slug 의
-    다음 큐잡을 fresh subprocess 로 돌리지 않도록 차단. `_save_state` (등록 성공) 가 둘 다 자동 정리.
+def marker_kind(slug: str) -> Optional[str]:
+    """slug 의 차단 마커 종류 반환. 'rejected' / 'failed' / 'bug' / None (없음).
+    여럿 동시 존재 시 우선순위: rejected > bug > failed (영구 거부가 가장 단호, BUG 는 운영자 점검, FAILED 는 hand-config).
     """
-    return ((STATE_DIR / f"{slug}.REJECTED.json").exists()
-            or (STATE_DIR / f"{slug}.FAILED.json").exists())
+    if (STATE_DIR / f"{slug}.REJECTED.json").exists():
+        return "rejected"
+    if (STATE_DIR / f"{slug}.BUG.json").exists():
+        return "bug"
+    if (STATE_DIR / f"{slug}.FAILED.json").exists():
+        return "failed"
+    return None
 
 
-def rejected_info(slug: str) -> Optional[dict]:
-    # REJECTED 우선 — 같은 slug 에 둘 다 있는 비정상 케이스에서 영구 거부 사유 우선 표시.
-    p = STATE_DIR / f"{slug}.REJECTED.json"
-    if not p.exists():
-        # FAILED 마커 fallback — `_save_failed` 가 박은 형식.
-        # 형식: {"slug", "url", "failed_at", "reason", "last_config", "last_feedback"} — "reason" 필드 호환.
-        p = STATE_DIR / f"{slug}.FAILED.json"
+def is_blocked(slug: str) -> bool:
+    """REJECTED+FAILED+BUG 마커 중 하나라도 있으면 True. `/preview`·`/watch` 진입 시점 및 worker
+    claim 시점 첫 가드 — 같은 slug 의 subprocess 재시도 차단. 응답 문구는 `marker_kind` 로 분기.
+    """
+    return marker_kind(slug) is not None
+
+
+def blocked_info(slug: str) -> Optional[dict]:
+    """현재 박힌 마커의 dump. `marker_kind` 우선순위와 일치.
+    - rejected: {slug, url, reason, note, rejected_at, learned} (`_save_rejected`)
+    - bug:      {slug, url, first_at, last_at, count, rc, reason, tail} (`_save_bug`)
+    - failed:   {slug, url, failed_at, reason, last_config, last_feedback} (`_save_failed`)
+    """
+    kind = marker_kind(slug)
+    if kind is None:
+        return None
+    suffix = {"rejected": ".REJECTED.json", "bug": ".BUG.json", "failed": ".FAILED.json"}[kind]
+    p = STATE_DIR / f"{slug}{suffix}"
     try:
         return json.loads(p.read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001
         return None
+
+
+def is_rejected(slug: str) -> bool:
+    """Deprecated alias — `is_blocked` 로 쓰는 게 의미 정확. 호출처 정리 후 제거 예정."""
+    return is_blocked(slug)
+
+
+def rejected_info(slug: str) -> Optional[dict]:
+    """Deprecated alias — `blocked_info` 로 쓰는 게 의미 정확."""
+    return blocked_info(slug)
 
 
 # reason 끝 ` (...)` triage/디버그 hint — 사용자에 안 보이고 owner 운영용. 사용자 향 메시지에 쓸 때만 strip.

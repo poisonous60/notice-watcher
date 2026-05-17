@@ -297,7 +297,7 @@ def _save_state(slug: str, url: str, config_path: Path, post_ids: list[str],
     # 등록과 동시에 FAILED·REJECTED 마커 / triage 큐 항목이 남아있으면 제거.
     # REJECTED 제거는 의도된 등록 (예: admin 이 풀고 register.py --config --force 로 재등록) 만 해당 —
     # 자동 경로는 어차피 봇 _is_registered 가 False 라서 워커가 register.py 를 안 부른다.
-    for marker_suffix in (".FAILED.json", ".REJECTED.json"):
+    for marker_suffix in (".FAILED.json", ".REJECTED.json", ".BUG.json"):
         mp = STATE_DIR / f"{slug}{marker_suffix}"
         if mp.exists():
             mp.unlink()
@@ -551,6 +551,70 @@ def _clear_rejected(slug: str) -> bool:
         p.unlink()
         return True
     return False
+
+
+def _save_bug(slug: str, url: str, rc: int, reason: str, tail: str = "") -> Path:
+    """`.BUG.json` 마커 — 시스템 측 결함 (chromium_lock timeout / subprocess timeout / 봇 반복 죽음 /
+    worker 예외). hand-config pipeline 과 별도 카테고리 = bug-fix workflow 대상 (코드 자체 수정).
+
+    봇 `is_blocked(slug)`=True + `marker_kind(slug)`='bug' → `/preview`·`/watch` 가 "처리 중 문제 —
+    운영자 점검 중" 응답. OWNER DM X. 자동 재시도 X. learned_blacklist 학습 X (사이트 원인 아님).
+
+    같은 slug 의 `.BUG.json` 이 이미 있으면 `count` 증가시키고 `last_*` 필드 갱신 — 같은 결함 재현 추적.
+    `_clear_bug` 가 root cause 풀린 후 운영자/Claude 가 호출. ADR 0001 참조.
+    """
+    if not re.fullmatch(r"[A-Za-z0-9._%-]+", slug):
+        raise ValueError(f"잘못된 slug 형식: {slug!r}")
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    p = STATE_DIR / f"{slug}.BUG.json"
+    prev: dict = {}
+    if p.exists():
+        try:
+            prev = json.loads(p.read_text(encoding="utf-8")) or {}
+        except Exception:  # noqa: BLE001
+            prev = {}
+    count = int(prev.get("count", 0)) + 1
+    first_at = prev.get("first_at") or _now_iso()
+    p.write_text(json.dumps({
+        "slug": slug,
+        "url": url,
+        "first_at": first_at,
+        "last_at": _now_iso(),
+        "count": count,
+        "rc": rc,
+        "reason": reason,
+        "tail": (tail or "")[-4000:],
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
+    return p
+
+
+def _clear_bug(slug: str) -> bool:
+    """BUG 마커 제거 — bug-fix workflow 마지막 step / dashboard `/bugs` Clear / `/admin clear-bug`.
+    같은 slug 의 옛 ack 메시지나 fail 잡은 *건드리지 않음* — 사용자가 직접 다시 `/watch` 처야 새 시도.
+    """
+    if not re.fullmatch(r"[A-Za-z0-9._%-]+", slug):
+        raise ValueError(f"잘못된 slug 형식: {slug!r}")
+    p = STATE_DIR / f"{slug}.BUG.json"
+    if p.exists():
+        p.unlink()
+        return True
+    return False
+
+
+def _list_bugs() -> list[dict]:
+    """모든 `.BUG.json` 마커 dump — dashboard `/bugs` + `/admin bugs` 가 호출.
+    last_at 내림차순."""
+    out: list[dict] = []
+    if not STATE_DIR.exists():
+        return out
+    for p in STATE_DIR.glob("*.BUG.json"):
+        try:
+            d = json.loads(p.read_text(encoding="utf-8"))
+            out.append(d)
+        except Exception:  # noqa: BLE001
+            continue
+    out.sort(key=lambda d: d.get("last_at") or "", reverse=True)
+    return out
 
 
 def _check_body_at_baseline(cfg: dict, posts: list, sample: int = 3) -> Optional[bool]:
@@ -1015,6 +1079,9 @@ def _main_inner(argv) -> int:
     p.add_argument("--unlearn", metavar="PATTERN_ID",
                    help="learned_blacklist 의 pattern entry 제거 ([a-f0-9]{1,12}). 다른 인자 무시. "
                         "REMOVED / NOT_FOUND 한 줄 print.")
+    p.add_argument("--clear-bug", metavar="SLUG",
+                   help=".BUG.json 마커 제거 (bug-fix workflow 마지막 step). 다른 인자 무시. "
+                        "REMOVED / NOT_FOUND 한 줄 print.")
     args = p.parse_args(argv)
 
     if args.unlearn:
@@ -1023,6 +1090,15 @@ def _main_inner(argv) -> int:
             print(f"[register --unlearn] invalid pattern_id: {args.unlearn!r}", file=sys.stderr)
             return 4
         ok = _clear_learned_by_id(pid)
+        print("REMOVED" if ok else "NOT_FOUND")
+        return 0 if ok else 1
+
+    if args.clear_bug:
+        slug_arg = args.clear_bug.strip()
+        if not re.fullmatch(r"[A-Za-z0-9._%-]+", slug_arg):
+            print(f"[register --clear-bug] invalid slug: {args.clear_bug!r}", file=sys.stderr)
+            return 4
+        ok = _clear_bug(slug_arg)
         print("REMOVED" if ok else "NOT_FOUND")
         return 0 if ok else 1
 

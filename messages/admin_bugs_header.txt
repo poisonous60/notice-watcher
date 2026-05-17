@@ -1,0 +1,1 @@
+🐞 `.BUG.json` 마커 ({{n}}건) — bug-fix workflow 대상:

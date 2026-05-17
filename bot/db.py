@@ -521,6 +521,17 @@ def queue_pending_count(conn: sqlite3.Connection) -> int:
     return int(conn.execute("SELECT COUNT(*) FROM jobs WHERE status='pending'").fetchone()[0])
 
 
+def find_earlier_same_slug_job(conn: sqlite3.Connection, slug: str, *, exclude_id: int) -> Optional[int]:
+    """주어진 slug 의 다른 pending/running 잡 (exclude_id 제외) 중 가장 빠른 id 반환. 없으면 None.
+    K1/K3 같은 URL 동시 처리 시 사용자 ack 에 "이미 처리 중인 잡 #N" 표시용."""
+    row = conn.execute(
+        "SELECT id FROM jobs WHERE slug=? AND id<>? AND status IN ('pending','running') "
+        "ORDER BY id ASC LIMIT 1",
+        (slug, exclude_id),
+    ).fetchone()
+    return int(row["id"]) if row else None
+
+
 def count_user_register_jobs_since(conn: sqlite3.Connection, user_id: str, since_iso: str) -> int:
     """rate-limit 용 — 특정 user_id 가 since_iso 이후 enqueue 한 register 잡 수.
     `requested_by` 는 JSON {"id":..., "name":...} — `json_extract($.id)` 로 안전 매칭 (substring 매칭 X)."""

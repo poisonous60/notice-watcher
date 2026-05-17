@@ -173,12 +173,16 @@ async def watch(interaction: discord.Interaction, url: str, filter: Optional[str
         return
 
     slug = url_to_slug(url)
-    if site_ops.is_rejected(slug):
-        info = site_ops.rejected_info(slug) or {}
-        await interaction.edit_original_response(
-            content=msg("rejected_site",
-                        reason=site_ops.public_reason(info.get('reason')),
-                        note=info.get('note') or '없음'))
+    if site_ops.is_blocked(slug):
+        kind_m = site_ops.marker_kind(slug)
+        if kind_m == "bug":
+            await interaction.edit_original_response(content=msg("blocked_bug", slug=slug))
+        else:
+            info = site_ops.blocked_info(slug) or {}
+            await interaction.edit_original_response(
+                content=msg("rejected_site",
+                            reason=site_ops.public_reason(info.get('reason')),
+                            note=info.get('note') or '없음'))
         return
     user_id = str(interaction.user.id)
     target_kind = "channel" if here else "dm"
@@ -231,11 +235,17 @@ async def watch(interaction: discord.Interaction, url: str, filter: Optional[str
         ack_channel_id=str(ack_msg.channel.id), ack_message_id=str(ack_msg.id),
         sub_payload=sub_payload, dedupe=False,
     )
-    pos = db.queue_position(_conn, job_id)
-    if pos <= 1:
-        text = msg("watch_queued_first", job_id=job_id)
+    # 같은 URL 의 다른 잡이 이미 큐/실행 중이면 K1/K3 ack ("이미 처리 중") — worker 의 SQL skip +
+    # claim 가드가 자연 흡수해 subprocess 는 1회만 돈다.
+    inflight = db.find_earlier_same_slug_job(_conn, slug, exclude_id=job_id)
+    if inflight is not None:
+        text = msg("queued_same_url", job_id=inflight)
     else:
-        text = msg("watch_queued_wait", job_id=job_id, pos=pos)
+        pos = db.queue_position(_conn, job_id)
+        if pos <= 1:
+            text = msg("watch_queued_first", job_id=job_id)
+        else:
+            text = msg("watch_queued_wait", job_id=job_id, pos=pos)
     await interaction.edit_original_response(content=text)
 
 
@@ -258,12 +268,16 @@ async def preview(interaction: discord.Interaction, url: str, article_url: Optio
         return
 
     slug = url_to_slug(url)
-    if site_ops.is_rejected(slug):
-        info = site_ops.rejected_info(slug) or {}
-        await interaction.edit_original_response(
-            content=msg("rejected_site",
-                        reason=site_ops.public_reason(info.get('reason')),
-                        note=info.get('note') or '없음'))
+    if site_ops.is_blocked(slug):
+        kind_m = site_ops.marker_kind(slug)
+        if kind_m == "bug":
+            await interaction.edit_original_response(content=msg("blocked_bug", slug=slug))
+        else:
+            info = site_ops.blocked_info(slug) or {}
+            await interaction.edit_original_response(
+                content=msg("rejected_site",
+                            reason=site_ops.public_reason(info.get('reason')),
+                            note=info.get('note') or '없음'))
         return
     if _is_registered(slug):
         # 등록된 사이트 — 즉시 예시만
@@ -294,6 +308,11 @@ async def preview(interaction: discord.Interaction, url: str, article_url: Optio
         sub_payload=None,  # preview 는 subscription 안 만듦
         dedupe=False,
     )
+    inflight = db.find_earlier_same_slug_job(_conn, slug, exclude_id=job_id)
+    if inflight is not None:
+        text = msg("queued_same_url", job_id=inflight)
+        await interaction.edit_original_response(content=text)
+        return
     pos = db.queue_position(_conn, job_id)
     if pos <= 1:
         text = msg("preview_queued_first", job_id=job_id)

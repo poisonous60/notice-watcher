@@ -1,0 +1,1 @@
+• `{{slug}}` rc={{rc}} ×{{count}} (마지막 {{last_at}}) — {{reason}}

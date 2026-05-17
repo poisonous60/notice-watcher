@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}Bugs · notice-watcher{% endblock %}
+{% block body %}
+<h2>🐞 BUG 마커 — 코드 버그 / 시스템 측 결함</h2>
+<p class="muted">
+  `output/poll_state/&lt;slug&gt;.BUG.json` 박힌 slug 목록. rc=-1 (chromium_lock timeout) / rc=-2 (subprocess timeout) /
+  rc=-3 (외부 예외) / rc=-5 (봇 반복 죽음) / rc=-99 (worker 예외). hand-config pipeline 과 별도 = <b>bug-fix workflow</b> 대상.
+  root cause 푼 뒤 Clear 누르면 N100 의 마커 제거.
+  snapshot 기준 (Pull 시 N100 에서 복사).
+</p>
+
+{% if rows %}
+<p class="muted">행 hover → tail / 전체 reason.</p>
+
+<table class="cases-table compact">
+  <colgroup>
+    <col style="width: 140px">
+    <col style="width: 30%">
+    <col style="width: 70px">
+    <col style="width: 60px">
+    <col>
+    <col style="width: 48px">
+  </colgroup>
+  <thead>
+    <tr>
+      <th>last_at</th>
+      <th>slug</th>
+      <th>rc</th>
+      <th>count</th>
+      <th>reason</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+    <tr id="bugs-row-{{ r.slug }}" class="cases-row">
+      <td class="mono nowrap"><time>{{ r.last_at_short }}</time></td>
+      <td class="cases-slug-cell">
+        <span class="cases-slug-text"><code>{{ r.slug }}</code></span>
+        {% if r.url|is_http %}<a class="cases-slug-link" href="{{ r.url }}" target="_blank" rel="noopener noreferrer">↗</a>{% endif %}
+        <div class="cases-popover">
+          <div class="cases-pop-row"><b>slug</b> <code>{{ r.slug }}</code></div>
+          <div class="cases-pop-row"><b>rc</b> {{ r.rc }}</div>
+          <div class="cases-pop-row"><b>count</b> {{ r.count }}</div>
+          <div class="cases-pop-row"><b>first_at</b> <code>{{ r.first_at_short or '(없음)' }}</code></div>
+          <div class="cases-pop-row"><b>last_at</b> <code>{{ r.last_at_short or '(없음)' }}</code></div>
+          {% if r.url %}
+          <div class="cases-pop-row"><b>url</b>
+            {% if r.url|is_http %}
+              <a href="{{ r.url }}" target="_blank" rel="noopener noreferrer">{{ r.url }}</a>
+            {% else %}
+              <code>{{ r.url }}</code>
+            {% endif %}
+          </div>
+          {% endif %}
+          {% if r.reason %}<div class="cases-pop-row"><b>reason</b> {{ r.reason }}</div>{% endif %}
+          {% if r.tail_short %}<div class="cases-pop-row"><b>tail (last 6)</b><pre><code>{{ r.tail_short }}</code></pre></div>{% endif %}
+        </div>
+      </td>
+      <td class="nowrap"><code>{{ r.rc }}</code></td>
+      <td class="nowrap">{{ r.count }}</td>
+      <td class="nowrap" title="{{ r.reason }}">{{ r.reason_short }}</td>
+      <td>
+        <button class="secondary nw-icon-btn"
+                title="Clear — BUG 마커 제거 (root cause 푼 뒤)"
+                hx-post="/bugs/{{ r.slug }}/clear"
+                hx-target="#bugs-row-{{ r.slug }}"
+                hx-swap="outerHTML"
+                hx-confirm="`{{ r.slug }}` 의 BUG 마커 풀어줄까요? 옛 ack 메시지는 그대로 — 사용자가 다시 /watch 처야 새 시도가 들어가요.">
+          🔓
+        </button>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<script>
+(function() {
+  function flipIfNeeded(tr) {
+    var pop = tr.querySelector('.cases-popover');
+    if (!pop) return;
+    pop.classList.remove('flip-up');
+    var popH = pop.scrollHeight || 320;
+    var rect = tr.getBoundingClientRect();
+    var spaceBelow = window.innerHeight - rect.bottom;
+    var spaceAbove = rect.top;
+    if (spaceBelow < popH + 16 && spaceAbove > spaceBelow) {
+      pop.classList.add('flip-up');
+    }
+  }
+  document.querySelectorAll('.cases-table tbody tr.cases-row').forEach(function(tr) {
+    tr.addEventListener('mouseenter', function() { flipIfNeeded(tr); });
+  });
+})();
+</script>
+{% else %}
+<p class="muted">현재 BUG 마커 없음 — 시스템 측 결함 없음. 🎉</p>
+{% endif %}
+{% endblock %}

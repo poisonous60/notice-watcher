@@ -24,10 +24,11 @@ from bot.runtime_config import settings
 from bot.site_ops import (
     append_triage_queue,
     baseline_count,
+    blocked_info,
     body_warning,
-    is_rejected,
+    is_blocked,
+    marker_kind,
     public_reason,
-    rejected_info,
     blocking_register,
     edit_channel_message,
     is_registered,
@@ -38,8 +39,9 @@ log = logging.getLogger("bot.worker")
 
 _tasks: list[asyncio.Task] = []
 
-# 같은 잡이 봇을 N회 이상 죽이면 자동 failed 처리 — 큐 맨앞에서 무한 점유 방지.
-ATTEMPTS_LIMIT = 5
+# 같은 잡이 봇을 N회 이상 죽이면 BUG 마커 박고 자동 fail — 큐 맨앞 무한 점유 방지.
+# 임계 2 = 한 번은 외부 사고 (deploy/OOM 등) 봐주고, 두 번째 죽음에 즉시 BUG (잡 자체 원인 명백).
+ATTEMPTS_LIMIT = 2
 
 # per-slug 직렬화 — 같은 slug 잡 두 개를 다른 worker 가 동시 claim 했을 때 chromium probe
 # 가 같은 사이트에 병렬로 못 가게. 첫 worker 가 끝나면 두 번째가 깨어나 is_registered(slug)
@@ -148,7 +150,7 @@ async def _process_job(client, conn, job, dm_owner) -> None:
     """slug 단위 직렬화 wrapper. 본문은 `_process_job_inner` — 락 잡고 호출.
 
     같은 slug 의 잡이 다른 worker 에서 진행 중이면 끝날 때까지 await. 끝난 뒤 깨어나
-    `_process_job_inner` 가 자체적으로 is_rejected / is_registered 가드 통과 → 적절한 결과.
+    `_process_job_inner` 가 자체적으로 is_blocked / is_registered 가드 통과 → 적절한 결과.
     """
     job_id = int(job["id"])
     slug = job["slug"]
@@ -189,18 +191,24 @@ async def _process_job_inner(client, conn, job, dm_owner) -> None:
     try:
         # __enter__ 는 try 안 — 만약 raise 하면 finally 가 안 부서지고 __exit__ skip.
         trace_cm.__enter__()
-        # enqueue 직후 owner 가 /admin reject 박은 race condition — register subprocess 안 돌리고 fail.
-        if kind == "register" and is_rejected(slug):
-            info = rejected_info(slug) or {}
-            log.info("잡 #%d rejected by admin — register subprocess 스킵 (slug=%s)", job_id, slug)
-            db.mark_job_finished(conn, job_id, ok=False, rc=-4, tail="(rejected by admin)")
+        # is_blocked 가드 (진입~claim race 흡수) — REJECTED/FAILED/BUG 마커 중 하나라도 있으면 즉시 종결.
+        # 같은 slug 의 첫 잡이 영구 거부 / 자동 등록 실패 / BUG 박은 직후 두 번째 잡이 claim 된 케이스 등.
+        if kind == "register" and is_blocked(slug):
+            kind_m = marker_kind(slug)
+            info = blocked_info(slug) or {}
+            log.info("잡 #%d blocked (%s) — register subprocess 스킵 (slug=%s)", job_id, kind_m, slug)
+            rc_map = {"rejected": -4, "bug": -6, "failed": -7}
+            db.mark_job_finished(conn, job_id, ok=False, rc=rc_map.get(kind_m, -4),
+                                 tail=f"({kind_m} marker present)")
             if job["ack_channel_id"]:
-                await edit_channel_message(
-                    client, job["ack_channel_id"], job["ack_message_id"],
-                    msg("worker_rejected_during",
-                        slug=slug,
-                        reason=public_reason(info.get('reason')),
-                        note=info.get('note') or '없음'))
+                if kind_m == "bug":
+                    text = msg("blocked_bug", slug=slug)
+                else:
+                    text = msg("worker_rejected_during",
+                               slug=slug,
+                               reason=public_reason(info.get('reason')),
+                               note=info.get('note') or '없음')
+                await edit_channel_message(client, job["ack_channel_id"], job["ack_message_id"], text)
             return
         # 동시에 두 사용자가 같은 신규 사이트를 enqueue 한 경우 — 두 번째 잡은 register subprocess 스킵.
         if kind == "register" and is_registered(slug):
@@ -209,39 +217,34 @@ async def _process_job_inner(client, conn, job, dm_owner) -> None:
             await _post_register_success(client, conn, job)
             return
 
-        # 자동 fail — 같은 잡이 봇을 ATTEMPTS_LIMIT 회 이상 죽였으면 큐 맨앞 점유 그만 두고 끝냄.
-        # claim_next_pending 직후라 status='running' → mark_job_finished 의 가드 통과.
-        if attempts > ATTEMPTS_LIMIT:
-            log.warning("잡 #%d attempts=%d 가 한도 %d 초과 — 자동 failed 처리",
+        # 자동 fail — 같은 잡이 봇을 ATTEMPTS_LIMIT 회 이상 죽였으면 BUG 마커 박고 종결.
+        # 한 번 봐주고 (외부 사고 가능성) 두 번째 죽음에 즉시 BUG (잡 자체 원인 명백).
+        if attempts >= ATTEMPTS_LIMIT:
+            log.warning("잡 #%d attempts=%d 한도 %d 도달 — BUG 마커 박고 자동 fail",
                         job_id, attempts, ATTEMPTS_LIMIT)
+            try:
+                from scripts.register import _save_bug
+                _save_bug(slug, url, rc=-5,
+                          reason=f"봇이 {attempts}회 처리 중 죽음 (kind={kind})",
+                          tail=f"job_id={job_id} via={job['via']}")
+            except Exception as _e:  # noqa: BLE001
+                log.warning("attempts 한도 _save_bug 실패 — slug=%s err=%r", slug, _e)
             db.mark_job_finished(conn, job_id, ok=False, rc=-5,
-                                 tail=f"(자동 fail — 재시작 {attempts}회로 한도 {ATTEMPTS_LIMIT} 초과)")
+                                 tail=f"(BUG: 재시작 {attempts}회로 한도 {ATTEMPTS_LIMIT} 도달)")
             if kind == "register" and job["ack_channel_id"]:
                 await edit_channel_message(
                     client, job["ack_channel_id"], job["ack_message_id"],
-                    msg("worker_attempts_exceeded", slug=slug, attempts=attempts))
-            await dm_owner(
-                f"❌ 잡 #{job_id} `{slug}` 가 재시작 {attempts}회로 한도 초과 — 자동 failed. "
-                "처리 중 봇이 반복 죽는 원인 조사 필요",
-                key=f"job-attempts-exceeded:{job_id}",
-            )
+                    msg("blocked_bug", slug=slug))
             return
 
         # 봇 재시작으로 재실행된 잡 (attempts>0) → 사용자 향 재시작 안내 우선 띄움.
         # 이전 인스턴스가 ack 메시지를 phase 중간 상태(예: "사전 확인 중…")로 남겨두고 죽었을 수 있어서,
         # 다음 phase edit 가 phase 를 거꾸로 돌리는 것처럼 보이기 전에 명시적으로 "재시작 → 처음부터" 안내.
-        # register 만 ack 보유 → reprobe 는 사용자 ack 없이 OWNER DM 만.
+        # register 만 ack 보유 → reprobe 는 사용자 ack 없이.
         if attempts > 0 and kind == "register" and job["ack_channel_id"]:
             await edit_channel_message(
                 client, job["ack_channel_id"], job["ack_message_id"],
                 msg("worker_restarted", slug=slug, attempts=attempts))
-        # OWNER DM 은 kind 무관 — reprobe 도 무한 재시작 가능성 관측해야 함.
-        if attempts >= 2:
-            await dm_owner(
-                f"⚠️ 잡 #{job_id} `{slug}` (kind={kind}) 가 재시작 {attempts}회 — "
-                "처리 중 봇이 반복 죽는지 확인 필요",
-                key=f"job-restart:{job_id}",
-            )
 
         # ack — 처리 시작 표시 (register 만). 곧 [PHASE] probe / recognize 가 와서 덮어쓴다.
         # attempts>0 이어서 worker_restarted 가 위에 떴어도, 이 phase_probe 가 곧 덮어써서
@@ -310,19 +313,41 @@ async def _process_job_inner(client, conn, job, dm_owner) -> None:
                     await edit_channel_message(
                         client, job["ack_channel_id"], job["ack_message_id"],
                         msg("worker_policy_blocked", slug=slug))
+                elif rc in (-1, -2, -3):
+                    # 시스템 측 결함 (chromium_lock timeout / subprocess timeout / 외부 예외)
+                    # = BUG 카테고리. `.BUG.json` 박고 같은 slug 후속 잡 fast-skip 시킴. OWNER DM X.
+                    try:
+                        from scripts.register import _save_bug
+                        _save_bug(slug, url, rc=rc,
+                                  reason={-1: "chromium_lock timeout",
+                                          -2: "register subprocess timeout",
+                                          -3: "blocking_register 외부 예외"}[rc],
+                                  tail=tail or "")
+                    except Exception as _e:  # noqa: BLE001
+                        log.warning("rc=%d _save_bug 실패 — slug=%s err=%r", rc, slug, _e)
+                    await edit_channel_message(
+                        client, job["ack_channel_id"], job["ack_message_id"],
+                        msg("blocked_bug", slug=slug))
                 else:
                     append_triage_queue(url, slug, job["via"], req_by, tail)
                     err = _format_register_error(rc, tail)
                     await edit_channel_message(client, job["ack_channel_id"], job["ack_message_id"],
                                                msg("worker_register_fail", slug=slug, err=err))
             else:
-                # re-probe 실패 — OWNER 에게만 알림
-                await dm_owner(
-                    f"⚠️ re-probe 실패 — `{slug}`\nrc={rc}\n```\n{(tail or '')[-1500:]}\n```",
-                    key=f"reprobe-fail:{slug}",
-                )
+                # re-probe 실패 — OWNER 알림 안 함 (BUG 면 마커, 그 외 transient 는 다음 주기 재시도).
+                if rc in (-1, -2, -3):
+                    try:
+                        from scripts.register import _save_bug
+                        _save_bug(slug, url, rc=rc,
+                                  reason={-1: "chromium_lock timeout (reprobe)",
+                                          -2: "register subprocess timeout (reprobe)",
+                                          -3: "blocking_register 외부 예외 (reprobe)"}[rc],
+                                  tail=tail or "")
+                    except Exception as _e:  # noqa: BLE001
+                        log.warning("re-probe rc=%d _save_bug 실패 — slug=%s err=%r", rc, slug, _e)
+                log.warning("re-probe 실패 — slug=%s rc=%d", slug, rc)
     except Exception as e:  # noqa: BLE001
-        # 잡 처리 중 예상 못한 예외 — running 상태로 멈추지 않도록 failed 로 finalize.
+        # 잡 처리 중 예상 못한 예외 — 코드 자체 결함 = BUG 카테고리. `.BUG.json` 박고 ack BUG 문구.
         # mark_job_finished 가 status='running' 조건이라 이미 done/failed 인 잡은 안 건드림.
         _job_exc = e
         log.exception("잡 #%d 처리 중 예외: %r", job_id, e)
@@ -330,14 +355,21 @@ async def _process_job_inner(client, conn, job, dm_owner) -> None:
             db.mark_job_finished(conn, job_id, ok=False, rc=-99, tail=f"worker exception: {e!r}")
         except Exception:  # noqa: BLE001
             pass
+        try:
+            from scripts.register import _save_bug
+            _save_bug(slug, url, rc=-99,
+                      reason=f"worker inner 예외: {type(e).__name__}",
+                      tail=f"{e!r}")
+        except Exception:  # noqa: BLE001
+            pass
         if kind == "register" and job["ack_channel_id"]:
             try:
-                # to_thread 가 raise 한 경우 drain 안 됐을 수 있음 — phase edit 가 unexpected 보다
+                # to_thread 가 raise 한 경우 drain 안 됐을 수 있음 — phase edit 가 BUG ack 보다
                 # 늦게 land 해서 덮어쓰는 race 차단.
                 await _drain_phase_edits(phase_edit_futures)
                 await edit_channel_message(
                     client, job["ack_channel_id"], job["ack_message_id"],
-                    msg("worker_unexpected", slug=slug))
+                    msg("blocked_bug", slug=slug))
             except Exception:  # noqa: BLE001
                 pass
     finally:
@@ -378,13 +410,8 @@ def _phase_to_message(label: str, slug: str) -> Optional[str]:
 
 
 def _format_register_error(rc: int, tail: str) -> str:
-    if rc == -1:
-        return msg("worker_err_lock_timeout")
-    if rc == -2:
-        secs = int(settings.chromium_lock.register_subprocess_timeout)
-        mins = secs // 60
-        unit = f"{mins}분" if secs % 60 == 0 else f"{secs}초"
-        return msg("worker_err_subprocess_timeout", unit=unit)
+    # rc=-1/-2/-3 (BUG) 는 호출자가 BUG 분기로 가로채므로 여기 안 들어옴.
+    # rc=1 등 hand-config 대상만 — tail 의 마지막 ~6줄을 사용자 향 안내에 첨부.
     last = "\n".join((tail or "").strip().splitlines()[-6:])
     return msg("worker_err_needs_hand_adapter", tail=last)
 
