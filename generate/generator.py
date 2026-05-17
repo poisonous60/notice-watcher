@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Callable, Optional
 from urllib.parse import urlsplit
 
@@ -26,34 +27,40 @@ class GenerationError(RuntimeError):
 
 
 def _enrich_retry_feedback(rep, prev_cfg: Optional[dict], digest: dict, attempt_history: list[dict]) -> str:
-    """retry prompt 에 들어갈 풍부한 feedback. rep.feedback_text() 베이스 + 세 가지 보강.
+    """retry prompt 에 들어갈 풍부한 feedback. rep.feedback_text() 베이스 + 네 가지 보강.
 
-    1. 직전 시도 cfg 의 핵심 selector/strategy echo — LLM 이 자기가 뭐 박았는지 잊지 않도록.
-    2. probe 가 본 정적 HTML 의 top 3 repeating patterns 후보 재표시 — 125k digest 안에 묻혀 LLM
-       이 못 찾는 selector 후보를 *눈에 띄게* 다시 제시.
-    3. attempt history — 직전 시도들이 박은 strategy/row_selector 누적. 같은 방향 반복 차단.
+    1. 직전 시도 cfg 의 list/article 전체 JSON echo — LLM 이 자기가 뭐 박았는지 잊지 않도록.
+    2. probe 정적 HTML 의 top 7 repeating patterns 후보 재표시 — 125k digest 안에 묻혀 LLM 이
+       못 찾는 selector 후보를 *눈에 띄게* 다시 제시.
+    3. probe 가 본 *다른 list 전략 후보* 카운트 (traffic_json_api / inline_js_data /
+       hydration_list / runtime_id / feed) — 지금 strategy 가 안 풀리면 다른 방향 검토 유도.
+    4. attempt history — 직전 시도들이 박은 strategy/row_selector + 각 attempt 의 fail
+       detail(첫 80자) 누적. 같은 hard fail 반복 시 명시 경고.
 
     같은 모델(gpt-5.4-mini)이 같은 prompt 에 같은 실수 반복하던 문제(retry 회복률 ~17%) 완화.
     """
     base = rep.feedback_text() if rep is not None else ""
     parts: list[str] = [base] if base else []
 
-    # (1) 직전 시도 cfg 핵심 필드 echo
+    # (1) 직전 시도 cfg — list/article 전체 echo (LLM 이 자기 박은 거 다시 보도록)
     if isinstance(prev_cfg, dict) and prev_cfg:
         lst = prev_cfg.get("list") or {}
         art = prev_cfg.get("article") or {}
         strat = prev_cfg.get("strategy")
-        rows = lst.get("row_selector") or lst.get("rows") or lst.get("list_path")
-        art_content = art.get("content") or art.get("body_selector")
+        lst_dump = json.dumps(lst, ensure_ascii=False)
+        art_dump = json.dumps(art, ensure_ascii=False)
+        # 너무 길면 잘림 (개별 키 600자) — 보통 list/article 은 100-400자 수준
+        if len(lst_dump) > 600:
+            lst_dump = lst_dump[:600] + "…(잘림)"
+        if len(art_dump) > 600:
+            art_dump = art_dump[:600] + "…(잘림)"
         parts.append(
-            "\n### 직전 시도가 박은 핵심 필드 (똑같이 박지 마라)\n"
+            "\n### 직전 시도가 박은 cfg (똑같이 박지 마라)\n"
             f"  strategy: {strat!r}\n"
-            f"  list.row_selector / list_path: {rows!r}\n"
-            f"  list.url_template: {lst.get('url_template')!r}\n"
-            f"  article.fetch_kind: {art.get('fetch_kind')!r}\n"
-            f"  article.content selector: {art_content!r}\n"
-            f"  article.url_template: {art.get('url_template')!r}\n"
-            f"  → 위 selector/strategy 로 검증 실패했다. 같은 selector 살짝 변형은 똑같이 실패한다 — "
+            f"  list: {lst_dump}\n"
+            f"  article: {art_dump}\n"
+            f"  headers: {json.dumps(prev_cfg.get('headers') or {}, ensure_ascii=False)[:200]}\n"
+            "  → 위 selector/strategy 로 검증 실패했다. 같은 selector 살짝 변형은 똑같이 실패한다 — "
             "**방향 자체**(strategy 또는 selector 의 root 컨테이너)를 바꿔라."
         )
 
@@ -61,8 +68,8 @@ def _enrich_retry_feedback(rep, prev_cfg: Optional[dict], digest: dict, attempt_
     lc = digest.get("list_candidates") or {}
     pats = lc.get("html_repeating_patterns") or []
     if pats:
-        top = sorted(pats, key=lambda p: int(p.get("child_count") or 0), reverse=True)[:3]
-        lines = ["\n### probe 정적 HTML 의 반복 패턴 후보 top 3 (selector 다시 검토)"]
+        top = sorted(pats, key=lambda p: int(p.get("child_count") or 0), reverse=True)[:7]
+        lines = [f"\n### probe 정적 HTML 의 반복 패턴 후보 top {len(top)} (selector 다시 검토)"]
         for p in top:
             lines.append(
                 f"  - selector={p.get('selector')!r}  child_count={p.get('child_count')}  "
@@ -74,19 +81,45 @@ def _enrich_retry_feedback(rep, prev_cfg: Optional[dict], digest: dict, attempt_
         )
         parts.append("\n".join(lines))
 
-    # (3) attempt history — 누적 시도된 strategy/selector
+    # (3) probe 다른 list 전략 후보 카운트 — strategy 변경 옵션 LLM 한테 명시
+    n_json_api = len(lc.get("traffic_json_api_candidates") or [])
+    n_inline_js = len(lc.get("inline_js_data_candidates") or [])
+    n_hyd = len(lc.get("hydration_list_candidates") or [])
+    n_runtime = len(lc.get("runtime_id_candidates") or [])
+    n_feed = len(digest.get("feed_candidates") or [])
+    counts = []
+    if n_json_api:
+        counts.append(f"traffic_json_api_candidates={n_json_api}건 (httpx_json 검토)")
+    if n_inline_js:
+        counts.append(f"inline_js_data_candidates={n_inline_js}건 (정적 HTML 안 JSON island 파싱)")
+    if n_hyd:
+        counts.append(f"hydration_list_candidates={n_hyd}건 (Next/Nuxt SSR data)")
+    if n_runtime:
+        counts.append(f"runtime_id_candidates={n_runtime}건")
+    if n_feed:
+        counts.append(f"feed_candidates={n_feed}건 (RSS/Atom)")
+    if counts:
+        parts.append(
+            "\n### probe 가 본 *다른* list 전략 후보 (지금 strategy 안 풀리면 검토)\n  "
+            + "\n  ".join(counts)
+            + "\n  → 후보가 있는데 못 풀고 있으면 strategy 자체를 바꿔라."
+        )
+
+    # (4) attempt history — 누적 시도된 strategy/selector + fail detail
     if len(attempt_history) >= 1:
         lines = [f"\n### 직전 {len(attempt_history)} 회 시도 누적 (같은 방향 X)"]
         for h in attempt_history:
+            fails = h.get("fails_detail") or h.get("fails") or []
             lines.append(
                 f"  attempt {h['n']}: strategy={h.get('strategy')!r}  "
-                f"row_selector/list_path={h.get('rows')!r}  fails={h.get('fails')!r}"
+                f"row_selector/list_path={h.get('rows')!r}\n"
+                f"    fails: {fails!r}"
             )
-        # 같은 hard fail 반복 감지
+        # 같은 hard fail 반복 감지 (name set 비교)
         all_fails = [tuple(sorted(h.get("fails") or [])) for h in attempt_history]
         if len(all_fails) >= 2 and len(set(all_fails)) == 1:
             lines.append(
-                "  ⚠ 직전 시도들 모두 *같은 hard fail* 만 일으킴 — 같은 방향으론 절대 안 풀린다. "
+                "  ⚠ 직전 시도들 모두 *같은 hard fail 종류* 만 일으킴 — 같은 방향으론 절대 안 풀린다. "
                 "selector 미세 조정 대신 strategy 자체 또는 selector root 를 바꿔라. "
                 "본문 fail 반복이면 article.body_empty_acceptable:true 검토."
             )
@@ -231,13 +264,14 @@ async def generate_config_validated(
             msg = "하드 실패: " + "; ".join(f"{c.name}({c.detail})" for c in rep.hard_failures())
             if on_attempt:
                 on_attempt(i, cfg, rep, False, msg)
-            # history 누적 — 다음 attempt feedback 의 (3) 분기용
+            # history 누적 — 다음 attempt feedback 의 (4) 분기용
             _lst = cfg.get("list") or {}
             attempt_history.append({
                 "n": i,
                 "strategy": cfg.get("strategy"),
                 "rows": _lst.get("row_selector") or _lst.get("list_path"),
                 "fails": [c.name for c in rep.hard_failures()],
+                "fails_detail": [f"{c.name}: {(c.detail or '')[:80]}" for c in rep.hard_failures()],
             })
             prev_cfg = cfg
             prev_feedback = _enrich_retry_feedback(rep, prev_cfg, digest, attempt_history)
