@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "site": "www.humblebundle.com",
+  "board": "software",
+  "_source_url": "https://www.humblebundle.com/software",
+  "_note": "Humble Bundle software 카테고리 — 활성 번들 모자이크. probe 가 첫 글로 /store/search?... 를 잘못 집어 자동 등록 4회 실패 (last_feedback: posts_nonempty=0). 정적 GET 응답은 <script id=\"landingPage-json-data\"> 안의 JSON 만 — 타일 anchor 는 클라이언트 JS 가 그림. 그래서 playwright_html + wait_selector. row_selector 'a.full-tile-view.bundle' (probe-captured DOM 에 22개). post_id = /software/<machine-name> 의 machine-name (stable). body_empty_acceptable=true — 새 번들 등장 알림만 (개인용).",
+  "strategy": "playwright_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8"
+  },
+  "timeout": 20.0,
+  "list": {
+    "url_template": "https://www.humblebundle.com/software",
+    "wait_selector": "a.full-tile-view.bundle",
+    "row_selector": "a.full-tile-view.bundle",
+    "fields": {
+      "post_id": [{"from": "attr", "selector": ":self", "attr": "href", "transform": [["regex_extract", "/software/([^/?#]+)"]]}],
+      "title": [{"from": "attr", "selector": ":self", "attr": "aria-label", "transform": [["collapse_ws"], ["regex_extract", "^(.+?)(?:,\\s*\\d+\\s*(?:Day|Hour|Minute|Second)s?\\s*Left)?$"]]}],
+      "url": [{"from": "attr", "selector": ":self", "attr": "href", "transform": [["strip_query_fragment"], ["urljoin", "https://www.humblebundle.com"]]}]
+    }
+  },
+  "article": {
+    "body_empty_acceptable": true,
+    "content": []
+  }
+}

@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 44 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 45 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -10,6 +10,7 @@
 | [`host_tistory-com_root_c59077fa`](host_tistory-com_root_c59077fa.md) | ❌ 거부 (Tistory 메인 멀티-블로그 hub — 게시판 아님) | 2026-05-17 | F | not_a_board, multi_host_hub, post_id_stable_shape, tistory_root | https://www.tistory.com/ |
 | [`host_openai-com_index_47fc1c1b`](host_openai-com_index_47fc1c1b.md) | ❌ 거부 (OpenAI 단일 글페이지 — 게시판 아님; 보드 `/news/` Cloudflare 차단) | 2026-05-17 | F | not_a_board, single_article_page, fetch_list_403, cloudflare_blocked, openai_index | https://openai.com/index/attacking-machine-learning-with-adversarial-examples/ |
 | [`host_ktword-co-kr_test_d081a15f`](host_ktword-co-kr_test_d081a15f.md) | ❌ 거부 (KT용어집 단일 entry — 백과형 사이트 게시판 아님) | 2026-05-17 | F | not_a_board, single_article_page, post_id_unique_duplicate, encyclopedia_entry | http://www.ktword.co.kr/test/view/view.php?m_temp1=3801 |
+| [`host_humblebundle-co_software_4589b229`](host_humblebundle-co_software_4589b229.md) | 🔧 손 config (playwright_html) — probe `pick_first_article_url` 가 `/store/search?...` 픽 + 정적 GET 응답엔 타일 anchor 없음 (JS 가 `<script id="landingPage-json-data">` JSON 에서 렌더) | 2026-05-17 | none | posts_nonempty_0, wrong_first_article_url, dom_only_in_headless, cross_section_tile_pattern | https://www.humblebundle.com/software |
 | [`host_github-wiki-see_m_6c370ddf`](host_github-wiki-see_m_6c370ddf.md) | ❌ 거부 (github-wiki-see.page wiki 미러 단일 페이지 — 게시판 아님) | 2026-05-17 | F | not_a_board, single_article_page, post_id_stable_shape, wiki_mirror, external_only_links | https://github-wiki-see.page/m/goofcode/UR/wiki/%EB%85%BC%EB%AC%B8-%EC%9D%BD%EB%8A%94-%EB%B2%95%2C-Survey-%EB%85%BC%EB%AC%B8-%EC%93%B0%EB%8A%94%EB%B2%95 |
 | [`host_developer-mozil_ko_47b50435`](host_developer-mozil_ko_47b50435.md) | ❌ 거부 (MDN docs reference 단일 페이지 — 게시판 아님) | 2026-05-17 | F | not_a_board, single_article_page, posts_nonempty_zero, docs_reference_page | https://developer.mozilla.org/ko/docs/Web/HTML/Reference/Elements/button |
 | [`host_d4m0n-tistory-c_10_dd865fee`](host_d4m0n-tistory-c_10_dd865fee.md) | ✅ 일반화 완료 (probe verdict TARGET_NOT_FOUND 분리 — 같은 패턴 미래 자동 처리) | 2026-05-17 | C+D | target_not_found_misclassified_as_blocked, verdict_target_404_falls_through | https://d4m0n.tistory.com/10 |
@@ -66,7 +67,7 @@
 | F | 15 |
 | F+A | 1 |
 | F+C | 3 |
-| none | 8 |
+| none | 9 |
 
 ### config_strategy 분포
 
@@ -77,9 +78,9 @@
 | httpx_html | 6 |
 | httpx_json | 4 |
 | none | 6 |
-| playwright_html | 3 |
+| playwright_html | 4 |
 
 ### 최근 90일 (≥ 2026-02-16)
 
-케이스 44 건.
+케이스 45 건.
 
