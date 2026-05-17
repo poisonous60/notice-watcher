@@ -181,11 +181,15 @@ async def triage_failed_later(request: Request):
 # --------------------------------------------------------------------------- #
 @app.get("/jobs", response_class=HTMLResponse)
 async def jobs_list(request: Request, count: int = Query(50, ge=1, le=200),
+                    page: int = Query(1, ge=1),
                     status: Optional[str] = None, q: Optional[str] = None,
                     conn=Depends(get_conn)):
     if conn is None:
         return _no_snapshot(request)
-    rows = inspector.recent_jobs(conn, limit=count)
+    offset = (page - 1) * count
+    rows = inspector.recent_jobs(conn, limit=count + 1, offset=offset)
+    has_next = len(rows) > count
+    rows = rows[:count]
     if status:
         rows = [r for r in rows if (r.get("status") or "") == status]
     if q:
@@ -201,7 +205,8 @@ async def jobs_list(request: Request, count: int = Query(50, ge=1, le=200),
             return False
         rows = [r for r in rows if _match(r)]
     return _render("jobs.html", request,
-                   rows=rows, count=count, filter_status=status, q=q, active="jobs")
+                   rows=rows, count=count, filter_status=status, q=q,
+                   page=page, has_next=has_next, active="jobs")
 
 
 @app.get("/jobs/{job_id}", response_class=HTMLResponse)
@@ -578,19 +583,23 @@ async def history_index(request: Request,
                         category: Optional[str] = Query(None),
                         q: Optional[str] = Query(None),
                         failed: Optional[str] = Query(None),
-                        limit: int = Query(200, ge=10, le=2000)):
+                        limit: int = Query(200, ge=10, le=2000),
+                        page: int = Query(1, ge=1)):
     """dashboard 액션 audit (output/control_audit.jsonl) tail + 필터 표."""
     cat = (category or "").strip()
     if cat and cat not in history_view.CATEGORIES:
         cat = ""
-    rows, total = history_view.load_rows(
-        limit=limit, category=cat, only_failed=bool(failed), q=(q or "").strip(),
+    offset = (page - 1) * limit
+    rows, total, has_next = history_view.load_rows(
+        limit=limit, offset=offset, category=cat,
+        only_failed=bool(failed), q=(q or "").strip(),
     )
     return _render("history.html", request,
                    active="history", rows=rows, total=total,
                    categories=history_view.CATEGORIES,
                    selected_category=cat, q=q or "",
                    only_failed=bool(failed), limit=limit,
+                   page=page, has_next=has_next,
                    max_tail=history_view.MAX_TAIL_LINES)
 
 
@@ -600,12 +609,14 @@ async def timings_index(request: Request,
                         q: Optional[str] = Query(None),
                         failed: Optional[str] = Query(None),
                         idle: Optional[str] = Query(None),
-                        limit: int = Query(100, ge=10, le=500)):
+                        limit: int = Query(100, ge=10, le=500),
+                        page: int = Query(1, ge=1)):
     ok, entries, err = await tracing_view.fetch_index_all()
     selected_kinds = {kind} if kind else None
-    entries = tracing_view.filter_sort_entries(
+    offset = (page - 1) * limit
+    entries, has_next = tracing_view.filter_sort_entries(
         entries, kinds=selected_kinds, only_failed=bool(failed),
-        include_idle=bool(idle), slug_q=q, limit=limit,
+        include_idle=bool(idle), slug_q=q, limit=limit, offset=offset,
     )
     # 표시용 변환.
     rows = []
@@ -622,7 +633,7 @@ async def timings_index(request: Request,
                    known_kinds=tracing_view.KNOWN_KINDS,
                    selected_kind=kind or "", q=q or "",
                    only_failed=bool(failed), include_idle=bool(idle),
-                   limit=limit)
+                   limit=limit, page=page, has_next=has_next)
 
 
 @app.get("/timings/{trace_id}", response_class=HTMLResponse)
@@ -646,16 +657,21 @@ async def timings_detail(request: Request, trace_id: str):
 @app.get("/reports", response_class=HTMLResponse)
 async def reports_list(request: Request, status: str = "open",
                        count: int = Query(50, ge=1, le=500),
+                       page: int = Query(1, ge=1),
                        conn=Depends(get_conn)):
     if conn is None:
         return _no_snapshot(request)
     s = None if status == "all" else status
-    rows = [dict(r) for r in db.list_reports(conn, status=s, limit=count)]
+    offset = (page - 1) * count
+    raw = db.list_reports(conn, status=s, limit=count + 1, offset=offset)
+    has_next = len(raw) > count
+    rows = [dict(r) for r in raw[:count]]
     bulk_prompt = prompts.report_triage_bulk(
         report_ids=[r["id"] for r in rows]) if rows and status == "open" else None
     return _render("reports.html", request,
                    rows=rows, filter_status=status, count=count,
-                   bulk_prompt=bulk_prompt, active="reports")
+                   bulk_prompt=bulk_prompt,
+                   page=page, has_next=has_next, active="reports")
 
 
 @app.get("/reports/{report_id}", response_class=HTMLResponse)
@@ -682,11 +698,16 @@ async def report_detail(request: Request, report_id: int, conn=Depends(get_conn)
 # --------------------------------------------------------------------------- #
 @app.get("/feedback", response_class=HTMLResponse)
 async def feedback_list(request: Request, count: int = Query(50, ge=1, le=500),
+                        page: int = Query(1, ge=1),
                         conn=Depends(get_conn)):
     if conn is None:
         return _no_snapshot(request)
-    rows = [dict(r) for r in db.list_feedback(conn, limit=count)]
-    return _render("feedback.html", request, rows=rows, count=count, active="feedback")
+    offset = (page - 1) * count
+    raw = db.list_feedback(conn, limit=count + 1, offset=offset)
+    has_next = len(raw) > count
+    rows = [dict(r) for r in raw[:count]]
+    return _render("feedback.html", request, rows=rows, count=count,
+                   page=page, has_next=has_next, active="feedback")
 
 
 # --------------------------------------------------------------------------- #
@@ -699,7 +720,8 @@ _USAGE_RANGES = ("today", "7d", "30d", "all")
 async def usage_page(request: Request,
                      range: str = Query("7d"),  # noqa: A002 (shadow built-in OK — FastAPI 파라미터)
                      call_site: Optional[str] = None,
-                     limit: int = Query(100, ge=1, le=1000)):
+                     limit: int = Query(100, ge=1, le=1000),
+                     page: int = Query(1, ge=1)):
     rng = range if range in _USAGE_RANGES else "7d"
     conn = usage_view.open_usage_conn(state.usage_db_path())
     if conn is None:
@@ -708,7 +730,12 @@ async def usage_page(request: Request,
         since = usage_view.since_iso_for(rng)
         kpis = usage_view.usage_kpis(conn, since_iso=since, call_site=call_site)
         matrix = usage_view.usage_matrix(conn, since_iso=since)
-        recent = usage_view.usage_recent(conn, since_iso=since, call_site=call_site, limit=limit)
+        offset = (page - 1) * limit
+        recent_raw = usage_view.usage_recent(
+            conn, since_iso=since, call_site=call_site,
+            limit=limit + 1, offset=offset)
+        has_next = len(recent_raw) > limit
+        recent = recent_raw[:limit]
         series = usage_view.usage_daily_series(conn, days=14)
         sites = usage_view.list_call_sites(conn)
     finally:
@@ -717,6 +744,7 @@ async def usage_page(request: Request,
                    kpis=kpis, matrix=matrix, recent=recent, series=series,
                    call_sites=sites, range=rng, ranges=_USAGE_RANGES,
                    filter_call_site=call_site, limit=limit,
+                   page=page, has_next=has_next,
                    active="usage")
 
 

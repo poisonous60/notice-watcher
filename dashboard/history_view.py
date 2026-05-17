@@ -95,17 +95,21 @@ def _attrs_short(detail) -> str:
 CATEGORIES = ("remote", "push", "save", "users")
 
 
-def load_rows(*, limit: int = 200, category: str = "",
-              only_failed: bool = False, q: str = "") -> tuple[list[dict], int]:
-    """audit jsonl tail → 필터 → 표시용 dict list. 두 번째 반환값 = 총 raw 줄 수.
+def load_rows(*, limit: int = 200, offset: int = 0, category: str = "",
+              only_failed: bool = False,
+              q: str = "") -> tuple[list[dict], int, bool]:
+    """audit jsonl tail → 필터 → 표시용 dict list. 반환: (rows, total_raw_lines, has_next).
 
     최신 행이 위. 행 dict 는 `/timings` 와 같은 키를 씀 — template 가 거의 동일 markup.
+    필터·정렬 후 offset/limit slice 로 pagination 지원.
     """
     raw_lines = _tail_lines(AUDIT_PATH, MAX_TAIL_LINES)
     total = len(raw_lines)
-    rows: list[dict] = []
+    matched: list[dict] = []
     q_lower = (q or "").strip().lower()
     cat_filter = (category or "").strip().lower()
+    # offset + limit + 1 까지만 수집 — has_next 판정용 +1, 더는 풀스캔 X.
+    stop_at = offset + limit + 1
 
     for line in reversed(raw_lines):
         d = _parse_line(line)
@@ -132,7 +136,7 @@ def load_rows(*, limit: int = 200, category: str = "",
             if q_lower not in hay.lower():
                 continue
 
-        rows.append({
+        matched.append({
             "ok": ok,
             "kind": action,                              # remote.poll-now-slug 등 full action
             "t_start_str": _ts_to_kst_str(d.get("ts") or ""),
@@ -141,10 +145,12 @@ def load_rows(*, limit: int = 200, category: str = "",
             "attrs_short": _attrs_short(detail),
             "trace_id": trace_id,
         })
-        if len(rows) >= limit:
+        if len(matched) >= stop_at:
             break
 
-    return rows, total
+    has_next = len(matched) > offset + limit
+    rows = matched[offset:offset + limit]
+    return rows, total, has_next
 
 
 __all__ = ["load_rows", "CATEGORIES", "MAX_TAIL_LINES", "AUDIT_PATH"]

@@ -114,7 +114,8 @@ def usage_matrix(conn: sqlite3.Connection, *, since_iso: Optional[str]) -> list[
 
 
 def usage_recent(conn: sqlite3.Connection, *, since_iso: Optional[str],
-                 call_site: Optional[str], limit: int = 100) -> list[dict]:
+                 call_site: Optional[str], limit: int = 100,
+                 offset: int = 0) -> list[dict]:
     where, params = _where_clause(since_iso, call_site)
     q = f"""
         SELECT id, ts, call_site, slug, attempt, provider, model, status,
@@ -123,9 +124,10 @@ def usage_recent(conn: sqlite3.Connection, *, since_iso: Optional[str],
         FROM llm_calls
         {where}
         ORDER BY ts DESC, id DESC
-        LIMIT ?
+        LIMIT ? OFFSET ?
     """
-    rows = [dict(r) for r in conn.execute(q, params + [int(limit)]).fetchall()]
+    rows = [dict(r) for r in conn.execute(
+        q, params + [int(limit), int(offset)]).fetchall()]
     for r in rows:
         r["ts_kst"] = _ts_to_kst_str(r.get("ts") or "")
     return rows

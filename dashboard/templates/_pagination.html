@@ -1,0 +1,27 @@
+{# 페이지 네비 — 컨텍스트에 page(int) + has_next(bool) 필요. request.url 의 page 만 교체. #}
+{% if page > 1 or has_next %}
+<nav class="pagination" style="display:flex;gap:0.6rem;align-items:center;margin:0.6rem 0;font-size:0.9rem;">
+  {% if page > 1 %}
+    <a href="{{ request.url.include_query_params(page=1) }}" title="첫 페이지">⏮</a>
+    <a href="{{ request.url.include_query_params(page=page-1) }}">← 이전</a>
+  {% else %}
+    <span class="muted">⏮</span>
+    <span class="muted">← 이전</span>
+  {% endif %}
+  <span class="muted">page {{ page }}</span>
+  {% if has_next %}
+    <a href="{{ request.url.include_query_params(page=page+1) }}">다음 →</a>
+  {% else %}
+    <span class="muted">다음 →</span>
+  {% endif %}
+  <form method="get" style="display:inline-flex;gap:0.3rem;align-items:center;margin-left:0.6rem;">
+    {% for k, v in request.query_params.multi_items() if k != 'page' %}
+      <input type="hidden" name="{{ k }}" value="{{ v }}">
+    {% endfor %}
+    <label class="muted" style="font-size:0.85rem;margin:0;">이동
+      <input type="number" name="page" value="{{ page }}" min="1" style="width:5em;">
+    </label>
+    <button type="submit" class="secondary outline" style="padding:0.2rem 0.6rem;margin:0;">go</button>
+  </form>
+</nav>
+{% endif %}

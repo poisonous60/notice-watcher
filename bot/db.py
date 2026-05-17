@@ -572,10 +572,12 @@ def jobs_summary(conn: sqlite3.Connection) -> dict:
     return {r["status"]: int(r["n"]) for r in rows}
 
 
-def recent_register_jobs(conn: sqlite3.Connection, limit: int = 20) -> list[sqlite3.Row]:
+def recent_register_jobs(conn: sqlite3.Connection, limit: int = 20,
+                         offset: int = 0) -> list[sqlite3.Row]:
     """사용자 `/watch`·`/preview` 가 만든 잡만(=kind='register') 최신 순. inspector.recent_jobs 가 호출."""
     return conn.execute(
-        "SELECT * FROM jobs WHERE kind='register' ORDER BY id DESC LIMIT ?", (limit,)
+        "SELECT * FROM jobs WHERE kind='register' ORDER BY id DESC LIMIT ? OFFSET ?",
+        (limit, offset),
     ).fetchall()
 
 
@@ -596,14 +598,16 @@ def add_report(conn: sqlite3.Connection, *, user_id: str, username: Optional[str
 
 
 def list_reports(conn: sqlite3.Connection, *, status: Optional[str] = "open",
-                 limit: int = 50) -> list[sqlite3.Row]:
+                 limit: int = 50, offset: int = 0) -> list[sqlite3.Row]:
     """status=None 이면 전체. 기본 open 만 최신순."""
     if status is None:
         return conn.execute(
-            "SELECT * FROM reports ORDER BY id DESC LIMIT ?", (limit,)
+            "SELECT * FROM reports ORDER BY id DESC LIMIT ? OFFSET ?",
+            (limit, offset),
         ).fetchall()
     return conn.execute(
-        "SELECT * FROM reports WHERE status=? ORDER BY id DESC LIMIT ?", (status, limit),
+        "SELECT * FROM reports WHERE status=? ORDER BY id DESC LIMIT ? OFFSET ?",
+        (status, limit, offset),
     ).fetchall()
 
 
@@ -726,9 +730,11 @@ def add_feedback(conn: sqlite3.Connection, *, user_id: str, username: Optional[s
     return _retry(_do)
 
 
-def list_feedback(conn: sqlite3.Connection, limit: int = 20) -> list[sqlite3.Row]:
+def list_feedback(conn: sqlite3.Connection, limit: int = 20,
+                  offset: int = 0) -> list[sqlite3.Row]:
     return conn.execute(
-        "SELECT * FROM feedback ORDER BY id DESC LIMIT ?", (limit,)
+        "SELECT * FROM feedback ORDER BY id DESC LIMIT ? OFFSET ?",
+        (limit, offset),
     ).fetchall()
 
 

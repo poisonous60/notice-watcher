@@ -87,7 +87,7 @@
   </div>
 </form>
 
-<p class="muted">{{ rows|length }} row (cap 500). 행 hover → 상세 (reason · failure_keys · files · url).</p>
+<p class="muted">{{ rows|length }} row · page {{ page }} (page_size {{ page_size }}). 행 hover → 상세 (reason · failure_keys · files · url).</p>
 
 <table class="cases-table compact">
   <colgroup>
@@ -156,6 +156,8 @@
     {% endfor %}
   </tbody>
 </table>
+
+{% include "_pagination.html" %}
 
 <script>
 (function() {

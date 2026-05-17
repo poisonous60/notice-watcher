@@ -60,6 +60,9 @@ def _build_filter_sql(
     requested_by: Optional[str],
     q: Optional[str],
     period_days: Optional[int],
+    *,
+    limit: int = 500,
+    offset: int = 0,
 ) -> tuple[str, list[Any]]:
     """LIKE 패턴은 escape_like + ESCAPE '\\\\' — 사용자 input 의 `_`/`%` wildcard 화 차단."""
     sql = "SELECT * FROM case_runs WHERE 1=1"
@@ -86,7 +89,8 @@ def _build_filter_sql(
         params.extend([like, like, like])
     if period_days and period_days > 0:
         sql += f" AND ts > datetime('now', '-{int(period_days)} days')"
-    sql += " ORDER BY ts DESC LIMIT 500"
+    sql += " ORDER BY ts DESC LIMIT ? OFFSET ?"
+    params.extend([int(limit), int(offset)])
     return sql, params
 
 
@@ -133,16 +137,21 @@ def register(app, templates, _render):
         requested_by: Optional[str] = None,
         q: Optional[str] = None,
         period: int = Query(0, ge=0, le=3650),
+        page: int = Query(1, ge=1),
+        page_size: int = Query(100, ge=10, le=500),
     ):
         conn = state.open_cases_conn()
         if conn is None:
             return _render("cases_empty.html", request, active="cases")
         try:
+            offset = (page - 1) * page_size
             sql, params = _build_filter_sql(
                 skill, outcome, layer, failure_key, requested_by, q, period,
+                limit=page_size + 1, offset=offset,
             )
             raw_rows = conn.execute(sql, params).fetchall()
-            rows = [_row_to_view(r) for r in raw_rows]
+            has_next = len(raw_rows) > page_size
+            rows = [_row_to_view(r) for r in raw_rows[:page_size]]
             distinct_outcomes = set(_distinct(conn, "outcome"))
             facets = {
                 "skills": _distinct(conn, "skill"),
@@ -163,6 +172,7 @@ def register(app, templates, _render):
                 "failure_key": failure_key, "requested_by": requested_by,
                 "q": q, "period": period,
             },
+            page=page, has_next=has_next, page_size=page_size,
             active="cases",
         )
 

@@ -142,7 +142,9 @@ def filter_sort_entries(entries: list[IndexEntry], *,
                         only_failed: bool = False,
                         include_idle: bool = False,
                         slug_q: Optional[str] = None,
-                        limit: int = 100) -> list[IndexEntry]:
+                        limit: int = 100,
+                        offset: int = 0) -> tuple[list[IndexEntry], bool]:
+    """필터·정렬 후 offset/limit slice. 반환: (page_entries, has_next)."""
     out = entries
     if not include_idle:
         out = [e for e in out if e.kind != "notify_idle"]
@@ -160,7 +162,8 @@ def filter_sort_entries(entries: list[IndexEntry], *,
             return False
         out = [e for e in out if _match(e)]
     out.sort(key=lambda e: e.t_start_wall, reverse=True)
-    return out[:limit]
+    has_next = (offset + limit) < len(out)
+    return out[offset:offset + limit], has_next
 
 
 # --------------------------------------------------------------------------- #
