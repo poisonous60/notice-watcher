@@ -946,6 +946,60 @@ def _list_strategy_hint(digest: dict) -> Optional[str]:
     return None
 
 
+def _extra_signal_hints(digest: dict) -> list[str]:
+    """probe 가 이미 잡은 신호들을 *별도 hint* 로 LLM 한테 강조. notes/list_candidates 안에 묻혀 있어 LLM 이
+    무시하는 신호를 escalation_hint 블록으로 빼냄.
+
+    포함:
+      (A) probe.diagnose 의 static_vs_headless 결과 notes — 정적 응답이 빈 shell / headless 에만 mosaic.
+          piku 류: static_ok_preset=S1.H2 라 `_list_strategy_hint` 가 None 반환 → hint 안 박혔던 케이스.
+      (B) list_candidates.body_empty_likely — 본문 없는 사이트 (row_interactive_action 게임/투표/SPA
+          또는 row_external_host 검색결과/aggregator). article.body_empty_acceptable: true 권고.
+    """
+    out: list[str] = []
+    notes = digest.get("notes") or []
+    lc = digest.get("list_candidates") or {}
+
+    blank_shell = any("정적 응답이 빈 shell" in n for n in notes)
+    js_mosaic = any(("정적 응답 vs Playwright DOM" in n) for n in notes)
+    if blank_shell:
+        out.append(
+            "⚠ probe: **정적 응답이 빈 shell — Playwright DOM 에만 글 목록/카드가 그려진다** "
+            "(static_ok_preset 가 200 OK 라도 빈 껍데기). strategy=httpx_html 은 글 0건 나옴 — "
+            "strategy=playwright_html + list.wait_selector 로 그 컨테이너가 그려질 때까지 대기해라. "
+            "또는 정적 HTML 안 inline JSON island(<script id=*-json-data>) 가 있으면 직접 파싱 검토."
+        )
+    elif js_mosaic:
+        out.append(
+            "⚠ probe: **headless 응답에만 mosaic/tile 류 반복 패턴 다수 (정적 응답엔 0건 또는 빈약)**. "
+            "정적 HTML 의 inline JSON island 가 있으면 httpx_html + inline_js_data 직접 파싱도 가능, "
+            "확신 없으면 strategy=playwright_html + list.wait_selector. 같은 row_selector 를 정적 httpx "
+            "전략으로 잡으면 0건 → retry 도 같은 selector 반복으로 모두 실패한다."
+        )
+
+    if lc.get("body_empty_likely"):
+        ria = lc.get("row_interactive_action") or {}
+        reh = lc.get("row_external_host") or {}
+        if ria.get("is_interactive_action"):
+            sample = (ria.get("sample_row_first_text") or "")[:60]
+            cause = f"행 텍스트가 게임/투표/검색 액션 패턴 (예: {sample!r}, 매칭 키워드={ria.get('matched_keyword_set')})"
+        elif reh.get("external_ratio"):
+            cause = (f"행 url 의 외부 호스트 비율 {int((reh.get('external_ratio') or 0) * 100)}% "
+                     f"(aggregator/검색결과 류 — sample_external_urls={reh.get('sample_external_urls', [])[:2]})")
+        else:
+            cause = "row_external_host 또는 row_interactive_action 신호"
+        out.append(
+            f"⚠ probe: **body_empty_likely=true — 본문이 본질적으로 없는 사이트** ({cause}). "
+            "이런 사이트의 글 페이지엔 selector 로 잡을 본문이 없거나 매우 짧다 — 같은 본문 selector 를 "
+            "여러 번 시도해봐야 retry 다 실패한다. **article.body_empty_acceptable: true** 박고 "
+            "content 키는 비우거나 가장 그럴듯한 후보 1-2개만. 본문 검증이 hard 에서 soft 로 완화됨. "
+            "봇이 등록 후 'body_empty_at_baseline=true' 면 사용자 알림에 '본문 추출 안 됨' 경고가 자동 표시 — "
+            "알림은 제목+URL 만 나가도 OK."
+        )
+
+    return out
+
+
 def _preflight(slug: str, url: Optional[str], digest: dict, *, no_escalate: bool) -> dict:
     """gemini 부르기 *전에* 한 번: 옛 escalation 의 정보 수집을 "N회 실패 후 escalate" 대신 "사전 준비"로.
 
@@ -984,6 +1038,7 @@ def _preflight(slug: str, url: Optional[str], digest: dict, *, no_escalate: bool
     lh = _list_strategy_hint(digest)
     if lh:
         hints.append(lh)
+    hints.extend(_extra_signal_hints(digest))
     if art_ok:
         hints.append(
             f"probe 가 '{art}' 를 '첫 글' 로 추정하고 그 페이지를 render+HAR 로 re-probe 했다 — article_sample.html / api_candidates / article_sample.url 이 그것. "
