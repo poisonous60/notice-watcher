@@ -232,13 +232,18 @@ async def job_detail(request: Request, job_id: int, conn=Depends(get_conn)):
 # --------------------------------------------------------------------------- #
 @app.get("/subs", response_class=HTMLResponse)
 async def subs_list(request: Request, q: Optional[str] = None,
+                    include_lurking: int = 0, broken_only: int = 0,
                     conn=Depends(get_conn)):
     if conn is None:
         return _no_snapshot(request)
     paths = state.snapshot_paths()
     # 자동등록 *실패* 만 한 slug 는 subscriptions 테이블에 행이 없다 — DB-only 목록이면 누락 →
     # /subs 가 활성+FAILED 둘 다 보이도록 합집합. (FAILED 큐 상세는 /triage/failed)
-    slugs = sorted(set(state.unique_slugs(conn)) | set(state.failed_slugs()))
+    # include_lurking=1 이면 구독자 0 + state 파일만 있는 slug (lurking) 도 포함.
+    base = set(state.unique_slugs(conn)) | set(state.failed_slugs())
+    if include_lurking:
+        base |= set(state.state_file_slugs())
+    slugs = sorted(base)
     rows = []
     for s in slugs:
         subs = db.subscriptions_for_slug(conn, s)
@@ -269,6 +274,8 @@ async def subs_list(request: Request, q: Optional[str] = None,
             "user_ids": user_ids,
         })
     rows.sort(key=lambda r: (-r["broken"], not r["failed"], r["slug"]))
+    if broken_only:
+        rows = [r for r in rows if r["broken"] > 0]
     if q:
         ql = q.strip().lower()
         def _match(r):
@@ -280,7 +287,10 @@ async def subs_list(request: Request, q: Optional[str] = None,
                 return True
             return False
         rows = [r for r in rows if _match(r)]
-    return _render("subs.html", request, rows=rows, q=q, active="subs")
+    return _render("subs.html", request, rows=rows, q=q,
+                   include_lurking=bool(include_lurking),
+                   broken_only=bool(broken_only),
+                   active="subs")
 
 
 @app.get("/subs/{slug}", response_class=HTMLResponse)

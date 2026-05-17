@@ -7,12 +7,22 @@
 <form hx-get="/subs"
       hx-target="#subs-rows"
       hx-select="#subs-rows > *"
-      hx-trigger="keyup changed delay:300ms from:find input[name=q], submit"
+      hx-trigger="keyup changed delay:300ms from:find input[name=q], change from:find input[type=checkbox], submit"
       hx-push-url="true"
-      class="topbar" style="border:0;margin-bottom:0.5rem;gap:0.6rem;">
+      class="topbar" style="border:0;margin-bottom:0.5rem;gap:0.6rem;flex-wrap:wrap;">
   <input type="search" name="q" value="{{ q or '' }}"
          placeholder="slug · URL · user_id 검색"
          style="flex:1;min-width:14em;margin:0;">
+  <label style="display:flex;align-items:center;gap:0.3rem;font-size:0.85rem;white-space:nowrap;">
+    <input type="checkbox" name="include_lurking" value="1"
+           {% if include_lurking %}checked{% endif %}>
+    구독자 없는 lurking 포함
+  </label>
+  <label style="display:flex;align-items:center;gap:0.3rem;font-size:0.85rem;white-space:nowrap;">
+    <input type="checkbox" name="broken_only" value="1"
+           {% if broken_only %}checked{% endif %}>
+    broken 만
+  </label>
 </form>
 
 <p class="muted" style="font-size:0.85rem;margin:0 0 0.5rem 0;">{{ rows | length }}건 표시</p>
@@ -26,7 +36,9 @@
   <tbody id="subs-rows">
     {% for r in rows %}
     <tr>
-      <td class="mono"><a href="/subs/{{ r.slug | urlencode }}">{{ r.slug }}</a></td>
+      <td class="mono" style="max-width:28em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+        <a href="/subs/{{ r.slug | urlencode }}" title="{{ r.slug }}">{{ r.slug }}</a>
+      </td>
       <td>{{ r.n_subs }}</td>
       <td>{{ '✓' if r.has_config else '—' }}</td>
       <td>{{ '✓' if r.has_state else '—' }}</td>

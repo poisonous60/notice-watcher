@@ -132,6 +132,21 @@ def unique_slugs(conn) -> list[str]:
     return [r[0] for r in rows]
 
 
+def state_file_slugs() -> list[str]:
+    """state_dir 의 *.json 중 FAILED/BUG marker 가 아닌 slug.
+    lurking (구독자 0) 포함해 polling 흔적 있는 모든 slug."""
+    paths = snapshot_paths()
+    if not paths.state_dir.exists():
+        return []
+    out = []
+    for f in paths.state_dir.glob("*.json"):
+        n = f.name
+        if n.endswith(".FAILED.json") or n.endswith(".BUG.json"):
+            continue
+        out.append(n[:-len(".json")])
+    return sorted(out)
+
+
 def open_cases_conn():
     """case_runs 테이블 (skill 실행 audit) sqlite. dev box 전용 — N100 안 봄.
     파일 없으면 None — 라우트가 안내 페이지 분기.
