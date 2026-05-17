@@ -25,6 +25,76 @@ class GenerationError(RuntimeError):
     pass
 
 
+def _enrich_retry_feedback(rep, prev_cfg: Optional[dict], digest: dict, attempt_history: list[dict]) -> str:
+    """retry prompt 에 들어갈 풍부한 feedback. rep.feedback_text() 베이스 + 세 가지 보강.
+
+    1. 직전 시도 cfg 의 핵심 selector/strategy echo — LLM 이 자기가 뭐 박았는지 잊지 않도록.
+    2. probe 가 본 정적 HTML 의 top 3 repeating patterns 후보 재표시 — 125k digest 안에 묻혀 LLM
+       이 못 찾는 selector 후보를 *눈에 띄게* 다시 제시.
+    3. attempt history — 직전 시도들이 박은 strategy/row_selector 누적. 같은 방향 반복 차단.
+
+    같은 모델(gpt-5.4-mini)이 같은 prompt 에 같은 실수 반복하던 문제(retry 회복률 ~17%) 완화.
+    """
+    base = rep.feedback_text() if rep is not None else ""
+    parts: list[str] = [base] if base else []
+
+    # (1) 직전 시도 cfg 핵심 필드 echo
+    if isinstance(prev_cfg, dict) and prev_cfg:
+        lst = prev_cfg.get("list") or {}
+        art = prev_cfg.get("article") or {}
+        strat = prev_cfg.get("strategy")
+        rows = lst.get("row_selector") or lst.get("rows") or lst.get("list_path")
+        art_content = art.get("content") or art.get("body_selector")
+        parts.append(
+            "\n### 직전 시도가 박은 핵심 필드 (똑같이 박지 마라)\n"
+            f"  strategy: {strat!r}\n"
+            f"  list.row_selector / list_path: {rows!r}\n"
+            f"  list.url_template: {lst.get('url_template')!r}\n"
+            f"  article.fetch_kind: {art.get('fetch_kind')!r}\n"
+            f"  article.content selector: {art_content!r}\n"
+            f"  article.url_template: {art.get('url_template')!r}\n"
+            f"  → 위 selector/strategy 로 검증 실패했다. 같은 selector 살짝 변형은 똑같이 실패한다 — "
+            "**방향 자체**(strategy 또는 selector 의 root 컨테이너)를 바꿔라."
+        )
+
+    # (2) probe 정적 HTML top 반복 패턴 후보 재표시 (LLM 이 못 찾던 selector 후보)
+    lc = digest.get("list_candidates") or {}
+    pats = lc.get("html_repeating_patterns") or []
+    if pats:
+        top = sorted(pats, key=lambda p: int(p.get("child_count") or 0), reverse=True)[:3]
+        lines = ["\n### probe 정적 HTML 의 반복 패턴 후보 top 3 (selector 다시 검토)"]
+        for p in top:
+            lines.append(
+                f"  - selector={p.get('selector')!r}  child_count={p.get('child_count')}  "
+                f"href_pattern_guess={p.get('href_pattern_guess')!r}  sample_url={p.get('sample_url')!r}"
+            )
+        lines.append(
+            "  → 같은 호스트 글 링크(`href_pattern_guess` / `sample_url`) 가진 게 진짜 보드 후보. "
+            "nav/footer/sidebar 패턴은 건너뛰어라. 정적 HTML 에 없으면 strategy=playwright_html."
+        )
+        parts.append("\n".join(lines))
+
+    # (3) attempt history — 누적 시도된 strategy/selector
+    if len(attempt_history) >= 1:
+        lines = [f"\n### 직전 {len(attempt_history)} 회 시도 누적 (같은 방향 X)"]
+        for h in attempt_history:
+            lines.append(
+                f"  attempt {h['n']}: strategy={h.get('strategy')!r}  "
+                f"row_selector/list_path={h.get('rows')!r}  fails={h.get('fails')!r}"
+            )
+        # 같은 hard fail 반복 감지
+        all_fails = [tuple(sorted(h.get("fails") or [])) for h in attempt_history]
+        if len(all_fails) >= 2 and len(set(all_fails)) == 1:
+            lines.append(
+                "  ⚠ 직전 시도들 모두 *같은 hard fail* 만 일으킴 — 같은 방향으론 절대 안 풀린다. "
+                "selector 미세 조정 대신 strategy 자체 또는 selector root 를 바꿔라. "
+                "본문 fail 반복이면 article.body_empty_acceptable:true 검토."
+            )
+        parts.append("\n".join(lines))
+
+    return "\n".join(parts) if parts else ""
+
+
 def _patch_minimal(cfg: dict, digest: dict) -> dict:
     if not isinstance(cfg, dict):
         raise GenerationError(f"모델이 JSON 객체가 아닌 걸 반환: {type(cfg).__name__}")
@@ -96,6 +166,7 @@ async def generate_config_validated(
     override = f"gemini:{model}" if model else None
     prev_cfg: Optional[dict] = None
     prev_feedback: str = ""
+    attempt_history: list[dict] = []  # _enrich_retry_feedback (3) — 누적 시도 strategy/selector/fails
     tr = current_trace()
 
     for i in range(1, max_attempts + 1):
@@ -160,8 +231,16 @@ async def generate_config_validated(
             msg = "하드 실패: " + "; ".join(f"{c.name}({c.detail})" for c in rep.hard_failures())
             if on_attempt:
                 on_attempt(i, cfg, rep, False, msg)
+            # history 누적 — 다음 attempt feedback 의 (3) 분기용
+            _lst = cfg.get("list") or {}
+            attempt_history.append({
+                "n": i,
+                "strategy": cfg.get("strategy"),
+                "rows": _lst.get("row_selector") or _lst.get("list_path"),
+                "fails": [c.name for c in rep.hard_failures()],
+            })
             prev_cfg = cfg
-            prev_feedback = rep.feedback_text()
+            prev_feedback = _enrich_retry_feedback(rep, prev_cfg, digest, attempt_history)
             if i < max_attempts:
                 await asyncio.sleep(inter_attempt_sleep)
 
