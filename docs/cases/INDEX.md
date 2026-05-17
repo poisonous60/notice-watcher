@@ -2,10 +2,11 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 45 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 46 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
+| [`infra_probe_static_drift_url_penalty_2026-05-17`](infra_probe_static_drift_url_penalty_2026-05-17.md) | 🏗 인프라 (probe 휴리스틱 lift — static_vs_headless rule 2 + first_article_url query penalty) | 2026-05-17 | C+A | static_vs_headless_repeat_diff, first_article_url_query_heavy, prompt_static_insufficient_signal, deferred_heuristic_moving_target | (인프라 case — 특정 사이트 X. 트리거 = 사용자 비판 "5건째도 보류 6건째도 보류 — 언제 박는데" 의 트랙 B 부분) |
 | [`infra_article_page_reject_3_2026-05-17`](infra_article_page_reject_3_2026-05-17.md) | 🏗 인프라 (article_page_reject 패턴 5 호스트 추가 + 자가 점검 §6.7 보류 결정 1) | 2026-05-17 | F | not_a_board, single_article_page, multi_host_hub, mdn_docs, wiki_mirror, encyclopedia, cloudflare_blocked, tistory_root | (인프라 case — 트리거 = 5 건 동시 처리: mdn/github-wiki-see/ktword/openai/tistory) |
 | [`host_tistory-com_root_c59077fa`](host_tistory-com_root_c59077fa.md) | ❌ 거부 (Tistory 메인 멀티-블로그 hub — 게시판 아님) | 2026-05-17 | F | not_a_board, multi_host_hub, post_id_stable_shape, tistory_root | https://www.tistory.com/ |
 | [`host_openai-com_index_47fc1c1b`](host_openai-com_index_47fc1c1b.md) | ❌ 거부 (OpenAI 단일 글페이지 — 게시판 아님; 보드 `/news/` Cloudflare 차단) | 2026-05-17 | F | not_a_board, single_article_page, fetch_list_403, cloudflare_blocked, openai_index | https://openai.com/index/attacking-machine-learning-with-adversarial-examples/ |
@@ -60,6 +61,7 @@
 |---|---|
 | (미기재) | 11 |
 | C | 1 |
+| C+A | 1 |
 | C+D | 2 |
 | C+F | 1 |
 | E | 1 |
@@ -73,7 +75,7 @@
 
 | strategy | count |
 |---|---|
-| (미기재) | 18 |
+| (미기재) | 19 |
 | handwritten | 7 |
 | httpx_html | 6 |
 | httpx_json | 4 |
@@ -82,5 +84,5 @@
 
 ### 최근 90일 (≥ 2026-02-16)
 
-케이스 45 건.
+케이스 46 건.
 

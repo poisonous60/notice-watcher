@@ -80,4 +80,58 @@ def run() -> list[tuple[str, bool, str]]:
         f"out={out}",
     ))
 
+    # 6) humblebundle-like — size ratio 작음 (~1.2배) 이지만 headless 에만 mosaic tile 다수.
+    # 룰 2 (selector-level diff) 가 잡아야 함 — nav/scripts 가 정적에도 충분히 커서 size ratio 가 안 터지게.
+    padding = "<script>" + ("var x=1; " * 1000) + "</script>"
+    nav = "<nav>" + "".join(f'<a href="/menu/{i}">menu {i}</a>' for i in range(40)) + "</nav>"
+    footer = "<footer>" + "".join(f'<a href="/policy/{i}">policy {i}</a>' for i in range(20)) + "</footer>"
+    nav_static = f"<html><body>{padding}{nav}<div>page intro</div>{footer}</body></html>"
+    nav_plus_tiles = (f"<html><body>{padding}{nav}<div>page intro</div>"
+                      "<div class='mosaic-section'>"
+                      "<div class='mosaic-layout threes'>"
+                      + "".join(f'<a class="full-tile-view bundle" href="/software/bundle-{i}-software" aria-label="Bundle {i}">tile {i}</a>' for i in range(22))
+                      + f"</div></div>{footer}</body></html>")
+    out = static_vs_headless_check(nav_static, nav_plus_tiles, base_url="https://example.com/software")
+    cases.append((
+        "humblebundle_like_repeat_diff_detected",
+        out.get("static_insufficient") is True
+        and out.get("trigger_rule") == "repeat"
+        and out.get("repeat_anchors_headless") >= 10
+        and out.get("ratio") < 2.0,
+        f"out={out}",
+    ))
+
+    # 7) base_url 없으면 룰 2 skip — 룰 1 만 평가. 정적 = headless → False.
+    out = static_vs_headless_check(nav_static, nav_plus_tiles)
+    cases.append((
+        "no_base_url_skips_rule2",
+        out.get("repeat_anchors_headless") == 0,
+        f"out={out}",
+    ))
+
+    # 8) 룰 2 임계 — repeat_h 가 19 면 trigger X (정확히 임계 미만 검증). 22 면 trigger O.
+    base_pad = padding + nav + footer
+    tiles15 = ("<div class='mosaic'>"
+               + "".join(f'<a class="t bundle" href="/x/bundle-{i}">tile {i}</a>' for i in range(15))
+               + "</div>")
+    tiles25 = ("<div class='mosaic'>"
+               + "".join(f'<a class="t bundle" href="/x/bundle-{i}">tile {i}</a>' for i in range(25))
+               + "</div>")
+    out15 = static_vs_headless_check(f"<html><body>{base_pad}</body></html>",
+                                     f"<html><body>{base_pad}{tiles15}</body></html>",
+                                     base_url="https://example.com/")
+    out25 = static_vs_headless_check(f"<html><body>{base_pad}</body></html>",
+                                     f"<html><body>{base_pad}{tiles25}</body></html>",
+                                     base_url="https://example.com/")
+    cases.append((
+        "rule2_threshold_15_below_20_not_triggered_by_repeat",
+        out15.get("trigger_rule") != "repeat",
+        f"out15={out15}",
+    ))
+    cases.append((
+        "rule2_threshold_25_above_20_triggered",
+        out25.get("trigger_rule") == "repeat" and out25.get("static_insufficient") is True,
+        f"out25={out25}",
+    ))
+
     return cases

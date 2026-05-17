@@ -10,6 +10,7 @@ config 는 "무엇을 어떻게 긁을지"만 정한다. polite delay / robots /
 - "httpx_html"  : 정적 HTML 게시판. httpx GET → bs4 CSS select 로 행 추출. (digest 의 verdict 가 "정적 HTTP로 충분" 류이고 html_repeating_patterns 가 있으면 보통 이것.)
 - "httpx_json"  : JSON API 게시판. httpx GET → JSON 경로로 목록 배열 추출. (digest 의 list_candidates.traffic_json_api_candidates 가 있으면.)
 - "playwright_html" : JS 렌더 필요(Cloudflare 등 / SPA). httpx_html 과 같은 필드 + wait_selector. (verdict 가 "JS 실행 필요" 류, 또는 escalation_hint 가 시키면.)
+- ⚠ playwright_html 추가 트리거 (2026-05-17): notes 에 "정적 응답에 반복 패턴 anchor 가 없음" / "정적 응답이 빈 shell" 경고 — JSON island 에서 tile/card 를 JS 가 그리는 사이트 (humblebundle/itch.io 류) → list.wait_selector 필수.
 - ⚠ **목록은 정적 HTML 인데 *글 본문 페이지* 만 SPA(정적 HTML 에 본문이 비어있음)** 인 경우: strategy 는 "httpx_html" 그대로 두고, article.fetch_kind:"json" + article.url_template(글 본문 JSON API URL, 글 ID 자리는 {post_id}) + article.content:[{from:"json", path:[...]}] 로 *본문만* API 에서 받아라. 그런 API 후보(digest 의 article_sample.api_candidates)가 없으면 strategy 를 "playwright_html" 로 (목록·본문 둘 다 렌더, article.wait_selector 로 본문 컨테이너 대기).
 ※ 로그인 필요(LOGIN_REQUIRED)거나 차단(BLOCKED_*)이면 config 생성하지 말고 그렇게 알 수 있는 최소 config(예: 빈 fields)라도 만들지 말 것 — 대신 strategy 를 정해도 무방하나 본 시스템은 그런 사이트를 자동 등록하지 않는다.
 

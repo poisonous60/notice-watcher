@@ -435,7 +435,14 @@ def traffic_article_body_candidates(har_path: Path, article_url: str = "", *, ma
 
 @heuristic
 def _article_url_score(u: Optional[str], base_host: str) -> int:
-    """'진짜 글 페이지 URL' 같은 정도. (헤더의 myinfo/login 링크 같은 잡 후보를 거르기 위해)"""
+    """'진짜 글 페이지 URL' 같은 정도. (헤더의 myinfo/login 링크 같은 잡 후보를 거르기 위해)
+
+    페널티 (2026-05-17 추가):
+      - query string 안 sort/filter/search/keyword/q= 류 패턴 → -3 (글 페이지가 아니라 *검색·필터 결과 페이지*).
+        humblebundle `/store/search?sort=bestselling&filter=onsale` 같은 헤더의 "Browse Store" 류를 거른다.
+      - path-only 깨끗한 URL (`/path/machine-name` 패턴, 숫자 ID 없이도 안정) → +1
+    누적 4건 (humblebundle/nexon/jobplanet/nature) — `cases_index.py query --signal diverging_first_article` 확인.
+    """
     if not u:
         return -1
     from urllib.parse import urlsplit
@@ -448,6 +455,17 @@ def _article_url_score(u: Optional[str], base_host: str) -> int:
     if re.search(r"\d{3,}", (sp.path or "") + "?" + (sp.query or "")):
         s += 2                                    # 글 ID 같은 숫자
     if re.search(r"(view|detail|article|notice|read|thread|post|bbs|board)", (sp.path or "").lower()):
+        s += 1
+    # 페널티: query string 의 검색/필터/정렬 파라미터 — 글 페이지 아님
+    q = (sp.query or "").lower()
+    if q and re.search(r"(?:^|&)(sort|filter|search|keyword|query|q|page|category)=", q):
+        s -= 3
+    # 페널티: path 가 검색·목록 엔드포인트
+    path_l = (sp.path or "").lower()
+    if re.search(r"/(search|list|index|all|category|tag|sort|filter)(?:/|$|\?)", path_l):
+        s -= 2
+    # 보너스: path-only 깨끗한 URL (machine-name 패턴, query 없음)
+    if not sp.query and re.search(r"/[a-z0-9][a-z0-9_\-]{4,}/?$", path_l):
         s += 1
     return s
 
@@ -546,19 +564,27 @@ def static_vs_headless_check(
     *,
     min_ratio: float = 2.0,
     min_row_diff: int = 5,
+    base_url: Optional[str] = None,
 ) -> dict:
     """정적 응답 vs Playwright 응답 콘텐츠 비교 — *정적이 충분한지* 검증.
 
-    검출 룰:
-      - `headless_size / static_size ≥ min_ratio` AND
-      - headless 의 row-like 신호 (`data-id=`/`<a ` count) 가 정적보다 `+ min_row_diff` 이상
-      - → `static_insufficient: True` (정적 응답이 빈 shell — JS 가 카드/목록 그려야 함)
+    검출 룰 (둘 중 하나 True 면 `static_insufficient=True`):
+      1. **size + row-signal**: `headless_size / static_size ≥ min_ratio` AND
+         headless 의 row-like 신호 (`data-id=`/`<a ` count) 가 정적보다 `+ min_row_diff` 이상
+      2. **반복 패턴 anchor count diff** (2026-05-17 추가, base_url 필요): 같은 class
+         signature 의 sibling 그룹 anchor 가 globally 정적 0 / headless ≥ 10 (즉, JS 가
+         tile/card 를 0→N 으로 그림). humblebundle 처럼 size ratio 작아도 (1.25배)
+         반복 패턴 anchor 가 0→22 인 경우 잡힘.
 
     *왜 필요한가*: probe 의 verdict 결정이 HTTP status(200 OK) 만 보고 "정적 HTTP로 충분" 박음.
     piku 같은 사이트 (정적 14kb data-id=0 vs Playwright 44kb data-id=20) 도 같은 weight 로
-    봐서 LLM 한테 잘못된 strategy=httpx_html 권고 → retry 헛수고. 이 휴리스틱이 verdict 정정 신호.
+    봐서 LLM 한테 잘못된 strategy=httpx_html 권고 → retry 헛수고. 룰 1 이 그걸 잡음.
+    humblebundle 처럼 헤더/푸터/스크립트가 정적·headless 동일이라 size ratio 가 1.25 머무는데
+    번들 타일만 JS render (0→22) 인 케이스는 룰 1 이 못 잡음 — 룰 2 가 그걸 잡음.
 
-    출력: {static_size, headless_size, ratio, row_signal_static, row_signal_headless, static_insufficient: bool}
+    출력: {static_size, headless_size, ratio, row_signal_static, row_signal_headless,
+           repeat_anchors_static, repeat_anchors_headless, repeat_anchors_diff,
+           static_insufficient: bool, trigger_rule: "size"|"repeat"|None}
         둘 중 하나라도 None/빈 문자열이면 ratio=0.0 / static_insufficient=False (판단 불가 → 안전쪽).
     """
     s_text = static_html or ""
@@ -570,19 +596,58 @@ def static_vs_headless_check(
             "static_size": s_size, "headless_size": h_size,
             "ratio": 0.0,
             "row_signal_static": 0, "row_signal_headless": 0,
+            "repeat_anchors_static": 0, "repeat_anchors_headless": 0,
+            "repeat_anchors_diff": 0,
             "static_insufficient": False,
+            "trigger_rule": None,
         }
     s_signal = s_text.count("data-id=") + s_text.count("<a ")
     h_signal = h_text.count("data-id=") + h_text.count("<a ")
     ratio = round(h_size / s_size, 2)
-    static_insufficient = (ratio >= min_ratio) and ((h_signal - s_signal) >= min_row_diff)
+    rule1 = (ratio >= min_ratio) and ((h_signal - s_signal) >= min_row_diff)
+
+    # 룰 2: 반복 패턴 selector-level diff — *headless 에만 등장* 또는 *headless 가 정적 3배 이상* 인 selector 들의
+    # child_count 합 ≥ 10 → drift. nav/footer 같은 양쪽 동일 패턴은 빠지고 *JS render 로 새로 생긴* tile/card 만 잡힘.
+    # base_url 필요 (selector 생성 시).
+    s_repeat = h_repeat = 0
+    if base_url:
+        try:
+            s_patterns = html_repeating_patterns(s_text, base_url=base_url, min_children=3)
+            h_patterns = html_repeating_patterns(h_text, base_url=base_url, min_children=3)
+            s_sels = {p["selector"]: int(p.get("child_count") or 0) for p in s_patterns}
+            h_sels = {p["selector"]: int(p.get("child_count") or 0) for p in h_patterns}
+            # selector-by-selector: headless 가 정적보다 *유의미하게* 더 그린 만큼만 카운트.
+            #   - 정적 0 / headless ≥ N      → headless count
+            #   - 정적 N / headless ≥ 3N    → headless - static
+            #   - 외엔 0 (nav/footer 등 양쪽 비슷)
+            for sel, h_cc in h_sels.items():
+                s_cc = s_sels.get(sel, 0)
+                if s_cc == 0 and h_cc >= 3:
+                    h_repeat += h_cc
+                elif h_cc >= s_cc * 3 and h_cc - s_cc >= 5:
+                    h_repeat += h_cc - s_cc
+            # s_repeat = headless-only-or-3x 신호의 정적 baseline (참고용)
+            for sel, s_cc in s_sels.items():
+                if sel in h_sels and h_sels[sel] >= s_cc:
+                    s_repeat += s_cc
+        except Exception:
+            s_repeat = h_repeat = 0
+    repeat_diff = h_repeat  # headless 가 새로 그린 양
+    rule2 = h_repeat >= 20  # 임계 20 — humblebundle(51)/itch.io(46)/jobplanet(79) 통과, naver-blog post(41) 도 잡히지만 무해(검토)
+
+    static_insufficient = rule1 or rule2
+    trigger = "size" if rule1 else ("repeat" if rule2 else None)
     return {
         "static_size": s_size,
         "headless_size": h_size,
         "ratio": ratio,
         "row_signal_static": s_signal,
         "row_signal_headless": h_signal,
+        "repeat_anchors_static": s_repeat,
+        "repeat_anchors_headless": h_repeat,
+        "repeat_anchors_diff": repeat_diff,
         "static_insufficient": static_insufficient,
+        "trigger_rule": trigger,
     }
 
 

@@ -94,17 +94,32 @@ def diagnose(
                 static_vs_headless = static_vs_headless_check(
                     s_path.read_text(encoding="utf-8", errors="replace"),
                     h_path.read_text(encoding="utf-8", errors="replace"),
+                    base_url=url,
                 )
                 if static_vs_headless.get("static_insufficient"):
-                    # static_ok 무효화 — static 응답이 빈 shell. headless 만 쓸모 있음.
-                    static_ok = []
-                    notes.append(
-                        "정적 응답이 빈 shell — Playwright 응답이 정적보다 "
-                        f"{static_vs_headless.get('ratio'):.1f}배 크고 row-like 요소 "
-                        f"({static_vs_headless.get('row_signal_headless')} vs "
-                        f"{static_vs_headless.get('row_signal_static')}) 만 잡힘. "
-                        "JS 가 카드/목록 그리는 사이트 — strategy=playwright_html 필수."
-                    )
+                    trigger = static_vs_headless.get("trigger_rule") or "?"
+                    if trigger == "size":
+                        # 강한 신호 — 정적 응답이 진짜 빈 shell. static_ok 무효화.
+                        static_ok = []
+                        notes.append(
+                            "정적 응답이 빈 shell — Playwright 응답이 정적보다 "
+                            f"{static_vs_headless.get('ratio'):.1f}배 크고 row-like 요소 "
+                            f"({static_vs_headless.get('row_signal_headless')} vs "
+                            f"{static_vs_headless.get('row_signal_static')}) 만 잡힘. "
+                            "JS 가 카드/목록 그리는 사이트 — strategy=playwright_html 필수."
+                        )
+                    elif trigger == "repeat":
+                        # 약한 신호 — 정적 응답에도 콘텐츠 있지만 headless 에만 mosaic tile 다수 (humblebundle 류).
+                        # static_ok 무효화 X (정적 httpx 로도 작동할 수 있음 — JSON island 직접 파싱 등).
+                        # notes 로 LLM 에 *고려* 만 시킴.
+                        notes.append(
+                            "⚠ 정적 응답 vs Playwright DOM 비교: headless 에만 mosaic/tile 류 반복 패턴 "
+                            f"{static_vs_headless.get('repeat_anchors_headless')}개 추가됨 "
+                            f"(정적 {static_vs_headless.get('repeat_anchors_static')}). "
+                            "정적 HTML 의 <script id=*-json-data> 같은 JSON island 에서 클라이언트 JS 가 tile 렌더 가능성 — "
+                            "그렇다면 strategy=playwright_html + list.wait_selector. 단, 정적 응답 안에 직접 파싱 가능한 "
+                            "JSON 이 있으면 httpx_html + inline_js_data_candidates 도 검토."
+                        )
 
     recommended_strategy: str
     recommended_headers_summary: str
