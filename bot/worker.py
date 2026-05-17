@@ -310,9 +310,10 @@ async def _process_job_inner(client, conn, job, dm_owner) -> None:
                         client, job["ack_channel_id"], job["ack_message_id"],
                         msg("worker_board_shape_fail", slug=slug))
                 elif rc == 2:
-                    # policy_check 거부 (BLOCKED/LOGIN_REQUIRED) — 차단 우회는 정책상 금지 →
-                    # 손어댑터 안내·tail dump 모두 거짓 신호. 짧은 한 줄 안내로 대체.
-                    append_triage_queue(url, slug, job["via"], req_by, tail)
+                    # policy_check 거부 (BLOCKED/LOGIN_REQUIRED) — register 가 이미 _save_rejected →
+                    # `.REJECTED.json` + learned_blacklist + _prune_triage_queue 마쳤음.
+                    # 여기서 append_triage_queue 다시 부르면 prune 직후 re-add 라 큐 잡음 (dashboard X / triage list O 불일치).
+                    # rc=3 분기와 동일하게 triage 큐 오염 막기 위해 안 쌓는다.
                     await edit_channel_message(
                         client, job["ack_channel_id"], job["ack_message_id"],
                         msg("worker_policy_blocked", slug=slug))

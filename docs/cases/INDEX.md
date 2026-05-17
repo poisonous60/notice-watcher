@@ -2,11 +2,12 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 52 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 53 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
 | [`tistory_leedakyeong_e0e58b0f`](tistory_leedakyeong_e0e58b0f.md) | ✅ 일반화 완료 (Tistory 플랫폼 — known-platform 인식기 + RSS adapter) | 2026-05-17 | F | posts_nonempty, static_vs_headless, feed_candidates, post_id_stable_shape | https://leedakyeong.tistory.com/entry/Python-pandas-tutorial-drop-duplicates-in-pandas |
+| [`infra_worker_rc2_triage_double_record_2026-05-17`](infra_worker_rc2_triage_double_record_2026-05-17.md) | 🏗 인프라 (bot/worker rc=2 분기 append_triage_queue 중복 호출 제거) | 2026-05-17 | F | triage_queue_dashboard_mismatch, rc2_double_record, queue_noise | (인프라 case — 특정 사이트 X. 트리거 = triage queue 잡음 진단) |
 | [`infra_skill_cross_case_gate_2026-05-17`](infra_skill_cross_case_gate_2026-05-17.md) | 🏗 skill-infrastructure (cross-case lookup 강제 게이트 — cases_index.py query + SKILL.md §2 진입 전 5번) | 2026-05-17 |  | skill_cross_case_lookup_missing, deferred_heuristic_moving_target, cases_index_query_command_missing | (인프라 case — 특정 사이트 X. 트리거 = 사용자 비판 "5건째도 보류 6건째도 보류" 의 메타 원인) |
 | [`infra_retry_feedback_enrich_2026-05-17`](infra_retry_feedback_enrich_2026-05-17.md) | 🏗 인프라 (retry feedback 풍부화 — prev cfg selector echo + probe top patterns 재표시 + attempt history) | 2026-05-17 | F | retry_same_selector_repeat, llm_forgets_prev_cfg, probe_patterns_buried, no_attempt_history | (인프라 case — 특정 사이트 X. 트리거 = retry 메커니즘 개선 Phase 3) |
 | [`infra_probe_static_drift_url_penalty_2026-05-17`](infra_probe_static_drift_url_penalty_2026-05-17.md) | 🏗 인프라 (probe 휴리스틱 lift — static_vs_headless rule 2 + first_article_url query penalty) | 2026-05-17 | C+A | static_vs_headless_repeat_diff, first_article_url_query_heavy, prompt_static_insufficient_signal, deferred_heuristic_moving_target | (인프라 case — 특정 사이트 X. 트리거 = 사용자 비판 "5건째도 보류 6건째도 보류 — 언제 박는데" 의 트랙 B 부분) |
@@ -73,7 +74,7 @@
 | C+F+A | 1 |
 | E | 1 |
 | E+A+C+D | 1 |
-| F | 19 |
+| F | 20 |
 | F+A | 1 |
 | F+C | 3 |
 | none | 9 |
@@ -82,7 +83,7 @@
 
 | strategy | count |
 |---|---|
-| (미기재) | 24 |
+| (미기재) | 25 |
 | handwritten | 8 |
 | httpx_html | 6 |
 | httpx_json | 4 |
@@ -91,5 +92,5 @@
 
 ### 최근 90일 (≥ 2026-02-16)
 
-케이스 52 건.
+케이스 53 건.
 
