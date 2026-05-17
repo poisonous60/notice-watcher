@@ -49,6 +49,16 @@ def _is_http_url(value: object) -> bool:
 templates.env.filters["is_http"] = _is_http_url
 templates.env.globals["is_http_url"] = _is_http_url
 
+# fail_taxonomy 카탈로그 → 템플릿 헬퍼 (filter dropdown / badge color 한 곳에서 derive).
+from bot.fail_taxonomy import (  # noqa: E402
+    fail_filter_options as _fail_filter_options,
+    severity_for_kind as _severity_for_kind,
+    label_for_kind as _label_for_kind,
+)
+templates.env.globals["fail_filter_options"] = _fail_filter_options
+templates.env.globals["severity_for_kind"] = _severity_for_kind
+templates.env.globals["label_for_kind"] = _label_for_kind
+
 app = FastAPI(title="notice-watcher dashboard", docs_url=None, redoc_url=None)
 app.mount("/static", StaticFiles(directory=str(HERE / "static")), name="static")
 

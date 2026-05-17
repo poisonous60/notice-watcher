@@ -156,6 +156,31 @@ handwritten 만 가능: 클릭/스크롤로만 글이 뜨는 SPA, 강한 anti-bo
 4. 새 산출물 파일 추가 시 — `tests/probe_heuristics/test_contract.py` 의 `output_schema_completeness` expected set 에도 추가
 5. `probe_smoke.py` 통과 확인 (stage 1·1b·1c)
 
+## 4b. fail 분류 catalog 갱신 (새 [FAIL] check / 새 gate-reject 메시지 도입 시)
+
+§2c·2d·2e 에서 `register.py`·인식기 코드에 *새 거부 사유 메시지* (예: 새 `[FAIL] foo_bar`, 새 `등록 거부 — …` 패턴) 박았다면 fail 분류 카탈로그도 동기해야 함. 안 하면 dashboard `/jobs` 의 status 셀이 그 사유를 *catalog 미등록* 으로 표시 (gen_fail 의 dynamic passthrough 가 잡지만 hint·label 없음).
+
+절차:
+
+1. `bot/fail_taxonomy.py` 의 `FAIL_CATALOG` 안 해당 `FailKind` 의 `subkinds` 튜플에 `Subkind(...)` 한 줄 추가 — `name`/`label_ko`/`hint`/`match`. 기존 matcher 빌더 (`_fail_check`/`_has_any`/`_rc_eq`) 그대로 사용.
+2. `tests/fail_taxonomy/test_classify_fail.py` 의 `CASES` 리스트에 `(name, (status, rc, tail), expect_kind, expect_sub)` 한 줄 추가 — tail 은 실제 `register.py` 가 찍는 라인 그대로.
+3. `python scripts/gen_fail_taxonomy_doc.py` 실행 → `docs/fail 분류.md` 자동 재생성. 결과 `git add`.
+
+빠뜨리면 pre-push hook 의 `probe_smoke.py` stage 5 가 차단:
+- `test_catalog_completeness.py` — fixed Subkind 가 `CASES` 에 없으면 FAIL.
+- `test_doc_drift.py` — catalog 변경 + doc 재생성 안 했으면 FAIL.
+
+dynamic family (`recognizer:*`, `[FAIL]:<check>`) 는 추가 필요 X — 자동 capture (catalog 미등록 이름도 surface).
+
+**dynamic Subkind 위치 규칙** — 각 FailKind 의 `subkinds` 튜플 안에서 의도된 우선순위:
+
+- `gen_fail`: fixed `[FAIL]` 매처들 → `[FAIL]:<check>` dynamic passthrough → 토큰 fallback (`gemini_api`). `[FAIL]` 라인이 있으면 그 이름이 항상 토큰 매처를 이긴다 (구 동작 보존).
+- `gate_reject`: `recognizer:*` dynamic 이 **첫째**. recognizer fast-path 의도 — 다른 게이트 메시지가 같이 있어도 recognizer 우선. 새 fixed gate Subkind 는 dynamic 뒤에 박는다.
+
+새 Subkind 추가 시 *어느 위치에 박는가* 가 결과를 바꿈 — declaration order = matcher 순회 순서.
+
+**dynamic capture 승격**: `recognizer:foo_bar` 가 자주 등장하면 fixed Subkind (`name="foo_bar_specific"`, `match=_has_any("foo_bar 특정 토큰", name="foo_bar_specific")`) 로 승격 가능. 그 경우 dynamic 앞에 박아 우선순위 확보 + `CASES` 에 fixture 추가 + doc regen.
+
 ## 5. 검증 + N100 배포 (모든 분기 공통)
 
 순서 중요 — `case_log` 의 `commit_sha`/`files_changed` derive 가 *현재 HEAD* + `git diff HEAD~1..HEAD` 라 **반드시 commit + push 뒤에** 호출해야 본 case 의 commit 잡힘. commit 전 호출하면 직전 commit (의 sha + diff) 가 잘못 박힘.
