@@ -28,6 +28,10 @@ def hand_config_for_url(*, url: str, slug: Optional[str] = None,
     lines.append("  - 트랙 B (미래 향 — 같은 패턴 자동 처리): 진단 중 분기 2a (인식기 확장) / 2b (--article-url) / "
                  "2c (probe 휴리스틱 + retry feedback hint) / 2d (probe artifact 수정) 후보 한 줄씩 enumerate. "
                  "매칭 있으면 그 자리도 같은 PR 에 박음. 매칭 0이면 case 파일에 이유 한 줄.")
+    lines.append("")
+    lines.append("§2 분기 *전*: `triage.py show <slug>` 출력 받은 다음 메시지에서 4개 강제 인용 "
+                 "(last_feedback `[FAIL]` 줄 / diagnosis verdict / 매칭 §번호 / 분기 후보+이유). "
+                 "artifact 없는 §0 신규 case 만 예외. — SKILL.md \"§2 진입 전 강제 인용\" 박스.")
     return "\n".join(lines)
 
 
@@ -39,6 +43,10 @@ def hand_config_redo_slug(*, slug: str, url: Optional[str] = None) -> str:
     lines.append(f"현재 config: configs.snapshot/{slug}.json (참고용 — dev 의 configs/ 가 진본)")
     lines.append("")
     lines.append("문제 진단 → 수정 → fetch 확인 → 배포.")
+    lines.append("")
+    lines.append("§2 분기 *전*: `triage.py show <slug>` 출력 받은 다음 메시지에서 4개 강제 인용 "
+                 "(last_feedback `[FAIL]` 줄 / diagnosis verdict / 매칭 §번호 / 분기 후보+이유). "
+                 "— SKILL.md \"§2 진입 전 강제 인용\" 박스.")
     return "\n".join(lines)
 
 
@@ -55,6 +63,10 @@ def hand_config_triage_queue(*, failed_slugs: list[str]) -> str:
                  "2c (probe 휴리스틱 + retry feedback hint) / 2d (probe artifact 수정) 후보 한 줄씩 enumerate. "
                  "매칭 있으면 같은 PR 에 박음. 0 이면 case 파일에 이유.")
     lines.append("우선순위 정렬 → 각 항목 처리 → 배포.")
+    lines.append("")
+    lines.append("각 slug §2 분기 *전*: `triage.py show <slug>` 출력 받은 다음 메시지에서 4개 강제 인용 "
+                 "(last_feedback `[FAIL]` 줄 / diagnosis verdict / 매칭 §번호 / 분기 후보+이유). "
+                 "— SKILL.md \"§2 진입 전 강제 인용\" 박스.")
     lines.append("")
     lines.append("REJECT된 사이트라도 구조를 분석하여 probe를 개선, 이후 손config 의존도를 줄여야 함.")
     lines.append("특수한 경우나 tradeoff가 명확한 경우에 한해 probe 개선을 스킵하고 case log에 이유를 명확히 남김.")
