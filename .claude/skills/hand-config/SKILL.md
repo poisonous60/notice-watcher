@@ -40,7 +40,7 @@ python scripts/triage.py show <slug>         # 그 slug 의 .FAILED.json + 요�
 
 `--skip-later` 가 제외하는 slug 는 dashboard `/triage/failed` 의 '나중에' 토글로 결정 (`output/triage_later.json`, dev box only). 후순위로 미뤘다는 신호 — 같은 dev 박스에서 dashboard 와 동일 큐 공유. Later 라도 명시적으로 처리하고 싶으면 `show <slug>` 또는 인자 빼고 호출.
 
-IP 바뀌었으면 `DEPLOY_HOST=aaaa@<새IP>` 환경변수.
+호스트는 Tailscale MagicDNS `<user>@<host>` (LAN/외부 모두 동작). LAN IP `aaaa@<lan-ip>` 도 집에서는 OK. 다른 호스트 필요시 `DEPLOY_HOST=aaaa@<…>` 환경변수.
 
 `show` 출력의 `last_feedback`(=`[FAIL] <체크>`), `last_config`(자동 생성된 마지막 시도 — selector/path 한두 개만 고치면 될 때도 많음), `output/probe/<slug>/` 의 `summary.txt`·`list_candidates.json`·`article_candidates.json`·`traffic.har`·`diagnosis.json` 을 본다. `docs/config 자동생성 실패 케이스.md` 의 §번호에 매칭해 원인 분류.
 
@@ -203,10 +203,10 @@ dynamic family (`recognizer:*`, `[FAIL]:<check>`) 는 추가 필요 X — 자동
    ```
    이 시점 HEAD = 본 case 의 commit → `commit_sha` 와 `files_changed` 정확. commit 전 실행하면 stderr 에 `⚠ staged/working tree 변경 있음 — commit 후 호출 권장` 경고만 박고 진행 (derive 부정확 가능). outcome 분류는 §6 step 5 표 참조. 잊어도 push 차단 X (~10% gap). dashboard `/cases` 에서 표시.
 
-8. **N100 배포** (운영 메모 §8 SoT) — `ssh aaaa@<lan-ip> 'cd ~/notice-watcher && git pull --ff-only && .venv/bin/python scripts/register.py --config "configs/<slug>.json"'`.
+8. **N100 배포** (운영 메모 §8 SoT) — `ssh <user>@<host> 'cd ~/notice-watcher && git pull --ff-only && .venv/bin/python scripts/register.py --config "configs/<slug>.json"'`.
    - **`adapters/`·`engine/`·`scripts/notify.py`·`bot/` 변경 시 뒤에 `&& systemctl --user restart notice-bot.service`** — 봇 import 캐시. 안 하면 `make_adapter() ValueError`.
    - `requirements.txt` 변경 시 앞에 `.venv/bin/pip install -r requirements.txt &&`.
-   - 확인: `register.py --list` 에 slug 가 `registered`. IP DHCP — 안 되면 콘솔 `ip a` (운영 메모 §1~2).
+   - 확인: `register.py --list` 에 slug 가 `registered`. SSH 안 되면 Tailscale 먼저 (`tailscale status` 로 `n100-noticewatcher` 보이는지) → LAN-only 면 콘솔 `ip a` 로 IP 확인 (운영 메모 §1~2).
 
 9. (자동) `.FAILED.json`·`triage_queue.jsonl` 의 slug 항목은 `register.py` 가 자동 정리.
 

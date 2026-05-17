@@ -313,6 +313,6 @@ call_site 별로 provider/model 분리. source: `output/llm_routing.json`.
 | 머신 | 역할 | 코드 변경 |
 |---|---|---|
 | **dev box** | 코드 작성·테스트·commit·push, 대시보드 (dev 전용) | YES |
-| **N100** (`aaaa@<lan-ip>`) | 봇·polling 운영 (`notice-bot.service` systemd) | NO — `git pull` 만 |
+| **N100** (`<user>@<host>` Tailscale; LAN `<lan-ip>`) | 봇·polling 운영 (`notice-bot.service` systemd) | NO — `git pull` 만 |
 
 원칙: 모든 코드 변경 dev box only, N100 pull only. 룰·안전망: **[CLAUDE.md](CLAUDE.md)** §3·5·7 + **[docs/운영 메모.md](docs/%EC%9A%B4%EC%98%81%20%EB%A9%94%EB%AA%A8.md)**.

@@ -15,8 +15,8 @@
                   list 시 → Later slug 행 안 보임.
                   show <slug> 는 명시 호출이라 Later 라도 통과.
 
-N100 호스트: 환경변수 `DEPLOY_HOST`(기본 `aaaa@<lan-ip>`) / `DEPLOY_PATH`(기본 `~/notice-watcher`).
-  IP 가 DHCP 라 바뀌었으면 `DEPLOY_HOST=aaaa@<새IP>` 로. N100 콘솔에서 `ip a` 로 확인 — `docs/운영 메모.md` §1~2.
+N100 호스트: 환경변수 `DEPLOY_HOST`(기본 `<user>@<host>` — Tailscale MagicDNS) / `DEPLOY_PATH`(기본 `~/notice-watcher`).
+  Tailscale 이 LAN/외부 양쪽에서 라우팅 — IP 변동 무관. LAN IP `aaaa@<lan-ip>` 도 집에서는 OK.
   ※ ssh/scp 가 PATH 에 있어야 함(Windows 10+ 기본 포함).
 """
 from __future__ import annotations
@@ -35,7 +35,7 @@ QUEUE = OUTPUT / "triage_queue.jsonl"
 PROBE_DIR = OUTPUT / "probe"
 LATER_STORE = OUTPUT / "triage_later.json"  # dashboard `/triage/failed` 의 '나중에' 토글 (dev box only, gitignored)
 
-DEPLOY_HOST = os.environ.get("DEPLOY_HOST", "aaaa@<lan-ip>")
+DEPLOY_HOST = os.environ.get("DEPLOY_HOST", "<user>@<host>")
 DEPLOY_PATH = os.environ.get("DEPLOY_PATH", "~/notice-watcher")
 
 _FAILED_SUFFIX = ".FAILED.json"

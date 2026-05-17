@@ -14,7 +14,7 @@
   python scripts/inspect_subs.py fetch <slug> [-n 5]  # 현 config 로 fetch_list 돌려 결과 출력 + 진단 갱신
   python scripts/inspect_subs.py diagnose <slug>      # fetch 없이 정적 진단만
 
-N100 호스트: `DEPLOY_HOST` (기본 `aaaa@<lan-ip>`), `DEPLOY_PATH` (기본 `~/notice-watcher`).
+N100 호스트: `DEPLOY_HOST` (기본 `<user>@<host>` — Tailscale MagicDNS), `DEPLOY_PATH` (기본 `~/notice-watcher`).
 snapshot 디렉토리는 `.gitignore` 에 추가됨 — dev 의 git tracked `configs/` 는 절대 안 건드림.
 """
 from __future__ import annotations
@@ -34,7 +34,7 @@ from bot import db, inspector  # noqa: E402
 
 SNAPSHOT_DIR = ROOT / "output" / "snapshot"
 CONFIGS_SNAPSHOT = ROOT / "configs.snapshot"
-DEPLOY_HOST = os.environ.get("DEPLOY_HOST", "aaaa@<lan-ip>")
+DEPLOY_HOST = os.environ.get("DEPLOY_HOST", "<user>@<host>")
 DEPLOY_PATH = os.environ.get("DEPLOY_PATH", "~/notice-watcher")
 
 

@@ -30,7 +30,7 @@ python scripts/inspect_subs.py pull
 ```
 N100 의 `bot.sqlite3` (sqlite3 `.backup` 으로 WAL-safe) + `output/poll_state/*.json` + `configs/*.json` 을
 `output/snapshot/` + `configs.snapshot/` 으로 미러. **dev 의 git tracked `configs/` 는 절대 안 건드림** —
-snapshot 은 별도 디렉토리(읽기 전용 사본). N100 IP 가 바뀌었으면 `DEPLOY_HOST=aaaa@<새IP>` 환경변수.
+snapshot 은 별도 디렉토리(읽기 전용 사본). 호스트는 Tailscale MagicDNS `<user>@<host>` (LAN/외부 모두). 다른 호스트 필요시 `DEPLOY_HOST=aaaa@<…>` 환경변수.
 
 ### 2. 미해결 신고 목록
 ```
@@ -93,7 +93,7 @@ python scripts/inspect_subs.py fetch <slug> -n 5
 recognizer 를 고쳐도 *이미 만들어진* `configs/<slug>.json` 은 그대로다. `_is_registered(slug)` True 라서
 새 /watch 도 재등록을 트리거 안 함. 운영 메모 §7 "강제 재등록" 절차 — N100 에서:
 ```
-ssh aaaa@<lan-ip> 'cd ~/notice-watcher && rm output/poll_state/<slug>.json configs/<slug>.json'
+ssh <user>@<host> 'cd ~/notice-watcher && rm output/poll_state/<slug>.json configs/<slug>.json'
 ```
 그 다음 사용자에게 `/watch <원본 URL>` 재요청 안내. 또는 owner 가 본인 계정으로 재현. 둘 다 안 되면 *worker 큐* 에 register 잡을 직접 enqueue 하는 admin 명령을 추가해야 하는데 — 현재 그건 없다(필요해지면 `bot/admin.py` 에 추가).
 
@@ -162,7 +162,7 @@ rm -f "output/poll_state/${SLUG}.json" "output/poll_state/${SLUG}.FAILED.json"
 - `git add -A; git commit -m "<요지>"; git push origin main` (commit 메시지 끝에 `Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>`)
 - N100 배포:
   ```
-  ssh aaaa@<lan-ip> 'cd ~/notice-watcher && git pull --ff-only && systemctl --user restart notice-bot.service'
+  ssh <user>@<host> 'cd ~/notice-watcher && git pull --ff-only && systemctl --user restart notice-bot.service'
   ```
   - `requirements.txt` 변경 있었으면 앞에 `.venv/bin/pip install -r requirements.txt &&`.
   - **새 어댑터/엔진 import 가 있었다면 봇 재시작 필수** (hand-config §9 와 같음).
@@ -178,7 +178,7 @@ DB 의 `reports.status` 를 `resolved` 로 마킹 + `resolved_note` 기록.
 CLI 에서 처리하려면 (admin guild 에 없을 때 등) — 아직 `scripts/inspect_subs.py` 에 resolve 서브커맨드는 없음.
 필요해지면 추가하면 됨(현재는 owner 가 Discord 에서 한 줄). 임시로 N100 에서 sqlite 직접:
 ```
-ssh aaaa@<lan-ip> 'cd ~/notice-watcher && .venv/bin/python -c "from bot import db; c=db.connect(); print(db.resolve_report(c, <N>, \"수정 내용\"))"'
+ssh <user>@<host> 'cd ~/notice-watcher && .venv/bin/python -c "from bot import db; c=db.connect(); print(db.resolve_report(c, <N>, \"수정 내용\"))"'
 ```
 
 ### 9.5. case_runs DB row (필수, 매 신고 처리)

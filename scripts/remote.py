@@ -34,7 +34,7 @@ import sys
 from typing import Optional
 
 
-DEPLOY_HOST = os.environ.get("DEPLOY_HOST", "aaaa@<lan-ip>")
+DEPLOY_HOST = os.environ.get("DEPLOY_HOST", "<user>@<host>")
 DEPLOY_PATH_RAW = os.environ.get("DEPLOY_PATH", "~/notice-watcher")
 
 # DEPLOY_PATH 가 SSH command 에 직접 interpolation 되므로 안전 문자만 허용. 위반 시 즉시 거부.

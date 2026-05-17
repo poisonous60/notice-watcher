@@ -69,7 +69,7 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 | 머신 | 역할 | 변경 가능? |
 |---|---|---|
 | **dev box** (이 폴더 = `notice-watcher` repo dev clone) | 코드 작성·테스트·commit·push. 대시보드(`scripts/dashboard.py`) dev 전용 | YES — git commit/push, 직접 편집 |
-| **N100** (`aaaa@<lan-ip>`) | 봇·polling 운영 (`notice-bot.service` systemd) | NO — *코드 편집 금지*. `git pull` 만 받음 |
+| **N100** (`<user>@<host>` — Tailscale MagicDNS; LAN IP `<lan-ip>` 도 가능) | 봇·polling 운영 (`notice-bot.service` systemd) | NO — *코드 편집 금지*. `git pull` 만 받음 |
 
 **핵심 원칙**: 모든 코드 변경 **dev box 에서만**. N100 *pull only*. 양쪽 같은 `git log` 유지.
 
@@ -84,7 +84,7 @@ dev box:
 
 N100:
 ```
-3. ssh aaaa@<lan-ip> 'cd ~/notice-watcher && git pull --ff-only'
+3. ssh <user>@<host> 'cd ~/notice-watcher && git pull --ff-only'
 4. (adapters/·engine/·scripts/notify.py·bot/ 변경 시) 'systemctl --user restart notice-bot.service'
 5. (requirements.txt 변경 시) '.venv/bin/pip install -r requirements.txt' (restart 전)
 ```

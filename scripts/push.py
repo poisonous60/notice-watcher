@@ -10,7 +10,7 @@
     python scripts/push.py env                         # .env (로컬 .env.push 가 있을 때만)
     python scripts/push.py timer                       # notice-poll.timer (~/.config/systemd/user/)
 
-N100 호스트: `DEPLOY_HOST` (기본 `aaaa@<lan-ip>`), `DEPLOY_PATH` (기본 `~/notice-watcher`).
+N100 호스트: `DEPLOY_HOST` (기본 `<user>@<host>` — Tailscale MagicDNS), `DEPLOY_PATH` (기본 `~/notice-watcher`).
 
 설계:
 - target 종류는 allowlist (TARGETS dict). 임의 파일 path 인자 안 받음 → SSH/scp injection 차단.
@@ -31,7 +31,7 @@ from typing import Optional
 
 
 ROOT = Path(__file__).resolve().parent.parent
-DEPLOY_HOST = os.environ.get("DEPLOY_HOST", "aaaa@<lan-ip>")
+DEPLOY_HOST = os.environ.get("DEPLOY_HOST", "<user>@<host>")
 DEPLOY_PATH = os.environ.get("DEPLOY_PATH", "~/notice-watcher")
 
 
