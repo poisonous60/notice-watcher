@@ -141,7 +141,7 @@ def state_file_slugs() -> list[str]:
     out = []
     for f in paths.state_dir.glob("*.json"):
         n = f.name
-        if n.endswith(".FAILED.json") or n.endswith(".BUG.json"):
+        if n.endswith(".FAILED.json") or n.endswith(".BUG.json") or n.endswith(".REJECTED.json"):
             continue
         out.append(n[:-len(".json")])
     return sorted(out)
