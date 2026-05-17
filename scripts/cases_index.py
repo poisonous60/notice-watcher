@@ -370,7 +370,7 @@ def main() -> int:
         print(f"cases 디렉토리 없음: {cases_dir}", file=sys.stderr)
         return 2
 
-    paths = sorted(p for p in cases_dir.glob("*.md") if p.name != "INDEX.md")
+    paths = sorted(p for p in cases_dir.glob("*.md") if p.name != "INDEX.md" and not p.name.startswith("_"))
     cases: list[dict] = []
     skipped = 0
     for p in paths:
