@@ -41,6 +41,14 @@ _tasks: list[asyncio.Task] = []
 # 같은 잡이 봇을 N회 이상 죽이면 자동 failed 처리 — 큐 맨앞에서 무한 점유 방지.
 ATTEMPTS_LIMIT = 5
 
+# per-slug 직렬화 — 같은 slug 잡 두 개를 다른 worker 가 동시 claim 했을 때 chromium probe
+# 가 같은 사이트에 병렬로 못 가게. 첫 worker 가 끝나면 두 번째가 깨어나 is_registered(slug)
+# 가드(_process_job 안)에 자연 매칭 → subprocess 스킵 + _post_register_success 가 subscription
+# 만 추가. 첫 잡 실패면 두 번째가 fresh subprocess (거부 사유 같으면 재거부 — 기존 메커니즘).
+# enqueue 시점 url_to_slug(canonical) 가 정규화 후 DB jobs.slug 에 저장 — `?page=X` 변형 등
+# 자연 흡수. asyncio.Lock 객체는 단일 thread 라 setdefault 가 race-free.
+_slug_locks: dict[str, asyncio.Lock] = {}
+
 
 async def start(client, conn, *, dm_owner: Callable[..., Awaitable[None]]) -> None:
     """봇 ready 직후 호출. running 잡 → pending 으로 reset 하고 worker pool 띄움.
@@ -137,6 +145,21 @@ async def _drain_phase_edits(futures: list) -> None:
 
 
 async def _process_job(client, conn, job, dm_owner) -> None:
+    """slug 단위 직렬화 wrapper. 본문은 `_process_job_inner` — 락 잡고 호출.
+
+    같은 slug 의 잡이 다른 worker 에서 진행 중이면 끝날 때까지 await. 끝난 뒤 깨어나
+    `_process_job_inner` 가 자체적으로 is_rejected / is_registered 가드 통과 → 적절한 결과.
+    """
+    job_id = int(job["id"])
+    slug = job["slug"]
+    lock = _slug_locks.setdefault(slug, asyncio.Lock())
+    if lock.locked():
+        log.info("잡 #%d slug=%s — 같은 slug 다른 worker 처리 중, 끝날 때까지 대기", job_id, slug)
+    async with lock:
+        await _process_job_inner(client, conn, job, dm_owner)
+
+
+async def _process_job_inner(client, conn, job, dm_owner) -> None:
     import sys as _sys
     from engine.tracing import start_trace
     job_id = int(job["id"])
