@@ -2,10 +2,16 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 38 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 44 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
+| [`infra_article_page_reject_3_2026-05-17`](infra_article_page_reject_3_2026-05-17.md) | 🏗 인프라 (article_page_reject 패턴 5 호스트 추가 + 자가 점검 §6.7 보류 결정 1) | 2026-05-17 | F | not_a_board, single_article_page, multi_host_hub, mdn_docs, wiki_mirror, encyclopedia, cloudflare_blocked, tistory_root | (인프라 case — 트리거 = 5 건 동시 처리: mdn/github-wiki-see/ktword/openai/tistory) |
+| [`host_tistory-com_root_c59077fa`](host_tistory-com_root_c59077fa.md) | ❌ 거부 (Tistory 메인 멀티-블로그 hub — 게시판 아님) | 2026-05-17 | F | not_a_board, multi_host_hub, post_id_stable_shape, tistory_root | https://www.tistory.com/ |
+| [`host_openai-com_index_47fc1c1b`](host_openai-com_index_47fc1c1b.md) | ❌ 거부 (OpenAI 단일 글페이지 — 게시판 아님; 보드 `/news/` Cloudflare 차단) | 2026-05-17 | F | not_a_board, single_article_page, fetch_list_403, cloudflare_blocked, openai_index | https://openai.com/index/attacking-machine-learning-with-adversarial-examples/ |
+| [`host_ktword-co-kr_test_d081a15f`](host_ktword-co-kr_test_d081a15f.md) | ❌ 거부 (KT용어집 단일 entry — 백과형 사이트 게시판 아님) | 2026-05-17 | F | not_a_board, single_article_page, post_id_unique_duplicate, encyclopedia_entry | http://www.ktword.co.kr/test/view/view.php?m_temp1=3801 |
+| [`host_github-wiki-see_m_6c370ddf`](host_github-wiki-see_m_6c370ddf.md) | ❌ 거부 (github-wiki-see.page wiki 미러 단일 페이지 — 게시판 아님) | 2026-05-17 | F | not_a_board, single_article_page, post_id_stable_shape, wiki_mirror, external_only_links | https://github-wiki-see.page/m/goofcode/UR/wiki/%EB%85%BC%EB%AC%B8-%EC%9D%BD%EB%8A%94-%EB%B2%95%2C-Survey-%EB%85%BC%EB%AC%B8-%EC%93%B0%EB%8A%94%EB%B2%95 |
+| [`host_developer-mozil_ko_47b50435`](host_developer-mozil_ko_47b50435.md) | ❌ 거부 (MDN docs reference 단일 페이지 — 게시판 아님) | 2026-05-17 | F | not_a_board, single_article_page, posts_nonempty_zero, docs_reference_page | https://developer.mozilla.org/ko/docs/Web/HTML/Reference/Elements/button |
 | [`host_d4m0n-tistory-c_10_dd865fee`](host_d4m0n-tistory-c_10_dd865fee.md) | ✅ 일반화 완료 (probe verdict TARGET_NOT_FOUND 분리 — 같은 패턴 미래 자동 처리) | 2026-05-17 | C+D | target_not_found_misclassified_as_blocked, verdict_target_404_falls_through | https://d4m0n.tistory.com/10 |
 | [`naver-cafe_gutterlife_all_e0009e69`](cafe.naver.com_home.md) | ✅ 자동 (recognizer 확장 — cafe 홈 URL 인식, NaverCafeAdapter 가 cafe_slug→cafe_id 런타임 해소) | 2026-05-16 | F | posts_nonempty | https://cafe.naver.com/gutterlife |
 | [`naver-cafe_31104609_1_c9b1f633`](naver-cafe_31104609_1_c9b1f633.md) | 🚫 등록 거부 (등록은 OK, 본문 추출 불가 — 정책상 우회 X) + 시스템 차원 후속 완료 | 2026-05-16 | F | body_empty_at_baseline, article_api_401_403 | https://cafe.naver.com/f-e/cafes/31104609/menus/1?viewType=L |
@@ -57,7 +63,7 @@
 | C+F | 1 |
 | E | 1 |
 | E+A+C+D | 1 |
-| F | 9 |
+| F | 15 |
 | F+A | 1 |
 | F+C | 3 |
 | none | 8 |
@@ -66,14 +72,14 @@
 
 | strategy | count |
 |---|---|
-| (미기재) | 12 |
+| (미기재) | 18 |
 | handwritten | 7 |
 | httpx_html | 6 |
 | httpx_json | 4 |
 | none | 6 |
 | playwright_html | 3 |
 
-### 최근 90일 (≥ 2026-02-15)
+### 최근 90일 (≥ 2026-02-16)
 
-케이스 38 건.
+케이스 44 건.
 

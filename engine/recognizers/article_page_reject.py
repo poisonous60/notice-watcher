@@ -71,4 +71,36 @@ PATTERNS_REJECT: list[tuple] = [
         r"^https?://www\.jobplanet\.co\.kr/contents/news-\d+/?(?:[?#].*)?$", re.I,
     ), "jobplanet.co.kr 단일 뉴스 기사(`/contents/news-<N>`) — 게시판 아님. 보드는 `/contents/news` (트레일링 슬러그 없음).",
         True),
+    # MDN docs reference — `/<lang>/docs/<path>` 모든 docs 페이지.
+    # 호스트 전체가 reference docs (article-only). MDN Blog `/<lang>/blog/` 는 다른 path-prefix → 영향 X.
+    # skip_learn=False (host_path_prefix=`/<lang>` 학습은 위험 — 첫 segment 가 lang 이라 너무 광범위).
+    # 그러나 학습은 `_extract_url_pattern` 의 첫 path-segment 만 봄 — `/ko`, `/en-US` 같은 lang 이 path_prefix. 다른 path 영향 X 사실상.
+    # 보수적으로 skip_learn=True (MDN Blog 미래 등록 막지 않기).
+    (re.compile(
+        r"^https?://developer\.mozilla\.org/[a-z]{2,5}(?:-[a-z]{2,5})?/docs/", re.I,
+    ), "MDN docs reference 단일 페이지 — 게시판 아님. 폴링 대상 X (페이지 안 사이드바 element nav 가 board 가 아님). MDN Blog `/<lang>/blog/` 는 별도.",
+        True),
+    # GitHub Wiki 미러 — `/m/<user>/<repo>/wiki/<title>` 단일 wiki 페이지.
+    # 호스트 전체가 wiki 미러 (article-only) — skip_learn=False.
+    (re.compile(
+        r"^https?://github-wiki-see\.page/m/[^/]+/[^/]+/wiki/", re.I,
+    ), "github-wiki-see.page wiki 미러 단일 페이지 — 게시판 아님. 폴링 대상 X."),
+    # KT용어집 — `/test/view/...` 단일 용어 entry. 호스트 전체가 용어집(백과형 article-only).
+    # skip_learn=False (host_path_prefix=`/test` 차단 OK — 모두 article).
+    (re.compile(
+        r"^https?://www\.ktword\.co\.kr/test/view/", re.I,
+    ), "ktword 용어집 단일 entry — 게시판 아님. 백과형 사이트, 폴링 대상 X."),
+    # OpenAI 블로그 글 — `/index/<slug>/` 단일 article. 보드는 `/news/` (Cloudflare 차단 — 자동 등록 불가).
+    # 보드/article 첫 segment 다름 (`/news` vs `/index`) → skip_learn=False 안전.
+    (re.compile(
+        r"^https?://openai\.com/index/[^/?#]+/?(?:[?#].*)?$", re.I,
+    ), "openai.com 단일 글페이지 (`/index/<slug>/`) — 게시판 아님. 보드 `/news/` 는 Cloudflare 차단 (자동 등록 불가)."),
+    # Tistory 메인 — `www.tistory.com/` 멀티-블로그 인기글 hub. row URL 들이 *서로 다른 서브도메인*.
+    # 개별 블로그 (`<subdomain>.tistory.com/...`) 는 별도 host 라 영향 X.
+    # skip_learn=True — host=`www.tistory.com` path=`` 학습은 모든 path 차단 (보드 없는 hub 라 안전이지만 보수적).
+    (re.compile(
+        r"^https?://(?:www\.)?tistory\.com/?(?:\?.*)?(?:#.*)?$", re.I,
+    ),
+        "tistory.com 메인 — 여러 블로그 인기글 hub. 게시판 아님 (개별 블로그 `<subdomain>.tistory.com/...` 은 따로 등록).",
+        True),
 ]

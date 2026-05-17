@@ -133,6 +133,74 @@ def run() -> list[tuple[str, bool, str]]:
                   out is not None and out[2] is False,
                   f"got {out!r}"))
 
+    # 27. MDN docs ko (host_developer-mozil_ko_47b50435) — skip_learn=True (host_path_prefix=lang)
+    out = recognize_reject("https://developer.mozilla.org/ko/docs/Web/HTML/Reference/Elements/button")
+    cases.append(("mdn_docs_ko",
+                  out is not None and "MDN" in out[1] and out[2] is True,
+                  f"got {out!r}"))
+
+    # 28. MDN docs en-US
+    out = recognize_reject("https://developer.mozilla.org/en-US/docs/Web/HTML/Element/button")
+    cases.append(("mdn_docs_en",
+                  out is not None and "MDN" in out[1],
+                  f"got {out!r}"))
+
+    # 29. MDN Blog — 통과 (보드 가능)
+    out = recognize_reject("https://developer.mozilla.org/en-US/blog/")
+    cases.append(("mdn_blog_passes", out is None, f"got {out!r}"))
+
+    # 30. github-wiki-see.page wiki 미러 (host_github-wiki-see_m_6c370ddf)
+    out = recognize_reject("https://github-wiki-see.page/m/goofcode/UR/wiki/%EB%85%BC%EB%AC%B8-%EC%9D%BD%EB%8A%94-%EB%B2%95")
+    cases.append(("github_wiki_see",
+                  out is not None and "wiki" in out[1] and out[2] is False,
+                  f"got {out!r}"))
+
+    # 31. github-wiki-see 루트 — 통과 (목록 페이지 가능성)
+    out = recognize_reject("https://github-wiki-see.page/")
+    cases.append(("github_wiki_see_root_passes", out is None, f"got {out!r}"))
+
+    # 32. ktword 용어집 (host_ktword-co-kr_test_d081a15f) — skip_learn=False (host 전체 article-only)
+    out = recognize_reject("http://www.ktword.co.kr/test/view/view.php?m_temp1=3801")
+    cases.append(("ktword_view",
+                  out is not None and "ktword" in out[1] and out[2] is False,
+                  f"got {out!r}"))
+
+    # 33. ktword 다른 view path — 통과
+    out = recognize_reject("http://www.ktword.co.kr/test/abbr_view/list_letter.php")
+    cases.append(("ktword_other_path_passes", out is None, f"got {out!r}"))
+
+    # 34. OpenAI /index/<slug>/ (host_openai-com_index_47fc1c1b)
+    out = recognize_reject("https://openai.com/index/attacking-machine-learning-with-adversarial-examples/")
+    cases.append(("openai_index_article",
+                  out is not None and "openai" in out[1] and out[2] is False,
+                  f"got {out!r}"))
+
+    # 35. OpenAI /news/ 보드 — 통과 (보드 URL 은 통과시켜야 함; 차단은 별도 이슈)
+    out = recognize_reject("https://openai.com/news/")
+    cases.append(("openai_news_passes", out is None, f"got {out!r}"))
+
+    # 36. OpenAI /index/ root (no slug) — 통과
+    out = recognize_reject("https://openai.com/index/")
+    cases.append(("openai_index_root_passes", out is None, f"got {out!r}"))
+
+    # 37. Tistory 메인 (host_tistory-com_root_c59077fa) — skip_learn=True (host 전체 hub)
+    out = recognize_reject("https://www.tistory.com/")
+    cases.append(("tistory_root_www",
+                  out is not None and "tistory" in out[1] and out[2] is True,
+                  f"got {out!r}"))
+
+    # 38. Tistory naked root
+    out = recognize_reject("https://tistory.com/")
+    cases.append(("tistory_root_naked", out is not None and "tistory" in out[1], f"got {out!r}"))
+
+    # 39. Tistory 개별 블로그 — 통과 (subdomain 별도 host)
+    out = recognize_reject("https://ohokja1940.tistory.com/1976")
+    cases.append(("tistory_subdomain_passes", out is None, f"got {out!r}"))
+
+    # 40. Tistory 메인 카테고리 query — 거부 (메인 hub 의 변형)
+    out = recognize_reject("https://www.tistory.com/?category=travel")
+    cases.append(("tistory_root_with_query", out is not None and "tistory" in out[1], f"got {out!r}"))
+
     return cases
 
 
