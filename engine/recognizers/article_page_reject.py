@@ -95,6 +95,13 @@ PATTERNS_REJECT: list[tuple] = [
     (re.compile(
         r"^https?://openai\.com/index/[^/?#]+/?(?:[?#].*)?$", re.I,
     ), "openai.com 단일 글페이지 (`/index/<slug>/`) — 게시판 아님. 보드 `/news/` 는 Cloudflare 차단 (자동 등록 불가)."),
+    # SUMO docs (DLR Eclipse SUMO documentation) — mkdocs/material-style static docs.
+    # `/docs/<name>.html` 단일 docs 페이지. probe `first_article_url` 가 `<input>#<anchor>` (same-page section)
+    # 라 nav-only/meta-diverging 게이트가 못 잡음 — 명시 호스트 패턴이 효율적.
+    # host 의 다른 path (`/wiki/`, `/`, release notes 등) 가능성 → skip_learn=False 안전 (path_prefix=`/docs` 만 차단).
+    (re.compile(
+        r"^https?://sumo\.dlr\.de/docs/", re.I,
+    ), "sumo.dlr.de/docs 단일 문서 페이지 — 게시판 아님. mkdocs-style 정적 문서, 새 글 발행 X (폴링 의미 없음)."),
     # Tistory 메인 — `www.tistory.com/` 멀티-블로그 인기글 hub. row URL 들이 *서로 다른 서브도메인*.
     # 개별 블로그 (`<subdomain>.tistory.com/...`) 는 별도 host 라 영향 X.
     # skip_learn=True — host=`www.tistory.com` path=`` 학습은 모든 path 차단 (보드 없는 hub 라 안전이지만 보수적).

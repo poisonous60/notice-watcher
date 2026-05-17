@@ -201,6 +201,20 @@ def run() -> list[tuple[str, bool, str]]:
     out = recognize_reject("https://www.tistory.com/?category=travel")
     cases.append(("tistory_root_with_query", out is not None and "tistory" in out[1], f"got {out!r}"))
 
+    # 41. SUMO docs (host_sumo-dlr-de_docs_3634ca61) — mkdocs static docs, skip_learn=False
+    out = recognize_reject("https://sumo.dlr.de/docs/Definition_of_Vehicles,_Vehicle_Types,_and_Routes.html")
+    cases.append(("sumo_docs_page",
+                  out is not None and "sumo" in out[1] and out[2] is False,
+                  f"got {out!r}"))
+
+    # 42. SUMO docs root — also blocked (정적 docs hub, 어떤 path 든 폴링 대상 X)
+    out = recognize_reject("https://sumo.dlr.de/docs/index.html")
+    cases.append(("sumo_docs_index", out is not None and "sumo" in out[1], f"got {out!r}"))
+
+    # 43. SUMO 다른 path — 통과 (skip_learn=False 이지만 path_prefix=`/docs` 만 차단)
+    out = recognize_reject("https://sumo.dlr.de/")
+    cases.append(("sumo_root_passes", out is None, f"got {out!r}"))
+
     return cases
 
 

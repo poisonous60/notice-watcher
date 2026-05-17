@@ -6,6 +6,7 @@ from .skku_cse import SkkuCseAdapter
 from .navercafe import NaverCafeAdapter
 from .daumcafe import DaumCafeAdapter
 from .naver_blog import NaverBlogRssAdapter
+from .tistory import TistoryRssAdapter
 from .reddit import RedditAdapter
 
 __all__ = [
@@ -18,5 +19,6 @@ __all__ = [
     "NaverCafeAdapter",
     "DaumCafeAdapter",
     "NaverBlogRssAdapter",
+    "TistoryRssAdapter",
     "RedditAdapter",
 ]

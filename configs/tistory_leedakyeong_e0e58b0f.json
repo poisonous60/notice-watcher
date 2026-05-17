@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "site": "leedakyeong.tistory.com",
+  "board": "leedakyeong",
+  "strategy": "handwritten",
+  "adapter": "TistoryRssAdapter",
+  "kwargs": {
+    "host": "leedakyeong.tistory.com",
+    "timeout": 15.0
+  },
+  "_slug_board": "leedakyeong",
+  "_source_url": "https://leedakyeong.tistory.com/entry/Python-pandas-tutorial-drop-duplicates-in-pandas",
+  "_note": "Tistory 블로그 — known-platform 자동 인식. 손어댑터 TistoryRssAdapter 가 <host>/rss 를 직접 파싱(자동 httpx_html 은 빈 shell SPA — diagnosis rule 1 `static_vs_headless` 일관). RSS description 에 본문 inline 이라 본문 fetch 도 불요. 사용자가 개별 글/카테고리/태그/루트 어느 URL 을 줘도 호스트 기준으로 블로그 단위 등록.",
+  "_recognized_platform": "tistory"
+}

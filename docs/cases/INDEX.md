@@ -2,10 +2,11 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 50 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 52 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
+| [`tistory_leedakyeong_e0e58b0f`](tistory_leedakyeong_e0e58b0f.md) | ✅ 일반화 완료 (Tistory 플랫폼 — known-platform 인식기 + RSS adapter) | 2026-05-17 | F | posts_nonempty, static_vs_headless, feed_candidates, post_id_stable_shape | https://leedakyeong.tistory.com/entry/Python-pandas-tutorial-drop-duplicates-in-pandas |
 | [`infra_skill_cross_case_gate_2026-05-17`](infra_skill_cross_case_gate_2026-05-17.md) | 🏗 skill-infrastructure (cross-case lookup 강제 게이트 — cases_index.py query + SKILL.md §2 진입 전 5번) | 2026-05-17 |  | skill_cross_case_lookup_missing, deferred_heuristic_moving_target, cases_index_query_command_missing | (인프라 case — 특정 사이트 X. 트리거 = 사용자 비판 "5건째도 보류 6건째도 보류" 의 메타 원인) |
 | [`infra_retry_feedback_enrich_2026-05-17`](infra_retry_feedback_enrich_2026-05-17.md) | 🏗 인프라 (retry feedback 풍부화 — prev cfg selector echo + probe top patterns 재표시 + attempt history) | 2026-05-17 | F | retry_same_selector_repeat, llm_forgets_prev_cfg, probe_patterns_buried, no_attempt_history | (인프라 case — 특정 사이트 X. 트리거 = retry 메커니즘 개선 Phase 3) |
 | [`infra_probe_static_drift_url_penalty_2026-05-17`](infra_probe_static_drift_url_penalty_2026-05-17.md) | 🏗 인프라 (probe 휴리스틱 lift — static_vs_headless rule 2 + first_article_url query penalty) | 2026-05-17 | C+A | static_vs_headless_repeat_diff, first_article_url_query_heavy, prompt_static_insufficient_signal, deferred_heuristic_moving_target | (인프라 case — 특정 사이트 X. 트리거 = 사용자 비판 "5건째도 보류 6건째도 보류 — 언제 박는데" 의 트랙 B 부분) |
@@ -13,6 +14,7 @@
 | [`infra_extra_signal_hints_2026-05-17`](infra_extra_signal_hints_2026-05-17.md) | 🏗 인프라 (probe 가 이미 잡은 신호를 LLM prompt 의 별도 hint 블록으로 강조) | 2026-05-17 | F | retry_same_failure_loop, static_shell_ignored, body_empty_likely_buried, llm_ignores_meta_notes | (인프라 case — 특정 사이트 X. 트리거 = retry 메커니즘 진단 후 1차 prompt 강화) |
 | [`infra_article_page_reject_3_2026-05-17`](infra_article_page_reject_3_2026-05-17.md) | 🏗 인프라 (article_page_reject 패턴 5 호스트 추가 + 자가 점검 §6.7 보류 결정 1) | 2026-05-17 | F | not_a_board, single_article_page, multi_host_hub, mdn_docs, wiki_mirror, encyclopedia, cloudflare_blocked, tistory_root | (인프라 case — 트리거 = 5 건 동시 처리: mdn/github-wiki-see/ktword/openai/tistory) |
 | [`host_tistory-com_root_c59077fa`](host_tistory-com_root_c59077fa.md) | ❌ 거부 (Tistory 메인 멀티-블로그 hub — 게시판 아님) | 2026-05-17 | F | not_a_board, multi_host_hub, post_id_stable_shape, tistory_root | https://www.tistory.com/ |
+| [`host_sumo-dlr-de_docs_3634ca61`](host_sumo-dlr-de_docs_3634ca61.md) | ❌ 거부 (mkdocs-style 정적 docs site — 게시판 아님) | 2026-05-17 | F | not_a_board, static_docs_site, same_page_anchor_first_article, post_id_unique | https://sumo.dlr.de/docs/Definition_of_Vehicles,_Vehicle_Types,_and_Routes.html |
 | [`host_openai-com_index_47fc1c1b`](host_openai-com_index_47fc1c1b.md) | ❌ 거부 (OpenAI 단일 글페이지 — 게시판 아님; 보드 `/news/` Cloudflare 차단) | 2026-05-17 | F | not_a_board, single_article_page, fetch_list_403, cloudflare_blocked, openai_index | https://openai.com/index/attacking-machine-learning-with-adversarial-examples/ |
 | [`host_ktword-co-kr_test_d081a15f`](host_ktword-co-kr_test_d081a15f.md) | ❌ 거부 (KT용어집 단일 entry — 백과형 사이트 게시판 아님) | 2026-05-17 | F | not_a_board, single_article_page, post_id_unique_duplicate, encyclopedia_entry | http://www.ktword.co.kr/test/view/view.php?m_temp1=3801 |
 | [`host_humblebundle-co_software_4589b229`](host_humblebundle-co_software_4589b229.md) | 🔧 손 config (playwright_html) — probe `pick_first_article_url` 가 `/store/search?...` 픽 + 정적 GET 응답엔 타일 anchor 없음 (JS 가 `<script id="landingPage-json-data">` JSON 에서 렌더) | 2026-05-17 | none | posts_nonempty_0, wrong_first_article_url, dom_only_in_headless, cross_section_tile_pattern | https://www.humblebundle.com/software |
@@ -71,7 +73,7 @@
 | C+F+A | 1 |
 | E | 1 |
 | E+A+C+D | 1 |
-| F | 17 |
+| F | 19 |
 | F+A | 1 |
 | F+C | 3 |
 | none | 9 |
@@ -80,8 +82,8 @@
 
 | strategy | count |
 |---|---|
-| (미기재) | 23 |
-| handwritten | 7 |
+| (미기재) | 24 |
+| handwritten | 8 |
 | httpx_html | 6 |
 | httpx_json | 4 |
 | none | 6 |
@@ -89,5 +91,5 @@
 
 ### 최근 90일 (≥ 2026-02-16)
 
-케이스 50 건.
+케이스 52 건.
 
