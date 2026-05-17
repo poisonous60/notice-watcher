@@ -229,9 +229,7 @@ probe/prompt/schema/코드 손대기 전 다음 여섯 질문에 답해보면 �
 
 6. **새 패턴이면 smoke_test fixture 추가했나?** — 새 strategy (F) 면 `probe_smoke.py:REPS` + slug-specific `_stage2_check_digest` 분기. 새 휴리스틱 (C) 면 `tests/probe_heuristics/test_<name>.py`. 기존 수정만은 skip. fixture URL = *진짜로 그 패턴 보여주는* URL 인지 probe 결과로 직접 검증.
 
-7. **트랙 B 매칭 0이면 이유 메모** — §1 의 트랙 B 검토 후보 (2a~2d) 매칭 X 면 case body 에 "일반화 안 되는 이유: <한 줄>" 명시. 미래 2번째 케이스 들어왔을 때 즉시 알아채는 비용 절감.
-
-8. **휴리스틱 일반화 후보가 떠올랐지만 *지금* 박지 않기로 했나? → `docs/cases/_deferred_heuristics.md` 에 박음** — case body 에만 묻으면 누적되며 grep 비용 늘고 빠뜨리기 쉬움. ledger 자리에 한 H2 섹션 (후보명·신호·잡힐 case·보류 사유·재검토 트리거·픽스 자리·commit·관련 case). 새 후보 = 새 섹션 append. 임계량 도달해 휴리스틱화 PR 박을 때 그 섹션 삭제 + PR commit msg 에 "deferred_heuristics ledger 항목 제거: <후보명>" 명시. 컨벤션 = ledger 본문 상단. `cases_index.py` 가 `_` prefix 파일 skip — INDEX.md/DB 안 박힘.
+7. **트랙 B 매칭 0이면 이유 메모** — §1 의 트랙 B 검토 후보 (2a~2d) 매칭 X 면 case body 에 "일반화 안 되는 이유: <한 줄>" 명시. 미래 2번째 케이스 들어왔을 때 즉시 알아채는 비용 절감. — *휴리스틱 후보가 떠올랐지만 보류했나*: 한 줄 `docs/cases/_deferred_heuristics.md` 에 append (format 그 파일 상단). 트리거 도달해 박을 때 그 줄 삭제 + commit msg "deferred_heuristics 제거: <후보명>".
 
 위 답 없어도 commit 막지 X — 진짜 검증은 reviewer subagent + pre-push hook.
 
