@@ -195,7 +195,27 @@ def cmd_pull(skip_later: bool = False) -> int:
     OUTPUT.mkdir(parents=True, exist_ok=True)
     later = _load_later() if skip_later else set()
 
-    # 1) <slug>.FAILED.json 들 — 원격 셸이 glob 확장. 매치 0개면 scp 가 비0 으로 끝남(에러 아님).
+    # 1a) N100 의 현재 FAILED.json slug 목록을 먼저 받는다 — local 의 stale (N100 에서 이미 REJECTED 로
+    # 전환됐는데 옛 FAILED 가 local 에 남은 것) 자동 정리. scp 는 reverse-delete 안 함 → 명시 sync 필요.
+    rc_ls, out_ls = _run(["ssh", DEPLOY_HOST, f"cd {DEPLOY_PATH} && ls output/poll_state/*{_FAILED_SUFFIX} 2>/dev/null || true"])
+    remote_failed: set[str] = set()
+    if rc_ls == 0:
+        for line in out_ls.splitlines():
+            name = Path(line.strip()).name
+            if name.endswith(_FAILED_SUFFIX):
+                remote_failed.add(name)
+    pruned_stale = 0
+    pruned_stale_slugs: list[str] = []
+    for fp in STATE_DIR.glob(f"*{_FAILED_SUFFIX}"):
+        if fp.name not in remote_failed:
+            try:
+                fp.unlink()
+                pruned_stale += 1
+                pruned_stale_slugs.append(fp.name[: -len(_FAILED_SUFFIX)])
+            except OSError as e:
+                sys.stderr.write(f"[triage pull] stale {fp.name} 삭제 실패: {e}\n")
+
+    # 1b) <slug>.FAILED.json 들 — 원격 셸이 glob 확장. 매치 0개면 scp 가 비0 으로 끝남(에러 아님).
     rc, out = _run(["scp", "-q", f"{DEPLOY_HOST}:{DEPLOY_PATH}/output/poll_state/*{_FAILED_SUFFIX}", f"{STATE_DIR}{os.sep}"])
     if rc != 0 and not any(s in out for s in ("No such file", "not a regular file", "matches no files")):
         sys.stderr.write(f"[triage pull] FAILED.json 가져오기 경고: {out}\n")
@@ -233,9 +253,23 @@ def cmd_pull(skip_later: bool = False) -> int:
                 except OSError as e:
                     sys.stderr.write(f"[triage pull] Later {slug} probe/ 삭제 실패: {e}\n")
 
+    # 3b) probe/ stale 정리 — *방금 prune 된 stale FAILED slug 의 probe 디렉토리만* 삭제.
+    # 다른 probe/ 디렉토리(smoke fixture, 성공 등록 사이트 probe 등)는 건드리지 않음.
+    pruned_stale_probe = 0
+    for slug in pruned_stale_slugs:
+        pd = PROBE_DIR / slug
+        if pd.exists() and pd.is_dir():
+            try:
+                shutil.rmtree(pd)
+                pruned_stale_probe += 1
+            except OSError as e:
+                sys.stderr.write(f"[triage pull] stale probe/{slug} 삭제 실패: {e}\n")
+
     nq = len({e.get("slug") for e in _read_queue()})
     print(f"[triage pull] {DEPLOY_HOST}:{DEPLOY_PATH}/output → {OUTPUT}")
     print(f"  FAILED.json: {len(slugs)}건   triage_queue slug: {nq}건   probe 디렉토리: {sum(1 for s in slugs if (PROBE_DIR / s).exists())}개")
+    if pruned_stale or pruned_stale_probe:
+        print(f"  stale 정리 (N100 에서 이미 REJECTED/등록 완료): FAILED.json {pruned_stale}건 / probe {pruned_stale_probe}개")
     if later:
         print(f"  Later 제외: FAILED.json {pruned_failed}건 / probe {pruned_probe}개 정리   (`output/triage_later.json` — dashboard 토글)")
     print("  → `python scripts/triage.py list`")
