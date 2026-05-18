@@ -2,10 +2,11 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 56 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 57 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
+| [`infra_probe_sitemap_discovery_2026-05-18`](infra_probe_sitemap_discovery_2026-05-18.md) | 🏗 인프라 (probe Phase 6 의 sitemap.xml 디스커버리 — docstring 의도 미구현분 채움) | 2026-05-18 | C | posts_nonempty, user_url_not_board_page | (인프라 case — 특정 사이트 X. 트리거 = prior-art 조사 followup-plan Action |
 | [`tistory_leedakyeong_e0e58b0f`](tistory_leedakyeong_e0e58b0f.md) | ✅ 일반화 완료 (Tistory 플랫폼 — known-platform 인식기 + RSS adapter) | 2026-05-17 | F | posts_nonempty, static_vs_headless, feed_candidates, post_id_stable_shape | https://leedakyeong.tistory.com/entry/Python-pandas-tutorial-drop-duplicates-in-pandas |
 | [`infra_worker_rc2_triage_double_record_2026-05-17`](infra_worker_rc2_triage_double_record_2026-05-17.md) | 🏗 인프라 (bot/worker rc=2 분기 append_triage_queue 중복 호출 제거) | 2026-05-17 | F | triage_queue_dashboard_mismatch, rc2_double_record, queue_noise | (인프라 case — 특정 사이트 X. 트리거 = triage queue 잡음 진단) |
 | [`infra_triage_pull_reverse_delete_2026-05-17`](infra_triage_pull_reverse_delete_2026-05-17.md) | 🏗 인프라 (triage.py pull 이 N100 에서 삭제된 FAILED 도 local 동기 삭제) | 2026-05-17 | F | scp_no_reverse_delete, stale_local_failed, pull_mirror_drift | (인프라 case — triage.py pull stale FAILED 자동 정리) |
@@ -70,7 +71,7 @@
 | layer | count |
 |---|---|
 | (미기재) | 13 |
-| C | 1 |
+| C | 2 |
 | C+A | 1 |
 | C+D | 2 |
 | C+F | 1 |
@@ -86,7 +87,7 @@
 
 | strategy | count |
 |---|---|
-| (미기재) | 27 |
+| (미기재) | 28 |
 | handwritten | 9 |
 | httpx_html | 6 |
 | httpx_json | 4 |
@@ -95,5 +96,5 @@
 
 ### 최근 90일 (≥ 2026-02-17)
 
-케이스 56 건.
+케이스 57 건.
 

@@ -117,7 +117,26 @@
 
 ---
 
-## 4. Action #1 — Firecrawl `/map` 통합 (1~2일, v2 — 통합 위치 확정)
+## 4. Action #1 — 실행 결과 (commit `30b9532`, probe-native sitemap discovery)
+
+**최종 형태** = probe Phase 6 의 sitemap.xml 디스커버리 (docstring 의도 미구현분 채움).
+자세히: [docs/cases/infra_probe_sitemap_discovery_2026-05-18.md](cases/infra_probe_sitemap_discovery_2026-05-18.md)
+
+요약:
+- **Firecrawl 의존 X** — codex 리뷰 DIRECT-IMPL-OK (self-host Firecrawl 도 sitemap+crawl 만 사용)
+- **자리** = `probe/discover.py` Phase 6 (engine/ X, register.py retry 추가 X)
+- **digest 통합** — `digest.sitemap_candidates` 에 항상 박힘. generate i==1 부터 LLM 참조 (retry 추가 0)
+- 비용: probe 마다 ~1~3s. LLM 호출 4회 그대로. 폴링 영향 0. credit 0.
+
+이전 시도 함정 (다시 하지 X):
+- ❌ `ea26370` Firecrawl hosted API (revert) — credit 부담, 외부 의존
+- ❌ `160936b` engine/url_discovery.py + register retry (revert) — LLM 토큰 2배, 잘못된 자리
+
+원래 plan 본문 ↓ (이전 설계 — 참고용. 실제 구현은 위와 다름)
+
+---
+
+## 4. Action #1 — Firecrawl `/map` 통합 (1~2일, v2 — 통합 위치 확정) [이전 설계 — 폐기]
 
 ### 현재 상태
 - bench 라이브: skku_cse → 15 entry (`/cse/notice.do` ✅), gamemeca → 11 entry, naver_cafe → 1 (한계).
