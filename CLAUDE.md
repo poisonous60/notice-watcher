@@ -147,8 +147,11 @@ bash scripts/setup-hooks.sh   # 또는 pwsh scripts/setup-hooks.ps1
 - `.claude/skills/hand-config/SKILL.md` 절차 따름
 - 자가 점검 가이드 (SKILL.md §6, 가이드라인, 권장)
 - `docs/cases/<slug>.md` 작성 + `python scripts/cases_index.py`
+- **`python scripts/cases_index.py --backfill-db output/cases.sqlite3`** — *반드시*. case_runs DB 에 row 박지 않으면 dashboard `/cases` 탭에 *안 보임* (file 만 만들고 빠뜨리면 다음 사람이 못 찾음).
 - `Agent(subagent_type='hand-config-reviewer', model='sonnet')` 호출
 - pre-push hook 통과 후 push → N100 pull → restart
+
+`output/cases.sqlite3` = git ignored (output/ rule). dev box 만 backfill. N100 dashboard 안 봄.
 
 `docs/자가개선 인프라 계획.md` 전체 설계 (rev 3).
 
