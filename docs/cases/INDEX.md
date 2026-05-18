@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 55 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 56 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -55,6 +55,7 @@
 | [`host_nte-perfectworl_kr_c8f4855a`](host_nte-perfectworl_kr_c8f4855a.md) | 🔧 손 config (작동중, baseline 3, httpx_html) | 2026-05-15 |  | article_body_len | https://nte.perfectworld.com/kr/article/news/index.html |
 | [`www.reddit.com_r_CosmicPrincessKaguya`](www.reddit.com_r_CosmicPrincessKaguya.md) | 🧩 손어댑터 (작동중, baseline 19, handwritten/RedditAdapter, flair="Fan Art") | 2026-05-12 |  |  | https://www.reddit.com/r/CosmicPrincessKaguya/ |
 | [`m.cafe.daum.net_umamusume-kor_Z4os_boardType`](m.cafe.daum.net_umamusume-kor_Z4os_boardType.md) | 🧩 손어댑터 (작동중, baseline 20, handwritten/DaumCafeAdapter) | 2026-05-12 |  | posts_nonempty | https://m.cafe.daum.net/umamusume-kor/Z4os?boardType= |
+| [`arca-live_trickcal_6703bf64`](arca-live_trickcal_6703bf64.md) | 🧩 손어댑터 (작동중, baseline 30, handwritten/ArcaLiveAdapter, playwright-stealth) | 2026-05-12 |  |  | https://arca.live/b/trickcal |
 | [`mabinogimobile.nexon.com_News_notice`](mabinogimobile.nexon.com_News_notice.md) | 🔧 손작성 config (작동중, baseline 10) | 2026-05-11 |  | article_body_len | https://mabinogimobile.nexon.com/News/notice |
 | [`game.naver.com_lounge_Trickcal_board_3`](game.naver.com_lounge_Trickcal_board_3.md) | 🔧 손작성 config (작동중, baseline 25, httpx_json) | 2026-05-11 |  | posts_nonempty | https://game.naver.com/lounge/Trickcal/board/3 |
 | [`forum.nexon.com_bluearchive_board_list_board_1018`](forum.nexon.com_bluearchive_board_list_board_1018.md) | 🔧 손작성 config (작동중, baseline 30, httpx_json) | 2026-05-11 |  | posts_nonempty | https://forum.nexon.com/bluearchive/board_list?board=1018 |
@@ -68,7 +69,7 @@
 
 | layer | count |
 |---|---|
-| (미기재) | 12 |
+| (미기재) | 13 |
 | C | 1 |
 | C+A | 1 |
 | C+D | 2 |
@@ -86,7 +87,7 @@
 | strategy | count |
 |---|---|
 | (미기재) | 27 |
-| handwritten | 8 |
+| handwritten | 9 |
 | httpx_html | 6 |
 | httpx_json | 4 |
 | none | 6 |
@@ -94,5 +95,5 @@
 
 ### 최근 90일 (≥ 2026-02-17)
 
-케이스 55 건.
+케이스 56 건.
 
