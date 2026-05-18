@@ -181,11 +181,39 @@ _ARTIFACTS: dict[str, ArtifactContract] = {
                            note="robots.txt 의 Crawl-Delay (config 의 polite_sleep 에 반영)"),
             _ContractField("disallow", type_hint="list[str]",
                            note="robots.txt 의 Disallow 패턴 (config 등록 거부 판단)"),
+            _ContractField("sitemaps", type_hint="list[str]",
+                           note="robots.txt 의 Sitemap: 라인 (RFC 9309). fetch_sitemaps 의 seed."),
             _ContractField("raw_path", type_hint="str|null", required=False,
                            note="robots.txt 원본을 디스크에 저장한 경로"),
             _ContractField("error", type_hint="str", required=False,
                            note="요청 실패 시 에러 메시지"),
         ),
+        optional_on_disk=True,
+    ),
+
+    # ----------------------------------------------------------------- #
+    # sitemap.json — probe/discover.py:fetch_sitemaps
+    # ----------------------------------------------------------------- #
+    "sitemap.json": ArtifactContract(
+        file_name="sitemap.json",
+        payload_kind="object",
+        fields=(
+            _ContractField("page_url", note="probe seed URL"),
+            _ContractField("sitemap_urls_tried", type_hint="list[str]",
+                           note="실제 fetch 시도한 sitemap.xml URL 들 (robots 의 Sitemap: + 표준 경로 폴백)"),
+            _ContractField("candidates", type_hint="list[dict]",
+                           note="발견한 board page 후보 URL — board-like 점수 내림차순. cap 100. "
+                                "config_writer 가 사용자 URL 이 board 아닐 때 list.url_template 후보로 사용."),
+            _ContractField("stats", type_hint="dict",
+                           note="{sitemap_count, fetched, errors, out_total} — 디버깅용."),
+            _ContractField("error", type_hint="str|null", required=False,
+                           note="실패 시 에러 메시지 (전체 실패 — fail-soft 라 candidates=[])"),
+        ),
+        list_item_fields={"candidates": (
+            _ContractField("url"),
+            _ContractField("score", type_hint="int",
+                           note="board-like 점수 — keyword(notice/bbs/board/news/공지/게시판) + ID query + 숫자 path + depth"),
+        )},
         optional_on_disk=True,
     ),
 

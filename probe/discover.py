@@ -1,10 +1,14 @@
 """Phase 6: RSS/Atom + robots.txt + sitemap 디스커버리."""
 from __future__ import annotations
 
+import gzip
 import json
 import re
+import zlib
 from pathlib import Path
+from typing import Optional
 from urllib.parse import urljoin, urlsplit
+from xml.etree import ElementTree as ET
 
 import httpx
 from bs4 import BeautifulSoup
@@ -71,12 +75,16 @@ def discover_feeds(*, page_url: str, page_html: str, out_dir: Path) -> dict:
 
 
 _CRAWL_DELAY_RE = re.compile(r"^\s*crawl-delay\s*:\s*(\d+(?:\.\d+)?)", re.IGNORECASE | re.MULTILINE)
+_SITEMAP_LINE_RE = re.compile(r"(?im)^\s*sitemap\s*:\s*(\S+)\s*$")
 
 
 def read_robots(*, page_url: str, out_dir: Path) -> dict:
     parts = urlsplit(page_url)
     url = f"{parts.scheme}://{parts.netloc}/robots.txt"
-    info = {"url": url, "status": None, "crawl_delay": None, "disallow": [], "raw_path": None}
+    info: dict = {
+        "url": url, "status": None, "crawl_delay": None,
+        "disallow": [], "sitemaps": [], "raw_path": None,
+    }
     try:
         with httpx.Client(headers=preset_h2_chrome_min(), timeout=10.0, follow_redirects=True) as c:
             r = c.get(url)
@@ -94,6 +102,7 @@ def read_robots(*, page_url: str, out_dir: Path) -> dict:
                     for line in txt.splitlines()
                     if line.lower().startswith("disallow:")
                 ][:30]
+                info["sitemaps"] = _SITEMAP_LINE_RE.findall(txt)[:10]
     except Exception as e:
         info["error"] = f"{type(e).__name__}: {e}"
 
@@ -102,3 +111,216 @@ def read_robots(*, page_url: str, out_dir: Path) -> dict:
         json.dumps(info, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     return info
+
+
+# --------------------------------------------------------------------------- #
+# sitemap.xml discovery — robots 의 Sitemap: 라인 + 표준 경로 (/sitemap.xml 등)
+# 재귀 sitemapindex + gzip + namespace 유무 둘 다 + byte cap (gzip bomb 방어)
+# --------------------------------------------------------------------------- #
+
+_SITEMAP_DEFAULT_PATHS = ("/sitemap.xml", "/sitemap_index.xml", "/sitemap.xml.gz")
+_MAX_SITEMAP_DEPTH = 2
+_MAX_SITEMAP_URLS = 500
+_MAX_SITEMAP_BYTES = 10 * 1024 * 1024  # 10 MB 본문/decompressed 상한
+_MAX_OUT_TOTAL = 100  # digest 에 들어갈 cap
+
+# board page URL 우선순위 휴리스틱 (cap 자를 때 살리기 위함).
+_BOARD_KEYWORDS = ("notice", "bbs", "board", "news", "article", "post", "공지", "게시판", "뉴스", "글")
+_BOARD_ID_RE = re.compile(r"[?&](?:id|no|page|p|bid|cid|board)=", re.I)
+
+
+def fetch_sitemaps(*, page_url: str, robots_sitemaps: list, out_dir: Path) -> dict:
+    """robots 의 Sitemap: 라인 (있으면) + 표준 경로 폴백 → sitemap.xml 재귀 fetch+parse.
+
+    사용자가 board root 아닌 URL 던졌을 때 후보 회복 신호 (`config_writer.system.txt`
+    의 `discovery.sitemap_candidates` 참조). probe Phase 6 — 항상 도는 정찰, retry X.
+
+    fail-soft (네트워크/파싱 오류 → 빈 list). digest 에 *항상* 박힘 — generate 가 i==1 부터 참조.
+    """
+    info: dict = {
+        "page_url": page_url,
+        "sitemap_urls_tried": [],
+        "candidates": [],  # board-like 점수 내림차순. {url, score}
+        "stats": {"sitemap_count": 0, "fetched": 0, "errors": 0, "out_total": 0},
+        "error": None,
+    }
+    try:
+        parts = urlsplit(page_url)
+        if not parts.scheme or not parts.netloc:
+            info["error"] = "bad page_url"
+            _write(out_dir, info)
+            return info
+        origin_host = parts.netloc.lower()
+        allowed_hosts: set = {origin_host}
+        root_url = f"{parts.scheme}://{parts.netloc}"
+
+        headers = preset_h2_chrome_min()
+        with httpx.Client(headers=headers, timeout=10.0, follow_redirects=True) as client:
+            # 1) seed = robots 의 Sitemap 라인. 빈 list 면 표준 경로 폴백 (HEAD 또는 Range GET).
+            seeds: list[str] = list(robots_sitemaps or [])
+            if not seeds:
+                for path in _SITEMAP_DEFAULT_PATHS:
+                    cand = urljoin(root_url, path)
+                    if _head_exists(client, cand):
+                        seeds.append(cand)
+                        break
+            info["sitemap_urls_tried"] = seeds[:5]
+            info["stats"]["sitemap_count"] = len(info["sitemap_urls_tried"])
+
+            # 2) sitemap parse (재귀)
+            collected: list[str] = []
+            for sm in info["sitemap_urls_tried"]:
+                got = _parse_sitemap_recursive(client, sm, depth=0, stats=info["stats"])
+                collected.extend(got)
+                if len(collected) >= _MAX_SITEMAP_URLS:
+                    break
+
+        # 3) host filter (origin + redirect canonical 둘 다 허용) + dedup + 정규화
+        seen: set = set()
+        normalized: list[str] = []
+        for u in collected:
+            norm = _normalize_url(u)
+            if not norm or norm in seen:
+                continue
+            try:
+                if urlsplit(norm).netloc.lower() not in allowed_hosts:
+                    continue
+            except ValueError:
+                continue
+            seen.add(norm)
+            normalized.append(norm)
+
+        # 4) board-like 점수 정렬, cap
+        scored = [{"url": u, "score": _board_like_score(u)} for u in normalized]
+        scored.sort(key=lambda d: d["score"], reverse=True)
+        info["candidates"] = scored[:_MAX_OUT_TOTAL]
+        info["stats"]["out_total"] = len(info["candidates"])
+    except Exception as e:  # noqa: BLE001
+        info["error"] = f"{type(e).__name__}: {e}"
+
+    _write(out_dir, info)
+    return info
+
+
+def _write(out_dir: Path, info: dict) -> None:
+    validate_payload("sitemap.json", info, allow_extra=False)
+    (out_dir / "sitemap.json").write_text(
+        json.dumps(info, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
+def _head_exists(client: httpx.Client, url: str) -> bool:
+    try:
+        r = client.head(url)
+        if r.status_code < 400:
+            return True
+        if r.status_code in (405, 501, 403):
+            r2 = client.get(url, headers={"Range": "bytes=0-1023"})
+            return r2.status_code < 400
+        return False
+    except (httpx.HTTPError, OSError):
+        return False
+
+
+def _parse_sitemap_recursive(client: httpx.Client, sm_url: str, depth: int,
+                              stats: dict) -> list[str]:
+    if depth > _MAX_SITEMAP_DEPTH:
+        return []
+    try:
+        r = client.get(sm_url)
+        if r.status_code != 200:
+            stats["errors"] = stats.get("errors", 0) + 1
+            return []
+        body = r.content[:_MAX_SITEMAP_BYTES]
+        stats["fetched"] = stats.get("fetched", 0) + 1
+    except (httpx.HTTPError, OSError):
+        stats["errors"] = stats.get("errors", 0) + 1
+        return []
+
+    if sm_url.endswith(".gz") or body[:2] == b"\x1f\x8b":
+        try:
+            body = _gzip_decompress_capped(body)
+        except (OSError, gzip.BadGzipFile, EOFError, ValueError, zlib.error):
+            stats["errors"] = stats.get("errors", 0) + 1
+            return []
+
+    try:
+        root = ET.fromstring(body)
+    except ET.ParseError:
+        stats["errors"] = stats.get("errors", 0) + 1
+        return []
+
+    tag = _strip_ns(root.tag)
+    out: list[str] = []
+    if tag == "sitemapindex":
+        for child in root:
+            if _strip_ns(child.tag) != "sitemap":
+                continue
+            loc = _child_text(child, "loc")
+            if loc:
+                out.extend(_parse_sitemap_recursive(client, loc.strip(), depth + 1, stats))
+                if len(out) >= _MAX_SITEMAP_URLS:
+                    return out[:_MAX_SITEMAP_URLS]
+    elif tag == "urlset":
+        for child in root:
+            if _strip_ns(child.tag) != "url":
+                continue
+            loc = _child_text(child, "loc")
+            if loc:
+                out.append(loc.strip())
+                if len(out) >= _MAX_SITEMAP_URLS:
+                    return out
+    return out
+
+
+def _child_text(el, local_name: str) -> Optional[str]:
+    for child in el:
+        if _strip_ns(child.tag) == local_name:
+            return (child.text or "").strip() or None
+    return None
+
+
+def _strip_ns(tag: str) -> str:
+    return tag.split("}", 1)[-1] if "}" in tag else tag
+
+
+def _gzip_decompress_capped(data: bytes) -> bytes:
+    """gzip bomb 방어 — decompressed cap."""
+    decomp = zlib.decompressobj(zlib.MAX_WBITS | 16)
+    out = bytearray()
+    out.extend(decomp.decompress(data, _MAX_SITEMAP_BYTES))
+    if not decomp.eof and len(out) >= _MAX_SITEMAP_BYTES:
+        raise ValueError("gzip decompressed size exceeds cap")
+    return bytes(out)
+
+
+def _normalize_url(u: str) -> Optional[str]:
+    try:
+        p = urlsplit(u.strip())
+    except ValueError:
+        return None
+    if not p.scheme or not p.netloc:
+        return None
+    path = p.path or "/"
+    return f"{p.scheme.lower()}://{p.netloc.lower()}{path}" + (f"?{p.query}" if p.query else "")
+
+
+def _board_like_score(u: str) -> int:
+    try:
+        p = urlsplit(u)
+    except ValueError:
+        return 0
+    s = 0
+    path_q = (p.path or "").lower() + "?" + (p.query or "")
+    for kw in _BOARD_KEYWORDS:
+        if kw in path_q:
+            s += 3
+            break
+    if _BOARD_ID_RE.search("?" + (p.query or "")):
+        s += 2
+    if re.search(r"/\d{3,}(?:/|$)", p.path or ""):
+        s += 1
+    depth = len([seg for seg in (p.path or "").split("/") if seg])
+    if 1 <= depth <= 3:
+        s += 1
+    return s

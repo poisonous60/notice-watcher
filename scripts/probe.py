@@ -19,7 +19,7 @@ from engine.tracing import start_trace, current_trace
 from probe.baseline import baseline_check, is_baseline_blocked
 from probe.diagnose import diagnose
 from probe.environment import capture as capture_environment, gdpi_advice
-from probe.discover import discover_feeds, read_robots
+from probe.discover import discover_feeds, fetch_sitemaps, read_robots
 from probe.extract import (
     all_same_host_patterns_in_nav,
     article_meta_signals,
@@ -483,9 +483,24 @@ def _run(args: argparse.Namespace, url: str, slug: str) -> int:
                 robots_info = _robots_fut.result()
             except Exception as _e_robots:  # noqa: BLE001
                 print(f"  [Phase 6 robots] fail: {type(_e_robots).__name__}: {_e_robots}")
-                robots_info = {"url": "", "status": None, "crawl_delay": None, "disallow": []}
+                robots_info = {"url": "", "status": None, "crawl_delay": None, "disallow": [], "sitemaps": []}
+        # sitemap fetch (robots 의 Sitemap: 라인 + 표준 경로 폴백) — robots 결과 의존이라 sequential.
+        # 사용자 URL 이 board root 아닐 때 후보 회복 — config_writer 가 i==1 부터 참조.
+        with tr.span("phase6_fetch_sitemaps"):
+            try:
+                sitemap_info = fetch_sitemaps(
+                    page_url=url,
+                    robots_sitemaps=robots_info.get("sitemaps") or [],
+                    out_dir=out_dir,
+                )
+            except Exception as _e_sm:  # noqa: BLE001
+                print(f"  [Phase 6 sitemap] fail: {type(_e_sm).__name__}: {_e_sm}")
+                sitemap_info = {"page_url": url, "sitemap_urls_tried": [], "candidates": [],
+                                "stats": {"sitemap_count": 0, "fetched": 0, "errors": 0, "out_total": 0}}
         print(f"\n[Phase 6 result] feeds: {len(feeds.get('candidates') or [])} candidates · "
-              f"robots: status={robots_info.get('status')} crawl_delay={robots_info.get('crawl_delay')}")
+              f"robots: status={robots_info.get('status')} crawl_delay={robots_info.get('crawl_delay')} "
+              f"sitemaps={len(robots_info.get('sitemaps') or [])} · "
+              f"sitemap_candidates: {len(sitemap_info.get('candidates') or [])}")
 
     # ---- Phase 10: diagnose + summary ----
     print("\n[Phase 10] diagnose + write summary ...")

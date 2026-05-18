@@ -241,6 +241,7 @@ def build_digest(
     robots = _read_json(out_dir / "robots.json") or {}
     list_cands = _read_json(out_dir / "list_candidates.json") or {}
     feeds = _read_json(out_dir / "feed_candidates.json") or {}
+    sitemap_disc = _read_json(out_dir / "sitemap.json") or {}
     captured_headers = _read_json(out_dir / "list.captured_headers.json") or {}
     article_body_apis = _read_json(out_dir / "article_candidates.json")  # register.py 의 글페이지 re-probe 가 씀 (없으면 None)
     click_meta = _read_json(out_dir / "article_click.json") or {}        # probe Phase 9b: 목록에서 글 링크 클릭 → 최종 URL/페이지
@@ -284,6 +285,7 @@ def build_digest(
         "list_candidates": list_cands,
         "hydration": hydration or None,
         "feed_candidates": (feeds.get("candidates") if isinstance(feeds, dict) else feeds) or [],
+        "sitemap_candidates": (sitemap_disc.get("candidates") if isinstance(sitemap_disc, dict) else []) or [],
         "list_html": {
             "source": str(list_path) if list_path else None,
             "truncated": list_trunc,

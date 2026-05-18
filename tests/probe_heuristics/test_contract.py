@@ -69,9 +69,9 @@ def run() -> list[tuple[str, bool, str]]:
     except KeyError:
         cases.append(("unknown_artifact_raises", True, ""))
 
-    # 6. OUTPUT_SCHEMA 가 6 종 완전성 (산출물 종류 회귀 차단)
+    # 6. OUTPUT_SCHEMA 가 7 종 완전성 (산출물 종류 회귀 차단)
     expected = {
-        "diagnosis.json", "list_candidates.json", "robots.json",
+        "diagnosis.json", "list_candidates.json", "robots.json", "sitemap.json",
         "feed_candidates.json", "article_click.json", "article_candidates.json",
     }
     cases.append(("output_schema_completeness", set(OUTPUT_SCHEMA) == expected,
