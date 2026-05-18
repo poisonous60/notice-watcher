@@ -814,6 +814,68 @@ def _gen(digest: dict, *, max_attempts: int, model):
     return asyncio.run(_generate(digest, max_attempts=max_attempts, model=model))
 
 
+_FIRECRAWL_FALLBACK_KEYWORDS = ("posts_nonempty", "fetch_list", "0건", "row_selector", "list_path")
+
+
+def _should_try_firecrawl_fallback(feedback: str) -> bool:
+    """generate 실패 사유가 '목록 추출 실패' 류면 True. URL 자체가 잘못된 root 페이지일 가능성."""
+    if not feedback:
+        return False
+    return any(k in feedback for k in _FIRECRAWL_FALLBACK_KEYWORDS)
+
+
+def _try_firecrawl_fallback(url: Optional[str], digest: dict, args, original_err):
+    """generate fail 후 Firecrawl `/map` 으로 후보 board URL 회복 → digest 에 hint 박고 1회 retry.
+
+    반환: 성공 시 (cfg, rep), 실패/skip 시 (None, None). config_writer 가 hint 보고 후보 중 board 골라 list.url_template 설정.
+    """
+    if not url or args.config:
+        return None, None
+    last_fb = getattr(original_err, "last_feedback", "") or str(original_err)
+    if not _should_try_firecrawl_fallback(last_fb):
+        return None, None
+
+    from bot.config import firecrawl_api_key  # lazy import — bot.config 가 .env 로딩
+    from engine.url_discovery import discover_board_candidates
+
+    key = firecrawl_api_key()
+    if not key:
+        print("[register] [firecrawl] /map fallback skip — FIRECRAWL_API_KEY 미설정")
+        return None, None
+
+    print(f"\n[register] [firecrawl] /map fallback 시도 — posts_nonempty 류 실패 + key 있음")
+    cands = discover_board_candidates(url, key)
+    if not cands:
+        print("[register] [firecrawl] /map 결과 0건 — fallback 중단")
+        return None, None
+    print(f"[register] [firecrawl] {len(cands)} 후보 (상위 10): ")
+    for c in cands[:10]:
+        print(f"    {c}")
+
+    hint = (
+        f"이전 시도 실패 — 사용자가 던진 URL ({url}) 이 board (글 목록) page 가 아닐 가능성. "
+        f"Firecrawl /map 결과 후보 ({len(cands)}개, 상위 30 표시):\n"
+        + "\n".join(f"  - {c}" for c in cands[:30])
+        + "\n위 중 *글 목록* page URL 을 골라 list.url_template 에 사용. "
+        + "홈/About/메뉴 페이지 제외 — 글 ID 패턴(/view?id=, /post/123, /article/456, /notice/, /bbs/) 있을 것."
+    )
+    old_hint = digest.get("escalation_hint") or ""
+    digest["escalation_hint"] = (old_hint + "\n\n[firecrawl /map fallback]\n" + hint) if old_hint else hint
+    digest["firecrawl_url_candidates"] = cands[:30]
+
+    print(f"[register] [firecrawl] /map hint 박힘 — 재시도 (max_attempts={args.max_attempts})")
+    try:
+        cfg, rep = _gen(digest, max_attempts=args.max_attempts, model=args.model)
+        print("[register] [firecrawl] ✅ /map fallback 으로 재시도 성공")
+        return cfg, rep
+    except GenerationError as e2:
+        print(f"[register] [firecrawl] 재시도도 실패 — 원래 FAILED 흐름으로")
+        # 재시도 실패 시 last_feedback 갱신 — caller 의 FAILED 로그에 반영
+        original_err.last_feedback = getattr(e2, "last_feedback", str(e2))  # type: ignore[attr-defined]
+        original_err.last_config = getattr(e2, "last_config", None)  # type: ignore[attr-defined]
+        return None, None
+
+
 def _article_url_score(u: Optional[str], host: str) -> int:
     if not u or not u.startswith("http"):
         return -1
@@ -1404,24 +1466,32 @@ def _main_inner(argv) -> int:
     try:
         cfg, rep = _gen(digest, max_attempts=args.max_attempts, model=args.model)
     except GenerationError as e:
-        if args.no_escalate:
-            _ctx = "--no-escalate: preflight(글페이지 re-probe + probe 신호 hint) 생략, raw lite digest 로 생성한 상태"
-        elif digest.get("escalation_hint") or article_url_hint:
-            _ctx = "preflight: 글페이지 HAR re-probe + probe 신호 hint 적용 상태"
+        # Firecrawl /map fallback — posts_nonempty 류 실패 시 후보 board URL 회복 후 1회 재시도
+        fc_cfg, fc_rep = _try_firecrawl_fallback(url, digest, args, e)
+        if fc_cfg is not None and fc_rep is not None:
+            cfg, rep = fc_cfg, fc_rep
+            # 재시도 성공 — 정상 흐름 합류 (아래 out_path.write_text 로 떨어짐)
         else:
-            _ctx = "preflight 돌렸으나 글 페이지 후보 없음/추가 hint 없음 — 사실상 raw lite digest"
-        fp = _save_failed(slug, url, f"gemini 생성+검증 {args.max_attempts}회 실패 ({_ctx})",
-                          getattr(e, "last_config", None), getattr(e, "last_feedback", str(e)))
-        print(f"\n[register] ❌ 자동 처리 불가. → {fp}")
-        print("  → docs/config 자동생성 실패 케이스.md 에서 .FAILED.json 의 last_feedback([FAIL] <체크명>) 로 케이스 판별 → 보통 손작성 config(register.py --config)로 해결, 안 되면 손어댑터(docs/사이트 어댑터 추가 가이드.md).")
-        print("  (probe 가 '첫 글'을 잘못 집은 게 의심되면: register.py \"<목록URL>\" --article-url \"<실제 글 하나 URL>\" 로 재시도.)")
-        print(f"  마지막 실패 사유:\n{getattr(e, 'last_feedback', e)}")
-        try:
-            gem_span_cm.__exit__(type(e), e, e.__traceback__)
-            _gem_closed = True
-        except Exception:  # noqa: BLE001
-            _gem_closed = True
-        return 1
+            if args.no_escalate:
+                _ctx = "--no-escalate: preflight(글페이지 re-probe + probe 신호 hint) 생략, raw lite digest 로 생성한 상태"
+            elif digest.get("escalation_hint") or article_url_hint:
+                _ctx = "preflight: 글페이지 HAR re-probe + probe 신호 hint 적용 상태"
+            else:
+                _ctx = "preflight 돌렸으나 글 페이지 후보 없음/추가 hint 없음 — 사실상 raw lite digest"
+            if digest.get("firecrawl_url_candidates"):
+                _ctx += " + firecrawl /map fallback 도 실패"
+            fp = _save_failed(slug, url, f"gemini 생성+검증 {args.max_attempts}회 실패 ({_ctx})",
+                              getattr(e, "last_config", None), getattr(e, "last_feedback", str(e)))
+            print(f"\n[register] ❌ 자동 처리 불가. → {fp}")
+            print("  → docs/config 자동생성 실패 케이스.md 에서 .FAILED.json 의 last_feedback([FAIL] <체크명>) 로 케이스 판별 → 보통 손작성 config(register.py --config)로 해결, 안 되면 손어댑터(docs/사이트 어댑터 추가 가이드.md).")
+            print("  (probe 가 '첫 글'을 잘못 집은 게 의심되면: register.py \"<목록URL>\" --article-url \"<실제 글 하나 URL>\" 로 재시도.)")
+            print(f"  마지막 실패 사유:\n{getattr(e, 'last_feedback', e)}")
+            try:
+                gem_span_cm.__exit__(type(e), e, e.__traceback__)
+                _gem_closed = True
+            except Exception:  # noqa: BLE001
+                _gem_closed = True
+            return 1
     finally:
         # 아직 안 닫혔으면 — 정상 종료(exc=None) 또는 GenerationError 외의 예외 — 항상 닫는다.
         if not _gem_closed:
