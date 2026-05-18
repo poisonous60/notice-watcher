@@ -18,13 +18,15 @@ vocab_candidates:
     analysis_date: 2026-05-18
     deferred: true
   - candidate: response_branch_body
-    confidence: med
+    confidence: not_applicable
     evidence:
-      - adapters/navercafe.py:_SKIP_ARTICLE_STATUS or 401/403 handler
+      - adapters/navercafe.py:241 (`if r.status_code in (401, 403):` — status 분기만)
       - case_feedback: "비공개·등급제한 게시판이면 본문 API 401/403 → 어댑터가 본문 비워 반환. 200 = 정상."
-    reasoning: "글마다 본문 fetch 결과 status 분기 (200/401/403) 후 본문 합성/생략. closed vocab 의 article.fetch_kind 는 모든 글 동일 처리. Reddit·DaumCafe 동상 패턴."
+    reasoning: "재분류 2026-05-18 (vocab-ext design doc 검토 결과): 본문 합성 분기가 *status only* — 기존 `article.skip_status: [401, 403]` 어휘로 표현 가능. 새 어휘 불필요. 트리거 카운트 부풀리기 X. Reddit 의 4종 합성 분기 (synthesized_content_html) 와는 다른 카테고리."
     analysis_date: 2026-05-18
-    deferred: true
+    reclassified_at: 2026-05-18
+    reclassified_reason: "skip_status 재사용으로 OK — codex rescue 리뷰 + reviewer subagent 확인"
+    deferred: false
 ---
 
 ## 무엇이 일어났나

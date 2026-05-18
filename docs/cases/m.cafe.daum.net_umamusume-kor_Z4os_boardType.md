@@ -17,13 +17,15 @@ vocab_candidates:
     analysis_date: 2026-05-18
     deferred: true
   - candidate: response_branch_body
-    confidence: med
+    confidence: not_applicable
     evidence:
-      - adapters/daumcafe.py:_SKIP_ARTICLE_STATUS = {401, 403}
+      - adapters/daumcafe.py:202 (`if r.status_code in _SKIP_ARTICLE_STATUS:` — status only)
       - case_feedback: "비공개/등급제한 카페·게시판이면 401/403 → 본문 비워 반환 (NaverCafe 와 동일)."
-    reasoning: "본문 fetch status 분기 — NaverCafe·Reddit 동상. 셋 다 같은 패턴 누적 시 임계 도달."
+    reasoning: "재분류 2026-05-18 (vocab-ext design doc 검토 결과): 본문 분기가 status only — 기존 `article.skip_status: [401, 403]` 어휘로 표현 가능. 새 어휘 불필요. (DaumCafe 의 진짜 신규 패턴 = `inline_js_array_scrape` — 별 후보로 이미 등록됨)"
     analysis_date: 2026-05-18
-    deferred: true
+    reclassified_at: 2026-05-18
+    reclassified_reason: "skip_status 재사용으로 OK — reviewer subagent 코드 확인 (line 202)"
+    deferred: false
 ---
 
 ## 무엇이 일어났나

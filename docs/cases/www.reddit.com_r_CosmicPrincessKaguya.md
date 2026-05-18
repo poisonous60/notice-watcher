@@ -8,13 +8,16 @@ requested_by: 사용자(직접 요청)
 config_strategy: handwritten
 adapters_changed: [RedditAdapter]
 vocab_candidates:
-  - candidate: response_branch_body
+  - candidate: synthesized_content_html
     confidence: high
     evidence:
-      - adapters/reddit.py (fetch_article — self/이미지/갤러리/링크 4종 분기)
-      - case_feedback: "본문 응답이 배열 [postListing, commentListing], self 글 = selftext_html, 이미지/갤러리/링크 = 본문 대신 미디어/링크를 HTML 로 합성. closed vocab 의 article.content 는 모든 글 동일 처리."
-    reasoning: "응답 type field 보고 본문 합성 분기. NaverCafe·DaumCafe 의 401/403 분기와 같은 카테고리 (조건부 본문 합성). closed vocab 에 `article.content.match: [{when, source}, ...]` 어휘 추가 가치."
+      - adapters/reddit.py:_compose_body (line 254-274 — selftext_html / img / a / gallery 4종 HTML 합성)
+      - case_feedback: "본문 응답이 배열 [postListing, commentListing], self 글 = selftext_html, 이미지/갤러리/링크 = 본문 대신 미디어/링크를 HTML 로 합성. closed vocab 의 article.content 는 selector/path 기반 추출 — *HTML 합성* 표현 불가."
+    reasoning: "재분류 2026-05-18 (vocab-ext design doc 검토 결과): 원래 `response_branch_body` (status/type 분기) 로 분류했으나 reviewer 코드 확인 결과 *URL extension 분기* (`is_image_ext(dest)` → `<img>` vs `<a>`) + *gallery 루프* 합성 — closed vocab 의 source dict (selector/path/template) 만으로 표현 불가. `from:\"branch\"` 박아도 절반 안 됨 (NaverCafe·DaumCafe 의 status-only 분기와 다른 카테고리). 새 후보 명 = `synthesized_content_html`. 영향 사이트 1건 단독 — 임계 미달. 같은 패턴 누적 시 (예: BBS 의 첨부파일 합성, hub aggregator 의 link list 합성) 재평가."
     analysis_date: 2026-05-18
+    reclassified_at: 2026-05-18
+    reclassified_from: response_branch_body
+    reclassified_reason: "closed vocab 표현 불가 — branch source kind 추가해도 갤러리/이미지 합성 불가. 별 카테고리로 재분류."
     deferred: true
   - candidate: retry_backoff
     confidence: med
