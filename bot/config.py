@@ -48,14 +48,6 @@ def safe_browsing_api_key() -> str:
     return os.environ.get("SAFE_BROWSING_API_KEY", "").strip()
 
 
-def firecrawl_api_key() -> str:
-    """Firecrawl API 키 (`/map` endpoint — register.py 의 post-probe fallback).
-    `engine/url_discovery.py` 가 읽음. 없으면 fallback 비활성 (fail-soft, register 정상).
-    발급: https://firecrawl.dev → dashboard. free tier = 500 credit/월. 1 credit / `/map` 호출."""
-    load_env()
-    return os.environ.get("FIRECRAWL_API_KEY", "").strip()
-
-
 def guild_id() -> int | None:
     load_env()
     v = os.environ.get("GUILD_ID", "").strip()
