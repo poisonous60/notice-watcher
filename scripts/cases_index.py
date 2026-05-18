@@ -25,8 +25,13 @@
     python scripts/cases_index.py query --signal "<regex>"      # case .md 본문 grep
     python scripts/cases_index.py query --fix-layer <L>         # 같은 fix_layer
     python scripts/cases_index.py query --deferred              # _deferred_heuristics.md trigger 매칭
+    python scripts/cases_index.py query --vocab-candidate <name> # 같은 vocab_candidates 후보 가진 case
     SKILL hand-config §6.2 강제 게이트 — 매 case 처리 §2 진입 전에 진단한 failure_keys 마다 호출.
     누적 ≥3 면 트랙 B 자동 진입 (deferred 보류 불가).
+
+    python scripts/cases_index.py vocab-trigger                 # vocab_candidates 임계 체크 + alert history 적재
+    SKILL hand-config §5 commit 후 호출 — output/vocab_alerts.json 에 누적 + 임계 도달 시 출력.
+    ADR 0003 의 임계 룰 (high≥1 + total≥N, 또는 med≥N) 적용. low only = 보류. 모순 (high+low 공존) 검출.
 
 `--check` 는 만들지 않음 — pre-push 강제 시 UX friction (typo fix 도 regen 강제) 발생.
 """
@@ -393,6 +398,8 @@ def run_query(argv: list[str]) -> int:
                     help="status 가 이 이모지로 시작하는 case (예: 🔧/✅/🚫/❌)")
     qp.add_argument("--deferred", action="store_true",
                     help="docs/cases/_deferred_heuristics.md trigger 줄과 케이스 매칭")
+    qp.add_argument("--vocab-candidate", action="append", default=[],
+                    help="vocab_candidates 안에 이 candidate 가 있는 case (반복 OK = OR). ADR 0003.")
     qp.add_argument("--json", action="store_true",
                     help="기계 가독 JSON 출력 (skill 자동 게이트용)")
     args = qp.parse_args(argv)
@@ -429,6 +436,18 @@ def run_query(argv: list[str]) -> int:
         em = args.status_emoji
         matched = [c for c in all_cases if str(c.get("status") or "").startswith(em)]
         results[f"status_emoji={em}"] = matched
+
+    for vc in args.vocab_candidate:
+        matched = []
+        for c in all_cases:
+            vlist = c.get("vocab_candidates") or []
+            if not isinstance(vlist, list):
+                continue
+            for item in vlist:
+                if isinstance(item, dict) and item.get("candidate") == vc:
+                    matched.append(c)
+                    break
+        results[f"vocab_candidate={vc}"] = matched
 
     if args.deferred:
         deferred_path = cases_dir / "_deferred_heuristics.md"
@@ -484,10 +503,218 @@ def run_query(argv: list[str]) -> int:
     return 0
 
 
+def cmd_vocab_trigger(argv: list[str]) -> int:
+    """vocab_candidates 임계 체크 + alert history 적재 (ADR 0003).
+
+    case .md frontmatter 의 vocab_candidates (deferred=true 항목) 모아 후보별 카운트.
+    임계 룰: high≥1 + total≥N = 진입 권장 / med≥N = 진입 권장 / low only = 보류.
+    cross-evidence 모순: 같은 candidate 의 case 들이 confidence high+low 공존 = 알림.
+    output/vocab_alerts.json 에 history 누적 (gitignore). 매 호출 = noise pressure ↑.
+    """
+    ap = argparse.ArgumentParser(prog="cases_index.py vocab-trigger")
+    ap.add_argument("--cases-dir", type=Path, default=DEFAULT_CASES_DIR)
+    ap.add_argument("--alert-file", type=Path,
+                    default=ROOT / "output" / "vocab_alerts.json",
+                    help="누적 alert history 파일 (gitignore)")
+    ap.add_argument("--threshold", type=int, default=3,
+                    help="임계 N (deferred_heuristics 와 동일)")
+    ap.add_argument("--json", action="store_true",
+                    help="기계 가독 JSON 출력")
+    ap.add_argument("--no-write", action="store_true",
+                    help="alert history 적재 안 함 (dry-run)")
+    ap.add_argument("--silent-if-empty", action="store_true",
+                    help="vocab_candidates 후보 0건 + 임계 미달 시 출력 X (hand-config §5 step 10 호출용)")
+    args = ap.parse_args(argv)
+
+    cases_dir: Path = args.cases_dir
+    if not cases_dir.is_dir():
+        print(f"cases 디렉토리 없음: {cases_dir}", file=sys.stderr)
+        return 2
+
+    all_cases = _read_all_cases(cases_dir)
+
+    # candidate → entries (slug, confidence, deferred, vocab_attempt_failed)
+    by_candidate: dict[str, list[dict]] = {}
+    for c in all_cases:
+        vlist = c.get("vocab_candidates") or []
+        if not isinstance(vlist, list):
+            continue
+        slug = c.get("slug") or c["_path"].stem
+        for item in vlist:
+            if not isinstance(item, dict):
+                continue
+            name = item.get("candidate")
+            if not name:
+                continue
+            # failure feedback: vocab_attempt_failed=True 면 confidence 자동 강등 1단계
+            raw_conf = str(item.get("confidence", "unknown")).lower()
+            failed = bool(item.get("vocab_attempt_failed"))
+            conf = raw_conf
+            if failed:
+                conf = {"high": "med", "med": "low", "low": "low"}.get(raw_conf, "low")
+            by_candidate.setdefault(name, []).append({
+                "slug": slug,
+                "confidence": conf,
+                "raw_confidence": raw_conf,
+                "deferred": bool(item.get("deferred")),
+                "vocab_attempt_failed": failed,
+                "analysis_date": item.get("analysis_date"),
+            })
+
+    # 임계 룰 + 모순 검출
+    triggered: list[dict] = []
+    contradictions: list[dict] = []
+    sub_threshold: list[dict] = []
+    for name, entries in sorted(by_candidate.items()):
+        deferred_entries = [e for e in entries if e["deferred"]]
+        n = len(deferred_entries)
+        cnt = Counter(e["confidence"] for e in deferred_entries)
+        n_high = cnt.get("high", 0)
+        n_med = cnt.get("med", 0)
+        n_low = cnt.get("low", 0)
+
+        reason: str | None = None
+        if n_high >= 1 and n >= args.threshold:
+            reason = f"high>=1 + total={n}>={args.threshold}"
+        elif n_med >= args.threshold:
+            reason = f"med>={args.threshold}"
+        # low only = 보류 (의무 재평가 강제)
+
+        entry = {
+            "candidate": name,
+            "count": n,
+            "confidences": dict(cnt),
+            "reason": reason,
+            "cases": [e["slug"] for e in deferred_entries],
+        }
+        if reason:
+            triggered.append(entry)
+        elif n > 0:
+            sub_threshold.append(entry)
+
+        # 모순 — high + low 공존 (deferred 무관, 전체 case 보고 판단)
+        all_conf_cnt = Counter(e["confidence"] for e in entries)
+        if all_conf_cnt.get("high", 0) >= 1 and all_conf_cnt.get("low", 0) >= 1:
+            contradictions.append({
+                "candidate": name,
+                "confidences": dict(all_conf_cnt),
+                "cases": [(e["slug"], e["confidence"]) for e in entries],
+            })
+
+    # alert history 적재 — 후보별 keyed (candidate → first_seen/last_seen/count/last_trigger_count)
+    alert_history: dict = {"first_alert_at": None, "candidates": {}}
+    if args.alert_file.exists():
+        try:
+            loaded = json.loads(args.alert_file.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                alert_history = loaded
+                alert_history.setdefault("candidates", {})
+                alert_history.setdefault("first_alert_at", None)
+                # legacy migration — 옛 `alerts: [...]` 구조면 candidates 로 옮김
+                if "alerts" in alert_history and isinstance(alert_history["alerts"], list):
+                    for old in alert_history["alerts"]:
+                        for cname in (old.get("triggered") or []):
+                            slot = alert_history["candidates"].setdefault(cname, {
+                                "first_seen_at": old.get("first_seen_at"),
+                                "last_seen_at": old.get("last_seen_at"),
+                                "alert_count": 0,
+                                "last_trigger_count": None,
+                            })
+                            slot["alert_count"] = int(slot.get("alert_count", 0)) + int(old.get("count", 1))
+                            if not slot.get("first_seen_at"):
+                                slot["first_seen_at"] = old.get("first_seen_at")
+                            slot["last_seen_at"] = old.get("last_seen_at") or slot.get("last_seen_at")
+                    del alert_history["alerts"]
+        except json.JSONDecodeError:
+            pass
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    if triggered and not args.no_write:
+        args.alert_file.parent.mkdir(parents=True, exist_ok=True)
+        for t in triggered:
+            cname = t["candidate"]
+            slot = alert_history["candidates"].setdefault(cname, {
+                "first_seen_at": now_iso,
+                "last_seen_at": now_iso,
+                "alert_count": 0,
+                "last_trigger_count": None,
+            })
+            slot["last_seen_at"] = now_iso
+            slot["alert_count"] = int(slot.get("alert_count", 0)) + 1
+            slot["last_trigger_count"] = int(t["count"])
+        if alert_history["first_alert_at"] is None:
+            alert_history["first_alert_at"] = now_iso
+        args.alert_file.write_text(
+            json.dumps(alert_history, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    # 누적 = 후보별 alert_count 합산
+    total_alerts = sum(int(slot.get("alert_count", 0))
+                       for slot in alert_history.get("candidates", {}).values())
+
+    if args.json:
+        out = {
+            "triggered": triggered,
+            "sub_threshold": sub_threshold,
+            "contradictions": contradictions,
+            "total_alert_count": total_alerts,
+            "threshold": args.threshold,
+            "candidates_total": len(by_candidate),
+        }
+        print(json.dumps(out, ensure_ascii=False, indent=2))
+        return 0
+
+    # 모순 = silent 무시하고 항상 출력 (캐시 오염 의심 신호 — 침묵 X)
+    contradiction_block = ""
+    if contradictions:
+        lines = ["[모순] vocab_candidates cross-evidence 모순 (high+low 공존):"]
+        for c in contradictions:
+            confs = "/".join(f"{k}:{v}" for k, v in sorted(c["confidences"].items()))
+            lines.append(f"  - {c['candidate']}: {confs}")
+        contradiction_block = "\n".join(lines)
+
+    if not by_candidate:
+        if args.silent_if_empty:
+            if contradiction_block:
+                print(contradiction_block)
+            return 0
+        print("[vocab-trigger] vocab_candidates 후보 0건 — backfill 권장 (ADR 0003 §Consequences)")
+        if contradiction_block:
+            print(contradiction_block)
+        return 0
+
+    if triggered:
+        print("[알림] vocab_candidates 임계 도달:")
+        for t in triggered:
+            confs = "/".join(f"{k}:{v}" for k, v in sorted(t["confidences"].items()))
+            preview = ", ".join(t["cases"][:3])
+            if len(t["cases"]) > 3:
+                preview += f", +{len(t['cases'])-3}"
+            print(f"  - {t['candidate']} = {t['count']}건 ({confs}) — {t['reason']} — cases: {preview}")
+        print(f"  알림 누적 {total_alerts}회 — /vocabulary-extension 호출 권장")
+    else:
+        if args.silent_if_empty:
+            if contradiction_block:
+                print(contradiction_block)
+            return 0
+        print(f"[vocab-trigger] 임계 미달 ({len(by_candidate)} 후보 — threshold={args.threshold})")
+        for s in sub_threshold:
+            confs = "/".join(f"{k}:{v}" for k, v in sorted(s["confidences"].items()))
+            print(f"  - {s['candidate']} = {s['count']}건 ({confs})")
+
+    if contradiction_block:
+        print(contradiction_block)
+
+    return 0
+
+
 def main() -> int:
-    # query sub-command — sys.argv[1] 검사 (argparse subparser 안 흔드는 쪽)
+    # query / vocab-trigger sub-command — sys.argv[1] 검사 (argparse subparser 안 흔드는 쪽)
     if len(sys.argv) > 1 and sys.argv[1] == "query":
         return run_query(sys.argv[2:])
+    if len(sys.argv) > 1 and sys.argv[1] == "vocab-trigger":
+        return cmd_vocab_trigger(sys.argv[2:])
 
     ap = argparse.ArgumentParser(description="docs/cases/*.md → docs/cases/INDEX.md")
     ap.add_argument("--cases-dir", type=Path, default=DEFAULT_CASES_DIR)

@@ -31,9 +31,9 @@ fix-layer 6 자리:
 
 원칙: **위에서부터 차례로** (E > D > C > B > A > F). 싸고 hard 한 쪽 우선.
 
-# 검증 항목 (8 개)
+# 검증 항목 (8 + vocab-ext 진입 시 3 추가)
 
-다음 8 항목을 각각 PASS/FAIL 판정. 하나라도 FAIL 이면 전체 FAIL.
+다음 8 항목을 각각 PASS/FAIL 판정. 하나라도 FAIL 이면 전체 FAIL. vocab-ext (SKILL `vocabulary-extension`) 진입 변경이면 9~11 추가.
 
 1. **case 파일 존재 + 필수 frontmatter** — `docs/cases/<slug>.md` 가 변경에 포함됐고, frontmatter 의 필수 4 필드 (`slug`, `url`, `status`, `date`) 가 채워져 있나? slug = `output/poll_state/<slug>` 형식.
 
@@ -72,6 +72,24 @@ fix-layer 6 자리:
    없으면 FAIL — 이유: 휴리스틱 회귀 catch 안 됨 (stage 5 가 자동 picked-up 인데 fixture 없으면 의미 없음).
 
    probe/ 변경 없거나 기존 함수 수정만이면 PASS.
+
+# 검증 항목 (vocab-ext 진입 시만 — 9~12)
+
+vocab-ext (SKILL `vocabulary-extension`) 진입 판정 — 다음 중 *하나라도* 매칭 시:
+- main thread 가 prompt 에 "vocab-ext 진입" 또는 "vocabulary-extension" 명시
+- `engine/strategies/<X>.py` 신규 추가 또는 기존 strategy 파일에 새 옵션 추가
+- `engine/transforms.py` 새 함수 또는 `engine/extract_helpers.py` 새 source 추가
+- `engine/config_schema.py` 새 키 / 새 enum value 추가
+- `prompts/config_writer.system.txt` 에 새 어휘 토큰 (strategy/source/transform 이름) 추가
+- vocab-ext 진입이면 다음 4 항목 (9~12) 추가 검증 (ADR `docs/adr/0003-vocabulary-extension-skill.md` 의 smoke scope).
+
+9. **영향 사이트 회귀 결과 첨부** — vocab-ext 가 박은 새 어휘 = 모든 사이트 영향. main thread 가 prompt 로 박은 *영향 사이트 회귀 결과* (이 어휘 후보가 박힌 case .md 의 사이트 + 같은 strategy 사이트 14 개 의 `register.py --config <slug>` 결과) 가 있나? 모든 사이트가 baseline 과 동등 (최소: schema validate 통과 + fetch_list 1건 이상) 이어야. 결과 첨부 없거나 회귀 (config 검증 실패 / fetch 0건) 있으면 FAIL.
+
+10. **schema backward compat** — `engine/config_schema.py` 가 변경됐으면, 기존 14 configs 다 validate 통과해야. main thread 가 박은 출력 (`python -c "..."` 의 stdout 또는 명시 첨부) 으로 확인. 14 중 하나라도 fail = FAIL. 변경 없으면 PASS. *breaking change* (기존 키 의미 변경) 시 사용자 명시 confirm + migration script (`scripts/migrate_<feature>.py`) 둘 다 있어야 — 없으면 FAIL.
+
+11. **prompt 어휘 변경 시 fail 케이스 재시도** — `prompts/config_writer.system.txt` 에 새 어휘 룰 추가됐으면, 가장 최근 fail 케이스의 probe artifact 로 `register.py --reuse-probe` 1회 결과 (또는 동등한 dry-run 결과) 가 첨부됐나? 산출 config 가 baseline 과 동등 또는 더 좋아야. 결과 첨부 없거나 회귀 = FAIL. prompts 변경 없으면 PASS.
+
+12. **prompt 어휘 ↔ schema/engine 일관성** — `prompts/config_writer.system.txt` 에 새 어휘 토큰 (예: `multi_api_merge`, `click_pagination`) 가 추가됐으면, 같은 토큰이 `engine/config_schema.py` 의 enum/리터럴 또는 `engine/strategies/`/`engine/transforms.py`/`engine/extract_helpers.py` 의 명시 정의에 *실제 존재* 해야. prompt 어휘만 추가하고 schema/engine 미반영 = LLM 이 죽은 어휘 학습 = FAIL. Grep `engine/` 으로 확인. 변경 없으면 PASS.
 
 # 출력 형식
 
