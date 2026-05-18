@@ -22,6 +22,7 @@ from dashboard import actions as act
 from dashboard import bugs_view
 from dashboard import cases_view
 from dashboard import learned_view
+from dashboard import vocab_deferred_view
 from dashboard import prompts, state, triage_later
 from dashboard import usage_view
 from dashboard import user_view
@@ -905,6 +906,7 @@ async def actions_fetch(request: Request, slug: str = Form(...),
 cases_view.register(app, templates, _render)
 learned_view.register(app, templates, _render)
 bugs_view.register(app, templates, _render)
+vocab_deferred_view.register(app, templates, _render)
 
 
 # --------------------------------------------------------------------------- #

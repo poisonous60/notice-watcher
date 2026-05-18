@@ -7,6 +7,23 @@ date: 2026-05-12
 failure_keys: [posts_nonempty]
 config_strategy: handwritten
 adapters_changed: [DaumCafeAdapter]
+vocab_candidates:
+  - candidate: inline_js_array_scrape
+    confidence: high
+    evidence:
+      - adapters/daumcafe.py (fetch_list — `articles.push({...})` JS 블록 regex 파싱)
+      - case_feedback: "글 데이터가 페이지 인라인 JS `articles.push({dataid,fldid,title,...})` 형태. json.loads 불가 (JS literal). probe 의 hydration 휴리스틱이 `__NEXT_DATA__` / `__INITIAL_STATE__` 같은 JSON 리터럴만 잡아서 못 봄."
+    reasoning: "JS `funcName.push({...})` 호출 패턴에서 객체 리터럴 regex 추출. closed vocab 의 `from:json` source 는 진짜 JSON 응답만 처리. inline JS array scrape 어휘 추가 가치 (다음 카페 외 옛 SSR + 인라인 JS 사이트)."
+    analysis_date: 2026-05-18
+    deferred: true
+  - candidate: response_branch_body
+    confidence: med
+    evidence:
+      - adapters/daumcafe.py:_SKIP_ARTICLE_STATUS = {401, 403}
+      - case_feedback: "비공개/등급제한 카페·게시판이면 401/403 → 본문 비워 반환 (NaverCafe 와 동일)."
+    reasoning: "본문 fetch status 분기 — NaverCafe·Reddit 동상. 셋 다 같은 패턴 누적 시 임계 도달."
+    analysis_date: 2026-05-18
+    deferred: true
 ---
 
 ## 무엇이 일어났나

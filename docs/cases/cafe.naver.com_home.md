@@ -10,6 +10,16 @@ config_strategy: handwritten
 adapters_changed: [NaverCafeAdapter]
 engine_files_touched: [engine/recognizers/naver_cafe.py]
 tags: [naver-cafe, recognizer-extend, cafe-home, slug-resolve]
+vocab_candidates:
+  - candidate: html_chain_to_api
+    confidence: high
+    evidence:
+      - adapters/navercafe.py (cafe_slug 분기 — cafe HOME HTML 의 g_sClubId 스크랩 → cafe_id → API)
+      - engine/recognizers/naver_cafe.py:_cfg_home
+      - case_feedback: "cafe.naver.com/<slug> 홈 URL = URL 에 cafe_id 없음. 어댑터가 HOME HTML GET → g_sClubId 정규식 스크랩 → 그 값으로 apis.naver.com 호출."
+    reasoning: "HTML 스크랩으로 얻은 변수 → 별도 API URL_template 의 변수 대입. closed vocab 의 `list.url_template` 은 단일 GET. `list.preflight: {url, extract_var}` 같은 chained GET 어휘 없음. SPA 로그인 cookie 헤어 같은 다단계 사이트에 일반화 가치."
+    analysis_date: 2026-05-18
+    deferred: true
 ---
 
 ## 무엇이 일어났나

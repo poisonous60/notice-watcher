@@ -7,6 +7,24 @@ date: 2026-05-11
 failure_keys: [posts_nonempty]
 config_strategy: handwritten
 adapters_changed: [NaverCafeAdapter]
+vocab_candidates:
+  - candidate: multi_api_merge
+    confidence: high
+    evidence:
+      - adapters/navercafe.py:44-46
+      - adapters/navercafe.py:LIST_API+NOTICE_API
+      - case_feedback: "sticky 공지 API + 목록 API 두 응답을 합쳐서 list 반환. closed vocab httpx_json.list_path 는 단일 응답 단일 path 만."
+    reasoning: "두 JSON API (공지 + 목록) 의 응답을 합쳐서 하나의 글 목록으로 반환해야 함. 현재 closed vocab 에 `list.url_template` list 받기 + `merge_strategy: concat|interleave` 같은 어휘 없음. multi-API 게시판 (네이버 카페·다음 카페 일부) 에 일반화 가치."
+    analysis_date: 2026-05-18
+    deferred: true
+  - candidate: response_branch_body
+    confidence: med
+    evidence:
+      - adapters/navercafe.py:_SKIP_ARTICLE_STATUS or 401/403 handler
+      - case_feedback: "비공개·등급제한 게시판이면 본문 API 401/403 → 어댑터가 본문 비워 반환. 200 = 정상."
+    reasoning: "글마다 본문 fetch 결과 status 분기 (200/401/403) 후 본문 합성/생략. closed vocab 의 article.fetch_kind 는 모든 글 동일 처리. Reddit·DaumCafe 동상 패턴."
+    analysis_date: 2026-05-18
+    deferred: true
 ---
 
 ## 무엇이 일어났나

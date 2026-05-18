@@ -7,6 +7,23 @@ date: 2026-05-12
 requested_by: 사용자(직접 요청)
 config_strategy: handwritten
 adapters_changed: [RedditAdapter]
+vocab_candidates:
+  - candidate: response_branch_body
+    confidence: high
+    evidence:
+      - adapters/reddit.py (fetch_article — self/이미지/갤러리/링크 4종 분기)
+      - case_feedback: "본문 응답이 배열 [postListing, commentListing], self 글 = selftext_html, 이미지/갤러리/링크 = 본문 대신 미디어/링크를 HTML 로 합성. closed vocab 의 article.content 는 모든 글 동일 처리."
+    reasoning: "응답 type field 보고 본문 합성 분기. NaverCafe·DaumCafe 의 401/403 분기와 같은 카테고리 (조건부 본문 합성). closed vocab 에 `article.content.match: [{when, source}, ...]` 어휘 추가 가치."
+    analysis_date: 2026-05-18
+    deferred: true
+  - candidate: retry_backoff
+    confidence: med
+    evidence:
+      - adapters/reddit.py (429 시 retry_after 후 백오프 재시도)
+      - case_feedback: "User-Agent 없으면 429. polite_sleep + 429 시 retry_after 후 백오프 재시도."
+    reasoning: "Rate limit 429 응답 시 retry-after 헤더 보고 재시도. closed vocab 에 retry/backoff 어휘 없음 (`polite_sleep` 만 있음, 응답별 backoff 분기 X). 다른 rate-limited API 사이트에 일반화 가치."
+    analysis_date: 2026-05-18
+    deferred: true
 ---
 
 ## 왜 손어댑터

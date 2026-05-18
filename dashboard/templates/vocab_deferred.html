@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% block title %}Vocab Deferred · notice-watcher{% endblock %}
+{% block body %}
+<h2>📚 Vocab Deferred — closed vocab 확장 후보</h2>
+<p class="muted">
+  case .md frontmatter 의 <code>vocab_candidates</code> 를 모은 후보별 표.
+  <b>임계 도달</b> 후보는 <code>/vocabulary-extension</code> SKILL 호출 검토.
+  ADR <code>docs/adr/0003-vocabulary-extension-skill.md</code>.
+  (dashboard 가 alert history 적재 안 함 — hand-config §5 step 10 의 <code>vocab-trigger --silent-if-empty</code> 호출만이 history 쓰기 권한)
+</p>
+
+{% if error %}
+<article class="error">
+  <header>⚠ subprocess 에러</header>
+  <pre><code>{{ error }}</code></pre>
+</article>
+{% endif %}
+
+<p class="muted">
+  <b>총 후보:</b> {{ candidates_total }}
+  · <b>threshold:</b> {{ threshold }}
+  · <b>전체 알림 누적:</b> {{ total_alerts }}회
+  {% if history.first_alert_at %} · <b>첫 알림:</b> <code>{{ history.first_alert_at[:19] }}</code>{% endif %}
+</p>
+
+{% if triggered %}
+<h3>🔥 임계 도달 (vocab-ext 호출 권장)</h3>
+<table class="cases-table compact">
+  <colgroup>
+    <col style="width: 220px">
+    <col style="width: 60px">
+    <col style="width: 180px">
+    <col style="width: 140px">
+    <col style="width: 60px">
+    <col style="width: 140px">
+    <col>
+  </colgroup>
+  <thead>
+    <tr>
+      <th>candidate</th>
+      <th>count</th>
+      <th>confidence 분포</th>
+      <th>reason</th>
+      <th>alert</th>
+      <th>last_seen_at</th>
+      <th>cases</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for t in triggered %}
+    <tr>
+      <td><code>{{ t.candidate }}</code></td>
+      <td><b>{{ t.count }}</b></td>
+      <td class="mono">{% for k, v in t.confidences.items() %}{{ k }}:{{ v }}{% if not loop.last %} / {% endif %}{% endfor %}</td>
+      <td class="mono">{{ t.reason }}</td>
+      <td>{{ t.history.alert_count or 0 }}회</td>
+      <td class="mono">{{ (t.history.last_seen_at or '')[:19] or '—' }}</td>
+      <td class="mono">{{ t.cases|join(', ') }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% if contradictions %}
+<h3>⚠ 모순 (cross-evidence high+low 공존 — 캐시 오염 의심)</h3>
+<table class="cases-table compact">
+  <colgroup>
+    <col style="width: 220px">
+    <col style="width: 180px">
+    <col>
+  </colgroup>
+  <thead>
+    <tr>
+      <th>candidate</th>
+      <th>confidence 분포 (전체)</th>
+      <th>case 별 confidence</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for c in contradictions %}
+    <tr>
+      <td><code>{{ c.candidate }}</code></td>
+      <td class="mono">{% for k, v in c.confidences.items() %}{{ k }}:{{ v }}{% if not loop.last %} / {% endif %}{% endfor %}</td>
+      <td class="mono">{% for slug, conf in c.cases %}{{ slug }}({{ conf }}){% if not loop.last %}, {% endif %}{% endfor %}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+<p class="muted">
+  모순 = 같은 후보의 case 들이 모순 evidence (한 case 는 어휘화 필요 high, 다른 case 는 closed vocab 으로 풀림 low).
+  vocab-ext 진입 시 *재정의* 또는 case .md evidence 재검증 필요.
+</p>
+{% endif %}
+
+{% if sub_threshold %}
+<h3>📥 누적 중 (임계 미달)</h3>
+<table class="cases-table compact">
+  <colgroup>
+    <col style="width: 220px">
+    <col style="width: 60px">
+    <col style="width: 180px">
+    <col>
+  </colgroup>
+  <thead>
+    <tr>
+      <th>candidate</th>
+      <th>count</th>
+      <th>confidence 분포</th>
+      <th>cases</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for s in sub_threshold %}
+    <tr>
+      <td><code>{{ s.candidate }}</code></td>
+      <td>{{ s.count }}</td>
+      <td class="mono">{% for k, v in s.confidences.items() %}{{ k }}:{{ v }}{% if not loop.last %} / {% endif %}{% endfor %}</td>
+      <td class="mono">{{ s.cases|join(', ') }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% if not triggered and not contradictions and not sub_threshold %}
+<p class="muted">현재 deferred 후보 없음 — backfill 권장 (ADR 0003 §Consequences) 또는 hand-config 의 handwritten 분기 진입 시 후보 분류 자동 박힘. 🎉</p>
+{% endif %}
+{% endblock %}
