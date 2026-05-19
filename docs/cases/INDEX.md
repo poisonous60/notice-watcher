@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 72 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 81 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -12,11 +12,20 @@
 | [`infra_post_fix_cleanup_2026-05-19`](infra_post_fix_cleanup_2026-05-19.md) | ✅ post-fix-cleanup 명령 — 영구 게이트 박은 후 N100 옛 큐 자동 정리 | 2026-05-19 | F | n100_stale_queue_after_permanent_gate, manual_cleanup_required | (infra — triage post-fix-cleanup + register --gate-only + digest backfill) |
 | [`infra_learned_root_only_match_2026-05-19`](infra_learned_root_only_match_2026-05-19.md) | ✅ root-only matching — learned entry path_prefix='' 가 호스트 전체 차단 X, root URL 만 차단 | 2026-05-19 | F | learned_blacklist_host_wide_overreach | (infra — url_gate root-only matching) |
 | [`infra_handconfig_preflight_reuse_probe_2026-05-19`](infra_handconfig_preflight_reuse_probe_2026-05-19.md) | 🏗 인프라 (hand-config SKILL.md §0b 추가 — preflight 이미 고쳐졌나 검사) | 2026-05-19 |  | skill_no_preflight_check, stale_queue_residue, sidewise_fix_not_recognized, batch_redundant_handconfig_work | (인프라 case — 특정 사이트 X. 트리거 = 사용자 메타 질문 — 다른 경로로 고친 사이트가 triage 큐에서 안 빠지는 경우 판단 절차) |
+| [`infra_catalog_batch_rev4_2026-05-19`](infra_catalog_batch_rev4_2026-05-19.md) | ✅ 42/42 등록 완료 (rev4 plan 끝) | 2026-05-19 | F | board_shape_gate_overreject, playwright_sw_assertion_crash, rss_xml_parser_mismatch, retry_unfixed_sites_wasteful, spa_inline_json_no_engine_support | (infra — catalog batch rev4 첫 실행 + 14 사이트 fix) |
 | [`infra_article_page_reject_gap_check_2026-05-19`](infra_article_page_reject_gap_check_2026-05-19.md) | ✅ 일반화 (programmatic gap-check + docstring sync) | 2026-05-19 | none | learned_blacklist_overbroad, shared_path_prefix_board, fixture_gap | tests/recognizers/test_article_page_reject.py |
 | [`host_vimeo-com_root_c6a102cf`](host_vimeo-com_root_c6a102cf.md) | 🚫 거부 (Vimeo root 도메인 마케팅 랜딩 — board 아님. 비디오 플랫폼 user landing) — root_marketing_homepage 게이트 (C+F+A) | 2026-05-19 | C | fetch_list_selector_syntax_error, tailwind_arbitrary_value_class, posts_nonempty, root_marketing_homepage | https://vimeo.com/ |
+| [`host_us-forums-blizz_en_895a75b6`](host_us-forums-blizz_en_895a75b6.md) | ✅ 손-config (Discourse `/latest.json` REST 직결, 30건 baseline) | 2026-05-19 | F | posts_nonempty, board_shape_gate_passed_no_extraction | https://us.forums.blizzard.com/en/wow/latest |
 | [`host_reuters-com_root_9c8aa57a`](host_reuters-com_root_9c8aa57a.md) | 🚫 거부 (Reuters root 도메인 마케팅 랜딩 + SPA shell — board 아님. 카테고리/섹션 URL 권장) — root_marketing_homepage 게이트 (C+F+A) | 2026-05-19 | C | fetch_list_401, fingerprint_hide_required, posts_nonempty, matches_probe_first_article, count_ballpark, root_marketing_homepage | https://www.reuters.com/ |
+| [`host_page-onstove-co_epicseven_1dd46993`](host_page-onstove-co_epicseven_1dd46993.md) | ✅ 손-config (api.onstove.com cwms v3.0 article list, 15건 baseline) | 2026-05-19 | F | gen_fail_posts_nonempty, spa_no_article_links | https://page.onstove.com/epicseven/kr/list/e7kr001 |
+| [`host_news-blizzard-c_en-us_ef8e0474`](host_news-blizzard-c_en-us_ef8e0474.md) | ✅ 손-config (/api/news Contentstack feed, 24건 baseline) | 2026-05-19 | F | board_shape_gate_rejected, spa_no_article_links | https://news.blizzard.com/en-us/ |
 | [`host_nationalgeograp_root_2be4a852`](host_nationalgeograp_root_2be4a852.md) | 🚫 거부 (NatGeo root 도메인 마케팅 랜딩 — board 아님. 카테고리/섹션 URL 권장) — root_marketing_homepage 게이트 (C+F+A) | 2026-05-19 | C | post_id_stable_shape, title_nonempty, article_body_len, row_type_mix, matches_probe_first_article, root_marketing_homepage | https://www.nationalgeographic.com/ |
+| [`host_namu-wiki_RecentChanges_2370318a`](host_namu-wiki_RecentChanges_2370318a.md) | ✅ 손-config (playwright_html + a[href^=/w/] row, 30건 baseline) | 2026-05-19 | F | gen_fail_unknown, spa_obfuscated_classes, vue-ssr-3kb-shell | https://namu.wiki/RecentChanges |
+| [`host_leagueoflegends_en-us_74f516a8`](host_leagueoflegends_en-us_74f516a8.md) | ✅ 손-config (httpx_json + script_root __NEXT_DATA__, 30건 baseline) | 2026-05-19 | E | gen_fail_unknown, spa_no_external_api, next-data-inline-json | https://www.leagueoflegends.com/en-us/news/ |
 | [`host_investopedia-co_news-4427706_c33346a4`](host_investopedia-co_news-4427706_c33346a4.md) | 🚫 거부 (게시판 형식 아닌 것으로 판정 — candidates_zero / list_url_none). | 2026-05-19 |  | candidates_zero, list_url_none, posts_nonempty, hub_url_not_board | https://www.investopedia.com/news-4427706 |
+| [`host_hoyolab-com_circles_f742739b`](host_hoyolab-com_circles_f742739b.md) | ✅ 손-config (bbs-api-os getNewsList gids=8, 15건 baseline) | 2026-05-19 | F | board_shape_gate_rejected, gen_fail_posts_nonempty, spa_no_article_links | https://www.hoyolab.com/circles/8/0/official?lang=ko-kr |
+| [`host_hoyolab-com_circles_5051fb8a`](host_hoyolab-com_circles_5051fb8a.md) | ✅ 손-config (bbs-api-os getNewsList gids=6, 15건 baseline) | 2026-05-19 | F | board_shape_gate_rejected, spa_no_article_links | https://www.hoyolab.com/circles/6/0/official?lang=ko-kr |
+| [`host_hoyolab-com_circles_41251f69`](host_hoyolab-com_circles_41251f69.md) | ✅ 손-config (bbs-api-os getNewsList gids=2, 15건 baseline) | 2026-05-19 | F | board_shape_gate_rejected, spa_no_article_links | https://www.hoyolab.com/circles/2/0/official?lang=ko-kr |
 | [`host_edition-cnn-com_world_ae74b4db`](host_edition-cnn-com_world_ae74b4db.md) | ✅ 자동 등록 (validation cap 64→200 완화 후 자동 통과 — playwright_html, 30건 baseline) | 2026-05-19 | E | post_id_stable_shape, posts_nonempty, matches_probe_first_article | https://edition.cnn.com/world |
 | [`host_edition-cnn-com_root_82356c05`](host_edition-cnn-com_root_82356c05.md) | 🚫 거부 (CNN root 도메인 마케팅 랜딩 — board 아님. 카테고리/섹션 URL 권장) — root_marketing_homepage 게이트 (C+F+A) | 2026-05-19 | C | post_id_unique, title_nonempty, published_at_iso, matches_probe_first_article, root_marketing_homepage | https://edition.cnn.com/ |
 | [`host_bbc-com_news_7e763da2`](host_bbc-com_news_7e763da2.md) | ✅ 자동 등록 회복 (preflight b-hit, baseline 8건) — prompt §8a 룰 추가 (carousel dedup + iso slash) 후. | 2026-05-19 |  | post_id_unique, carousel_dedup, narrow_wide_no_sweet_spot | https://www.bbc.com/news |
@@ -91,9 +100,9 @@
 | C+D | 2 |
 | C+F | 1 |
 | C+F+A | 1 |
-| E | 2 |
+| E | 3 |
 | E+A+C+D | 1 |
-| F | 26 |
+| F | 34 |
 | F+A | 1 |
 | F+C | 3 |
 | none | 10 |
@@ -105,11 +114,12 @@
 | (미기재) | 31 |
 | handwritten | 9 |
 | httpx_html | 6 |
-| httpx_json | 4 |
+| httpx_json | 11 |
+| mixed | 1 |
 | none | 16 |
-| playwright_html | 6 |
+| playwright_html | 7 |
 
 ### 최근 90일 (≥ 2026-02-18)
 
-케이스 72 건.
+케이스 81 건.
 
