@@ -7,3 +7,4 @@ playwright-stealth>=1.0.6
 firecrawl-py>=1.0
 crawl4ai>=0.4
 discord.py>=2.3
+PyYAML>=6.0
