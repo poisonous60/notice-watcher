@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "site": "www.leagueoflegends.com",
+  "board": "en-us_news",
+  "strategy": "httpx_json",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9"
+  },
+  "timeout": 20,
+  "list": {
+    "url_template": "https://www.leagueoflegends.com/en-us/news/",
+    "pagination": {"kind": "none"},
+    "page_size_max": 50,
+    "script_root": {"selector": "script#__NEXT_DATA__"},
+    "list_path": ["props", "pageProps", "page", "blades", 2, "items"],
+    "fields": {
+      "post_id": [{"from": "json", "path": ["action", "payload", "url"], "transform": [["regex_extract", "/([^/]+)/?$"]]}],
+      "title": [{"from": "json", "path": ["title"]}],
+      "url": [{"from": "json", "path": ["action", "payload", "url"]}],
+      "published_at": [{"from": "json", "path": ["publishedAt"]}],
+      "summary": [{"from": "json", "path": ["description"]}],
+      "category": [{"from": "json", "path": ["category", "title"]}],
+      "cover_image": [{"from": "json", "path": ["media", "url"]}]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "body_empty_acceptable": true,
+    "content": [
+      {"from": "css", "selector": "article", "html": true},
+      {"from": "css", "selector": "main", "html": true}
+    ]
+  }
+}

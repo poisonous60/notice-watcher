@@ -48,6 +48,27 @@ async def _get_json(adapter, url: str) -> Any:
     return r.json()
 
 
+async def _get_html_script_json(adapter, url: str, script_root: dict) -> Any:
+    """SPA 페이지의 inline `<script id="...">` JSON island 를 payload 로 사용.
+
+    `script_root` = {"selector": "script[id='__NEXT_DATA__']"} 식. body text 를
+    JSON 으로 parse. Next.js/Nuxt SSR 처럼 article list 가 HTML 안 박혀있고 별도
+    JSON XHR 없는 사이트용 (Riot LoL News 등).
+    """
+    import json
+    from bs4 import BeautifulSoup
+    r = await _get(adapter, url)
+    r.raise_for_status()
+    soup = BeautifulSoup(r.text, "lxml")
+    el = soup.select_one(script_root["selector"])
+    if el is None:
+        raise RuntimeError(f"{adapter.site} list: script_root selector 매칭 X — {script_root['selector']!r}")
+    body = el.get_text() or ""
+    if not body.strip():
+        raise RuntimeError(f"{adapter.site} list: script_root 내용 비어있음")
+    return json.loads(body)
+
+
 async def fetch_list(adapter, *, page: int = 1, page_size: int = 30) -> list[NoticePost]:
     cfg = adapter.cfg
     lst = cfg["list"]
@@ -59,7 +80,11 @@ async def fetch_list(adapter, *, page: int = 1, page_size: int = 30) -> list[Not
         page_size=page_size,
         page_size_max=lst.get("page_size_max"),
     )
-    payload = await _get_json(adapter, apply_proxy(url, cfg.get("proxy_url")))
+    script_root = lst.get("script_root")
+    if script_root:
+        payload = await _get_html_script_json(adapter, apply_proxy(url, cfg.get("proxy_url")), script_root)
+    else:
+        payload = await _get_json(adapter, apply_proxy(url, cfg.get("proxy_url")))
 
     ok, msg = check_success(payload, lst.get("success_when"))
     if not ok:

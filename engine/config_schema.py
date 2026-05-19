@@ -101,6 +101,7 @@ CONFIG_JSON_SCHEMA: dict = {
                 "type_field": {"type": "string"},
                 "type_allow": {"type": "array"},
                 "success_when": {"type": "object"},
+                "script_root": {"type": "object"},
                 "fields": {"type": "object"},
             },
         },
