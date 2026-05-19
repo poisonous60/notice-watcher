@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "site": "www.hoyolab.com",
+  "board": "circles_8_official",
+  "strategy": "httpx_json",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "ko-KR,ko;q=0.9",
+    "x-rpc-language": "ko-kr",
+    "Referer": "https://www.hoyolab.com/circles/8/0/official?lang=ko-kr",
+    "Origin": "https://www.hoyolab.com"
+  },
+  "timeout": 15,
+  "list": {
+    "url_template": "https://bbs-api-os.hoyolab.com/community/post/wapi/getNewsList?gids=8&page_size={page_size}&type=1",
+    "pagination": {
+      "kind": "query_param",
+      "page_param": "page",
+      "size_param": "page_size"
+    },
+    "page_size_max": 15,
+    "success_when": {"path": ["retcode"], "equals": 0},
+    "list_path": ["data", "list"],
+    "fields": {
+      "post_id": [{"from": "json", "path": ["post", "post_id"]}],
+      "title": [{"from": "json", "path": ["post", "subject"]}],
+      "url": [{"from": "template", "value": "https://www.hoyolab.com/article/{post_id}"}],
+      "published_at": [{"from": "json", "path": ["post", "created_at"], "transform": [["unixtime_to_iso", "+09:00", "s"]]}],
+      "cover_image": [{"from": "json", "path": ["post", "cover"]}]
+    }
+  },
+  "article": {
+    "url_template": "https://bbs-api-os.hoyolab.com/community/post/wapi/getPostFull?post_id={post_id}",
+    "fetch_kind": "json",
+    "body_empty_acceptable": true,
+    "success_when": {"path": ["retcode"], "equals": 0},
+    "data_path": ["data", "post"],
+    "content": [
+      {"from": "json", "path": ["post", "content"]}
+    ]
+  }
+}

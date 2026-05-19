@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "site": "us.forums.blizzard.com",
+  "board": "wow",
+  "strategy": "httpx_json",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/json,text/plain,*/*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://us.forums.blizzard.com/en/wow/latest"
+  },
+  "timeout": 15,
+  "list": {
+    "url_template": "https://us.forums.blizzard.com/en/wow/latest.json",
+    "pagination": {
+      "kind": "query_param",
+      "page_param": "page"
+    },
+    "page_size_max": 30,
+    "list_path": ["topic_list", "topics"],
+    "fields": {
+      "post_id": [{"from": "json", "path": ["id"]}],
+      "title": [{"from": "json", "path": ["title"]}],
+      "url": [{"from": "template", "value": "https://us.forums.blizzard.com/en/wow/t/{post_id}"}],
+      "published_at": [{"from": "json", "path": ["created_at"]}],
+      "author": [{"from": "json", "path": ["last_poster_username"]}],
+      "category": [{"from": "json", "path": ["category_id"]}]
+    }
+  },
+  "article": {
+    "url_template": "https://us.forums.blizzard.com/en/wow/t/{post_id}.json",
+    "fetch_kind": "json",
+    "body_empty_acceptable": true,
+    "content": [
+      {"from": "json", "path": ["post_stream", "posts", 0, "cooked"]}
+    ]
+  }
+}
