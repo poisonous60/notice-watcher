@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "site": "namu.wiki",
+  "board": "RecentChanges",
+  "strategy": "playwright_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9"
+  },
+  "timeout": 25,
+  "list": {
+    "url_template": "https://namu.wiki/RecentChanges",
+    "pagination": {"kind": "none"},
+    "wait_selector": "a[href^='/w/']",
+    "row_selector": "a[href^='/w/']",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {"from": "attr", "selector": ":self", "attr": "href",
+         "transform": [["remove_prefix", "/w/"], ["strip_query_fragment"]]}
+      ],
+      "title": [
+        {"from": "css", "selector": ":self", "text": true, "transform": [["collapse_ws"]]}
+      ],
+      "url": [
+        {"from": "attr", "selector": ":self", "attr": "href",
+         "transform": [["urljoin", "https://namu.wiki"], ["strip_query_fragment"]]}
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "body_empty_acceptable": true,
+    "content": [
+      {"from": "css", "selector": "article", "html": true},
+      {"from": "css", "selector": "main", "html": true}
+    ]
+  }
+}
