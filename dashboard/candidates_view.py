@@ -412,7 +412,7 @@ def register(app, templates, _render):  # noqa: ARG001
         all_subkinds = sorted({r["subkind"] for r in all_rows if r["subkind"] not in ("—", "ok")})
         return _render(
             "candidates_detail.html", request,
-            name=name,
+            catalog_name=name,
             rows=rows, kpis=kpis, distribution=distribution,
             jobs_db_error=jobs_db_error,
             total_filtered=len(rows), total_all=len(all_rows),
