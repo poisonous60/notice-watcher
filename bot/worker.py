@@ -339,9 +339,9 @@ async def _process_job_inner(client, conn, job, dm_owner) -> None:
                         msg("blocked_bug", slug=slug))
                 else:
                     append_triage_queue(url, slug, job["via"], req_by, tail)
-                    err = _format_register_error(rc, tail)
                     await edit_channel_message(client, job["ack_channel_id"], job["ack_message_id"],
-                                               msg("worker_register_fail", slug=slug, err=err))
+                                               msg("worker_register_fail", slug=slug,
+                                                   err=msg("worker_err_needs_hand_adapter")))
             else:
                 # re-probe 실패 — OWNER 알림 안 함 (BUG 면 마커, 그 외 transient 는 다음 주기 재시도).
                 if rc in (-1, -2, -3):
@@ -416,13 +416,6 @@ def _phase_to_message(label: str, slug: str) -> Optional[str]:
     if label == "baseline":
         return msg("worker_phase_baseline", slug=slug)
     return None
-
-
-def _format_register_error(rc: int, tail: str) -> str:
-    # rc=-1/-2/-3 (BUG) 는 호출자가 BUG 분기로 가로채므로 여기 안 들어옴.
-    # rc=1 등 hand-config 대상만 — tail 의 마지막 ~6줄을 사용자 향 안내에 첨부.
-    last = "\n".join((tail or "").strip().splitlines()[-6:])
-    return msg("worker_err_needs_hand_adapter", tail=last)
 
 
 async def _post_register_success(client, conn, job) -> None:
