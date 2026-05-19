@@ -13,7 +13,7 @@
   },
   "timeout": 15,
   "list": {
-    "url_template": "https://bbs-api-os.hoyolab.com/community/post/wapi/getNewsList?gids=6&page_size={page_size}&type=1",
+    "url_template": "https://bbs-api-os.hoyolab.com/community/post/wapi/getNewsList?gids=6&type=1",
     "pagination": {
       "kind": "query_param",
       "page_param": "page",
