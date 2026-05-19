@@ -2,19 +2,20 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 68 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 69 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
 | [`infra_wikipedia_learned_blacklist_skip_learn_2026-05-19`](infra_wikipedia_learned_blacklist_skip_learn_2026-05-19.md) | ✅ 일반화 (recognize_reject wikipedia 패턴 skip_learn=True) | 2026-05-19 | F | learned_blacklist_overbroad, shared_path_prefix_board, not_a_board | https://en.wikipedia.org/wiki/Special:RecentChanges?hidebots=1&hidecategorization=1&hideWikibase=1&limit=50&days=1&urlversion=2 |
 | [`infra_ushmm_learned_blacklist_skip_learn_2026-05-19`](infra_ushmm_learned_blacklist_skip_learn_2026-05-19.md) | ✅ 일반화 (USHMM 패턴 skip_learn=True + 모듈 docstring 강화) | 2026-05-19 | F | learned_blacklist_overbroad, shared_path_prefix_board, not_a_board | https://encyclopedia.ushmm.org/content/en |
+| [`infra_root_marketing_homepage_gate_2026-05-19`](infra_root_marketing_homepage_gate_2026-05-19.md) | ✅ 영구 게이트 박힘 — root_marketing_homepage 휴리스틱 + register fail-fast + prompt 룰 | 2026-05-19 | C | root_marketing_homepage | (infra — 영구 게이트 박힘) |
 | [`infra_handconfig_preflight_reuse_probe_2026-05-19`](infra_handconfig_preflight_reuse_probe_2026-05-19.md) | 🏗 인프라 (hand-config SKILL.md §0b 추가 — preflight 이미 고쳐졌나 검사) | 2026-05-19 |  | skill_no_preflight_check, stale_queue_residue, sidewise_fix_not_recognized, batch_redundant_handconfig_work | (인프라 case — 특정 사이트 X. 트리거 = 사용자 메타 질문 — 다른 경로로 고친 사이트가 triage 큐에서 안 빠지는 경우 판단 절차) |
 | [`infra_article_page_reject_gap_check_2026-05-19`](infra_article_page_reject_gap_check_2026-05-19.md) | ✅ 일반화 (programmatic gap-check + docstring sync) | 2026-05-19 | none | learned_blacklist_overbroad, shared_path_prefix_board, fixture_gap | tests/recognizers/test_article_page_reject.py |
-| [`host_vimeo-com_root_c6a102cf`](host_vimeo-com_root_c6a102cf.md) | ❌ 자동 등록 실패 (tailwind utility-class explosion → CSS parser malformed). | 2026-05-19 |  | fetch_list_selector_syntax_error, tailwind_arbitrary_value_class, posts_nonempty | https://vimeo.com/ |
-| [`host_reuters-com_root_9c8aa57a`](host_reuters-com_root_9c8aa57a.md) | ❌ 자동 등록 실패 (httpx 401 + playwright 0건 — fingerprint hide 필요). | 2026-05-19 |  | fetch_list_401, fingerprint_hide_required, posts_nonempty | https://www.reuters.com/ |
-| [`host_nationalgeograp_root_2be4a852`](host_nationalgeograp_root_2be4a852.md) | ❌ 자동 등록 실패 (row_selector 가 article/tv/movies mix 잡음). 손 config 또는 prompt 개선 대기. | 2026-05-19 |  | post_id_stable_shape, title_nonempty, article_body_len, row_type_mix | https://www.nationalgeographic.com/ |
+| [`host_vimeo-com_root_c6a102cf`](host_vimeo-com_root_c6a102cf.md) | 🚫 거부 (Vimeo root 도메인 마케팅 랜딩 — board 아님. 비디오 플랫폼 user landing) — root_marketing_homepage 게이트 (C+F+A) | 2026-05-19 | C | fetch_list_selector_syntax_error, tailwind_arbitrary_value_class, posts_nonempty, root_marketing_homepage | https://vimeo.com/ |
+| [`host_reuters-com_root_9c8aa57a`](host_reuters-com_root_9c8aa57a.md) | 🚫 거부 (Reuters root 도메인 마케팅 랜딩 + SPA shell — board 아님. 카테고리/섹션 URL 권장) — root_marketing_homepage 게이트 (C+F+A) | 2026-05-19 | C | fetch_list_401, fingerprint_hide_required, posts_nonempty, matches_probe_first_article, count_ballpark, root_marketing_homepage | https://www.reuters.com/ |
+| [`host_nationalgeograp_root_2be4a852`](host_nationalgeograp_root_2be4a852.md) | 🚫 거부 (NatGeo root 도메인 마케팅 랜딩 — board 아님. 카테고리/섹션 URL 권장) — root_marketing_homepage 게이트 (C+F+A) | 2026-05-19 | C | post_id_stable_shape, title_nonempty, article_body_len, row_type_mix, matches_probe_first_article, root_marketing_homepage | https://www.nationalgeographic.com/ |
 | [`host_investopedia-co_news-4427706_c33346a4`](host_investopedia-co_news-4427706_c33346a4.md) | 🚫 거부 (게시판 형식 아닌 것으로 판정 — candidates_zero / list_url_none). | 2026-05-19 |  | candidates_zero, list_url_none, posts_nonempty, hub_url_not_board | https://www.investopedia.com/news-4427706 |
-| [`host_edition-cnn-com_root_82356c05`](host_edition-cnn-com_root_82356c05.md) | ❌ 자동 등록 실패 (carousel 재사용 + iso8601 mash). 손 config 또는 prompt 개선 대기. | 2026-05-19 |  | post_id_unique, title_nonempty, published_at_iso, carousel_dedup, tile_card_iso_parse | https://edition.cnn.com/ |
+| [`host_edition-cnn-com_root_82356c05`](host_edition-cnn-com_root_82356c05.md) | 🚫 거부 (CNN root 도메인 마케팅 랜딩 — board 아님. 카테고리/섹션 URL 권장) — root_marketing_homepage 게이트 (C+F+A) | 2026-05-19 | C | post_id_unique, title_nonempty, published_at_iso, matches_probe_first_article, root_marketing_homepage | https://edition.cnn.com/ |
 | [`host_bbc-com_news_7e763da2`](host_bbc-com_news_7e763da2.md) | ✅ 자동 등록 회복 (preflight b-hit, baseline 8건) — prompt §8a 룰 추가 (carousel dedup + iso slash) 후. | 2026-05-19 |  | post_id_unique, carousel_dedup, narrow_wide_no_sweet_spot | https://www.bbc.com/news |
 | [`host_acm-org_code-of-ethics_a1ad42c5`](host_acm-org_code-of-ethics_a1ad42c5.md) | ⚠️ 자동 등록 통과 (baseline 1건 — single article 의심, learned_blacklist false negative 가능성). | 2026-05-19 |  | single_article_page, baseline_1_only, count_ballpark_warn, learned_blacklist_false_negative | https://www.acm.org/code-of-ethics |
 | [`infra_probe_sitemap_discovery_2026-05-18`](infra_probe_sitemap_discovery_2026-05-18.md) | 🏗 인프라 (probe Phase 6 의 sitemap.xml 디스커버리 — docstring 의도 미구현분 채움) | 2026-05-18 | C | posts_nonempty, user_url_not_board_page | (인프라 case — 특정 사이트 X. 트리거 = prior-art 조사 followup-plan Action |
@@ -81,8 +82,8 @@
 
 | layer | count |
 |---|---|
-| (미기재) | 21 |
-| C | 2 |
+| (미기재) | 17 |
+| C | 7 |
 | C+A | 1 |
 | C+D | 2 |
 | C+F | 1 |
@@ -98,14 +99,14 @@
 
 | strategy | count |
 |---|---|
-| (미기재) | 35 |
+| (미기재) | 31 |
 | handwritten | 9 |
 | httpx_html | 6 |
 | httpx_json | 4 |
-| none | 9 |
+| none | 14 |
 | playwright_html | 5 |
 
 ### 최근 90일 (≥ 2026-02-18)
 
-케이스 68 건.
+케이스 69 건.
 

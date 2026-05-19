@@ -253,6 +253,52 @@ def _multi_host_hub_check(digest: dict, url: str) -> tuple[bool, str]:
                    f"[신호: {detail}]")
 
 
+def _root_marketing_homepage_check(digest: dict, url: str) -> tuple[bool, str]:
+    """probe digest 의 list_candidates.root_marketing_homepage 가 dict (=조건 매칭) 면
+    *root 도메인 마케팅 랜딩/허브* 페이지 판정. LLM 호출 *전* fail-fast.
+
+    트리거 (probe/extract.py:root_marketing_homepage):
+      - URL path == '/' (root 도메인)
+      - html_repeating_patterns top7 의 nav/footer/dropdown/carousel/swiper/menu 키워드 ≥ 2
+      - same-host article rows ≤ 15 (진짜 article-grid root 차단 가드)
+
+    `_board_shape_check` *전* 호출 — board_shape 는 hero/carousel 의 same-host article 1-2개 만으로도
+    통과하지만 root marketing 페이지는 polling 대상 board 아님. 메이저 미디어 root (CNN/Reuters/
+    NatGeo/Vimeo 류) 가 여기서 잡힘.
+
+    learn=False — root 만 차단, 카테고리 path (예: /world/, /business/) 는 진짜 board 가능성 있어
+    path_prefix 차단 위험. 호출자가 `_save_rejected(..., learn=False)`.
+
+    사용자 권장 메시지: first_article_url 의 path-prefix (예: `/world/`) 를 카테고리 URL 시도 권장.
+    """
+    lc = digest.get("list_candidates") or {}
+    rm = lc.get("root_marketing_homepage")
+    if not isinstance(rm, dict) or not rm.get("is_root_marketing_homepage"):
+        return True, ""
+    hits = rm.get("marketing_hits")
+    sels = rm.get("marketing_selectors") or []
+    total = rm.get("total_same_host")
+    body_empty = rm.get("body_empty_likely")
+    fau = lc.get("first_article_url") or ""
+    suggestion = ""
+    if fau:
+        try:
+            fpath = (urlsplit(fau).path or "").strip()
+            parts = [s for s in fpath.split("/") if s]
+            if parts:
+                suggestion = (f" 카테고리/섹션 URL 시도 권장 — 예: "
+                              f"https://{urlsplit(url).netloc}/{parts[0]}/ "
+                              f"(probe 가 잡은 첫 글 path: /{parts[0]}/...)")
+        except (ValueError, AttributeError):
+            pass
+    detail = (f"marketing_hits={hits} total_same_host={total} "
+              f"body_empty_likely={body_empty} sample_selectors={sels[:2]}")
+    return False, ("root 도메인 마케팅 랜딩/허브 페이지 같음 — 글 행 반복 패턴 자리에 nav/footer/"
+                   "dropdown/carousel/swiper 메뉴가 우세하고, 같은 호스트로 가는 article rows 가 작음. "
+                   "메이저 미디어/플랫폼 root 페이지 (CNN/Reuters/NatGeo/Vimeo 류) — 폴링 대상 board 아님."
+                   + suggestion + f" [신호: {detail}]")
+
+
 def _board_shape_check(digest: dict, url: str) -> tuple[bool, str]:
     """probe digest 만으로 '게시판 형식 같은가' 판정 — gemini 부르기 전에.
     어떤 board 신호도 같은 호스트로 안 잡히면 '게시판 아님' 단정 (rc=3 로 거부).
@@ -1337,6 +1383,20 @@ def _main_inner(argv) -> int:
         try:
             _save_rejected(slug, url, "multi_host_hub 거부 (3+ unique external hosts, ratio≥0.95)",
                            note="gate: _multi_host_hub_check", learn=False)
+        except Exception as e:  # noqa: BLE001
+            print(f"[register] ⚠ REJECTED 마커 저장 실패 (rc=3): {e}", file=sys.stderr)
+        return 3
+
+    # root marketing homepage 게이트 — 메이저 미디어/플랫폼 root 도메인 (CNN/Reuters/NatGeo/Vimeo 류) 차단.
+    # board_shape 가 hero/carousel 의 same-host article 1-2개 만으로 통과시키는 걸 막음. learn=False —
+    # root 만 차단 (카테고리 path 는 진짜 board 가능성). 사용자에 카테고리 URL 권장 메시지.
+    ok_rmh, rmh_msg = _root_marketing_homepage_check(digest, url)
+    if not ok_rmh:
+        print(f"[register] {rmh_msg}")
+        print("[register] ❌ 등록 거부 — root 도메인 마케팅 랜딩/허브.")
+        try:
+            _save_rejected(slug, url, "root_marketing_homepage 거부 (root + nav/carousel-heavy + same-host rows 작음)",
+                           note="gate: _root_marketing_homepage_check", learn=False)
         except Exception as e:  # noqa: BLE001
             print(f"[register] ⚠ REJECTED 마커 저장 실패 (rc=3): {e}", file=sys.stderr)
         return 3

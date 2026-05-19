@@ -1,16 +1,16 @@
 ---
 slug: host_vimeo-com_root_c6a102cf
 url: https://vimeo.com/
-status: ❌ 자동 등록 실패 (tailwind utility-class explosion → CSS parser malformed).
-outcome: failed
+status: 🚫 거부 (Vimeo root 도메인 마케팅 랜딩 — board 아님. 비디오 플랫폼 user landing) — root_marketing_homepage 게이트 (C+F+A)
+outcome: rejected_with_policy
 date: 2026-05-19
-fix_layer:
-failure_keys: [fetch_list_selector_syntax_error, tailwind_arbitrary_value_class, posts_nonempty]
-config_strategy:
-adapters_changed:
-engine_files_touched:
-tags: [arxiv-2601-bench, video-platform, tailwind, css-parser, modern-frontend]
-requested_by: 운영자 (prior-art followup — arxiv-2601-bench 11 사이트 자동 등록 측정)
+fix_layer: C
+failure_keys: [fetch_list_selector_syntax_error, tailwind_arbitrary_value_class, posts_nonempty, root_marketing_homepage]
+config_strategy: none
+adapters_changed: []
+engine_files_touched: [probe/extract.py, probe/_contract.py, scripts/register.py, scripts/probe.py, prompts/config_writer.system.txt, bot/fail_taxonomy.py]
+tags: [vimeo, root-marketing-homepage, video-platform, tailwind, gate-reject, policy-reject, infra-root-gate, arxiv-2601-bench]
+requested_by: poi23619
 vocab_candidates:
   - candidate: tailwind_attr_selector_explosion
     confidence: high
@@ -21,6 +21,16 @@ vocab_candidates:
     analysis_date: 2026-05-19
     deferred: true
 ---
+
+## 갱신 (2026-05-19 turn 2) — root_marketing_homepage 영구 게이트로 거부
+
+기존 §"왜" / §"픽스" 의 tailwind-explosion 진단은 *board 진입 가정* 분석. 본 turn 에서 **Vimeo root = 비디오 플랫폼 마케팅 랜딩 (staff picks 카루셀 + features 메뉴) = board 정의 X** 를 인정하고 [[infra_root_marketing_homepage_gate_2026-05-19]] 영구 게이트 박음:
+
+- probe `list_candidates.root_marketing_homepage` 휴리스틱 매칭. Vimeo 신호: `marketing_hits=2 total_same_host=0 body_empty_likely=False`. top selectors: `text-footer-sub-content` (footer) 2종
+- `.REJECTED.json` 마커 + `learn=False`
+- 사용자에 안내: `카테고리/섹션 URL 시도 권장 — 예: https://vimeo.com/user41006705/` (probe first_article=`/user41006705`. user 페이지 자체도 board 아닐 가능성 — Vimeo 는 *비디오 사이트 = 알림 대상 부적합 본질*. 게이트가 거부한 것 OK)
+
+기존 vocab_candidate `tailwind_attr_selector_explosion` 는 *root 아닌 다른 tailwind 사이트* (예: Webflow/Vercel 류 marketing landing 의 카테고리 URL) 등록 시도 시 활성. prompt §31 룰 (이미 박힘 — `class 가 [, :, / 포함하면 박지 마라`) + 본 root 게이트 = 두 단계 방어. root 게이트가 *tailwind 사이트 root 의 LLM 호출 자체 차단* — prompt 룰까지 안 가도 됨.
 
 ## 무엇이 일어났나
 

@@ -165,6 +165,12 @@ _ARTIFACTS: dict[str, ArtifactContract] = {
                                 "None=신호 0건. dict={has_og_article, schema_article_types, has_microdata_article, is_article_page, signals}. "
                                 "is_article_page=true AND first_article_url 의 path-prefix 가 input URL 과 *다르면* `_meta_article_diverging_check` 가 거부 — "
                                 "보드 페이지가 우연히 article 마크업 박은 경우(omate 등)는 first_article 이 같은 path-prefix 라 통과 (false-positive 차단)."),
+            _ContractField("root_marketing_homepage", type_hint="dict|null", required=False,
+                           note="root 도메인 URL 의 마케팅 랜딩/허브 페이지 검출 — board 정의 자체 X. "
+                                "None=조건 미충족. dict={is_root_marketing_homepage, marketing_hits, marketing_selectors, total_same_host, body_empty_likely}. "
+                                "트리거: path='/' AND html_repeating_patterns top7 중 nav/footer/dropdown/carousel/swiper/menu 키워드 ≥ 2 AND same-host article rows ≤ 15. "
+                                "register.py `_root_marketing_homepage_check` 가 이 신호 보고 LLM 호출 *전* REJECTED 마커 + 카테고리/섹션 URL 권장 메시지. "
+                                "learn=False — root 만 차단, 카테고리 path 는 진짜 board 가능성 있어 path_prefix 차단 X."),
         ),
     ),
 

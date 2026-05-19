@@ -384,6 +384,7 @@ def _run(args: argparse.Namespace, url: str, slug: str) -> int:
             meta_signals = article_meta_signals(html=page_html or "")
             write_list_candidates(
                 out_dir,
+                base_url=url,
                 html_candidates=html_lists,
                 json_api_candidates=json_api_lists,
                 hydration_candidates=hydration_lists,

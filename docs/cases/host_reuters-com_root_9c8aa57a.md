@@ -1,16 +1,16 @@
 ---
 slug: host_reuters-com_root_9c8aa57a
 url: https://www.reuters.com/
-status: ❌ 자동 등록 실패 (httpx 401 + playwright 0건 — fingerprint hide 필요).
-outcome: failed
+status: 🚫 거부 (Reuters root 도메인 마케팅 랜딩 + SPA shell — board 아님. 카테고리/섹션 URL 권장) — root_marketing_homepage 게이트 (C+F+A)
+outcome: rejected_with_policy
 date: 2026-05-19
-fix_layer:
-failure_keys: [fetch_list_401, fingerprint_hide_required, posts_nonempty]
-config_strategy:
-adapters_changed:
-engine_files_touched:
-tags: [arxiv-2601-bench, western-news, bot-block, fingerprint, akamai]
-requested_by: 운영자 (prior-art followup — arxiv-2601-bench 11 사이트 자동 등록 측정)
+fix_layer: C
+failure_keys: [fetch_list_401, fingerprint_hide_required, posts_nonempty, matches_probe_first_article, count_ballpark, root_marketing_homepage]
+config_strategy: none
+adapters_changed: []
+engine_files_touched: [probe/extract.py, probe/_contract.py, scripts/register.py, scripts/probe.py, prompts/config_writer.system.txt, bot/fail_taxonomy.py]
+tags: [reuters, root-marketing-homepage, spa-shell, akamai, body-empty-likely, gate-reject, policy-reject, infra-root-gate, arxiv-2601-bench]
+requested_by: poi23619
 vocab_candidates:
   - candidate: fingerprint_hide_required
     confidence: high
@@ -21,6 +21,16 @@ vocab_candidates:
     analysis_date: 2026-05-19
     deferred: false
 ---
+
+## 갱신 (2026-05-19 turn 2) — root_marketing_homepage 영구 게이트로 거부
+
+기존 §"왜" / §"픽스" 의 fingerprint-hide 진단은 *board 진입 가정* 분석 (= Akamai bot manager 우회). 본 turn 에서 **Reuters root = SPA shell + 뉴스 hub = board 정의 X** 를 인정하고 [[infra_root_marketing_homepage_gate_2026-05-19]] 영구 게이트 박음:
+
+- probe `list_candidates.root_marketing_homepage` 휴리스틱 매칭. Reuters 신호: `marketing_hits=3 total_same_host=8 body_empty_likely=True` (SPA shell — 정적 HTML 본문 비어있음). top selectors: `nav-dropdown-module__subsections`, `VideoShortsCarouselContainer`, `nav-dropdown-module__sections-group`
+- `.REJECTED.json` 마커 + `learn=False`
+- 사용자에 안내: `카테고리/섹션 URL 시도 권장 — 예: https://www.reuters.com/world/` (probe first_article=`/world/<...>-2026-05-18/` → `/world/` segment)
+
+기존 vocab_candidate `fingerprint_hide_required` (high=2, [[arca-live_trickcal_6703bf64]] Cloudflare 와 누적) 는 *root 우회 후 카테고리 URL 시도 시* 여전히 활성. ADR 0003 임계 도달 가능성 남음 (현재 high=2, +1 추가 시 trigger). root 게이트는 *그 vocab 후보를 보호* — root 등록 시도가 fingerprint 우회 비용 0 으로 끝남.
 
 ## 무엇이 일어났나
 

@@ -789,6 +789,77 @@ def all_same_host_patterns_in_nav(
     }
 
 
+_MARKETING_SELECTOR_KEYWORDS = (
+    "nav", "footer", "header", "dropdown", "subnav", "menu",
+    "carousel", "swiper", "tile", "promo", "hero", "banner",
+)
+
+
+@heuristic
+def root_marketing_homepage(
+    *,
+    base_url: str,
+    html_candidates: list[dict],
+    nav_only_same_host: Optional[dict],
+    body_empty_likely: bool,
+) -> Optional[dict]:
+    """root 도메인 URL 의 마케팅 랜딩/허브 페이지 검출 — board 정의 자체 X.
+
+    트리거 조건 (AND):
+      1. URL path == '/' (또는 빈 path) — root 도메인
+      2. html_repeating_patterns top 7 중 selector 에 nav/footer/header/dropdown/subnav/menu/
+         carousel/swiper/tile/promo/hero/banner 키워드 ≥ 2 (마케팅 구조 우세)
+      3. nav_only_same_host.total_same_host ≤ 15 (또는 None) — 진짜 article-grid root
+         (예: HackerNews) false-positive 차단. 진짜 board root 면 same-host article rows
+         가 보통 ≥ 30.
+
+    출력:
+      None — 조건 미충족 (정상 board 가능성).
+      dict = {is_root_marketing_homepage, marketing_hits, marketing_selectors, total_same_host,
+              body_empty_likely}.
+
+    register.py `_root_marketing_homepage_check` 가 이 신호 보고 LLM 호출 *전* REJECTED
+    마커 박음 + 사용자에 카테고리/섹션 URL 권장. learn=False — root 만 차단, 카테고리 path
+    는 진짜 board 가능성 있어 path_prefix 차단 안 함.
+    """
+    from urllib.parse import urlsplit
+    if not base_url:
+        return None
+    try:
+        parts = urlsplit(base_url)
+        path = (parts.path or "").strip()
+        host = (parts.netloc or "").strip()
+    except (ValueError, AttributeError):
+        return None
+    if not host:
+        return None
+    if path and path != "/":
+        return None
+    if not html_candidates:
+        return None
+    top = html_candidates[:7]
+    matched: list[str] = []
+    for c in top:
+        sel = (c.get("selector") or "").lower()
+        if not sel:
+            continue
+        if any(kw in sel for kw in _MARKETING_SELECTOR_KEYWORDS):
+            matched.append((c.get("selector") or "")[:120])
+    if len(matched) < 2:
+        return None
+    nav = nav_only_same_host if isinstance(nav_only_same_host, dict) else {}
+    total_same = int(nav.get("total_same_host") or 0)
+    if total_same > 15:
+        return None
+    return {
+        "is_root_marketing_homepage": True,
+        "marketing_hits": len(matched),
+        "marketing_selectors": matched[:5],
+        "total_same_host": total_same,
+        "body_empty_likely": bool(body_empty_likely),
+    }
+
+
 def _find_nav_ancestor(el: Tag) -> Optional[str]:
     p = el.parent
     while p is not None and getattr(p, "name", None):
@@ -1051,6 +1122,7 @@ def _walk_id_keys(node, prefix: str = "", _depth: int = 0):
 def write_list_candidates(
     out_dir: Path,
     *,
+    base_url: str,
     html_candidates: list[dict],
     json_api_candidates: list[dict],
     hydration_candidates: list[dict],
@@ -1068,6 +1140,14 @@ def write_list_candidates(
     body_empty_likely = bool(
         (row_external_host and float(row_external_host.get("external_ratio") or 0.0) >= 0.8)
         or (row_interactive_action and row_interactive_action.get("is_interactive_action"))
+    )
+    # root_marketing_homepage — root 도메인 + nav/footer/dropdown/carousel 키워드 우세 + same-host
+    # article rows 작음. register.py 가 LLM 전 fail-fast 게이트로 사용.
+    root_marketing = root_marketing_homepage(
+        base_url=base_url,
+        html_candidates=html_candidates,
+        nav_only_same_host=nav_only_same_host,
+        body_empty_likely=body_empty_likely,
     )
     payload = {
         "html_repeating_patterns": html_candidates,
@@ -1099,6 +1179,11 @@ def write_list_candidates(
         # register.py `_meta_article_diverging_check` 가 is_article_page=true AND first_article_url 의 path-prefix 가
         # input URL 과 *다르면* 거부 — 보드가 article 마크업 *우연히* 박은 사이트(omate 등)는 first_article 이 같은 path-prefix 라 통과.
         "article_meta_signals": article_meta_signals,
+        # root 도메인 마케팅 랜딩/허브 페이지 검출 — board 정의 자체 X.
+        # None=조건 미충족. dict={is_root_marketing_homepage, marketing_hits, marketing_selectors, total_same_host, body_empty_likely}.
+        # 트리거: path='/' AND html_repeating_patterns top7 의 nav/footer/dropdown/carousel/swiper/menu 키워드 ≥ 2 AND same-host article rows ≤ 15.
+        # register.py `_root_marketing_homepage_check` 가 LLM 호출 *전* REJECTED 마커 + 카테고리/섹션 URL 권장 메시지. learn=False.
+        "root_marketing_homepage": root_marketing,
     }
     validate_payload("list_candidates.json", payload, allow_extra=False)
     (out_dir / "list_candidates.json").write_text(

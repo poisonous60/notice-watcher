@@ -1,16 +1,16 @@
 ---
 slug: host_nationalgeograp_root_2be4a852
 url: https://www.nationalgeographic.com/
-status: ❌ 자동 등록 실패 (row_selector 가 article/tv/movies mix 잡음). 손 config 또는 prompt 개선 대기.
-outcome: failed
+status: 🚫 거부 (NatGeo root 도메인 마케팅 랜딩 — board 아님. 카테고리/섹션 URL 권장) — root_marketing_homepage 게이트 (C+F+A)
+outcome: rejected_with_policy
 date: 2026-05-19
-fix_layer:
-failure_keys: [post_id_stable_shape, title_nonempty, article_body_len, row_type_mix]
-config_strategy:
-adapters_changed:
-engine_files_touched:
-tags: [arxiv-2601-bench, western-media, row-type-mix, multimodal]
-requested_by: 운영자 (prior-art followup — arxiv-2601-bench 11 사이트 자동 등록 측정)
+fix_layer: C
+failure_keys: [post_id_stable_shape, title_nonempty, article_body_len, row_type_mix, matches_probe_first_article, root_marketing_homepage]
+config_strategy: none
+adapters_changed: []
+engine_files_touched: [probe/extract.py, probe/_contract.py, scripts/register.py, scripts/probe.py, prompts/config_writer.system.txt, bot/fail_taxonomy.py]
+tags: [natgeo, root-marketing-homepage, mixed-media-root, carousel, gate-reject, policy-reject, infra-root-gate, arxiv-2601-bench]
+requested_by: poi23619
 vocab_candidates:
   - candidate: row_type_filter_required
     confidence: high
@@ -27,6 +27,16 @@ vocab_candidates:
     analysis_date: 2026-05-19
     deferred: true
 ---
+
+## 갱신 (2026-05-19 turn 2) — root_marketing_homepage 영구 게이트로 거부
+
+기존 §"왜" / §"픽스" 의 row-type-mix 진단은 *board 진입 가정* 분석. 본 turn 에서 **NatGeo root = magazine + video hub = board 정의 X** 를 인정하고 [[infra_root_marketing_homepage_gate_2026-05-19]] 영구 게이트 박음:
+
+- probe `list_candidates.root_marketing_homepage` 휴리스틱 매칭. NatGeo 신호: `marketing_hits=4 total_same_host=4 body_empty_likely=False`. top selectors: `SwiperWrapper > TileStackCarousel__Card`, `Swiper__DotContainer__Dot`, `Carousel__Inner > li.CarouselSlide`, `GlobalFooter__Menu__List__Item`
+- `.REJECTED.json` 마커 + `learn=False`
+- 사용자에 안내: `카테고리/섹션 URL 시도 권장 — 예: https://www.nationalgeographic.com/tv/` (probe first_article=`/tv/show/<uuid>` 이라 `/tv/` segment 추출. 더 유의미한 권장은 `/science/`, `/history/`, `/photography/` 카테고리 — 미래 first_article path 의 *비-단일-segment* 권장 후보 휴리스틱 개선 여지)
+
+기존 vocab_candidates (`row_type_filter_required`, `slug_stable_shape_relaxation`) 는 *root 아닌 카테고리 URL* (예: `/science/`) 등록 시도 시 다시 활성화. root 게이트는 우회 경로.
 
 ## 무엇이 일어났나
 

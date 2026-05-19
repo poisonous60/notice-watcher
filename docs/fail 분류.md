@@ -56,6 +56,7 @@
 | `nav_only` | nav-only same-host | 단일 article 인데 nav 만 같은 host 로 발산. |
 | `meta_diverging` | meta 선언 + 발산 | 단일 article + meta 선언이지만 first_article 발산. |
 | `multi_host_hub` | multi-host hub root | 외부 host 여러 곳으로 발산하는 hub root. |
+| `root_marketing_homepage` | root 마케팅 랜딩 | 메이저 미디어/플랫폼 root 도메인 — board 아님. 카테고리 URL 권장. |
 | `board_shape` | 게시판 형식 아님 | post 리스트 구조 인식 실패. |
 
 ### bug

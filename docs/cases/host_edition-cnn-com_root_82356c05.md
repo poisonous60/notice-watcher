@@ -1,16 +1,16 @@
 ---
 slug: host_edition-cnn-com_root_82356c05
 url: https://edition.cnn.com/
-status: ❌ 자동 등록 실패 (carousel 재사용 + iso8601 mash). 손 config 또는 prompt 개선 대기.
-outcome: failed
+status: 🚫 거부 (CNN root 도메인 마케팅 랜딩 — board 아님. 카테고리/섹션 URL 권장) — root_marketing_homepage 게이트 (C+F+A)
+outcome: rejected_with_policy
 date: 2026-05-19
-fix_layer:
-failure_keys: [post_id_unique, title_nonempty, published_at_iso, carousel_dedup, tile_card_iso_parse]
-config_strategy:
-adapters_changed:
-engine_files_touched:
-tags: [arxiv-2601-bench, western-news, carousel-reuse, spa-light, iso-slash-date]
-requested_by: 운영자 (prior-art followup — arxiv-2601-bench 11 사이트 자동 등록 측정)
+fix_layer: C
+failure_keys: [post_id_unique, title_nonempty, published_at_iso, matches_probe_first_article, root_marketing_homepage]
+config_strategy: none
+adapters_changed: []
+engine_files_touched: [probe/extract.py, probe/_contract.py, scripts/register.py, scripts/probe.py, prompts/config_writer.system.txt, bot/fail_taxonomy.py]
+tags: [cnn, root-marketing-homepage, mixed-media-root, gate-reject, policy-reject, infra-root-gate, arxiv-2601-bench, carousel-reuse]
+requested_by: poi23619
 vocab_candidates:
   - candidate: carousel_dedup_required
     confidence: high
@@ -78,6 +78,18 @@ playwright_html + `section[data-zone-label="zone-1"] li.card[data-open-link]` (m
 
 [`experiments/arxiv-2601-bench/bot_results.md`](../../experiments/arxiv-2601-bench/bot_results.md)
 §5. 같은 fail key (`post_id_unique` 중복) BBC ([[host_bbc-com_news_7e763da2]]) 와 평행.
+
+## 갱신 (2026-05-19 turn 2) — root_marketing_homepage 영구 게이트로 거부
+
+기존 §"왜" / §"픽스" 의 carousel-dedup + iso-slash-date 진단은 *board 진입 가정* 하의 분석. 본 turn 에서 **CNN root 도메인 자체가 board 정의 X** 를 인정하고 [[infra_root_marketing_homepage_gate_2026-05-19]] 영구 게이트 박음:
+
+- probe `list_candidates.root_marketing_homepage` 휴리스틱 (path='/' + nav/footer/dropdown/carousel/swiper 키워드 ≥ 2 + same-host article rows ≤ 15). CNN 신호: `marketing_hits=4 total_same_host=8 body_empty_likely=False`
+- `scripts/register.py:_root_marketing_homepage_check` 게이트 (LLM 호출 *전* fail-fast)
+- `.REJECTED.json` 마커 + `learn=False` (root 만 차단 — `/world/`, `/business/` 등 카테고리 path 는 진짜 board 가능성)
+- 사용자에 안내: `카테고리/섹션 URL 시도 권장 — 예: https://edition.cnn.com/2026/`
+  - ⚠ 권장 URL 의 첫 segment 가 date (`/2026/`) — 미래 개선 후보: first_article_url path 중 *워드 segment* (예: `world`) 우선 추출. case `infra_root_marketing_homepage_gate_2026-05-19` 의 deferred 후보로 기록.
+
+기존 vocab_candidates (`carousel_dedup_required`, `tile_card_iso_parse`) 는 *root 아닌 carousel/news 사이트* (BBC root 도 root_marketing_homepage 게이트가 잡을 가능성) 에 여전히 deferred — root 게이트는 그 vocab 후보들의 *우회 경로*. 미래 카테고리 URL 등록 시도 시 fail 패턴 누적되면 다시 활성화.
 
 ## preflight 결과 (2026-05-19, SKILL.md §0b 적용)
 
