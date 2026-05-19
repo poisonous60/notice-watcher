@@ -2,10 +2,11 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 57 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 58 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
+| [`infra_wikipedia_learned_blacklist_skip_learn_2026-05-19`](infra_wikipedia_learned_blacklist_skip_learn_2026-05-19.md) | ✅ 일반화 (recognize_reject wikipedia 패턴 skip_learn=True) | 2026-05-19 | F | learned_blacklist_overbroad, shared_path_prefix_board, not_a_board | https://en.wikipedia.org/wiki/Special:RecentChanges?hidebots=1&hidecategorization=1&hideWikibase=1&limit=50&days=1&urlversion=2 |
 | [`infra_probe_sitemap_discovery_2026-05-18`](infra_probe_sitemap_discovery_2026-05-18.md) | 🏗 인프라 (probe Phase 6 의 sitemap.xml 디스커버리 — docstring 의도 미구현분 채움) | 2026-05-18 | C | posts_nonempty, user_url_not_board_page | (인프라 case — 특정 사이트 X. 트리거 = prior-art 조사 followup-plan Action |
 | [`tistory_leedakyeong_e0e58b0f`](tistory_leedakyeong_e0e58b0f.md) | ✅ 일반화 완료 (Tistory 플랫폼 — known-platform 인식기 + RSS adapter) | 2026-05-17 | F | posts_nonempty, static_vs_headless, feed_candidates, post_id_stable_shape | https://leedakyeong.tistory.com/entry/Python-pandas-tutorial-drop-duplicates-in-pandas |
 | [`infra_worker_rc2_triage_double_record_2026-05-17`](infra_worker_rc2_triage_double_record_2026-05-17.md) | 🏗 인프라 (bot/worker rc=2 분기 append_triage_queue 중복 호출 제거) | 2026-05-17 | F | triage_queue_dashboard_mismatch, rc2_double_record, queue_noise | (인프라 case — 특정 사이트 X. 트리거 = triage queue 잡음 진단) |
@@ -78,7 +79,7 @@
 | C+F+A | 1 |
 | E | 1 |
 | E+A+C+D | 1 |
-| F | 22 |
+| F | 23 |
 | F+A | 1 |
 | F+C | 3 |
 | none | 9 |
@@ -91,10 +92,10 @@
 | handwritten | 9 |
 | httpx_html | 6 |
 | httpx_json | 4 |
-| none | 6 |
+| none | 7 |
 | playwright_html | 4 |
 
 ### 최근 90일 (≥ 2026-02-17)
 
-케이스 57 건.
+케이스 58 건.
 

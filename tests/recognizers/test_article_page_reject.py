@@ -127,11 +127,15 @@ def run() -> list[tuple[str, bool, str]]:
     out = recognize_reject("https://www.jobplanet.co.kr/contents/news")
     cases.append(("jobplanet_board_passes", out is None, f"got {out!r}"))
 
-    # 26. 기존 위키 패턴은 skip_learn=False (2-tuple 호환 — 호스트 전체가 article-only)
+    # 26. 위키 패턴은 skip_learn=True — 보드 (/wiki/Special:RecentChanges 등) 가 같은 첫 path segment 공유
     out = recognize_reject("https://en.wikipedia.org/wiki/Nazi_Party")
-    cases.append(("wikipedia_skip_learn_false",
-                  out is not None and out[2] is False,
+    cases.append(("wikipedia_skip_learn_true",
+                  out is not None and out[2] is True,
                   f"got {out!r}"))
+
+    # 26b. Wikipedia Special:RecentChanges with query — 통과 (board, not article)
+    out = recognize_reject("https://en.wikipedia.org/wiki/Special:RecentChanges?hidebots=1&limit=50&days=1&urlversion=2")
+    cases.append(("wikipedia_recent_changes_passes", out is None, f"got {out!r}"))
 
     # 27. MDN docs ko (host_developer-mozil_ko_47b50435) — skip_learn=True (host_path_prefix=lang)
     out = recognize_reject("https://developer.mozilla.org/ko/docs/Web/HTML/Reference/Elements/button")

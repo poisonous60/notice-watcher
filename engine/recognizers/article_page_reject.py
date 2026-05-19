@@ -35,12 +35,16 @@ NAME = "article_page_reject"
 
 PATTERNS_REJECT: list[tuple] = [
     # Wikipedia (모든 lang) — `/wiki/<title>` 단일 article. Special:/Category:/Portal:/Help:/File:/Talk: 등 제외.
-    # 호스트 전체가 article-only — skip_learn=False (default: `/wiki/*` 전체 차단 OK).
+    # recognize_reject 자체는 negative look-ahead 로 보드 (Special:RecentChanges 등) 통과시키지만,
+    # learned_blacklist 의 `_extract_url_pattern` 은 첫 path segment 만 봐서 `/wiki` 한 자리로 학습 →
+    # 보드 URL (`/wiki/Special:*`) 까지 url_gate 단에서 차단됨 (nature/iln-ieee/jobplanet 와 같은 케이스).
+    # → skip_learn=True. recognize_reject 는 article 만 막고, learned_blacklist 학습은 X.
     (re.compile(
         r"^https?://[a-z]{2,3}\.wikipedia\.org/wiki/"
         r"(?!Special:|Category:|Portal:|Help:|File:|Talk:|User:|Wikipedia:|Template:|특수기능:|분류:|위키백과:)"
         r"[^/?#]+/?(?:[?#].*)?$", re.I,
-    ), "위키피디아 단일 article — 게시판 아님. 폴링 대상 X (한 글 안의 참고 링크를 새 글로 감시할 수 없음)."),
+    ), "위키피디아 단일 article — 게시판 아님. 폴링 대상 X (한 글 안의 참고 링크를 새 글로 감시할 수 없음). 보드는 `/wiki/Special:RecentChanges` 등.",
+        True),
     # 네이버 지식백과 — `terms.naver.com/entry.naver?docId=...` 단일 항목.
     (re.compile(
         r"^https?://terms\.naver\.com/entry\.(?:naver|nhn)\b", re.I,
