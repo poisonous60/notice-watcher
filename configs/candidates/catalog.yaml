@@ -1,0 +1,668 @@
+# 사이트 카탈로그 — `scripts/register_batch.py` 입력.
+#
+# 출처: `docs/[연구] 게시판 형태 플랫폼 크롤링 분류 가이드 …` (provenance=doc)
+#       `docs/사이트별 등록 시도 기록.md` (provenance=history)
+#       WebSearch 보강 (provenance=web)
+#
+# 스키마: docs/사이트 카탈로그 자동 등록 파이프라인 계획.md §3.
+# 한 entry 의 각 boards[].url 이 register.py 1회 호출 = 1 slug.
+#
+# tier 의미 (arXiv 2601.06301 5-tier):
+#   A=정적HTML, B=서버렌더+hydration, C=SPA+JSON XHR, D=SPA+auth/CSRF,
+#   E=Heavy SPA+bot보호(Cloudflare), F=iframe-in-iframe, G=CAPTCHA-gated.
+#
+# expected_strategy: rss | httpx_json | httpx_html | playwright_html | handwritten | unknown.
+
+version: 1
+schema: 1
+
+entries:
+  # =========================== KR 게임 공식 ===========================
+  - id: nexon-mabinogi-pc
+    name: 마비노기 (PC) 공지
+    category: kr-game-official
+    tier: A
+    expected_strategy: httpx_html
+    boards:
+      - url: https://mabinogi.nexon.com/page/news/notice_list.asp
+        label: 공지
+    note: 정적 ASP. 자동등록 잘 됨 예상.
+    source:
+      doc: "docs/[연구] … 사전 설계 문서.md"
+      section: "5) 한국 게임 매트릭스"
+      provenance: doc
+
+  - id: nexon-mabinogi-mobile
+    name: 마비노기 모바일 공지
+    category: kr-game-official
+    tier: B
+    expected_strategy: handwritten
+    boards:
+      - url: https://mabinogimobile.nexon.com/News/notice
+        label: 공지
+    note: 이미 손작성 config (시도기록). threadId URL 클라이언트 라우트.
+    source:
+      doc: "docs/사이트별 등록 시도 기록.md"
+      section: "mabinogimobile.nexon.com_News_notice"
+      provenance: history
+
+  - id: nexon-maplestory-pc
+    name: 메이플스토리 (PC) 공지
+    category: kr-game-official
+    tier: B
+    expected_strategy: httpx_html
+    boards:
+      - url: https://maplestory.nexon.com/News/Notice
+        label: 공지
+    source:
+      doc: "docs/[연구] … 사전 설계 문서.md"
+      section: "5) 한국 게임 매트릭스"
+      provenance: doc
+
+  - id: nexon-maplestory-mobile
+    name: 메이플스토리 (모바일) 공지
+    category: kr-game-official
+    tier: A
+    expected_strategy: httpx_html
+    boards:
+      - url: https://m.maplestory.nexon.com/board/7/
+        label: 공지(모바일)
+    note: 모바일 도메인이 더 깔끔하다고 doc 명시.
+    source:
+      doc: "docs/[연구] … 사전 설계 문서.md"
+      section: "5) 한국 게임 매트릭스"
+      provenance: doc
+
+  - id: nexon-df-pc
+    name: 던전앤파이터 공지
+    category: kr-game-official
+    tier: A
+    expected_strategy: httpx_html
+    boards:
+      - url: https://df.nexon.com/community/news/notice/list
+        label: 공지
+    note: 해외 IP 차단 — 한국 IP 필수. dev box 가 KR 이면 OK.
+    source:
+      doc: "docs/[연구] … 사전 설계 문서.md"
+      section: "5) 한국 게임 매트릭스"
+      provenance: doc
+
+  - id: nexon-fconline
+    name: FC온라인 공지
+    category: kr-game-official
+    tier: A
+    expected_strategy: httpx_html
+    boards:
+      - url: https://fconline.nexon.com/news/notice/list
+        label: 공지
+    source:
+      doc: "docs/[연구] … 사전 설계 문서.md"
+      section: "5) 한국 게임 매트릭스"
+      provenance: doc
+
+  - id: ncsoft-lineagew
+    name: 리니지W 공지
+    category: kr-game-official
+    tier: C
+    expected_strategy: httpx_json
+    boards:
+      - url: https://lineagew.plaync.com/board/notice/list
+        label: 공지
+    note: Next.js SPA + api.plaync.com 비공식 JSON. Akamai 가드.
+    source:
+      doc: "docs/[연구] … 사전 설계 문서.md"
+      section: "5) 한국 게임 매트릭스"
+      provenance: doc
+
+  - id: ncsoft-aion2
+    name: 아이온2 공지
+    category: kr-game-official
+    tier: C
+    expected_strategy: httpx_json
+    boards:
+      - url: https://aion2.plaync.com/news/notice/list
+        label: 공지
+    source:
+      doc: "docs/[연구] … 사전 설계 문서.md"
+      section: "5) 한국 게임 매트릭스"
+      provenance: doc
+
+  - id: ncsoft-tl
+    name: TL (Throne and Liberty) 공지
+    category: kr-game-official
+    tier: C
+    expected_strategy: httpx_json
+    boards:
+      - url: https://tl.plaync.com/board/notice/list
+        label: 공지
+    source:
+      doc: "docs/[연구] … 사전 설계 문서.md"
+      section: "5) 한국 게임 매트릭스"
+      provenance: doc
+
+  - id: smilegate-lostark
+    name: 로스트아크 공지 (Open API)
+    category: kr-game-official
+    tier: D
+    expected_strategy: handwritten
+    boards:
+      - url: https://developer-lostark.game.onstove.com/news/notices
+        label: Open API
+    note: 한국 게임사 중 유일한 공식 Open API + JWT. 손어댑터 필요.
+    source:
+      doc: "docs/[연구] … 사전 설계 문서.md"
+      section: "5) 한국 게임 매트릭스"
+      provenance: doc
+
+  - id: smilegate-epicseven
+    name: 에픽세븐 공지
+    category: kr-game-official
+    tier: E
+    expected_strategy: playwright_html
+    boards:
+      - url: https://page.onstove.com/epicseven/kr/list/e7kr001
+        label: 공지
+    note: 풀 SPA, api.onstove.com 비공식. 자동등록 어려움 예상.
+    source:
+      doc: "docs/[연구] … 사전 설계 문서.md"
+      section: "5) 한국 게임 매트릭스"
+      provenance: doc
+
+  - id: krafton-pubg-daum
+    name: PUBG (KR) 공지
+    category: kr-game-official
+    tier: A
+    expected_strategy: httpx_html
+    boards:
+      - url: https://bbs.pubg.game.daum.net/gaia/do/pubg/notice/list?bbsId=PN001
+        label: 공지
+    note: 한국 다음 BBS 클래식 정적 HTML.
+    source:
+      doc: "docs/[연구] … 사전 설계 문서.md"
+      section: "5) 한국 게임 매트릭스"
+      provenance: doc
+
+  - id: pearlabyss-bdo-kr
+    name: 검은사막 (KR) 공지
+    category: kr-game-official
+    tier: A
+    expected_strategy: httpx_html
+    boards:
+      - url: https://kr.playblackdesert.com/ko-KR/News/Notice
+        label: 공지
+    source:
+      doc: "docs/[연구] … 사전 설계 문서.md"
+      section: "5) 한국 게임 매트릭스"
+      provenance: doc
+
+  - id: nexon-forum-bluearchive
+    name: 넥슨 포럼 — 블루아카이브
+    category: kr-game-official
+    tier: C
+    expected_strategy: httpx_json
+    boards:
+      - url: https://forum.nexon.com/bluearchive/board_list?board=1018
+        label: 공지
+    note: 이미 손작성 config (시도기록). 같은 포럼의 다른 게임도 패턴 동일.
+    source:
+      doc: "docs/사이트별 등록 시도 기록.md"
+      section: "forum.nexon.com_bluearchive_board_list_board_1018"
+      provenance: history
+
+  - id: gryphline-endfield
+    name: 엔드필드 공식 뉴스
+    category: kr-game-official
+    tier: C
+    expected_strategy: httpx_json
+    boards:
+      - url: https://endfield.gryphline.com/ko-kr/news
+        label: 뉴스
+    note: 이미 자동등록 성공 (시도기록).
+    source:
+      doc: "docs/사이트별 등록 시도 기록.md"
+      section: "endfield.gryphline.com_ko-kr_news"
+      provenance: history
+
+  - id: perfectworld-nte-kr
+    name: 영원의탑 NTE (KR) 뉴스
+    category: kr-game-official
+    tier: B
+    expected_strategy: httpx_html
+    boards:
+      - url: https://nte.perfectworld.com/kr/article/news/index.html
+        label: 뉴스
+    note: 이미 손 config (시도기록, 2026-05-15).
+    source:
+      doc: "docs/사이트별 등록 시도 기록.md"
+      section: "host_nte-perfectworl_kr_c8f4855a"
+      provenance: history
+
+  # =========================== 글로벌 게임 공식 ===========================
+  - id: riot-lol-news
+    name: Riot LoL News
+    category: global-game-official
+    tier: B
+    expected_strategy: httpx_html
+    boards:
+      - url: https://www.leagueoflegends.com/en-us/news/
+        label: News
+    note: 공식 RSS 없음. SPA 일 가능성.
+    source:
+      doc: "docs/[연구] … 사전 설계 문서.md"
+      section: "5) 글로벌 매트릭스"
+      provenance: doc
+
+  - id: blizzard-news
+    name: Blizzard News
+    category: global-game-official
+    tier: B
+    expected_strategy: httpx_html
+    boards:
+      - url: https://news.blizzard.com/en-us/
+        label: News
+    note: 공식 RSS 미제공 (다년간 요청에도).
+    source:
+      doc: "docs/[연구] … 사전 설계 문서.md"
+      section: "5) 글로벌 매트릭스"
+      provenance: doc
+
+  - id: blizzard-forum-us
+    name: Blizzard US Forum (Discourse)
+    category: forum-engine
+    tier: A
+    expected_strategy: httpx_json
+    boards:
+      - url: https://us.forums.blizzard.com/en/wow/latest
+        label: WoW latest
+    note: Discourse `/latest.json` 활용 가능.
+    source:
+      doc: "docs/[연구] … 사전 설계 문서.md"
+      section: "5) 글로벌 매트릭스"
+      provenance: doc
+
+  - id: hoyolab-genshin-news
+    name: HoYoLAB 원신 News (KR)
+    category: global-game-official
+    tier: C
+    expected_strategy: httpx_json
+    boards:
+      - url: https://www.hoyolab.com/circles/2/0/official?lang=ko-kr
+        label: 원신 공식
+    note: 비공식 bbs-api-os JSON. `gids=2`.
+    source:
+      doc: "docs/[연구] … 사전 설계 문서.md"
+      section: "5) 글로벌 매트릭스"
+      provenance: doc
+
+  - id: hoyolab-hsr-news
+    name: HoYoLAB 스타레일 News (KR)
+    category: global-game-official
+    tier: C
+    expected_strategy: httpx_json
+    boards:
+      - url: https://www.hoyolab.com/circles/6/0/official?lang=ko-kr
+        label: HSR 공식
+    note: gids=6.
+    source:
+      doc: "docs/[연구] … 사전 설계 문서.md"
+      section: "5) 글로벌 매트릭스"
+      provenance: doc
+
+  - id: hoyolab-zzz-news
+    name: HoYoLAB 젠레스존제로 News (KR)
+    category: global-game-official
+    tier: C
+    expected_strategy: httpx_json
+    boards:
+      - url: https://www.hoyolab.com/circles/8/0/official?lang=ko-kr
+        label: ZZZ 공식
+    note: gids=8.
+    source:
+      doc: "docs/[연구] … 사전 설계 문서.md"
+      section: "5) 글로벌 매트릭스"
+      provenance: doc
+
+  # =========================== 한국 커뮤니티 (오픈) ===========================
+  - id: ruliweb-news-1001
+    name: 루리웹 유저정보 게시판 (RSS)
+    category: kr-community-open
+    tier: A
+    expected_strategy: rss
+    boards:
+      - url: https://bbs.ruliweb.com/news/board/1001/rss
+        label: 유저정보 RSS
+    note: RSS pattern (`/rss` 접미사) 는 doc §3 documented. board id 는 WebSearch 보강.
+    source:
+      doc: "docs/[연구] … 사전 설계 문서.md §3 + WebSearch board id"
+      section: "3) 콘텐츠 유형 분류"
+      provenance: doc
+
+  - id: ruliweb-pc-1003
+    name: 루리웹 PC정보 게시판 (RSS)
+    category: kr-community-open
+    tier: A
+    expected_strategy: rss
+    boards:
+      - url: https://bbs.ruliweb.com/pc/board/1003/rss
+        label: PC 정보 RSS
+    source:
+      doc: "docs/[연구] … §3 + WebSearch board id"
+      section: "3) 콘텐츠 유형 분류"
+      provenance: doc
+
+  - id: ruliweb-mobile-1004
+    name: 루리웹 모바일정보 게시판 (RSS)
+    category: kr-community-open
+    tier: A
+    expected_strategy: rss
+    boards:
+      - url: https://bbs.ruliweb.com/mobile/board/1004/rss
+        label: 모바일 정보 RSS
+    source:
+      doc: "docs/[연구] … §3 + WebSearch board id"
+      section: "3) 콘텐츠 유형 분류"
+      provenance: doc
+
+  - id: ruliweb-nintendo-300004
+    name: 루리웹 닌텐도 스위치 정보 (RSS)
+    category: kr-community-open
+    tier: A
+    expected_strategy: rss
+    boards:
+      - url: https://bbs.ruliweb.com/ps/board/300004/rss
+        label: 스위치 정보 RSS
+    source:
+      doc: "docs/[연구] … §3 + WebSearch board id"
+      section: "3) 콘텐츠 유형 분류"
+      provenance: doc
+
+  - id: clien-news
+    name: 클리앙 — 새로운 소식
+    category: kr-community-open
+    tier: A
+    expected_strategy: httpx_html
+    boards:
+      - url: https://www.clien.net/service/board/news
+        label: 새로운소식
+    note: 공식 RSS 폐지. Feedburner 미러 또는 HTML 폴링.
+    source:
+      doc: "docs/[연구] … 사전 설계 문서.md"
+      section: "5) 한국 매트릭스"
+      provenance: doc
+
+  - id: clien-park
+    name: 클리앙 — 모두의공원
+    category: kr-community-open
+    tier: A
+    expected_strategy: httpx_html
+    boards:
+      - url: https://www.clien.net/service/board/park
+        label: 모두의공원
+    source:
+      doc: "docs/[연구] … 사전 설계 문서.md"
+      section: "5) 한국 매트릭스"
+      provenance: doc
+
+  - id: inven-lostark
+    name: 인벤 — 로스트아크
+    category: kr-community-open
+    tier: A
+    expected_strategy: httpx_html
+    boards:
+      - url: https://www.inven.co.kr/board/lostark/4811
+        label: 자유게시판
+    source:
+      doc: "docs/[연구] … 사전 설계 문서.md"
+      section: "5) 한국 매트릭스"
+      provenance: doc
+
+  - id: inven-maple
+    name: 인벤 — 메이플
+    category: kr-community-open
+    tier: A
+    expected_strategy: httpx_html
+    boards:
+      - url: https://www.inven.co.kr/board/maple/2304
+        label: 자유게시판
+    source:
+      doc: "docs/[연구] … 사전 설계 문서.md"
+      section: "5) 한국 매트릭스"
+      provenance: doc
+
+  # =========================== 한국 커뮤니티 (제한) ===========================
+  - id: arca-trickcal
+    name: 아카라이브 — 트릭컬
+    category: kr-community-blocked
+    tier: E
+    expected_strategy: handwritten
+    boards:
+      - url: https://arca.live/b/trickcal
+        label: 채널
+    note: Cloudflare + 자체 캡차 ★★★★. 손어댑터 있음 (시도기록).
+    source:
+      doc: "docs/[연구] … 사전 설계 문서.md + history"
+      section: "5) 한국 매트릭스"
+      provenance: doc
+
+  - id: arca-endfield
+    name: 아카라이브 — 엔드필드
+    category: kr-community-blocked
+    tier: E
+    expected_strategy: handwritten
+    boards:
+      - url: https://arca.live/b/akendfield
+        label: 채널
+    source:
+      doc: "docs/사이트별 등록 시도 기록.md"
+      section: "arca-live_akendfield"
+      provenance: history
+
+  - id: dcinside-endfield
+    name: 디시 — 엔드필드 갤
+    category: kr-community-blocked
+    tier: E
+    expected_strategy: handwritten
+    boards:
+      - url: https://m.dcinside.com/board/endfield
+        label: 갤러리(모바일)
+    note: m. 도메인이 사실상 API. 클라우드 IP 차단 ★★★★ — 주거용 KR IP 필요.
+    source:
+      doc: "docs/사이트별 등록 시도 기록.md + 사전 설계 문서.md"
+      section: "5) 한국 매트릭스"
+      provenance: history
+
+  - id: dcinside-chokaguya
+    name: 디시 — 코즈믹 프린세스 카구야 미니갤
+    category: kr-community-blocked
+    tier: E
+    expected_strategy: handwritten
+    boards:
+      - url: https://m.dcinside.com/mgallery/board/lists?id=chokaguyahime
+        label: 미니갤(모바일)
+    source:
+      doc: "docs/사이트별 등록 시도 기록.md"
+      section: "dcinside-mgallery_chokaguyahime"
+      provenance: history
+
+  # =========================== 한국 커뮤니티 (로그인) ===========================
+  - id: navercafe-30291108-6
+    name: 네이버 카페 — 자료실(예시 카페)
+    category: kr-community-login
+    tier: F
+    expected_strategy: handwritten
+    boards:
+      - url: https://cafe.naver.com/f-e/cafes/30291108/menus/6?viewType=L
+        label: 자료실
+    note: 이미 손작성 config + NaverCafeAdapter (시도기록).
+    source:
+      doc: "docs/사이트별 등록 시도 기록.md"
+      section: "cafe.naver.com_f-e_cafes_30291108"
+      provenance: history
+
+  - id: navergame-trickcal-3
+    name: 네이버 게임라운지 — 트릭컬
+    category: kr-community-login
+    tier: C
+    expected_strategy: httpx_json
+    boards:
+      - url: https://game.naver.com/lounge/Trickcal/board/3
+        label: 게시판 3
+    note: 이미 손작성 httpx_json config (시도기록).
+    source:
+      doc: "docs/사이트별 등록 시도 기록.md"
+      section: "game.naver.com_lounge_Trickcal_board_3"
+      provenance: history
+
+  - id: daumcafe-umamusume-Z4os
+    name: 다음 카페 — 우마무스메 (모바일)
+    category: kr-community-open    # 공개 게시판이므로 open (login 안 필요 — 시도기록 기준)
+    tier: A
+    expected_strategy: handwritten
+    boards:
+      - url: https://m.cafe.daum.net/umamusume-kor/Z4os?boardType=
+        label: 자유
+    note: 이미 손어댑터 (시도기록).
+    source:
+      doc: "docs/사이트별 등록 시도 기록.md"
+      section: "m.cafe.daum.net_umamusume-kor"
+      provenance: history
+
+  # =========================== 글로벌 커뮤니티 ===========================
+  - id: reddit-cosmickaguya
+    name: Reddit — CosmicPrincessKaguya (Fan Art)
+    category: global-community
+    tier: A
+    expected_strategy: handwritten
+    boards:
+      - url: https://www.reddit.com/r/CosmicPrincessKaguya/
+        label: 메인
+    note: 이미 손어댑터 (시도기록). flair 필터 사용.
+    source:
+      doc: "docs/사이트별 등록 시도 기록.md"
+      section: "www.reddit.com_r_CosmicPrincessKaguya"
+      provenance: history
+
+  - id: reddit-genshin
+    name: Reddit — r/Genshin_Impact
+    category: global-community
+    tier: A
+    expected_strategy: handwritten
+    boards:
+      - url: https://www.reddit.com/r/Genshin_Impact/
+        label: 메인
+    note: RedditAdapter 가 인식해야 함.
+    source:
+      doc: "docs/[연구] … 사전 설계 문서.md"
+      section: "5) 글로벌 매트릭스"
+      provenance: doc
+
+  - id: reddit-honkaistarrail
+    name: Reddit — r/HonkaiStarRail
+    category: global-community
+    tier: A
+    expected_strategy: handwritten
+    boards:
+      - url: https://www.reddit.com/r/HonkaiStarRail/
+        label: 메인
+    source:
+      doc: "docs/[연구] … 사전 설계 문서.md"
+      section: "5) 글로벌 매트릭스"
+      provenance: doc
+
+  # =========================== 글로벌 게임 스토어 ===========================
+  - id: steam-news-global
+    name: Steam — 글로벌 뉴스 RSS
+    category: global-game-store
+    tier: A
+    expected_strategy: rss
+    boards:
+      - url: https://store.steampowered.com/feeds/news.xml
+        label: News
+    note: 게임별 RSS 는 appid 필요 — 별 entry.
+    source:
+      doc: "docs/[연구] … 사전 설계 문서.md §3"
+      section: "3) 콘텐츠 유형 분류"
+      provenance: doc
+
+  - id: steam-daily-deals
+    name: Steam — Daily Deals RSS
+    category: global-game-store
+    tier: A
+    expected_strategy: rss
+    boards:
+      - url: https://store.steampowered.com/feeds/daily_deals.xml
+        label: Daily Deals
+    source:
+      doc: "docs/[연구] … 사전 설계 문서.md §3"
+      section: "3) 콘텐츠 유형 분류"
+      provenance: doc
+
+  - id: steam-clientbeta-group
+    name: Steam Client Beta group
+    category: global-game-store
+    tier: A
+    expected_strategy: rss
+    boards:
+      - url: https://steamcommunity.com/groups/SteamClientBeta/rss/
+        label: RSS
+    source:
+      doc: "docs/[연구] … 사전 설계 문서.md"
+      section: "5) 글로벌 매트릭스"
+      provenance: doc
+
+  - id: epic-status-atom
+    name: Epic Games Store — status Atom
+    category: global-game-store
+    tier: A
+    expected_strategy: rss
+    boards:
+      - url: https://status.epicgames.com/history.atom
+        label: status
+    note: 사고/유지보수 atom 만 (게임 뉴스 RSS 미제공).
+    source:
+      doc: "docs/[연구] … 사전 설계 문서.md §3"
+      section: "3) 콘텐츠 유형 분류"
+      provenance: doc
+
+  - id: nintendo-us-whatsnew
+    name: Nintendo (US) — What's New
+    category: global-game-official
+    tier: B
+    expected_strategy: httpx_html
+    boards:
+      - url: https://www.nintendo.com/us/whatsnew/
+        label: What's New
+    note: 미국은 RSS 없고 HTML. EU 는 별 RSS 존재 (URL 정확치 안 잡혀 catalog 미포함).
+    source:
+      doc: "docs/[연구] … 사전 설계 문서.md §3"
+      section: "3) 콘텐츠 유형 분류"
+      provenance: doc
+
+  - id: clien-news-feedburner
+    name: 클리앙 — 새로운 소식 Feedburner 미러
+    category: kr-community-open
+    tier: A
+    expected_strategy: rss
+    boards:
+      - url: https://feeds.feedburner.com/c_news
+        label: c_news mirror
+    note: 클리앙 공식 RSS 폐지 후 Feedburner 미러. doc §3 명시.
+    source:
+      doc: "docs/[연구] … 사전 설계 문서.md §3"
+      section: "3) 콘텐츠 유형 분류"
+      provenance: doc
+
+  # =========================== 뉴스/위키 ===========================
+  - id: namuwiki-recent
+    name: 나무위키 최근 변경
+    category: news-wiki
+    tier: B
+    expected_strategy: httpx_html
+    boards:
+      - url: https://namu.wiki/RecentChanges
+        label: RecentChanges
+    note: SPA 일 수 있음. doc 분류상 "쉬운 군".
+    source:
+      doc: "docs/[연구] … 사전 설계 문서.md"
+      section: "2) 플랫폼 종류 × 봇 차단"
+      provenance: doc

@@ -20,6 +20,7 @@ from fastapi.templating import Jinja2Templates
 from bot import db, inspector
 from dashboard import actions as act
 from dashboard import bugs_view
+from dashboard import candidates_view
 from dashboard import cases_view
 from dashboard import learned_view
 from dashboard import vocab_deferred_view
@@ -931,6 +932,7 @@ async def actions_fetch(request: Request, slug: str = Form(...),
 # Cases — skill 실행 audit (`docs/case_runs DB 계획.md`). dev box only.
 # --------------------------------------------------------------------------- #
 cases_view.register(app, templates, _render)
+candidates_view.register(app, templates, _render)
 learned_view.register(app, templates, _render)
 bugs_view.register(app, templates, _render)
 vocab_deferred_view.register(app, templates, _render)

@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+{% block title %}Candidates · notice-watcher{% endblock %}
+{% block body %}
+<h1>🌐 사이트 카탈로그 등록 분포</h1>
+{% if catalog_warning %}
+<article style="border-left:4px solid #c0392b;padding:0.5rem 1rem;background:#fde8e6;color:#7c1f15;margin:1rem 0">
+  <strong>⚠ 카탈로그 로드 실패</strong><br>
+  {{ catalog_warning }}
+</article>
+{% endif %}
+{% if runs_db_error %}
+<article style="border-left:4px solid #c0392b;padding:0.5rem 1rem;background:#fde8e6;color:#7c1f15;margin:1rem 0">
+  <strong>⚠ runs DB 읽기 실패 — 분포가 stale 일 수 있음</strong><br>
+  {{ runs_db_error }} · <code>output/register_batch_runs.sqlite3</code> 점검 권장.
+</article>
+{% endif %}
+<p class="muted">
+  카탈로그: <code>{{ catalog_path }}</code> · runs DB:
+  {% if runs_db_present %}<code>output/register_batch_runs.sqlite3</code>{% else %}<em>아직 비어있음 — <code>python scripts/register_batch.py</code> 실행 안 됨</em>{% endif %}
+  · 전체 board 수: <strong>{{ total_all }}</strong>
+</p>
+
+{# ---------- KPI ---------- #}
+<section class="kpi-grid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:0.5rem;margin:1rem 0">
+  <article><strong>총</strong><br>{{ kpis.total }}</article>
+  <article><strong>✅ 등록</strong><br>{{ kpis.registered }}</article>
+  <article><strong>🚫 거부</strong><br>{{ kpis.rejected }}</article>
+  <article><strong>❌ 실패</strong><br>{{ kpis.failed }}</article>
+  <article><strong>· 미시도</strong><br>{{ kpis.untried }}</article>
+  <article><strong>⏳ skip</strong><br>{{ kpis.skipped }}</article>
+  <article><strong>⚠ error</strong><br>{{ kpis.error }}</article>
+</section>
+
+{# ---------- 카테고리 × tier matrix ---------- #}
+<details open>
+  <summary><strong>카테고리 × tier matrix</strong> (셀 값 = 등록됨 / 전체)</summary>
+  <table style="font-size:0.9rem">
+    <thead>
+      <tr>
+        <th>category</th>
+        {% for t in ['A','B','C','D','E','F','G'] %}<th>{{ t }}</th>{% endfor %}
+        <th>총</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in matrix %}
+      <tr>
+        <td><code>{{ row.category }}</code></td>
+        {% for cell in row.cells %}
+          {% if cell.total == 0 %}
+            <td class="muted">·</td>
+          {% else %}
+            <td>
+              {% set pct = (100.0 * cell.registered / cell.total) | round(0, 'floor') | int %}
+              <span title="reg={{ cell.registered }} rej={{ cell.rejected }} fail={{ cell.failed }} untried={{ cell.untried }}">
+                <strong>{{ cell.registered }}</strong>/{{ cell.total }}
+                <small class="muted">({{ pct }}%)</small>
+              </span>
+            </td>
+          {% endif %}
+        {% endfor %}
+        <td><strong>{{ row.registered }}</strong>/{{ row.total }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</details>
+
+{# ---------- 필터 ---------- #}
+<details>
+  <summary><strong>필터</strong>
+    {% if cur.category or cur.tier or cur.status or cur.provenance or cur.q %}
+      <small class="muted">(필터 적용중 — {{ total_filtered }}/{{ total_all }})</small>
+    {% endif %}
+  </summary>
+  <form method="get" action="/candidates">
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:0.5rem">
+      <label>category
+        <select name="category">
+          <option value="">전체</option>
+          {% for c in facets.categories %}
+          <option value="{{ c }}" {% if cur.category == c %}selected{% endif %}>{{ c }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>tier
+        <select name="tier">
+          <option value="">전체</option>
+          {% for t in facets.tiers %}
+          <option value="{{ t }}" {% if cur.tier == t %}selected{% endif %}>{{ t }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>status
+        <select name="status">
+          <option value="">전체</option>
+          {% for s in facets.statuses %}
+            {% set disp = status_display.get(s) %}
+            <option value="{{ s }}" {% if cur.status == s %}selected{% endif %}>
+              {% if disp %}{{ disp[0] }} {{ disp[1] }}{% else %}{{ s }}{% endif %}
+            </option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>provenance
+        <select name="provenance">
+          <option value="">전체</option>
+          {% for p in facets.provenances %}
+          <option value="{{ p }}" {% if cur.provenance == p %}selected{% endif %}>{{ p }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>검색
+        <input type="text" name="q" value="{{ cur.q }}" placeholder="id / name / url / slug">
+      </label>
+    </div>
+    <button type="submit">적용</button>
+    <a href="/candidates" role="button" class="secondary">초기화</a>
+  </form>
+</details>
+
+{# ---------- 상세 표 ---------- #}
+<table style="font-size:0.85rem">
+  <thead>
+    <tr>
+      <th>id</th>
+      <th>name</th>
+      <th>cat</th>
+      <th>tier</th>
+      <th>expected</th>
+      <th>actual</th>
+      <th>status</th>
+      <th>last_ts</th>
+      <th>url</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+    <tr>
+      <td><code>{{ r.cand_id }}</code></td>
+      <td>{{ r.name }}{% if r.label %} <small class="muted">({{ r.label }})</small>{% endif %}</td>
+      <td><small>{{ r.category }}</small></td>
+      <td><strong>{{ r.tier }}</strong></td>
+      <td><small>{{ r.expected_strategy }}</small></td>
+      <td>
+        {% if r.actual_strategy %}
+          <small{% if r.strategy_mismatch %} title="expected={{ r.expected_strategy }}" style="color:#c0392b"{% endif %}>
+            {{ r.actual_strategy }}{% if r.actual_adapter %}+{{ r.actual_adapter }}{% endif %}
+            {% if r.strategy_mismatch %} ⚠{% endif %}
+          </small>
+        {% else %}
+          <small class="muted">—</small>
+        {% endif %}
+      </td>
+      <td title="{{ r.reason }}">
+        {{ r.status_emoji }} <small>{{ r.status_label }}</small>
+        {% if r.status in ('registered', 'already_registered') and r.slug %}
+          · <a href="/subs/{{ r.slug }}" title="구독 상세">subs</a>
+        {% elif r.status in ('failed', 'timeout') and r.slug %}
+          · <a href="/triage/failed" title="FAILED 큐">triage</a>
+        {% elif r.status in ('policy_rejected', 'gate_rejected', 'already_rejected') and r.slug %}
+          · <a href="/learned" title="learned blacklist">learned</a>
+        {% endif %}
+      </td>
+      <td><small class="muted">{{ r.last_ts or '—' }}</small></td>
+      <td>
+        {% if is_http_url(r.url) %}
+          <a href="{{ r.url }}" target="_blank" rel="noopener"><small>{{ r.url[:60] }}{% if r.url|length > 60 %}…{% endif %}</small></a>
+        {% else %}
+          <small>{{ r.url }}</small>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<p class="muted" style="margin-top:1rem">
+  미시도 entry 처리: <code>python scripts/register_batch.py --tier=A --limit=10</code>
+  · 카탈로그 편집: <code>{{ catalog_path }}</code>
+</p>
+{% endblock %}
