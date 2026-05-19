@@ -35,9 +35,13 @@ worker 가 큐에서 잡 꺼내 처리 시작할 때 (`_process_job_inner` 첫 �
 **subprocess (= register subprocess)**:
 `scripts/register.py` 가 별도 OS 프로세스로 도는 무거운 작업 (~30초~수분). chromium 띄워 probe→recognize→generate→preflight→digest→baseline. 등록 시도 1회 = subprocess 1회. `blocking_register` 가 `subprocess.run(...)` 으로 호출.
 
-**catalog batch**:
-N100 의 `scripts/register_batch.py` 가 `configs/candidates/catalog.yaml` (name+url 짝의 list) 를 읽어 jobs 테이블에 `via='batch', ack_*=None` 으로 enqueue 하는 흐름. 사용자가 Discord 에서 `/preview URL` 매번 치는 걸 자동화 — bot worker 가 일반 path (claim 시점 가드 + subprocess) 그대로 처리. 결과는 `bot.sqlite3` 의 jobs 행 + slug-level 마커로 박힘. 기본 untried-only (jobs 에 같은 url row 없는 entry 만), `--force` 시 같은 slug 의 `.REJECTED/.FAILED/.BUG.json` 마커 자동 삭제 후 재enqueue. dev 박스 → `scripts/remote.py batch-register` (SSH wrapper) 또는 dashboard `/candidates` "▶ batch run" 버튼으로 호출.
-_Avoid_: "batch register" (`/preview` 와 같은 단어라 헷갈림), "bulk preview" (정확하지만 어휘 떠다님).
+**catalog**:
+name+url 짝 모음 1개 단위. 파일 1개 = catalog 1개 (`configs/candidates/<name>.yaml`, 파일명 stem = catalog 이름). 분류 단위 X — 사용자가 한 번에 추가한 chunk 의 *git/편집 편의 partition*. 의미적으론 모든 catalog 합쳐서 1개 monotonic pool ("아직 안 해본 사이트들"). 이름은 가벼움 (날짜·번호 — 예: `2026-05-20.yaml`, `chunk-2.yaml`). dashboard "+ 새 catalog" 시 이름 비우면 `auto-YYYY-MM-DD-<seq>.yaml` 자동. 이름 규칙: `^[a-z0-9][a-z0-9_-]{0,63}$`. 같은 url cross-catalog dedup 강제 (driver load 시 검증, 겹치면 fail).
+_Avoid_: "batch" (실행 단위 아님), "candidate list" (어휘 떠다님), "cohort" (분류 의도 X).
+
+**catalog batch run**:
+N100 의 `scripts/register_batch.py` 가 catalog 1개를 읽어 jobs 테이블에 `via='batch', ack_*=None` 으로 enqueue 하는 1회 실행. 사용자가 Discord 에서 `/preview URL` 매번 치는 걸 자동화 — bot worker 가 일반 path (claim 시점 가드 + subprocess) 그대로 처리. 결과는 `bot.sqlite3` 의 jobs 행 + slug-level 마커로 박힘. 기본 untried-only (jobs 에 같은 url row 없는 entry 만), `--force` 시 같은 slug 의 `.REJECTED/.FAILED/.BUG.json` 마커 자동 삭제 후 재enqueue. dev 박스 → `scripts/remote.py batch-register --catalog=<name>` (SSH wrapper) 또는 dashboard `/candidates` "▶ batch run" 버튼으로 호출.
+_Avoid_: "batch register" (`/preview` 와 같은 단어라 헷갈림), "bulk preview" (정확하지만 어휘 떠다님), "catalog batch" (단위/동작/흐름 혼동 — 2026-05-20 split).
 
 **SQL skip (= claim-time slug skip)**:
 `claim_next_pending` 의 SELECT 가 `slug NOT IN (SELECT slug FROM jobs WHERE status='running')` 으로 같은 slug 가 이미 running 인 pending 잡을 *건너뛴다*. job1 끝나야 job2 claim 가능. pool_size>1 에서 같은 slug 의 동시 subprocess 차단.
