@@ -10,8 +10,10 @@ N100 의 bot.sqlite3 jobs 테이블에 `kind='register', via='batch'` 잡을 enq
     python scripts/register_batch.py                # untried-only enqueue (default)
     python scripts/register_batch.py --limit=10     # 처음 10개만 enqueue
     python scripts/register_batch.py --dry-run      # enqueue 안 함, 분포만
-    python scripts/register_batch.py --force        # 모든 entry enqueue + 같은 slug 의
-                                                    # .REJECTED/.FAILED/.BUG.json 마커 삭제
+    python scripts/register_batch.py --url URL …    # 명시한 URL 만 retry (마커 삭제 + enqueue).
+                                                    # 호출자가 'root-cause 고쳐졌다' 단정한 사이트만.
+    python scripts/register_batch.py --force        # catalog 의 모든 entry enqueue + 마커 삭제
+                                                    # (재현 테스트·전체 평가용. unfixed 사이트 retry 비용 주의)
 
 rc:
     0  정상 종료
@@ -23,6 +25,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import Optional
 
 try:
     import yaml
@@ -109,9 +112,17 @@ def main(argv: list[str]) -> int:
                    help=f"catalog.yaml 경로 (기본 {CATALOG_DEFAULT.relative_to(ROOT)})")
     p.add_argument("--limit", type=int, default=0, help="enqueue 상한 (0=무한)")
     p.add_argument("--dry-run", action="store_true", help="enqueue 안 함, 분포만 출력")
+    p.add_argument("--url", action="append", default=[],
+                   help="명시한 URL 만 retry (반복 가능). catalog 안 URL 만 허용. "
+                        "마커 삭제 + enqueue. 호출자가 root-cause 고쳤다고 단정한 사이트용. "
+                        "default mode 의 skip-if-jobs-exist 우회.")
     p.add_argument("--force", action="store_true",
-                   help="이미 jobs row 있어도 새 enqueue + 같은 slug 의 .REJECTED/.FAILED/.BUG.json 마커 삭제")
+                   help="catalog 의 모든 entry enqueue + 같은 slug 의 .REJECTED/.FAILED/.BUG.json 마커 삭제. "
+                        "재현 테스트용. unfixed 사이트도 다시 LLM 호출 → 토큰 낭비 주의.")
     args = p.parse_args(argv)
+    if args.url and args.force:
+        print("[batch] --url 과 --force 동시 사용 불가 (의도 충돌)", file=sys.stderr)
+        return 2
 
     catalog_path = Path(args.catalog)
     try:
@@ -122,6 +133,16 @@ def main(argv: list[str]) -> int:
     except (ValueError, OSError) as e:
         print(f"[batch] catalog 검증 실패: {e}", file=sys.stderr)
         return 2
+
+    # --url allowlist 검증 — catalog 안 URL 만 허용 (typo 가 silent no-op 안 되게).
+    allow_urls: Optional[set[str]] = None
+    if args.url:
+        catalog_urls = {e["url"] for e in entries}
+        bad = [u for u in args.url if u not in catalog_urls]
+        if bad:
+            print(f"[batch] --url 인자 catalog 에 없음: {bad}", file=sys.stderr)
+            return 2
+        allow_urls = set(args.url)
 
     conn = db.connect()
     try:
@@ -137,12 +158,19 @@ def main(argv: list[str]) -> int:
             url = e["url"]
             slug = url_to_slug(url)
 
-            if not args.force and _url_has_job(conn, url):
+            # --url allowlist: 그 외 URL 은 무조건 skip (조용히).
+            if allow_urls is not None and url not in allow_urls:
+                skipped += 1
+                continue
+
+            # default mode: jobs row 있으면 skip. --url / --force 는 skip 안 함.
+            if not args.force and allow_urls is None and _url_has_job(conn, url):
                 skipped += 1
                 print(f"  [skip ] {name[:40]:<40} {url[:80]}")
                 continue
 
-            if args.force:
+            # 마커 삭제 — --force 또는 --url (둘 다 retry 의도).
+            if args.force or allow_urls is not None:
                 removed = _delete_markers(slug)
                 if removed:
                     markers_cleared += 1
@@ -167,9 +195,10 @@ def main(argv: list[str]) -> int:
     finally:
         conn.close()
 
+    mode = "url-allowlist" if allow_urls else ("force" if args.force else "untried-only")
     print(f"\n[batch] catalog={catalog_path.relative_to(ROOT)} entries={len(entries)} "
           f"considered={considered} enqueued={enqueued} skipped={skipped} "
-          f"markers_cleared={markers_cleared} force={args.force} dry_run={args.dry_run}")
+          f"markers_cleared={markers_cleared} mode={mode} dry_run={args.dry_run}")
     return 0
 
 

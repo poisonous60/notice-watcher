@@ -13,7 +13,9 @@
     python scripts/remote.py replay-deliveries <slug> <kind> <id> [post]    # M2/M3 replay (lock 잡고 직렬)
     python scripts/remote.py notify-target <slug> <kind> <id>               # collected → 그 target 만 발송
     python scripts/remote.py announce-scoped <base64-json>                  # 좁힌 공지 발송
-    python scripts/remote.py batch-register [--force]                       # catalog.yaml 일괄 enqueue
+    python scripts/remote.py batch-register                                 # catalog.yaml untried-only enqueue
+    python scripts/remote.py batch-register --url URL [--url URL ...]       # 명시 URL 만 retry (마커 삭제 + enqueue)
+    python scripts/remote.py batch-register --force                         # catalog 전체 retry (재현/평가용)
     python scripts/remote.py list                                           # 허용 명령 출력
 
 dashboard 가 subprocess 로 호출. stdout 그대로 캡처해 토스트/박스에 표시.
@@ -269,15 +271,29 @@ def cmd_clear_bug(slug: str) -> int:
     return _ssh(_remote_python_cmd("scripts/register.py", "--clear-bug", s))
 
 
-def cmd_batch_register(force: bool) -> int:
+_URL_ARG_RE = re.compile(r"^https?://[A-Za-z0-9._~\-]+(?::\d+)?/[A-Za-z0-9._~%:/?#\[\]@!$&'()*+,;=\-]*$")
+
+
+def cmd_batch_register(force: bool, urls: list[str]) -> int:
     """N100 의 `scripts/register_batch.py` 호출 — catalog.yaml entries 를 jobs 테이블에 enqueue.
 
-    `--force` 면 같은 slug 의 .REJECTED/.FAILED/.BUG.json 마커도 삭제 후 enqueue.
-    bot worker 가 `/preview` 와 동일 path 로 drain.
+    - `urls` 비어있고 `force=False`: default mode (untried-only).
+    - `urls` 명시: 그 URL 만 마커 삭제 + enqueue (root-cause 고친 사이트 재시도용).
+    - `force=True`: catalog 전체 + 마커 삭제.
+
+    urls 검증: http(s) URL 형식만 통과. SSH command interpolation 안 들어가는 metachar 차단.
     """
+    if urls and force:
+        print("[remote] --url 과 --force 동시 사용 불가", file=sys.stderr)
+        return 4
     args = ["scripts/register_batch.py"]
     if force:
         args.append("--force")
+    for u in urls:
+        if not _URL_ARG_RE.match(u):
+            print(f"[remote] invalid url: {u!r}", file=sys.stderr)
+            return 4
+        args += ["--url", u]
     return _ssh(_remote_python_cmd(*args))
 
 
@@ -314,7 +330,7 @@ def list_actions() -> int:
     print("  replay-deliveries <slug> <kind> <id> [post]    M2/M3 replay (lock+직렬)")
     print("  notify-target <slug> <kind> <id>               collected → 그 target 만 발송")
     print("  announce-scoped <base64-json>                  좁힌 공지 발송")
-    print("  batch-register [--force]                       catalog.yaml entries 를 jobs 테이블에 enqueue")
+    print("  batch-register [--force | --url URL ...]       catalog 일괄 enqueue 또는 명시 URL retry")
     print("  unlearn <pattern_id>                           learned_blacklist 패턴 제거")
     print("  clear-bug <slug>                               .BUG.json 마커 제거 (bug-fix workflow)")
     print("  trace-index <kind>                             output/traces/index.<kind>.jsonl tail")
@@ -345,7 +361,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     sp = sub.add_parser("notify-target")
     sp.add_argument("slug"); sp.add_argument("target_kind"); sp.add_argument("target_id")
     sp = sub.add_parser("announce-scoped"); sp.add_argument("base64_payload")
-    sp = sub.add_parser("batch-register"); sp.add_argument("--force", action="store_true", help="기존 marker 삭제 + enqueue 강제")
+    sp = sub.add_parser("batch-register")
+    sp.add_argument("--force", action="store_true", help="catalog 전체 + 기존 marker 삭제 + enqueue 강제")
+    sp.add_argument("--url", action="append", default=[], help="명시한 URL 만 retry (반복 가능, --force 와 동시 사용 X)")
     sp = sub.add_parser("unlearn"); sp.add_argument("pattern_id", help="learned_blacklist pattern id ([a-f0-9]{1,12})")
     sp = sub.add_parser("clear-bug"); sp.add_argument("slug", help="`.BUG.json` 마커가 박힌 slug")
     sp = sub.add_parser("trace-index"); sp.add_argument("kind", help="poll|notify|notify_idle|probe ...")
@@ -377,7 +395,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     if args.cmd == "announce-scoped":
         return cmd_announce_scoped(args.base64_payload)
     if args.cmd == "batch-register":
-        return cmd_batch_register(args.force)
+        return cmd_batch_register(args.force, args.url)
     if args.cmd == "unlearn":
         return cmd_unlearn(args.pattern_id)
     if args.cmd == "clear-bug":
