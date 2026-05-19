@@ -425,6 +425,49 @@ def register(app, templates, _render):  # noqa: ARG001
             active="candidates",
         )
 
+    @app.post("/candidates/{name}/edit", response_class=HTMLResponse)
+    async def candidates_edit(
+        name: str,
+        old_url: str = Form(...),
+        new_name: str = Form(...),
+        new_url: str = Form(...),
+    ):
+        """행별 inline edit — name + url 동시 변경. yaml 의 같은 entry 교체."""
+        path = _catalog_path(name)
+        ou = (old_url or "").strip()
+        nn = (new_name or "").strip()
+        nu = (new_url or "").strip()
+        if not ou or not nn or not nu:
+            raise HTTPException(status_code=400, detail="old_url / new_name / new_url 다 필요")
+        if len(nn) > 200:
+            raise HTTPException(status_code=400, detail="name 200자 초과")
+        if not (nu.startswith("http://") or nu.startswith("https://")) or len(nu) > 1000:
+            raise HTTPException(status_code=400, detail="invalid new_url (http(s) 만, ≤1000자)")
+        doc = _load_catalog_doc(path)
+        if doc is None:
+            raise HTTPException(status_code=500, detail="catalog 로드 실패")
+        entries = doc.get("entries") or []
+        idx = next((i for i, e in enumerate(entries)
+                    if isinstance(e, dict) and e.get("url") == ou), -1)
+        if idx < 0:
+            raise HTTPException(status_code=404, detail=f"old_url 못 찾음: {ou}")
+        if nu != ou:
+            # within-file dup 검사
+            if any(isinstance(e, dict) and e.get("url") == nu
+                   for i, e in enumerate(entries) if i != idx):
+                raise HTTPException(status_code=409, detail=f"new_url within-file 중복: {nu}")
+            # cross-catalog dup 검사
+            other = _all_urls_by_catalog().get(nu)
+            if other and other != name:
+                raise HTTPException(status_code=409,
+                                    detail=f"new_url 다른 catalog 에 이미 있음: {other}")
+        entries[idx] = {"name": nn, "url": nu}
+        try:
+            _save_catalog_doc(path, name, entries)
+        except (OSError, RuntimeError) as e:
+            raise HTTPException(status_code=500, detail=f"yaml 저장 실패: {e}")
+        return RedirectResponse(url=f"/candidates/{name}", status_code=303)
+
     @app.post("/candidates/{name}/remove", response_class=HTMLResponse)
     async def candidates_remove(name: str, url: str = Form(...)):
         path = _catalog_path(name)

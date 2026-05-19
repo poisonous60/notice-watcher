@@ -119,6 +119,7 @@
       <th>via</th>
       <th>url</th>
       <th>링크</th>
+      <th>편집</th>
       <th>제거</th>
     </tr>
   </thead>
@@ -145,6 +146,20 @@
         {% elif r.slug %}
           <a href="/jobs?q={{ r.slug }}" title="이 slug 의 잡">jobs</a>
         {% endif %}
+      </td>
+      <td>
+        <details>
+          <summary style="cursor:pointer">✏</summary>
+          <form method="post" action="/candidates/{{ catalog_name }}/edit"
+                style="display:flex;flex-direction:column;gap:0.2rem;margin-top:0.3rem;min-width:18rem">
+            <input type="hidden" name="old_url" value="{{ r.url }}">
+            <input type="text" name="new_name" value="{{ r.name }}" required maxlength="200"
+                   placeholder="name" style="font-size:0.8rem;padding:0.15rem 0.3rem">
+            <input type="url" name="new_url" value="{{ r.url }}" required maxlength="1000"
+                   placeholder="https://..." style="font-size:0.8rem;padding:0.15rem 0.3rem;font-family:monospace">
+            <button type="submit" style="padding:0.15rem 0.4rem;font-size:0.75rem">💾 저장</button>
+          </form>
+        </details>
       </td>
       <td>
         <form method="post" action="/candidates/{{ catalog_name }}/remove" style="display:inline"

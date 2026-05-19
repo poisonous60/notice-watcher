@@ -1,14 +1,11 @@
-# 2026-05-20 chunk — grill-with-docs 세션 결과 ~100 게시판 사이트 후보.
-# (헤더는 dashboard add/remove 시 자동 재박음.)
+# 2026-05-20 catalog — `scripts/register_batch.py --catalog=2026-05-20` 입력.
+# (헤더는 dashboard add/remove 시 자동 재박음 — entry 안 inline 코멘트는 round-trip 시 소실.)
 #
-# 모델: docs/사이트 카탈로그 자동 등록 파이프라인 계획.md §2 (multi-file catalog, monotonic pool).
-# 의도: probe / recognizer / engine 다양 surface 측정. 게시판 + 게시판-아닌 일부 (gate_reject 측정).
-# 이름 가벼움: 파일명 = 박은 날짜.
+# 모델: docs/사이트 카탈로그 자동 등록 파이프라인 계획.md §2 (rev5 multi-file).
 
 version: 1
 schema: 2
 entries:
-# --- Korean game community: inven sub-boards ---
 - name: 인벤 — FF14
   url: https://www.inven.co.kr/board/ff14/4467
 - name: 인벤 — 월드오브워크래프트
@@ -25,7 +22,6 @@ entries:
   url: https://www.inven.co.kr/board/df/3573
 - name: 인벤 — 디아블로4
   url: https://www.inven.co.kr/board/diablo4/5797
-# --- DCinside galleries (모바일) ---
 - name: 디시 — 로스트아크 갤
   url: https://m.dcinside.com/board/lostark
 - name: 디시 — 원신 갤
@@ -42,7 +38,6 @@ entries:
   url: https://m.dcinside.com/board/arknights
 - name: 디시 — 발로란트 갤
   url: https://m.dcinside.com/board/valorant
-# --- 아카라이브 채널 ---
 - name: 아카 — 원신 채널
   url: https://arca.live/b/genshin
 - name: 아카 — 붕괴 3rd 채널
@@ -59,7 +54,6 @@ entries:
   url: https://arca.live/b/proseka
 - name: 아카 — 블루아카이브 채널
   url: https://arca.live/b/bluearchive
-# --- 게임사 공식 공지 ---
 - name: 로스트아크 — 공지 (모바일)
   url: https://m-lostark.game.onstove.com/News/Notice/List
 - name: 로스트아크 — 공지 (PC)
@@ -82,7 +76,6 @@ entries:
   url: https://forum.nexon.com/maple/board_list?board=1009
 - name: 넥슨 포럼 — 던전앤파이터
   url: https://forum.nexon.com/df/board_list?board=1012
-# --- 한국 종합 커뮤니티 ---
 - name: 클리앙 — 강좌
   url: https://www.clien.net/service/board/lecture
 - name: 클리앙 — 사용기
@@ -107,7 +100,6 @@ entries:
   url: https://theqoo.net/hot
 - name: 인스티즈 — 일상
   url: https://www.instiz.net/name
-# --- 대학 공지 ---
 - name: 성균관대 — 공지사항
   url: https://www.skku.edu/skku/campus/skk_comm/notice01.do
 - name: 성균관대 — 학부대학 통합게시판
@@ -130,7 +122,6 @@ entries:
   url: https://www.unist.ac.kr/unist-news/notice/
 - name: POSTECH — 공지사항
   url: https://www.postech.ac.kr/posri-notice/
-# --- International Discourse forums ---
 - name: Python Discuss (Discourse)
   url: https://discuss.python.org/latest
 - name: Discourse Meta — Latest
@@ -157,7 +148,6 @@ entries:
   url: https://discuss.huggingface.co/latest
 - name: Streamlit Forum
   url: https://discuss.streamlit.io/latest
-# --- 위키 RecentChanges (MediaWiki 패턴) ---
 - name: English Wikipedia — RecentChanges
   url: https://en.wikipedia.org/wiki/Special:RecentChanges
 - name: 한국어 위키백과 — 최근 바뀜
@@ -172,7 +162,6 @@ entries:
   url: https://maplestory.fandom.com/wiki/Special:RecentChanges
 - name: Honkai Star Rail Fandom — Recent Changes
   url: https://honkai-star-rail.fandom.com/wiki/Special:RecentChanges
-# --- GitHub releases (changelog 패턴) ---
 - name: GitHub — microsoft/vscode releases
   url: https://github.com/microsoft/vscode/releases
 - name: GitHub — python/cpython releases
@@ -187,7 +176,6 @@ entries:
   url: https://github.com/kubernetes/kubernetes/releases
 - name: GitHub — anthropics/claude-code releases
   url: https://github.com/anthropics/claude-code/releases
-# --- Reddit subs (게임 + general) ---
 - name: Reddit — r/Maplestory
   url: https://www.reddit.com/r/Maplestory/
 - name: Reddit — r/lostarkgame
@@ -204,7 +192,6 @@ entries:
   url: https://www.reddit.com/r/programming/
 - name: Reddit — r/MachineLearning
   url: https://www.reddit.com/r/MachineLearning/
-# --- Tech blog / RSS ---
 - name: Hacker News RSS
   url: https://news.ycombinator.com/rss
 - name: Lobsters RSS
@@ -219,20 +206,17 @@ entries:
   url: https://blog.rust-lang.org/feed.xml
 - name: Kotlin Blog RSS
   url: https://kotlinlang.org/feed.xml
-# --- 게임 뉴스 매체 ---
 - name: 게임메카 — 뉴스
   url: https://www.gamemeca.com/news.php
 - name: 게임톡 — 메인
   url: https://www.gametoc.co.kr/
 - name: 인벤 뉴스 — 메인
   url: https://www.inven.co.kr/webzine/news/
-# --- 정부/공공 게시판 ---
 - name: 한국게임산업협회 (K-GAMES) — 공지
   url: https://kgames.or.kr/board/notice/list
 - name: 한국콘텐츠진흥원 — 공지
   url: https://www.kocca.kr/kocca/bbs/list/B0158948.do
-# --- 의도적 negative test (게시판-아닌, gate_reject 측정) ---
-- name: (네거티브) Apple — Homepage
+- name: (네거티브) Apple
   url: https://www.apple.com/
 - name: (네거티브) Google — Homepage
   url: https://www.google.com/
