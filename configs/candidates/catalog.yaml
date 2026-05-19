@@ -85,56 +85,6 @@ entries:
     doc: docs/[연구] … 사전 설계 문서.md
     section: 5) 한국 게임 매트릭스
     provenance: doc
-- id: ncsoft-lineagew
-  name: 리니지W 공지
-  category: kr-game-official
-  tier: C
-  expected_strategy: httpx_json
-  boards:
-  - url: https://lineagew.plaync.com/board/notice/list
-    label: 공지
-  note: Next.js SPA + api.plaync.com 비공식 JSON. Akamai 가드.
-  source:
-    doc: docs/[연구] … 사전 설계 문서.md
-    section: 5) 한국 게임 매트릭스
-    provenance: doc
-- id: ncsoft-aion2
-  name: 아이온2 공지
-  category: kr-game-official
-  tier: C
-  expected_strategy: httpx_json
-  boards:
-  - url: https://aion2.plaync.com/news/notice/list
-    label: 공지
-  source:
-    doc: docs/[연구] … 사전 설계 문서.md
-    section: 5) 한국 게임 매트릭스
-    provenance: doc
-- id: ncsoft-tl
-  name: TL (Throne and Liberty) 공지
-  category: kr-game-official
-  tier: C
-  expected_strategy: httpx_json
-  boards:
-  - url: https://tl.plaync.com/board/notice/list
-    label: 공지
-  source:
-    doc: docs/[연구] … 사전 설계 문서.md
-    section: 5) 한국 게임 매트릭스
-    provenance: doc
-- id: smilegate-lostark
-  name: 로스트아크 공지 (Open API)
-  category: kr-game-official
-  tier: D
-  expected_strategy: handwritten
-  boards:
-  - url: https://developer-lostark.game.onstove.com/news/notices
-    label: Open API
-  note: 한국 게임사 중 유일한 공식 Open API + JWT. 손어댑터 필요.
-  source:
-    doc: docs/[연구] … 사전 설계 문서.md
-    section: 5) 한국 게임 매트릭스
-    provenance: doc
 - id: smilegate-epicseven
   name: 에픽세븐 공지
   category: kr-game-official
@@ -425,18 +375,6 @@ entries:
   source:
     doc: docs/사이트별 등록 시도 기록.md + 사전 설계 문서.md
     section: 5) 한국 매트릭스
-    provenance: history
-- id: dcinside-chokaguya
-  name: 디시 — 코즈믹 프린세스 카구야 미니갤
-  category: kr-community-blocked
-  tier: E
-  expected_strategy: handwritten
-  boards:
-  - url: https://m.dcinside.com/mgallery/board/lists?id=chokaguyahime
-    label: 미니갤(모바일)
-  source:
-    doc: docs/사이트별 등록 시도 기록.md
-    section: dcinside-mgallery_chokaguyahime
     provenance: history
 - id: navercafe-30291108-6
   name: 네이버 카페 — 자료실(예시 카페)

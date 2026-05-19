@@ -35,6 +35,10 @@ worker 가 큐에서 잡 꺼내 처리 시작할 때 (`_process_job_inner` 첫 �
 **subprocess (= register subprocess)**:
 `scripts/register.py` 가 별도 OS 프로세스로 도는 무거운 작업 (~30초~수분). chromium 띄워 probe→recognize→generate→preflight→digest→baseline. 등록 시도 1회 = subprocess 1회. `blocking_register` 가 `subprocess.run(...)` 으로 호출.
 
+**catalog batch**:
+N100 의 `scripts/register_batch.py` 가 `configs/candidates/catalog.yaml` (name+url 짝의 list) 를 읽어 jobs 테이블에 `via='batch', ack_*=None` 으로 enqueue 하는 흐름. 사용자가 Discord 에서 `/preview URL` 매번 치는 걸 자동화 — bot worker 가 일반 path (claim 시점 가드 + subprocess) 그대로 처리. 결과는 `bot.sqlite3` 의 jobs 행 + slug-level 마커로 박힘. 기본 untried-only (jobs 에 같은 url row 없는 entry 만), `--force` 시 같은 slug 의 `.REJECTED/.FAILED/.BUG.json` 마커 자동 삭제 후 재enqueue. dev 박스 → `scripts/remote.py batch-register` (SSH wrapper) 또는 dashboard `/candidates` "▶ batch run" 버튼으로 호출.
+_Avoid_: "batch register" (`/preview` 와 같은 단어라 헷갈림), "bulk preview" (정확하지만 어휘 떠다님).
+
 **SQL skip (= claim-time slug skip)**:
 `claim_next_pending` 의 SELECT 가 `slug NOT IN (SELECT slug FROM jobs WHERE status='running')` 으로 같은 slug 가 이미 running 인 pending 잡을 *건너뛴다*. job1 끝나야 job2 claim 가능. pool_size>1 에서 같은 slug 의 동시 subprocess 차단.
 
