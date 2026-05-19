@@ -119,6 +119,40 @@
   </form>
 </details>
 
+{# ---------- 새 entry 추가 ---------- #}
+<details style="margin:0.5rem 0">
+  <summary><strong>+ 새 entry 추가</strong> <small class="muted">(catalog.yaml 직접 write)</small></summary>
+  <form method="post" action="/candidates/add" style="display:grid;grid-template-columns:repeat(4,1fr);gap:0.5rem;margin-top:0.5rem">
+    <label>id*<input type="text" name="cand_id" required pattern="[A-Za-z0-9._\-]{1,80}" placeholder="my-site-news"></label>
+    <label>name*<input type="text" name="name" required placeholder="사이트 이름"></label>
+    <label>category*
+      <select name="category" required>
+        {% for c in allowed_categories %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>tier*
+      <select name="tier" required>
+        {% for t in allowed_tiers %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>expected_strategy*
+      <select name="expected_strategy" required>
+        {% for s in allowed_strategies %}<option value="{{ s }}" {% if s == 'unknown' %}selected{% endif %}>{{ s }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>provenance
+      <select name="provenance">
+        {% for p in allowed_provenance %}<option value="{{ p }}" {% if p == 'web' %}selected{% endif %}>{{ p }}</option>{% endfor %}
+      </select>
+    </label>
+    <label style="grid-column:span 2">url*<input type="url" name="url" required placeholder="https://..."></label>
+    <label>label<input type="text" name="label" placeholder="공지 / 메인 등"></label>
+    <label>source_section<input type="text" name="source_section" placeholder="manual / WebSearch ..."></label>
+    <label style="grid-column:span 2">note<input type="text" name="note" placeholder="설명/메모"></label>
+    <div style="grid-column:span 4"><button type="submit">추가</button></div>
+  </form>
+</details>
+
 {# ---------- 상세 표 ---------- #}
 <table style="font-size:0.85rem">
   <thead>
@@ -132,6 +166,7 @@
       <th>status</th>
       <th>last_ts</th>
       <th>url</th>
+      <th>제거</th>
     </tr>
   </thead>
   <tbody>
@@ -169,6 +204,13 @@
         {% else %}
           <small>{{ r.url }}</small>
         {% endif %}
+      </td>
+      <td>
+        <form method="post" action="/candidates/remove" style="display:inline"
+              onsubmit="return confirm('catalog.yaml 에서 \'{{ r.cand_id }}\' 영구 제거. 확인?');">
+          <input type="hidden" name="cand_id" value="{{ r.cand_id }}">
+          <button type="submit" class="secondary outline" style="padding:0.1rem 0.4rem;font-size:0.75rem">🗑</button>
+        </form>
       </td>
     </tr>
     {% endfor %}
