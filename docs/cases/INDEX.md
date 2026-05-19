@@ -2,13 +2,14 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 67 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 68 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
 | [`infra_wikipedia_learned_blacklist_skip_learn_2026-05-19`](infra_wikipedia_learned_blacklist_skip_learn_2026-05-19.md) | ✅ 일반화 (recognize_reject wikipedia 패턴 skip_learn=True) | 2026-05-19 | F | learned_blacklist_overbroad, shared_path_prefix_board, not_a_board | https://en.wikipedia.org/wiki/Special:RecentChanges?hidebots=1&hidecategorization=1&hideWikibase=1&limit=50&days=1&urlversion=2 |
 | [`infra_ushmm_learned_blacklist_skip_learn_2026-05-19`](infra_ushmm_learned_blacklist_skip_learn_2026-05-19.md) | ✅ 일반화 (USHMM 패턴 skip_learn=True + 모듈 docstring 강화) | 2026-05-19 | F | learned_blacklist_overbroad, shared_path_prefix_board, not_a_board | https://encyclopedia.ushmm.org/content/en |
 | [`infra_handconfig_preflight_reuse_probe_2026-05-19`](infra_handconfig_preflight_reuse_probe_2026-05-19.md) | 🏗 인프라 (hand-config SKILL.md §0b 추가 — preflight 이미 고쳐졌나 검사) | 2026-05-19 |  | skill_no_preflight_check, stale_queue_residue, sidewise_fix_not_recognized, batch_redundant_handconfig_work | (인프라 case — 특정 사이트 X. 트리거 = 사용자 메타 질문 — 다른 경로로 고친 사이트가 triage 큐에서 안 빠지는 경우 판단 절차) |
+| [`infra_article_page_reject_gap_check_2026-05-19`](infra_article_page_reject_gap_check_2026-05-19.md) | ✅ 일반화 (programmatic gap-check + docstring sync) | 2026-05-19 | none | learned_blacklist_overbroad, shared_path_prefix_board, fixture_gap | tests/recognizers/test_article_page_reject.py |
 | [`host_vimeo-com_root_c6a102cf`](host_vimeo-com_root_c6a102cf.md) | ❌ 자동 등록 실패 (tailwind utility-class explosion → CSS parser malformed). | 2026-05-19 |  | fetch_list_selector_syntax_error, tailwind_arbitrary_value_class, posts_nonempty | https://vimeo.com/ |
 | [`host_reuters-com_root_9c8aa57a`](host_reuters-com_root_9c8aa57a.md) | ❌ 자동 등록 실패 (httpx 401 + playwright 0건 — fingerprint hide 필요). | 2026-05-19 |  | fetch_list_401, fingerprint_hide_required, posts_nonempty | https://www.reuters.com/ |
 | [`host_nationalgeograp_root_2be4a852`](host_nationalgeograp_root_2be4a852.md) | ❌ 자동 등록 실패 (row_selector 가 article/tv/movies mix 잡음). 손 config 또는 prompt 개선 대기. | 2026-05-19 |  | post_id_stable_shape, title_nonempty, article_body_len, row_type_mix | https://www.nationalgeographic.com/ |
@@ -91,7 +92,7 @@
 | F | 24 |
 | F+A | 1 |
 | F+C | 3 |
-| none | 9 |
+| none | 10 |
 
 ### config_strategy 분포
 
@@ -101,10 +102,10 @@
 | handwritten | 9 |
 | httpx_html | 6 |
 | httpx_json | 4 |
-| none | 8 |
+| none | 9 |
 | playwright_html | 5 |
 
 ### 최근 90일 (≥ 2026-02-18)
 
-케이스 67 건.
+케이스 68 건.
 

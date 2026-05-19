@@ -1,9 +1,14 @@
 """engine.recognizers.article_page_reject — 알려진 백과/사전 호스트 단일 article URL fast-path 거부.
 
 이 모듈은 일반 인식기(PATTERNS) 가 아니라 PATTERNS_REJECT 만 export. recognize_reject(url) 가
-매칭되면 (NAME, reason) 반환. register.py 가 probe 전에 호출해 즉시 REJECTED + learned_blacklist.
+매칭되면 (NAME, reason, skip_learn) 3-tuple 반환 (`engine/recognizers/__init__.py` 가 2-tuple
+패턴도 skip_learn=False 로 정규화). register.py 가 probe 전에 호출해 즉시 REJECTED
+(+ skip_learn=False 면 learned_blacklist 학습).
 
 false positive 0 필수 — 사용자가 *목록 페이지* 로 줄 수 있는 URL (분류/카테고리/Special) 통과 검증.
+
+마지막 `SAME_SEG_GAP_CHECKS` 루프 — codex review Q3 의 programmatic gap-check. 새 호스트 추가 시
+article + board 가 first path segment 공유면 한 줄 추가 + skip_learn=True 강제.
 """
 from __future__ import annotations
 
@@ -220,6 +225,57 @@ def run() -> list[tuple[str, bool, str]]:
     # 43. SUMO 다른 path — 통과 (skip_learn=False 이지만 path_prefix=`/docs` 만 차단)
     out = recognize_reject("https://sumo.dlr.de/")
     cases.append(("sumo_root_passes", out is None, f"got {out!r}"))
+
+    # ---------------------------------------------------------------------
+    # programmatic gap-check (codex review Q3) — same first-path-segment article+board.
+    #
+    # 버그 패턴: recognize_reject 가 article 만 거부하고 보드는 통과시키지만,
+    # `_extract_url_pattern` (scripts/register.py:364) 은 path 첫 segment 만 학습 →
+    # learned_blacklist 가 (host, /seg) 로 박혀 보드까지 url_gate stage 2 에서 차단.
+    #
+    # 가드: article 과 board 가 첫 path segment 를 공유하는 모든 호스트는 article 패턴이
+    # skip_learn=True 여야 함. 새 PATTERNS_REJECT 호스트 추가 시 보드가 article 과 first
+    # segment 공유면 아래에 한 줄 추가 — 누락 시 fixture 실패로 즉시 catch.
+    #
+    # 공유 안 하는 호스트 (terms.naver, britannica, openai, sumo, github-wiki-see,
+    # tistory) 는 여기 추가 X — skip_learn=False 안전.
+    #
+    # ktword: `/test/abbr_view/list_letter.php` (test #33) 가 실제 board 인지 미확인 →
+    # 별 PR 후보. 확인 후 board 면 여기 추가 + 패턴 flip.
+    from urllib.parse import urlsplit
+
+    def _first_seg_key(url: str) -> tuple[str, str]:
+        p = urlsplit(url)
+        seg = (p.path or "").lstrip("/").split("/", 1)[0]
+        return ((p.hostname or "").lower(), "/" + seg if seg else "")
+
+    SAME_SEG_GAP_CHECKS: list[tuple[str, str, str]] = [
+        # (label, article_url_must_skip_learn_True, board_url_must_pass)
+        ("wiki_en",   "https://en.wikipedia.org/wiki/Nazi_Party",
+                      "https://en.wikipedia.org/wiki/Special:RecentChanges"),
+        ("wiki_ko",   "https://ko.wikipedia.org/wiki/%EC%99%95%EC%88%98%EC%9D%B8",
+                      "https://ko.wikipedia.org/wiki/%EB%B6%84%EB%A5%98:%ED%95%9C%EA%B5%AD%EC%9D%98_%EC%82%AC%EB%9E%8C"),
+        ("ushmm",     "https://encyclopedia.ushmm.org/content/en/article/the-great-depression",
+                      "https://encyclopedia.ushmm.org/content/en"),
+        ("nature",    "https://www.nature.com/articles/d41586-018-05791-w",
+                      "https://www.nature.com/articles?type=news"),
+        ("iln_ieee",  "https://iln.ieee.org/Public/ContentDetails.aspx?id=9D3FE9C6144F4C298ABDE18D84EDB93C",
+                      "https://iln.ieee.org/Public/trainingcatalog.aspx"),
+        ("jobplanet", "https://www.jobplanet.co.kr/contents/news-616",
+                      "https://www.jobplanet.co.kr/contents/news"),
+        # MDN: learning key = /<lang> (lang prefix). Blog `/<lang>/blog` 가 같은 lang 공유.
+        ("mdn",       "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/button",
+                      "https://developer.mozilla.org/en-US/blog/"),
+    ]
+    for label, art_url, brd_url in SAME_SEG_GAP_CHECKS:
+        ar = recognize_reject(art_url)
+        br = recognize_reject(brd_url)
+        art_skip_true = ar is not None and len(ar) >= 3 and ar[2] is True
+        brd_pass = br is None
+        same_seg = _first_seg_key(art_url) == _first_seg_key(brd_url)
+        ok = art_skip_true and brd_pass and same_seg
+        detail = f"art_skip_learn_True={art_skip_true} brd_pass={brd_pass} same_first_seg={same_seg} (art={ar!r}, brd={br!r})"
+        cases.append((f"gap_check_{label}", ok, detail))
 
     return cases
 
