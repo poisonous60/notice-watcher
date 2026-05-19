@@ -59,7 +59,11 @@ _LAUNCH_ARGS = [
     "--disable-component-extensions-with-background-pages",
     "--disable-background-networking",
     "--disable-component-update",
-    "--disable-features=TranslateUI",
+    # ServiceWorker 비활성화 — scripts/playwright_daemon.py 의 `_LAUNCH_ARGS` 와 동기.
+    # 다른 사이트(hoyolab.com 등) 가 등록한 SW 가 context attach 시점에 CRBrowser
+    # _onAttachedToTarget assertion crash 유발 → Node driver 죽고 register subprocess 600s
+    # timeout. fresh launch path 에도 적용 (daemon path 는 daemon args 가 처리).
+    "--disable-features=TranslateUI,ServiceWorker",
     "--disable-translate",
 ]
 

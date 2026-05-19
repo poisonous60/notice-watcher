@@ -58,7 +58,13 @@ _LAUNCH_ARGS = [
     "--disable-component-extensions-with-background-pages",
     "--disable-background-networking",
     "--disable-component-update",
-    "--disable-features=TranslateUI",
+    # ServiceWorker 비활성화 — daemon 의 shared chromium 안에 다른 사이트가 등록한 SW 가
+    # 새 context attach 시점 race 로 CRBrowser._onAttachedToTarget assertion crash 유발
+    # (microsoft/playwright SW target type 미처리). Node driver 죽고 register subprocess
+    # 600s timeout (2026-05-19 catalog batch 8 사이트 동시 BUG).
+    # `service_workers="block"` context option 은 *새* SW 등록만 차단하지 기존 worker target
+    # attach 는 못 막아서 daemon args 로 통째로 끔.
+    "--disable-features=TranslateUI,ServiceWorker",
     "--disable-translate",
 ]
 
