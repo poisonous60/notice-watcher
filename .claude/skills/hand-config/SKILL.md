@@ -30,6 +30,47 @@ description: >-
 - `python -c "from engine.recognizers import recognize; print(recognize('<URL>'))"` — 매칭 시 `register.py "<URL>"` → §5 배포.
 - 미매칭이면 `register.py "<URL>"` 1회 — 성공이면 §5, 실패면 `.FAILED.json` 생기니 §1 흐름.
 
+## 0b. preflight — 이미 고쳐졌나 / 옆 작업이 큐를 stale 화했나
+
+§1 진단 진입 *전*, 각 큐 slug 에 대해 두 검사 강제. 본 검사 = 자가개선 인프라 (CLAUDE.md §6 + ADR 0003) 의 부산물 — prompt / engine / probe / recognizer 옆 작업이 큐 진입 후에 일어났으면 큐가 *옛 상태* 일 가능성. SKILL 이 그 가능성 인지 안 하면 *이미 회복 가능한 사이트에 손-config 작업 박는 낭비* 발생 (CLAUDE.md §8a 의 영구 게이트 정신).
+
+### (a) stale 큐 검사 — configs/<slug>.json 또는 손-adapter 이미 존재?
+
+```bash
+# configs/ 존재 확인
+test -f "configs/<slug>.json" && python scripts/register.py --config "configs/<slug>.json"
+
+# 또는 recognizer 매칭 확인
+python -c "from engine.recognizers import recognize; print(recognize('<URL>'))"
+# 매칭이면: python scripts/register.py "<URL>"
+```
+
+성공 → 큐 자동 정리 → 본 slug **종료** (§1 진단 skip). 실패 → (b) 또는 §1 진입.
+
+### (b) 옆 작업 회복 검사 — 큐 진입 후 prompt/engine/probe 변경 있나?
+
+```bash
+# FAILED.json 의 failed_at 추출
+failed_at=$(python -c "import json; print(json.load(open(r'output/poll_state/<slug>.FAILED.json',encoding='utf-8'))['failed_at'])")
+
+# 그 이후 영향 영역 commit 있나
+git log --since="$failed_at" --oneline -- prompts/ engine/ probe/ generate/ engine/recognizers/
+# uncommitted 변경도 jurisdiction (현 dev 세션의 작업)
+git status --short -- prompts/ engine/ probe/ generate/ engine/recognizers/
+```
+
+둘 중 하나라도 있으면:
+- probe artifact (`output/probe/<slug>/`) 존재 → `python scripts/register.py --reuse-probe "<URL>"` (LLM 만 재호출, fetch 0 추가)
+- artifact 없음 (큐가 *FAILED.json 만* 가져온 경우 — snapshot copy 등) → `python scripts/register.py "<URL>"` (full probe + 생성)
+
+성공 → 큐 정리 + §1 skip. 실패 → §1 진입.
+
+### (a)+(b) 모두 fail 시 → §1 진단 정상 진입
+
+본 preflight 결과는 §2 진입 전 강제 인용 6번 으로 인용 (skim 방지). 형식 = `preflight: <a-hit|b-hit|miss> — <slug> [<commit-sha-if-b-hit>]`.
+
+---
+
 ## 1. 가져오기 + 진단
 
 ```
@@ -61,6 +102,7 @@ python scripts/triage.py show <slug>         # 그 slug 의 .FAILED.json + 요�
 3. **`docs/config 자동생성 실패 케이스.md` 매칭 §번호** + 1줄 근거
 4. **분기 후보 (2a~2e)** + 그 선택 1줄 이유
 5. **누적 cross-check** — 진단한 failure_keys 각각에 대해 `python scripts/cases_index.py query --failure-key <key> [--failure-key <key2> ...] --json` 1회 호출 + JSON 결과 인용. 같은 진단의 root-cause 신호 (예: `static_vs_headless`, `diverging_first_article`) 가 case body 에 흔적 있으면 `--signal "<regex>"` 도 동시 호출. 그리고 `python scripts/cases_index.py query --deferred --json` 으로 deferred 후보 트리거 상태 확인. **한 label 의 `track_b_trigger=true` 면 트랙 B 진입 강제 — deferred 보류 불가, 같은 PR 에 휴리스틱·인식기·prompt 박음**. 0건이면 명시 ("누적 0건 — 첫 사례, deferred OK").
+6. **preflight 결과** (§0b) — `preflight: <a-hit|b-hit|miss> — <slug> [<commit-sha-if-b-hit>]`. a-hit 또는 b-hit 면 §2 진입 자체 X (이미 회복) — 인용 1줄 + 종료. miss 만 §2 진입. 본 인용 = §0b 강제 실행 증명. preflight 안 돌렸으면 *그 자체로 SKILL 위반*.
 
 artifact 없는 §0 신규 진입 (link 만 받은 첫 시도) 케이스는 예외 — `[§0 entry, no artifact yet]` 한 줄 명시 후 §0 절차로. 5번 (누적 cross-check) 도 skip (failure_keys 없음).
 

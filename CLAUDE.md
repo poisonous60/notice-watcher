@@ -174,7 +174,22 @@ bash scripts/setup-hooks.sh   # 또는 pwsh scripts/setup-hooks.ps1
 - pre-push hook 자동 검증
 - `Agent(subagent_type='hand-config-reviewer', model='sonnet')` 호출
 
-## 8. 관련 문서
+## 8. 추천·결정 룰
+
+### 8a. *영구 게이트* 우선 — *이번만 우회* 후순위
+사용자에게 옵션 제시할 때 "이번 batch 만 머리로 우회" / "SKILL.md·prompt·코드 안 바꾸고 임시 처리" 식의 *이번만* 안을 **1순위 추천 X**. gap 이 SKILL.md / prompt / engine / probe / docs 의 *영구 박기* 로 봉합 가능하면 그걸 1순위.
+
+**왜**: 같은 패턴 다음에도 옴 — gap 그대로면 다음 사람/세션이 같은 실수 반복. 자가개선 인프라 (CLAUDE.md §6 / ADR 0003) 의 직접 적용.
+
+**언제 *이번만* 안이 정당**: 게이트 박기가 정말 over-engineering 일 때 만 (단일 사이트, 재발 가능성 0, fix 비용 ≫ 영구 박기 비용). 그런 경우 *명시* 후 사용자 동의 받기.
+
+**구체 예**:
+- ✅ "SKILL.md §0b preflight 게이트 박고 그걸로 이번 batch 처리" (영구 + 즉시 효과)
+- ❌ "이번만 머리로 preflight 적용 — SKILL.md 는 다음에" (이번만 우회. gap 남음)
+
+이 룰 자체가 2026-05-19 사용자 feedback 으로 박힘 — 이전 다수 turn 에서 같은 패턴 반복 관찰.
+
+## 9. 관련 문서
 
 - `docs/운영 메모.md` — N100 SSH·systemd·배포 사이클 §1~9
 - `docs/자가개선 인프라 계획.md` — hand-config 자가개선 인프라 v3 설계

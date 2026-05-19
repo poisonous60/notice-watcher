@@ -1,0 +1,118 @@
+{
+  "version": 1,
+  "site": "bbc.com",
+  "board": "news",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+    "Referer": "https://www.bbc.com/news"
+  },
+  "timeout": 15,
+  "list": {
+    "url_template": "https://www.bbc.com/news",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "section[data-testid='virginia-section-outer-8'] div[data-indexcard='true']",
+    "row_required_selector": "a[data-testid='internal-link']",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a[data-testid='internal-link']",
+          "attr": "href",
+          "transform": [
+            [
+              "regex_extract",
+              "/(?:news|sport)/(?:articles|videos|live)/([a-z0-9]+)$"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "h2[data-testid='card-headline']",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a[data-testid='internal-link']",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://www.bbc.com"
+            ]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "css",
+          "selector": "span[data-testid='card-metadata-tag']",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "p[data-testid='card-description']",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "cover_image": [
+        {
+          "from": "css",
+          "selector": "img",
+          "attr": "src"
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "article",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "main article",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "#main-content article",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "[data-component='article-body']",
+        "html": true
+      }
+    ]
+  }
+}

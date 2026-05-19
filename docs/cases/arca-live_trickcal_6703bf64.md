@@ -10,7 +10,7 @@ backfill: true
 backfill_date: 2026-05-18
 backfill_source: docs/2026-05-18-prior-art-followup-plan.md (Action #2)
 vocab_candidates:
-  - candidate: cf_fingerprint_hide_required
+  - candidate: fingerprint_hide_required
     confidence: high
     evidence:
       - adapters/arca.py (playwright-stealth 사용 — `_open_browser` 의 `Stealth().apply_stealth_async`)
@@ -18,7 +18,7 @@ vocab_candidates:
       - experiments/prior-art-bench/results/llm_scraper/arca_trickcal__run1.json (R=0.70 — playwright + 3 anti-fingerprint 옵션 으로 통과)
       - experiments/prior-art-bench/results/manual_bs4/arca_trickcal__run1.json (R=0.00 — requests 403)
       - experiments/prior-art-bench/results/firecrawl_json/arca_trickcal__run1.json (R=0.00 — 페이지 접근은 OK, Notice rows 만)
-    reasoning: "Cloudflare 가 naive httpx 100% 차단, naive playwright 도 차단. `webdriver=undefined` + `--disable-blink-features=AutomationControlled` + 정상 UA 의 3 옵션으로 70% 통과 — 즉 fingerprint hide *는* 필요, 풀 stealth 패키지가 *과연 필요한가* 는 별 점검 (followup-plan Action #5). closed vocab 의 `playwright_html` strategy 는 stealth 옵션 X — `request_signing_required` 와 다른 카테고리 (HTTP 헤더가 아니라 브라우저 fingerprint). 영향 후보 사이트: dcinside 일부, 기타 CF 보호 게임 위키. closed vocab 에 `list.stealth: \"minimal\" | \"full\" | null` 어휘 추가 가치."
+    reasoning: "Cloudflare 가 naive httpx 100% 차단, naive playwright 도 차단. `webdriver=undefined` + `--disable-blink-features=AutomationControlled` + 정상 UA 의 3 옵션으로 70% 통과 — 즉 fingerprint hide *는* 필요, 풀 stealth 패키지가 *과연 필요한가* 는 별 점검 (followup-plan Action #5). closed vocab 의 `playwright_html` strategy 는 stealth 옵션 X — `request_signing_required` 와 다른 카테고리 (HTTP 헤더가 아니라 브라우저 fingerprint). 영향 후보 사이트: dcinside 일부, 기타 CF 보호 게임 위키. 후속 evidence [[host_reuters-com_root_9c8aa57a]] (Akamai bot manager — 같은 표면 증상). closed vocab 에 `list.stealth: \"minimal\" | \"full\" | null` 어휘 추가 가치. (2026-05-19 rename: `cf_fingerprint_hide_required` → `fingerprint_hide_required` — CDN-independent 으로 일반화. Akamai/Cloudflare/기타 bot-management 동일 처리.)"
     analysis_date: 2026-05-18
     deferred: true
   - candidate: response_branch_body
