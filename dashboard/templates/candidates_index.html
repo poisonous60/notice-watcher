@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Candidates · notice-watcher{% endblock %}
+{% block body %}
+<h1>🌐 사이트 카탈로그 — 목록</h1>
+
+{% if jobs_db_error %}
+<article style="border-left:4px solid #c0392b;padding:0.5rem 1rem;background:#fde8e6;color:#7c1f15;margin:1rem 0">
+  <strong>⚠ snapshot bot.sqlite3 jobs 읽기 실패</strong><br>{{ jobs_db_error }}
+</article>
+{% endif %}
+
+<p class="muted">
+  snapshot: {{ snapshot_ts }}
+  · 카탈로그: <strong>{{ catalogs|length }}</strong>개
+  · 전체 entry: <strong>{{ agg.total }}</strong>
+  · 등록률: <strong>{{ (100 * agg.registered / agg.total) | round(1) if agg.total else 0 }}%</strong>
+  ({{ agg.registered }}/{{ agg.total }})
+</p>
+
+{# ---------- 전체 KPI ---------- #}
+<section style="display:grid;grid-template-columns:repeat(8,1fr);gap:0.5rem;margin:1rem 0">
+  <article><strong>총</strong><br>{{ agg.total }}</article>
+  <article><strong>· 미시도</strong><br>{{ agg.untried }}</article>
+  <article><strong>⏳ 큐</strong><br>{{ agg.pending }}</article>
+  <article><strong>🔁 진행</strong><br>{{ agg.running }}</article>
+  <article><strong>✅ 등록</strong><br>{{ agg.registered }}</article>
+  <article><strong>❌ gen_fail</strong><br>{{ agg.gen_fail }}</article>
+  <article><strong>🚫 거부</strong><br>{{ agg.policy_reject + agg.gate_reject }}</article>
+  <article><strong>🐞 bug</strong><br>{{ agg.bug }}</article>
+</section>
+
+{# ---------- 카탈로그 목록 ---------- #}
+<table style="font-size:0.85rem">
+  <thead>
+    <tr>
+      <th>catalog</th>
+      <th>entry 수</th>
+      <th>진행률</th>
+      <th>등록</th>
+      <th>·미시도</th>
+      <th>❌</th>
+      <th>🚫</th>
+      <th>🐞</th>
+      <th>마지막 시도</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for c in catalogs %}
+    <tr>
+      <td><a href="/candidates/{{ c.name }}"><strong>{{ c.name }}</strong></a><br>
+          <small class="muted">{{ c.path }}</small></td>
+      <td>{{ c.total }}</td>
+      <td>
+        <div style="background:#eee;border-radius:4px;height:0.6rem;width:6rem;position:relative;overflow:hidden">
+          <div style="background:#27ae60;height:100%;width:{{ c.progress_pct }}%"></div>
+        </div>
+        <small class="muted">{{ c.progress_pct }}%</small>
+      </td>
+      <td>{{ c.registered }}</td>
+      <td>{{ c.untried }}</td>
+      <td>{{ c.gen_fail }}</td>
+      <td>{{ c.policy_reject + c.gate_reject }}</td>
+      <td>{{ c.bug }}</td>
+      <td><small class="muted">{{ c.last_ts or '—' }}</small></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="9" class="muted">카탈로그 없음 — 아래 "+ 새 catalog" 폼으로 박으세요.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{# ---------- 새 catalog ---------- #}
+<details style="margin:1rem 0">
+  <summary><strong>+ 새 catalog 만들기</strong></summary>
+  <form method="post" action="/candidates/new" style="margin-top:0.5rem">
+    <label>name (비우면 자동: <code>{{ auto_name_preview }}</code>)
+      <input type="text" name="name" placeholder="2026-05-21 / chunk-3 / ..."
+             pattern="[a-z0-9][a-z0-9_-]{0,63}"
+             title="소문자/숫자/hyphen/underscore, 1~64자, 첫 글자 영숫자">
+    </label>
+    <label>URL 박기 (한 줄에 하나 또는 markdown/문장 안 섞임 — http(s):// 만 추출)
+      <textarea name="bulk_text" rows="10" placeholder="https://example.com/board&#10;https://another.com/notice"
+                style="font-family:monospace;font-size:0.85rem"></textarea>
+    </label>
+    <button type="submit">생성</button>
+    <small class="muted" style="margin-left:0.5rem">
+      cross-catalog 중복 URL 은 자동 skip. name 은 host 자동 — 박은 후 catalog detail 에서 수정.
+    </small>
+  </form>
+</details>
+
+<p class="muted" style="margin-top:1rem">
+  batch run 트리거는 Claude/CLI 가 함:
+  <code>python scripts/remote.py batch-register --catalog &lt;name&gt;</code>
+  (rev5 §7).
+</p>
+{% endblock %}

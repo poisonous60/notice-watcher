@@ -1,32 +1,25 @@
 {% extends "base.html" %}
-{% block title %}Candidates · notice-watcher{% endblock %}
+{% block title %}{{ name }} · Candidates · notice-watcher{% endblock %}
 {% block body %}
-<h1>🌐 사이트 카탈로그 — 등록 결과 분포</h1>
-{% if catalog_warning %}
-<article style="border-left:4px solid #c0392b;padding:0.5rem 1rem;background:#fde8e6;color:#7c1f15;margin:1rem 0">
-  <strong>⚠ 카탈로그</strong><br>{{ catalog_warning }}
-</article>
-{% endif %}
+<p class="muted"><a href="/candidates">← 카탈로그 목록</a></p>
+<h1>🌐 {{ name }}</h1>
+<p class="muted">
+  파일: <code>{{ catalog_path }}</code>
+  · snapshot: {{ snapshot_ts }}
+  · 전체 entry: <strong>{{ total_all }}</strong>
+</p>
+
 {% if jobs_db_error %}
 <article style="border-left:4px solid #c0392b;padding:0.5rem 1rem;background:#fde8e6;color:#7c1f15;margin:1rem 0">
   <strong>⚠ snapshot bot.sqlite3 jobs 읽기 실패</strong><br>{{ jobs_db_error }}
 </article>
 {% endif %}
-<p class="muted">
-  카탈로그: <code>{{ catalog_path }}</code>
-  · snapshot: {{ snapshot_ts }}
-  · 전체 entry: <strong>{{ total_all }}</strong>
-</p>
 
-{# ---------- batch-run ---------- #}
-<form method="post" action="/candidates/batch-run" style="margin:1rem 0;padding:0.5rem;border:1px solid #ddd;border-radius:6px"
-      onsubmit="return confirm('N100 의 bot.sqlite3 jobs 테이블에 catalog 일괄 enqueue. 진행?');">
-  <button type="submit"><strong>▶ batch run</strong></button>
-  <label style="margin-left:1rem"><input type="checkbox" name="force" value="on"> --force (마커 삭제 + 재시도)</label>
-  <small class="muted" style="margin-left:0.5rem">
-    SSH → N100 의 <code>scripts/register_batch.py</code> 호출 → jobs enqueue → bot worker drain.
-  </small>
-</form>
+{# ---------- batch run hint (button X — Claude/CLI) ---------- #}
+<article style="border-left:3px solid #3498db;padding:0.4rem 0.8rem;background:#eaf4fb;margin:0.5rem 0;font-size:0.85rem">
+  batch run 은 Claude/CLI 에서: <code>python scripts/remote.py batch-register --catalog={{ name }}</code><br>
+  실패 재시도: <code>--catalog={{ name }} --failed</code> · 특정 rc: <code>--catalog={{ name }} --rc=1,-99</code>
+</article>
 
 {# ---------- KPI ---------- #}
 <section style="display:grid;grid-template-columns:repeat(8,1fr);gap:0.5rem;margin:1rem 0">
@@ -52,7 +45,7 @@
         <td>{{ d.status_emoji }} <small>{{ d.status_label }}</small></td>
         <td><code>{{ d.subkind }}</code></td>
         <td><strong>{{ d.count }}</strong></td>
-        <td><a href="/candidates?status={{ d.status }}&subkind={{ d.subkind }}">→</a></td>
+        <td><a href="/candidates/{{ name }}?status={{ d.status }}&subkind={{ d.subkind }}">→</a></td>
       </tr>
       {% endfor %}
     </tbody>
@@ -69,7 +62,7 @@
       <small class="muted">({{ total_filtered }}/{{ total_all }})</small>
     {% endif %}
   </summary>
-  <form method="get" action="/candidates">
+  <form method="get" action="/candidates/{{ name }}">
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.5rem">
       <label>status
         <select name="status">
@@ -95,17 +88,23 @@
       </label>
     </div>
     <button type="submit">적용</button>
-    <a href="/candidates" role="button" class="secondary">초기화</a>
+    <a href="/candidates/{{ name }}" role="button" class="secondary">초기화</a>
   </form>
 </details>
 
-{# ---------- 새 entry 추가 ---------- #}
+{# ---------- bulk URL 추가 ---------- #}
 <details style="margin:0.5rem 0">
-  <summary><strong>+ 새 entry 추가</strong> <small class="muted">(name + url 만)</small></summary>
-  <form method="post" action="/candidates/add" style="display:grid;grid-template-columns:1fr 2fr auto;gap:0.5rem;margin-top:0.5rem">
-    <label>name*<input type="text" name="name" required placeholder="사람 읽는 라벨"></label>
-    <label>url*<input type="url" name="url" required placeholder="https://..."></label>
+  <summary><strong>+ URL 추가 (bulk paste)</strong></summary>
+  <form method="post" action="/candidates/{{ name }}/add-bulk" style="margin-top:0.5rem">
+    <label>URL 박기 (한 줄에 하나 또는 markdown/문장 안 섞임 — http(s):// 만 추출)
+      <textarea name="bulk_text" rows="8" required
+                style="font-family:monospace;font-size:0.85rem"
+                placeholder="https://example.com/board&#10;https://another.com/notice"></textarea>
+    </label>
     <button type="submit">추가</button>
+    <small class="muted" style="margin-left:0.5rem">
+      cross-catalog 중복 URL 자동 skip. name 은 host 자동 — 박은 후 yaml 손-수정 가능.
+    </small>
   </form>
 </details>
 
@@ -148,8 +147,8 @@
         {% endif %}
       </td>
       <td>
-        <form method="post" action="/candidates/remove" style="display:inline"
-              onsubmit="return confirm('catalog.yaml 에서 \'{{ r.name }}\' 영구 제거. 확인?');">
+        <form method="post" action="/candidates/{{ name }}/remove" style="display:inline"
+              onsubmit="return confirm('{{ name }}.yaml 에서 \'{{ r.name }}\' 영구 제거. 확인?');">
           <input type="hidden" name="url" value="{{ r.url }}">
           <button type="submit" class="secondary outline" style="padding:0.1rem 0.4rem;font-size:0.75rem">🗑</button>
         </form>
@@ -161,6 +160,5 @@
 
 <p class="muted" style="margin-top:1rem">
   catalog 직접 편집: <code>{{ catalog_path }}</code>
-  · CLI (N100 에서): <code>python scripts/register_batch.py [--force] [--limit=N]</code>
 </p>
 {% endblock %}
