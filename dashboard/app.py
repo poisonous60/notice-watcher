@@ -674,9 +674,11 @@ async def timings_index(request: Request,
                         q: Optional[str] = Query(None),
                         failed: Optional[str] = Query(None),
                         idle: Optional[str] = Query(None),
+                        source: str = Query("snapshot"),
                         limit: int = Query(100, ge=10, le=500),
                         page: int = Query(1, ge=1)):
-    ok, entries, err = await tracing_view.fetch_index_all()
+    src = source if source in tracing_view.TRACE_SOURCES else "snapshot"
+    ok, entries, err = await tracing_view.fetch_index_all(source=src)
     selected_kinds = {kind} if kind else None
     offset = (page - 1) * limit
     entries, has_next = tracing_view.filter_sort_entries(
@@ -698,21 +700,25 @@ async def timings_index(request: Request,
                    known_kinds=tracing_view.KNOWN_KINDS,
                    selected_kind=kind or "", q=q or "",
                    only_failed=bool(failed), include_idle=bool(idle),
+                   source=src, sources=tracing_view.TRACE_SOURCES,
                    limit=limit, page=page, has_next=has_next)
 
 
 @app.get("/timings/{trace_id}", response_class=HTMLResponse)
-async def timings_detail(request: Request, trace_id: str):
+async def timings_detail(request: Request, trace_id: str,
+                         source: str = Query("snapshot")):
     # path-traversal 방어 — engine.tracing.valid_trace_id 와 일치.
     from engine.tracing import valid_trace_id as _vti
     if not _vti(trace_id):
         raise HTTPException(status_code=404, detail="invalid trace_id")
-    detail = await tracing_view.load_trace_detail(trace_id)
+    src = source if source in tracing_view.TRACE_SOURCES else "snapshot"
+    detail = await tracing_view.load_trace_detail(trace_id, source=src)
     if detail is None:
         raise HTTPException(status_code=404, detail="trace not found")
     gantt = tracing_view.build_gantt(detail)
     return _render("timings_detail.html", request,
                    active="timings", trace=detail, gantt=gantt,
+                   source=src, sources=tracing_view.TRACE_SOURCES,
                    start_str=_ts_str(detail.t_start_wall))
 
 
@@ -781,16 +787,22 @@ async def feedback_list(request: Request, count: int = Query(50, ge=1, le=500),
 _USAGE_RANGES = ("today", "7d", "30d", "all")
 
 
+_USAGE_SOURCES = ("snapshot", "local")
+
+
 @app.get("/usage", response_class=HTMLResponse)
 async def usage_page(request: Request,
                      range: str = Query("7d"),  # noqa: A002 (shadow built-in OK — FastAPI 파라미터)
+                     source: str = Query("snapshot"),
                      call_site: Optional[str] = None,
                      limit: int = Query(100, ge=1, le=1000),
                      page: int = Query(1, ge=1)):
     rng = range if range in _USAGE_RANGES else "7d"
-    conn = usage_view.open_usage_conn(state.usage_db_path())
+    src = source if source in _USAGE_SOURCES else "snapshot"
+    conn = usage_view.open_usage_conn(state.usage_db_path_for(src))
     if conn is None:
-        return _render("usage.html", request, present=False, active="usage")
+        return _render("usage.html", request, present=False, source=src,
+                       sources=_USAGE_SOURCES, active="usage")
     try:
         since = usage_view.since_iso_for(rng)
         kpis = usage_view.usage_kpis(conn, since_iso=since, call_site=call_site)
@@ -808,6 +820,7 @@ async def usage_page(request: Request,
     return _render("usage.html", request, present=True,
                    kpis=kpis, matrix=matrix, recent=recent, series=series,
                    call_sites=sites, range=rng, ranges=_USAGE_RANGES,
+                   source=src, sources=_USAGE_SOURCES,
                    filter_call_site=call_site, limit=limit,
                    page=page, has_next=has_next,
                    active="usage")

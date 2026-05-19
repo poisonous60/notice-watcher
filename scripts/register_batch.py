@@ -52,6 +52,11 @@ except ImportError:
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+# register.py 가 호출한 trace 가 dev box `output/traces/` 에 박히도록 — dashboard
+# `/timings?source=local` 에서 봇 production 과 별도로 본다. 사용자가 명시적으로
+# `TRACE_ENABLED=0` 박은 경우만 비활성화.
+os.environ.setdefault("TRACE_ENABLED", "1")
+
 from probe.paths import url_to_slug  # noqa: E402
 
 CATALOG_DEFAULT = ROOT / "configs" / "candidates" / "catalog.yaml"

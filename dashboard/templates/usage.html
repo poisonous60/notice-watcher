@@ -9,18 +9,33 @@
 {%- endmacro %}
 
 <h2>💸 Usage</h2>
+<nav style="display:flex;gap:0.3rem;margin:0.4rem 0;font-size:0.85rem;">
+  source:
+  {% for s in sources %}
+    {% if s == source %}
+      <strong>[{{ s }}]</strong>
+    {% else %}
+      <a href="?source={{ s }}&range={{ range }}">{{ s }}</a>
+    {% endif %}
+  {% endfor %}
+  <span class="muted">— snapshot=N100, local=dev box (register_batch 등)</span>
+</nav>
 
 {% if not present %}
 <article style="border-left:3px solid #d32f2f;padding-left:1rem;background:#fff5f5;">
-  <strong>usage 스냅샷 없음.</strong>
+  <strong>usage DB 없음 (source={{ source }}).</strong>
   <p class="muted" style="margin:0.3rem 0 0 0;">
-    아직 N100 에서 LLM 호출이 없거나, 자동 Pull 이 아직 완료되지 않았습니다.
-    페이지 새로고침 시 상단에서 자동 Pull 됩니다. 호출이 누적되면 여기 표시됩니다.
+    {% if source == 'snapshot' %}
+    N100 의 <code>output/usage.sqlite3</code> 사본 부재 — pull 미완료 또는 LLM 호출 아직 없음. 페이지 새로고침 시 자동 Pull.
+    {% else %}
+    dev box <code>output/usage.sqlite3</code> 부재 — register.py / register_batch.py 가 아직 LLM 안 부름.
+    {% endif %}
   </p>
 </article>
 {% else %}
 
 <form action="/usage" method="get" class="topbar" style="border:0;margin-bottom:0.5rem;gap:0.6rem;">
+  <input type="hidden" name="source" value="{{ source }}">
   <label style="margin:0;">범위
     <select name="range" onchange="this.form.submit()">
       {% for k in ranges %}

@@ -4,9 +4,20 @@
 
 <h2>⏱ Timings</h2>
 <p class="muted" style="font-size:0.85rem;">
-  N100 의 <code>output/traces/index.&lt;kind&gt;.jsonl</code> 을 SSH 로 가져와 표시. 행 클릭 → gantt 상세.
-  <code>TRACE_ENABLED=1</code> 환경변수가 N100 systemd 유닛에 있어야 trace 가 쌓입니다.
+  source={{ source }} —
+  {% if source == 'snapshot' %}N100 <code>output/traces/index.&lt;kind&gt;.jsonl</code> SSH cat
+  {% else %}dev box 로컬 <code>output/traces/index.&lt;kind&gt;.jsonl</code> 직접 read (register_batch 등){% endif %}.
+  행 클릭 → gantt 상세. <code>TRACE_ENABLED=1</code> 필요.
 </p>
+<nav style="display:flex;gap:0.3rem;margin:0.4rem 0;font-size:0.85rem;">
+  {% for s in sources %}
+    {% if s == source %}
+      <strong>[{{ s }}]</strong>
+    {% else %}
+      <a href="?source={{ s }}">{{ s }}</a>
+    {% endif %}
+  {% endfor %}
+</nav>
 
 {% if not ok %}
 <article style="border-left:3px solid #c00;padding:0.5rem 0.8rem;">
@@ -16,6 +27,7 @@
 {% endif %}
 
 <form method="get" action="/timings" style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:end;margin:0.5rem 0;">
+  <input type="hidden" name="source" value="{{ source }}">
   <label style="display:flex;flex-direction:column;font-size:0.85rem;">
     kind
     <select name="kind">
@@ -63,7 +75,7 @@
       <td class="muted" style="font-size:0.8rem;max-width:30em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
         {{ e.attrs_short }}
       </td>
-      <td class="mono"><a href="/timings/{{ e.trace_id }}">{{ e.trace_id }}</a></td>
+      <td class="mono"><a href="/timings/{{ e.trace_id }}?source={{ source }}">{{ e.trace_id }}</a></td>
     </tr>
     {% endfor %}
   </tbody>

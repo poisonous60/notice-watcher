@@ -27,7 +27,9 @@ from engine.tracing import valid_trace_id
 
 ROOT = Path(__file__).resolve().parent.parent
 CACHE_DIR = ROOT / "output" / "snapshot" / "traces"
+LOCAL_TRACES_DIR = ROOT / "output" / "traces"
 REMOTE_SCRIPT = ROOT / "scripts" / "remote.py"
+TRACE_SOURCES = ("snapshot", "local")
 
 # index 줄에 들어오는 kind 들 — UI 필터 옵션 source.
 KNOWN_KINDS = ("poll", "poll_and_notify", "notify", "notify_idle", "probe", "probe_reprobe")
@@ -87,12 +89,32 @@ async def _async_run(cmd: list[str]) -> tuple[int, str, str]:
     return await asyncio.to_thread(_run_blocking, cmd)
 
 
-async def fetch_index_all() -> tuple[bool, list[IndexEntry], str]:
-    """모든 kind 의 index 합본을 SSH cat 으로 가져옴 → IndexEntry list (start+end merge)."""
+async def fetch_index_all(source: str = "snapshot") -> tuple[bool, list[IndexEntry], str]:
+    """모든 kind 의 index 합본을 가져옴 → IndexEntry list (start+end merge).
+
+    source='snapshot' (기본): N100 의 `output/traces/index.*.jsonl` 을 SSH cat.
+    source='local'         : dev box `output/traces/index.*.jsonl` 직접 read.
+                             register_batch.py 같은 dev box 실행 트레이스 보기 용도.
+    """
+    if source == "local":
+        return _fetch_index_local()
     rc, out, err = await _async_run([sys.executable, str(REMOTE_SCRIPT), "trace-index-all"])
     if rc != 0:
         return False, [], err or out
     return True, _parse_index_lines(out), ""
+
+
+def _fetch_index_local() -> tuple[bool, list[IndexEntry], str]:
+    """LOCAL_TRACES_DIR/index.*.jsonl 합본 → IndexEntry list. SSH 없이 직접 read."""
+    if not LOCAL_TRACES_DIR.exists():
+        return True, [], ""
+    text_parts: list[str] = []
+    for f in sorted(LOCAL_TRACES_DIR.glob("index.*.jsonl")):
+        try:
+            text_parts.append(f.read_text(encoding="utf-8", errors="replace"))
+        except OSError as e:
+            return False, [], f"local trace index read 실패 ({f.name}): {e}"
+    return True, _parse_index_lines("\n".join(text_parts)), ""
 
 
 def _parse_index_lines(text: str) -> list[IndexEntry]:
@@ -169,12 +191,22 @@ def filter_sort_entries(entries: list[IndexEntry], *,
 # --------------------------------------------------------------------------- #
 # 단일 trace 상세 — cache miss 면 SSH fetch.
 # --------------------------------------------------------------------------- #
-async def load_trace_detail(trace_id: str) -> Optional[TraceDetail]:
+async def load_trace_detail(trace_id: str, source: str = "snapshot") -> Optional[TraceDetail]:
     """캐시 우선. 단 종료된 trace (meta 의 t_end_wall != None) 만 캐시 — 진행 중인 trace 가
     poisoning 되지 않게 매번 재 fetch.
+
+    source='local' 면 LOCAL_TRACES_DIR/<trace_id>.jsonl 을 직접 read (SSH 안 함).
     """
     if not valid_trace_id(trace_id):
         return None
+    if source == "local":
+        p = LOCAL_TRACES_DIR / f"{trace_id}.jsonl"
+        if not p.exists() or p.stat().st_size == 0:
+            return None
+        try:
+            return _parse_trace(p.read_text(encoding="utf-8"), trace_id)
+        except OSError:
+            return None
     cache = CACHE_DIR / f"{trace_id}.jsonl"
     use_cache = False
     if cache.exists() and cache.stat().st_size > 0:

@@ -49,6 +49,20 @@ def usage_db_path() -> Path:
     return SNAPSHOT_DIR / "usage.sqlite3"
 
 
+def usage_db_path_local() -> Path:
+    """dev box 자체에서 호출된 LLM 의 usage (예: `scripts/register_batch.py` 가 부른 register.py).
+    snapshot 과 별도 — N100 production runtime 과 dev box 실험을 분리해서 관찰.
+    """
+    return ROOT / "output" / "usage.sqlite3"
+
+
+def usage_db_path_for(source: str) -> Path:
+    """source enum → path. 라우트 query param 검증 후 호출.
+    source ∈ {'snapshot' (기본=N100), 'local' (dev box)}.
+    """
+    return usage_db_path_local() if source == "local" else usage_db_path()
+
+
 def snapshot_exists() -> bool:
     return snapshot_db_path().exists()
 
