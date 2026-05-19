@@ -1,96 +1,76 @@
 {% extends "base.html" %}
 {% block title %}Candidates · notice-watcher{% endblock %}
 {% block body %}
-<h1>🌐 사이트 카탈로그 등록 분포</h1>
+<h1>🌐 사이트 카탈로그 — 등록 결과 분포</h1>
 {% if catalog_warning %}
 <article style="border-left:4px solid #c0392b;padding:0.5rem 1rem;background:#fde8e6;color:#7c1f15;margin:1rem 0">
-  <strong>⚠ 카탈로그 로드 실패</strong><br>
-  {{ catalog_warning }}
+  <strong>⚠ 카탈로그</strong><br>{{ catalog_warning }}
 </article>
 {% endif %}
-{% if runs_db_error %}
+{% if jobs_db_error %}
 <article style="border-left:4px solid #c0392b;padding:0.5rem 1rem;background:#fde8e6;color:#7c1f15;margin:1rem 0">
-  <strong>⚠ runs DB 읽기 실패 — 분포가 stale 일 수 있음</strong><br>
-  {{ runs_db_error }} · <code>output/register_batch_runs.sqlite3</code> 점검 권장.
+  <strong>⚠ snapshot bot.sqlite3 jobs 읽기 실패</strong><br>{{ jobs_db_error }}
 </article>
 {% endif %}
 <p class="muted">
-  카탈로그: <code>{{ catalog_path }}</code> · runs DB:
-  {% if runs_db_present %}<code>output/register_batch_runs.sqlite3</code>{% else %}<em>아직 비어있음 — <code>python scripts/register_batch.py</code> 실행 안 됨</em>{% endif %}
-  · 전체 board 수: <strong>{{ total_all }}</strong>
+  카탈로그: <code>{{ catalog_path }}</code>
+  · snapshot: {{ snapshot_ts }}
+  · 전체 entry: <strong>{{ total_all }}</strong>
 </p>
 
+{# ---------- batch-run ---------- #}
+<form method="post" action="/candidates/batch-run" style="margin:1rem 0;padding:0.5rem;border:1px solid #ddd;border-radius:6px"
+      onsubmit="return confirm('N100 의 bot.sqlite3 jobs 테이블에 catalog 일괄 enqueue. 진행?');">
+  <button type="submit"><strong>▶ batch run</strong></button>
+  <label style="margin-left:1rem"><input type="checkbox" name="force" value="on"> --force (마커 삭제 + 재시도)</label>
+  <small class="muted" style="margin-left:0.5rem">
+    SSH → N100 의 <code>scripts/register_batch.py</code> 호출 → jobs enqueue → bot worker drain.
+  </small>
+</form>
+
 {# ---------- KPI ---------- #}
-<section class="kpi-grid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:0.5rem;margin:1rem 0">
+<section style="display:grid;grid-template-columns:repeat(8,1fr);gap:0.5rem;margin:1rem 0">
   <article><strong>총</strong><br>{{ kpis.total }}</article>
-  <article><strong>✅ 등록</strong><br>{{ kpis.registered }}</article>
-  <article><strong>🚫 거부</strong><br>{{ kpis.rejected }}</article>
-  <article><strong>❌ 실패</strong><br>{{ kpis.failed }}</article>
   <article><strong>· 미시도</strong><br>{{ kpis.untried }}</article>
-  <article><strong>⏳ skip</strong><br>{{ kpis.skipped }}</article>
-  <article><strong>⚠ error</strong><br>{{ kpis.error }}</article>
+  <article><strong>⏳ 큐</strong><br>{{ kpis.pending }}</article>
+  <article><strong>🔁 진행</strong><br>{{ kpis.running }}</article>
+  <article><strong>✅ 등록</strong><br>{{ kpis.registered }}</article>
+  <article><strong>❌ gen_fail</strong><br>{{ kpis.gen_fail }}</article>
+  <article><strong>🚫 거부</strong><br>{{ kpis.policy_reject + kpis.gate_reject }}</article>
+  <article><strong>🐞 bug</strong><br>{{ kpis.bug }}</article>
 </section>
 
-{# ---------- 카테고리 × tier matrix ---------- #}
-<details open>
-  <summary><strong>카테고리 × tier matrix</strong> (셀 값 = 등록됨 / 전체)</summary>
+{# ---------- status × subkind 분포 ---------- #}
+<details {% if distribution %}open{% endif %}>
+  <summary><strong>status × fail_subkind 분포</strong> <small class="muted">(약한 자리 한눈)</small></summary>
+  {% if distribution %}
   <table style="font-size:0.9rem">
-    <thead>
-      <tr>
-        <th>category</th>
-        {% for t in ['A','B','C','D','E','F','G'] %}<th>{{ t }}</th>{% endfor %}
-        <th>총</th>
-      </tr>
-    </thead>
+    <thead><tr><th>status</th><th>subkind</th><th>count</th><th>필터</th></tr></thead>
     <tbody>
-      {% for row in matrix %}
+      {% for d in distribution %}
       <tr>
-        <td><code>{{ row.category }}</code></td>
-        {% for cell in row.cells %}
-          {% if cell.total == 0 %}
-            <td class="muted">·</td>
-          {% else %}
-            <td>
-              {% set pct = (100.0 * cell.registered / cell.total) | round(0, 'floor') | int %}
-              <span title="reg={{ cell.registered }} rej={{ cell.rejected }} fail={{ cell.failed }} untried={{ cell.untried }}">
-                <strong>{{ cell.registered }}</strong>/{{ cell.total }}
-                <small class="muted">({{ pct }}%)</small>
-              </span>
-            </td>
-          {% endif %}
-        {% endfor %}
-        <td><strong>{{ row.registered }}</strong>/{{ row.total }}</td>
+        <td>{{ d.status_emoji }} <small>{{ d.status_label }}</small></td>
+        <td><code>{{ d.subkind }}</code></td>
+        <td><strong>{{ d.count }}</strong></td>
+        <td><a href="/candidates?status={{ d.status }}&subkind={{ d.subkind }}">→</a></td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
+  {% else %}
+  <p class="muted">실패/거부/BUG 분포 없음 (전부 등록됨 / 미시도 / 큐 대기).</p>
+  {% endif %}
 </details>
 
 {# ---------- 필터 ---------- #}
 <details>
   <summary><strong>필터</strong>
-    {% if cur.category or cur.tier or cur.status or cur.provenance or cur.q %}
-      <small class="muted">(필터 적용중 — {{ total_filtered }}/{{ total_all }})</small>
+    {% if cur.status or cur.subkind or cur.q %}
+      <small class="muted">({{ total_filtered }}/{{ total_all }})</small>
     {% endif %}
   </summary>
   <form method="get" action="/candidates">
-    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:0.5rem">
-      <label>category
-        <select name="category">
-          <option value="">전체</option>
-          {% for c in facets.categories %}
-          <option value="{{ c }}" {% if cur.category == c %}selected{% endif %}>{{ c }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <label>tier
-        <select name="tier">
-          <option value="">전체</option>
-          {% for t in facets.tiers %}
-          <option value="{{ t }}" {% if cur.tier == t %}selected{% endif %}>{{ t }}</option>
-          {% endfor %}
-        </select>
-      </label>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.5rem">
       <label>status
         <select name="status">
           <option value="">전체</option>
@@ -102,16 +82,16 @@
           {% endfor %}
         </select>
       </label>
-      <label>provenance
-        <select name="provenance">
+      <label>subkind
+        <select name="subkind">
           <option value="">전체</option>
-          {% for p in facets.provenances %}
-          <option value="{{ p }}" {% if cur.provenance == p %}selected{% endif %}>{{ p }}</option>
+          {% for k in facets.subkinds %}
+          <option value="{{ k }}" {% if cur.subkind == k %}selected{% endif %}>{{ k }}</option>
           {% endfor %}
         </select>
       </label>
       <label>검색
-        <input type="text" name="q" value="{{ cur.q }}" placeholder="id / name / url / slug">
+        <input type="text" name="q" value="{{ cur.q }}" placeholder="name / url / slug">
       </label>
     </div>
     <button type="submit">적용</button>
@@ -121,35 +101,11 @@
 
 {# ---------- 새 entry 추가 ---------- #}
 <details style="margin:0.5rem 0">
-  <summary><strong>+ 새 entry 추가</strong> <small class="muted">(catalog.yaml 직접 write)</small></summary>
-  <form method="post" action="/candidates/add" style="display:grid;grid-template-columns:repeat(4,1fr);gap:0.5rem;margin-top:0.5rem">
-    <label>id*<input type="text" name="cand_id" required pattern="[A-Za-z0-9._\-]{1,80}" placeholder="my-site-news"></label>
-    <label>name*<input type="text" name="name" required placeholder="사이트 이름"></label>
-    <label>category*
-      <select name="category" required>
-        {% for c in allowed_categories %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
-      </select>
-    </label>
-    <label>tier*
-      <select name="tier" required>
-        {% for t in allowed_tiers %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
-      </select>
-    </label>
-    <label>expected_strategy*
-      <select name="expected_strategy" required>
-        {% for s in allowed_strategies %}<option value="{{ s }}" {% if s == 'unknown' %}selected{% endif %}>{{ s }}</option>{% endfor %}
-      </select>
-    </label>
-    <label>provenance
-      <select name="provenance">
-        {% for p in allowed_provenance %}<option value="{{ p }}" {% if p == 'web' %}selected{% endif %}>{{ p }}</option>{% endfor %}
-      </select>
-    </label>
-    <label style="grid-column:span 2">url*<input type="url" name="url" required placeholder="https://..."></label>
-    <label>label<input type="text" name="label" placeholder="공지 / 메인 등"></label>
-    <label>source_section<input type="text" name="source_section" placeholder="manual / WebSearch ..."></label>
-    <label style="grid-column:span 2">note<input type="text" name="note" placeholder="설명/메모"></label>
-    <div style="grid-column:span 4"><button type="submit">추가</button></div>
+  <summary><strong>+ 새 entry 추가</strong> <small class="muted">(name + url 만)</small></summary>
+  <form method="post" action="/candidates/add" style="display:grid;grid-template-columns:1fr 2fr auto;gap:0.5rem;margin-top:0.5rem">
+    <label>name*<input type="text" name="name" required placeholder="사람 읽는 라벨"></label>
+    <label>url*<input type="url" name="url" required placeholder="https://..."></label>
+    <button type="submit">추가</button>
   </form>
 </details>
 
@@ -157,58 +113,44 @@
 <table style="font-size:0.85rem">
   <thead>
     <tr>
-      <th>id</th>
       <th>name</th>
-      <th>cat</th>
-      <th>tier</th>
-      <th>expected</th>
-      <th>actual</th>
       <th>status</th>
+      <th>subkind</th>
       <th>last_ts</th>
+      <th>via</th>
       <th>url</th>
+      <th>링크</th>
       <th>제거</th>
     </tr>
   </thead>
   <tbody>
     {% for r in rows %}
     <tr>
-      <td><code>{{ r.cand_id }}</code></td>
-      <td>{{ r.name }}{% if r.label %} <small class="muted">({{ r.label }})</small>{% endif %}</td>
-      <td><small>{{ r.category }}</small></td>
-      <td><strong>{{ r.tier }}</strong></td>
-      <td><small>{{ r.expected_strategy }}</small></td>
-      <td>
-        {% if r.actual_strategy %}
-          <small{% if r.strategy_mismatch %} title="expected={{ r.expected_strategy }}" style="color:#c0392b"{% endif %}>
-            {{ r.actual_strategy }}{% if r.actual_adapter %}+{{ r.actual_adapter }}{% endif %}
-            {% if r.strategy_mismatch %} ⚠{% endif %}
-          </small>
-        {% else %}
-          <small class="muted">—</small>
-        {% endif %}
-      </td>
-      <td title="{{ r.reason }}">
-        {{ r.status_emoji }} <small>{{ r.status_label }}</small>
-        {% if r.status in ('registered', 'already_registered') and r.slug %}
-          · <a href="/subs/{{ r.slug }}" title="구독 상세">subs</a>
-        {% elif r.status in ('failed', 'timeout') and r.slug %}
-          · <a href="/triage/failed" title="FAILED 큐">triage</a>
-        {% elif r.status in ('policy_rejected', 'gate_rejected', 'already_rejected') and r.slug %}
-          · <a href="/learned" title="learned blacklist">learned</a>
-        {% endif %}
-      </td>
+      <td>{{ r.name }}</td>
+      <td title="{{ r.reason }}">{{ r.status_emoji }} <small>{{ r.status_label }}</small></td>
+      <td><code>{{ r.subkind }}</code></td>
       <td><small class="muted">{{ r.last_ts or '—' }}</small></td>
+      <td><small class="muted">{{ r.via or '—' }}</small></td>
       <td>
         {% if is_http_url(r.url) %}
-          <a href="{{ r.url }}" target="_blank" rel="noopener"><small>{{ r.url[:60] }}{% if r.url|length > 60 %}…{% endif %}</small></a>
+          <a href="{{ r.url }}" target="_blank" rel="noopener"><small>{{ r.url[:80] }}{% if r.url|length > 80 %}…{% endif %}</small></a>
         {% else %}
           <small>{{ r.url }}</small>
         {% endif %}
       </td>
       <td>
+        {% if r.status == 'registered' and r.slug %}
+          <a href="/subs/{{ r.slug }}" title="구독 상세">subs</a>
+        {% elif r.job_id %}
+          <a href="/jobs/{{ r.job_id }}" title="잡 상세">job#{{ r.job_id }}</a>
+        {% elif r.slug %}
+          <a href="/jobs?q={{ r.slug }}" title="이 slug 의 잡">jobs</a>
+        {% endif %}
+      </td>
+      <td>
         <form method="post" action="/candidates/remove" style="display:inline"
-              onsubmit="return confirm('catalog.yaml 에서 \'{{ r.cand_id }}\' 영구 제거. 확인?');">
-          <input type="hidden" name="cand_id" value="{{ r.cand_id }}">
+              onsubmit="return confirm('catalog.yaml 에서 \'{{ r.name }}\' 영구 제거. 확인?');">
+          <input type="hidden" name="url" value="{{ r.url }}">
           <button type="submit" class="secondary outline" style="padding:0.1rem 0.4rem;font-size:0.75rem">🗑</button>
         </form>
       </td>
@@ -218,7 +160,7 @@
 </table>
 
 <p class="muted" style="margin-top:1rem">
-  미시도 entry 처리: <code>python scripts/register_batch.py --tier=A --limit=10</code>
-  · 카탈로그 편집: <code>{{ catalog_path }}</code>
+  catalog 직접 편집: <code>{{ catalog_path }}</code>
+  · CLI (N100 에서): <code>python scripts/register_batch.py [--force] [--limit=N]</code>
 </p>
 {% endblock %}
