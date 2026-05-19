@@ -21,6 +21,18 @@
   실패 재시도: <code>--catalog={{ catalog_name }} --failed</code> · 특정 rc: <code>--catalog={{ catalog_name }} --rc=1,-99</code>
 </article>
 
+{# ---------- Skill 프롬프트 — 새 세션에서 batch run + 진단·수정 자율 진행 ---------- #}
+<div class="prompt-card" style="margin:0.5rem 0">
+  <div class="row" style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem">
+    <span class="label">⚡ batch 돌리고 결과 진단·수정 (Skill 프롬프트 — 새 세션용)</span>
+    <button class="secondary" data-copy-target="#qp-cat-runfix">📋 복사</button>
+  </div>
+  <details>
+    <summary>미리보기</summary>
+    <pre id="qp-cat-runfix" style="white-space:pre-wrap;font-size:0.8rem">{{ run_and_fix_prompt }}</pre>
+  </details>
+</div>
+
 {# ---------- KPI ---------- #}
 <section style="display:grid;grid-template-columns:repeat(8,1fr);gap:0.5rem;margin:1rem 0">
   <article><strong>총</strong><br>{{ kpis.total }}</article>

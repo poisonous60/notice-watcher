@@ -30,7 +30,7 @@ from fastapi import Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from bot import fail_taxonomy
-from dashboard import state
+from dashboard import prompts, state
 
 ROOT = Path(__file__).resolve().parent.parent
 CATALOG_DIR = ROOT / "configs" / "candidates"
@@ -410,9 +410,16 @@ def register(app, templates, _render):  # noqa: ARG001
         distribution = _distribution(all_rows)
         all_statuses = sorted({r["status"] for r in all_rows})
         all_subkinds = sorted({r["subkind"] for r in all_rows if r["subkind"] not in ("—", "ok")})
+        run_and_fix_prompt = prompts.catalog_run_and_fix(
+            catalog_name=name,
+            untried=kpis.get("untried", 0),
+            failed=kpis.get("gen_fail", 0),
+            bug=kpis.get("bug", 0),
+        )
         return _render(
             "candidates_detail.html", request,
             catalog_name=name,
+            run_and_fix_prompt=run_and_fix_prompt,
             rows=rows, kpis=kpis, distribution=distribution,
             jobs_db_error=jobs_db_error,
             total_filtered=len(rows), total_all=len(all_rows),

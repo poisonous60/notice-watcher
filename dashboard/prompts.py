@@ -100,6 +100,41 @@ def report_triage_bulk(*, report_ids: list[int]) -> str:
     return "\n".join(lines)
 
 
+def catalog_run_and_fix(*, catalog_name: str,
+                        untried: int = 0, failed: int = 0, bug: int = 0) -> str:
+    """catalog 1개 batch run + 결과 진단·수정 단일 프롬프트. dashboard `/candidates/<name>` 에서 복사.
+
+    Claude 가 새 세션에서 받으면 register_batch 실행 → drain 대기 → fail 분류 → hand-config /
+    bug-fix workflow 분기 → re-run `--failed` 까지 자율 진행.
+    """
+    lines = [f"catalog `{catalog_name}` batch 돌리고 결과 진단·수정해줘 (skill: hand-config).", ""]
+    lines.append(f"현재 분포: untried={untried} / failed={failed} / bug={bug}")
+    lines.append("")
+    lines.append("절차:")
+    lines.append(f"1. `python scripts/remote.py batch-register --catalog={catalog_name}` 호출 → untried entry 큐 enqueue.")
+    lines.append("2. worker drain 대기 — `python scripts/remote.py logs bot --tail 50` 와 dashboard `/candidates/" + catalog_name + "` KPI 로 진행 확인.")
+    lines.append("3. drain 완료 후 fail_kind 분포 확인 (dashboard 또는 jobs 테이블).")
+    lines.append("4. fail_kind 별 처리:")
+    lines.append("   - **gen_fail** (rc=1): hand-config 진단 → 손-config 또는 probe/prompt 개선 (두 트랙 동시).")
+    lines.append("   - **gate_reject** (rc=3): board_shape / nav_only / meta_diverging / multi_host_hub — board-specific 거부. 의도 맞으면 그대로, 잘못이면 probe 휴리스틱 개선.")
+    lines.append("   - **policy_reject** (rc=2): BLOCKED/LOGIN_REQUIRED — 정책상 거부 (`docs/크롤링 지침.md`). 우회 X.")
+    lines.append("   - **bug** (rc=-1/-2/-3/-99): traceback 분석 → 코드 수정 (bug-fix workflow).")
+    lines.append(f"5. 재시도: `python scripts/remote.py batch-register --catalog={catalog_name} --failed` (rc∈{{1,-1,-2,-3,-99}} 만).")
+    lines.append("6. registered 100% 또는 root-cause 못 잡는 사이트만 남을 때까지 반복.")
+    lines.append("")
+    lines.append("각 fail 두 트랙 *동시* 진행 (한쪽 막는 게이트 X):")
+    lines.append("  - 트랙 A (사용자 향 — 사이트 즉시 작동): 손-config / 손어댑터 → configs/ → 배포.")
+    lines.append("  - 트랙 B (미래 향 — 같은 패턴 자동 처리): probe 휴리스틱 / 인식기 / prompt 개선 → 같은 패턴 자동.")
+    lines.append("매칭 있으면 같은 PR 에 박음. 매칭 0이면 case 파일에 이유.")
+    lines.append("")
+    lines.append("REJECT 사이트도 구조 분석 → probe 개선 시도. 특수 케이스나 tradeoff 명확하면 case log 이유 기록.")
+    lines.append("")
+    lines.append("각 slug §2 분기 *전*: `triage.py show <slug>` 출력 받은 다음 메시지에서 4개 강제 인용 "
+                 "(last_feedback `[FAIL]` 줄 / diagnosis verdict / 매칭 §번호 / 분기 후보+이유). "
+                 "— SKILL.md \"§2 진입 전 강제 인용\" 박스.")
+    return "\n".join(lines)
+
+
 def diagnose_slug(*, slug: str) -> str:
     """skill 아님 — 그냥 자연어 진단 요청. 사용자가 인터랙티브하게 파고들고 싶을 때."""
     return (
