@@ -214,3 +214,19 @@ def extract_row(
 
 def parse_html(html: str) -> BeautifulSoup:
     return BeautifulSoup(html or "", "lxml")
+
+
+def parse_html_or_xml(text: str) -> BeautifulSoup:
+    """`<?xml`/`<rss`/`<feed` prefix 면 XML parser, 아니면 HTML parser.
+
+    RSS/Atom 응답을 lxml HTML parser 로 파싱하면 `<link>` `<guid>` 같은 HTML void
+    element 가 self-closing 으로 처리돼 텍스트 내용 X (`it.find('link').get_text()` 빈
+    문자열). XML parser (`lxml-xml`) 는 모든 tag 를 컨테이너로 처리 → content 정상 추출.
+
+    catalog 의 RSS/Atom 사이트 (`bbs.ruliweb.com/.../rss`, `*.atom`, `*.xml` 등) 등록
+    시 `parse_list_html` 가 호출. text 가 XML prefix 면 자동 분기.
+    """
+    head = (text or "").lstrip()[:64].lower()
+    if head.startswith("<?xml") or head.startswith("<rss") or head.startswith("<feed"):
+        return BeautifulSoup(text or "", "lxml-xml")
+    return BeautifulSoup(text or "", "lxml")

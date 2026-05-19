@@ -11,7 +11,7 @@ from typing import Optional
 import httpx
 
 from ..base_compat import NoticePost
-from ..extract_helpers import extract_field, extract_row, parse_html
+from ..extract_helpers import extract_field, extract_row, parse_html, parse_html_or_xml
 from ._common import apply_proxy, build_list_url, render_template
 
 
@@ -91,7 +91,9 @@ def _build_post(adapter, extracted: dict, *, strategy: str) -> Optional[NoticePo
 def parse_list_html(adapter, html: str, *, page_size: int, strategy: str = "httpx_html") -> list[NoticePost]:
     cfg = adapter.cfg
     lst = cfg["list"]
-    soup = parse_html(html)
+    # RSS/Atom 응답이면 XML parser. lxml HTML parser 가 `<link>`/`<guid>` 등 HTML void
+    # element 를 self-closing 으로 처리 → text 빈 문자열 → posts_nonempty 0건 fail.
+    soup = parse_html_or_xml(html)
     rows = soup.select(lst["row_selector"])
     dropped = _drop_ids(soup, lst.get("exclude_selector"))
     include_notices = lst.get("include_notices", True)
