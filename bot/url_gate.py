@@ -169,8 +169,13 @@ def _normalize_groups(raw: object, source: str) -> list[dict]:
         pp = tuple(("/" + s.strip().lower().lstrip("/")) for s in path_prefix if s.strip())
         if not hs and not pe and not pp:
             raise ValueError(f"{source}: groups[{i}]({name}) 에 host_suffix/path_ext/path_prefix 중 하나라도 있어야 함")
-        out.append({"name": name.strip(), "message": message.strip(),
-                    "host_suffix": hs, "path_ext": pe, "path_prefix": pp})
+        out_entry: dict = {"name": name.strip(), "message": message.strip(),
+                           "host_suffix": hs, "path_ext": pe, "path_prefix": pp}
+        # match_root_only flag — learned entry 의 path_prefix='' (root URL 학습) 보존.
+        # `_learned_to_groups` 가 박음. `_DEFAULT_BLACKLIST` / url_blacklist.json 의 운영자 룰엔 없음.
+        if g.get("match_root_only") is True:
+            out_entry["match_root_only"] = True
+        out.append(out_entry)
     return out
 
 
@@ -180,6 +185,12 @@ _DEFAULT_BLACKLIST_NORM = _normalize_groups(_DEFAULT_BLACKLIST, "_DEFAULT_BLACKL
 def _learned_to_groups(patterns: list[dict]) -> list[dict]:
     """output/learned_blacklist.json 의 patterns → url_gate 정책 그룹 형식.
     각 pattern 이 하나의 그룹이 됨 (개별 message 유지).
+
+    root-only matching: learned entry 의 path_prefix='' (= root URL 학습 — `_extract_url_pattern`
+    이 path='/' or empty 면 '') 는 `match_root_only=True` flag 박음 → `_check_policy` 가
+    host_suffix only 분기에서 path in ('', '/') 일 때만 매칭 (호스트 전체 차단 회피).
+    `_DEFAULT_BLACKLIST` 의 운영자 host_suffix only 룰 (youtube/x.com 등) 은 이 flag 없음 →
+    host 전체 차단 의도 유지.
     """
     groups_raw: list[dict] = []
     for p in patterns:
@@ -202,6 +213,9 @@ def _learned_to_groups(patterns: list[dict]) -> list[dict]:
             "path_prefix": [pp] if pp else [],
             "path_ext": [],
         }
+        # root URL 학습 (path_prefix='') — host 전체 차단 의도 X. root path 만 매칭.
+        if host and not pp:
+            group_raw["match_root_only"] = True
         groups_raw.append(group_raw)
     return groups_raw
 
@@ -371,6 +385,10 @@ def _check_policy(u: str, label: str) -> None:
                 _reject(g["name"], f"{_lbl(label)}{g['message']}")
         elif g.get("host_suffix"):
             if hs_match:
+                # match_root_only=True (learned entry path_prefix='') 면 root URL 만 차단.
+                # 호스트 전체 차단 (운영자 host_suffix only 룰) 의도는 이 flag 없음.
+                if g.get("match_root_only") and path not in ("", "/"):
+                    continue
                 _reject(g["name"], f"{_lbl(label)}{g['message']}")
         elif g.get("path_prefix"):
             if pp_match:

@@ -235,6 +235,52 @@ def run() -> list[tuple[str, bool, str]]:
             cases.append(("auto_unlearn_after_register_success",
                           _reject_check("https://www.google.com/search?q=anything") == "",
                           "register --config 가 호출되면 작동 증거 → 같은 패턴 자동 회수 → 이후 통과"))
+
+            # ----- root-only matching (path_prefix='' learned) ----- #
+            # 16. root URL 학습 (path_prefix='') → root path 만 차단, 카테고리 path 통과.
+            # CNN/Reuters/NatGeo/Vimeo root 학습 같은 부작용 (호스트 전체 차단) 회귀 차단.
+            _learn_pattern("https://cnn-test.example.com/", "register failed: root marketing",
+                           slug="host_cnn_test_root")
+            url_gate._blacklist_cache = None
+
+            cases.append(("root_only_root_rejected",
+                          _reject_check("https://cnn-test.example.com/") == "learned_rejected",
+                          "root URL 차단"))
+            cases.append(("root_only_no_slash_rejected",
+                          _reject_check("https://cnn-test.example.com") == "learned_rejected",
+                          "trailing slash 없는 root 도 차단"))
+            cases.append(("root_only_category_passes",
+                          _reject_check("https://cnn-test.example.com/world/") == "",
+                          "카테고리 path 통과 (호스트 전체 차단 아님)"))
+            cases.append(("root_only_subpath_passes",
+                          _reject_check("https://cnn-test.example.com/business") == "",
+                          "subpath 통과"))
+            cases.append(("root_only_deep_path_passes",
+                          _reject_check("https://cnn-test.example.com/world/2026/05/article-x") == "",
+                          "깊은 path 통과"))
+
+            # 17. 운영자 host_suffix only 룰 (`_DEFAULT_BLACKLIST` 의 youtube 등) — host 전체 차단 의도 보존.
+            # 내장 룰엔 match_root_only flag 없음 → 동작 그대로.
+            cases.append(("default_blacklist_host_wide_youtube_root",
+                          _reject_check("https://www.youtube.com/") == "blocked_platform",
+                          "운영자 host_suffix only 룰 — root 차단"))
+            cases.append(("default_blacklist_host_wide_youtube_subpath",
+                          _reject_check("https://www.youtube.com/channel/UC_xyz") == "blocked_platform",
+                          "운영자 host_suffix only 룰 — subpath 도 차단 (host 전체)"))
+
+            # 18. root learned + 다른 path learned 공존 — 각자 정확히 작동.
+            _learn_pattern("https://multi-test.example.com/search?q=A",
+                           "policy fail: search blocked", slug="host_multi_search")
+            url_gate._blacklist_cache = None
+            cases.append(("root_and_path_coexist_root_rejected",
+                          _reject_check("https://cnn-test.example.com/") == "learned_rejected",
+                          "root learned 그대로"))
+            cases.append(("root_and_path_coexist_search_rejected",
+                          _reject_check("https://multi-test.example.com/search?q=anything") == "learned_rejected",
+                          "path-specific learned 그대로"))
+            cases.append(("root_and_path_coexist_multi_root_passes",
+                          _reject_check("https://multi-test.example.com/") == "",
+                          "multi-test host root 는 학습 X → 통과 (path-specific 만 학습됐음)"))
         finally:
             _restore_paths(saved)
 
