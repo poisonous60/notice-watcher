@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 71 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 72 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -17,6 +17,7 @@
 | [`host_reuters-com_root_9c8aa57a`](host_reuters-com_root_9c8aa57a.md) | 🚫 거부 (Reuters root 도메인 마케팅 랜딩 + SPA shell — board 아님. 카테고리/섹션 URL 권장) — root_marketing_homepage 게이트 (C+F+A) | 2026-05-19 | C | fetch_list_401, fingerprint_hide_required, posts_nonempty, matches_probe_first_article, count_ballpark, root_marketing_homepage | https://www.reuters.com/ |
 | [`host_nationalgeograp_root_2be4a852`](host_nationalgeograp_root_2be4a852.md) | 🚫 거부 (NatGeo root 도메인 마케팅 랜딩 — board 아님. 카테고리/섹션 URL 권장) — root_marketing_homepage 게이트 (C+F+A) | 2026-05-19 | C | post_id_stable_shape, title_nonempty, article_body_len, row_type_mix, matches_probe_first_article, root_marketing_homepage | https://www.nationalgeographic.com/ |
 | [`host_investopedia-co_news-4427706_c33346a4`](host_investopedia-co_news-4427706_c33346a4.md) | 🚫 거부 (게시판 형식 아닌 것으로 판정 — candidates_zero / list_url_none). | 2026-05-19 |  | candidates_zero, list_url_none, posts_nonempty, hub_url_not_board | https://www.investopedia.com/news-4427706 |
+| [`host_edition-cnn-com_world_ae74b4db`](host_edition-cnn-com_world_ae74b4db.md) | ✅ 자동 등록 (validation cap 64→200 완화 후 자동 통과 — playwright_html, 30건 baseline) | 2026-05-19 | E | post_id_stable_shape, posts_nonempty, matches_probe_first_article | https://edition.cnn.com/world |
 | [`host_edition-cnn-com_root_82356c05`](host_edition-cnn-com_root_82356c05.md) | 🚫 거부 (CNN root 도메인 마케팅 랜딩 — board 아님. 카테고리/섹션 URL 권장) — root_marketing_homepage 게이트 (C+F+A) | 2026-05-19 | C | post_id_unique, title_nonempty, published_at_iso, matches_probe_first_article, root_marketing_homepage | https://edition.cnn.com/ |
 | [`host_bbc-com_news_7e763da2`](host_bbc-com_news_7e763da2.md) | ✅ 자동 등록 회복 (preflight b-hit, baseline 8건) — prompt §8a 룰 추가 (carousel dedup + iso slash) 후. | 2026-05-19 |  | post_id_unique, carousel_dedup, narrow_wide_no_sweet_spot | https://www.bbc.com/news |
 | [`host_acm-org_code-of-ethics_a1ad42c5`](host_acm-org_code-of-ethics_a1ad42c5.md) | ⚠️ 자동 등록 통과 (baseline 1건 — single article 의심, learned_blacklist false negative 가능성). | 2026-05-19 |  | single_article_page, baseline_1_only, count_ballpark_warn, learned_blacklist_false_negative | https://www.acm.org/code-of-ethics |
@@ -90,7 +91,7 @@
 | C+D | 2 |
 | C+F | 1 |
 | C+F+A | 1 |
-| E | 1 |
+| E | 2 |
 | E+A+C+D | 1 |
 | F | 26 |
 | F+A | 1 |
@@ -106,9 +107,9 @@
 | httpx_html | 6 |
 | httpx_json | 4 |
 | none | 16 |
-| playwright_html | 5 |
+| playwright_html | 6 |
 
 ### 최근 90일 (≥ 2026-02-18)
 
-케이스 71 건.
+케이스 72 건.
 

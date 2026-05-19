@@ -43,7 +43,7 @@ ROOT = Path(__file__).resolve().parent.parent
 STATE_DIR = ROOT / "output" / "poll_state"
 COLLECTED_DIR = ROOT / "output" / "collected"
 
-_STABLE_ID_RE = re.compile(r"^[\w\-./:%]{1,64}$")
+_STABLE_ID_RE = re.compile(r"^[\w\-./:%]{1,200}$")  # generate/validate.py:_STABLE_ID_RE 와 동기 — URL-slug-as-id 수용.
 # strategy == "handwritten" 이면 adapter 이름을 보고 결정. 여기 들어있는 어댑터만 chromium sem.
 _CHROMIUM_HANDWRITTEN = {"ArcaLiveAdapter"}
 

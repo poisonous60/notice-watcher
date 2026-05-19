@@ -19,7 +19,8 @@ from engine import make_adapter, NoticePost
 from engine.tracing import current_trace
 
 
-_STABLE_ID_RE = re.compile(r"^[\w\-./:%]{1,64}$")  # 공백 없는 정수/문자열 ID. 'title with spaces' 같은 실수 차단.
+_STABLE_ID_RE = re.compile(r"^[\w\-./:%]{1,200}$")  # 공백 없는 정수/문자열 ID. 'title with spaces' 같은 실수 차단.
+# 200 cap = 메이저 뉴스미디어의 date+title-slug URL path 패턴 수용 (CNN/NYT/WaPo/Reuters 류, ≤130자 관측). 64 cap 은 URL-slug-as-id 정상 케이스를 차단했다.
 
 
 @dataclass

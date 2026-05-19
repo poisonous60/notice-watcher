@@ -1,0 +1,162 @@
+{
+  "version": 1,
+  "site": "edition.cnn.com",
+  "board": "world",
+  "strategy": "playwright_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9",
+    "Referer": "https://edition.cnn.com/world",
+    "Origin": "https://edition.cnn.com"
+  },
+  "timeout": 15,
+  "list": {
+    "url_template": "https://edition.cnn.com/world",
+    "pagination": {
+      "kind": "query_param",
+      "page_param": "page"
+    },
+    "row_selector": "ul.container__field-links > li.card[data-open-link], div.zone[data-link-type='article']",
+    "row_required_selector": "a[href], [data-open-link]",
+    "exclude_selector": "li.card[data-link-type='video']",
+    "include_notices": true,
+    "wait_selector": "ul.container__field-links, div.zone[data-link-type='article']",
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": ":self",
+          "attr": "data-open-link",
+          "transform": [
+            [
+              "strip",
+              "/"
+            ],
+            [
+              "strip_query_fragment"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": ".container__headline-text, .zone__headline-text, h2, h3",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        },
+        {
+          "from": "css",
+          "selector": "a[href]",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": ":self",
+          "attr": "data-open-link",
+          "transform": [
+            [
+              "urljoin",
+              "https://edition.cnn.com"
+            ],
+            [
+              "strip_query_fragment"
+            ]
+          ]
+        },
+        {
+          "from": "attr",
+          "selector": "a[href]",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://edition.cnn.com"
+            ],
+            [
+              "strip_query_fragment"
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": ".container__description, .container__dek, .zone__summary",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "cover_image": [
+        {
+          "from": "css",
+          "selector": "img",
+          "attr": "src",
+          "transform": [
+            [
+              "urljoin",
+              "https://edition.cnn.com"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "div.l-container, div.article__content, main article, section[data-page-type='video']",
+        "html": true
+      }
+    ],
+    "wait_selector": "main article, section[data-page-type='video']",
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "h1, .headline__text, .pg-headline",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "meta[property='article:published_time'], meta[name='pubdate'], time[datetime]",
+          "attr": "content",
+          "transform": [
+            [
+              "default",
+              ""
+            ],
+            [
+              "iso8601"
+            ]
+          ]
+        }
+      ]
+    }
+  }
+}
