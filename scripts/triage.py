@@ -387,6 +387,182 @@ def cmd_show(slug: str) -> int:
     return 0
 
 
+def cmd_post_fix_cleanup(execute: bool = False, host: Optional[str] = None) -> int:
+    """영구 게이트 박은 후 N100 의 옛 FAILED.json 정리.
+
+    default = dry-run: dev 박스 snapshot artifact 로 *순수 시뮬레이션* (write X). 각 FAILED 가
+    게이트로 잡힐지 예측만.
+
+    --execute: N100 ssh + 각 FAILED 의 url 에 대해 `register.py --reuse-probe --gate-only` 호출.
+      rc=2/3 = 게이트 잡힘 (REJECTED + cleanup 자동) | rc=6 = no gate match (수동 작업 필요)
+      rc=7 = artifact 없음 (probe 새 실행 권장) | 그 외 = error
+
+    ssh 실패 시: per-slug 'ssh_error' 표시 + N100 큐 변경 X. 다른 slug 들 계속 시도.
+    """
+    target_host = host or DEPLOY_HOST
+    target_path = DEPLOY_PATH
+
+    if execute:
+        # N100 ssh 로 실행 — 실제 register --gate-only 호출.
+        return _post_fix_cleanup_execute(target_host, target_path)
+    else:
+        # dry-run — dev 박스 snapshot artifact 로 순수 시뮬레이션 (write X).
+        return _post_fix_cleanup_dry_run()
+
+
+def _post_fix_cleanup_dry_run() -> int:
+    """dry-run — dev 박스 snapshot artifact 시뮬. write X."""
+    slugs = _failed_slugs()
+    if not slugs:
+        print("[post-fix-cleanup] dry-run: 로컬에 FAILED.json 없음.")
+        print("  먼저 `python scripts/triage.py pull` 로 N100 큐 가져오기.")
+        return 0
+    print(f"[post-fix-cleanup] dry-run — {len(slugs)} slug 시뮬레이션 (write X, ssh X):\n")
+    sys.path.insert(0, str(ROOT))
+    try:
+        from engine.digest import build_digest  # noqa: PLC0415
+        from scripts.register import (  # noqa: PLC0415
+            _policy_check, _single_article_nav_only_check,
+            _meta_article_diverging_check, _multi_host_hub_check,
+            _root_marketing_homepage_check, _board_shape_check,
+        )
+    except Exception as e:  # noqa: BLE001
+        print(f"[post-fix-cleanup] dry-run 모듈 로드 실패: {e}", file=sys.stderr)
+        return 2
+
+    rows: list[tuple[str, str, str, str]] = []  # (slug, rc, gate, hint)
+    for slug in slugs:
+        d = _load_failed(slug)
+        url = (d.get("url") or "").strip()
+        if not url:
+            rows.append((slug, "?", "no_url", "FAILED.json 에 url 없음"))
+            continue
+        pd = PROBE_DIR / slug
+        if not (pd.exists() and (pd / "diagnosis.json").exists()):
+            rows.append((slug, "7", "no_artifact", f"probe artifact 없음: {pd}"))
+            continue
+        try:
+            digest = build_digest(slug=slug, url=url)
+        except Exception as e:  # noqa: BLE001
+            rows.append((slug, "?", "digest_err", f"{type(e).__name__}: {str(e)[:60]}"))
+            continue
+        # 게이트 chain — register.py main() 의 순서 그대로. write X 의 순수 read.
+        ok, msgs = _policy_check(digest, url)
+        if not ok:
+            rows.append((slug, "2", "policy", "; ".join(msgs)[:80]))
+            continue
+        ok, msg = _single_article_nav_only_check(digest)
+        if not ok:
+            rows.append((slug, "3", "nav_only", msg[:80]))
+            continue
+        ok, msg = _meta_article_diverging_check(digest, url)
+        if not ok:
+            rows.append((slug, "3", "meta_diverging", msg[:80]))
+            continue
+        ok, msg = _multi_host_hub_check(digest, url)
+        if not ok:
+            rows.append((slug, "3", "multi_host_hub", msg[:80]))
+            continue
+        ok, msg = _root_marketing_homepage_check(digest, url)
+        if not ok:
+            rows.append((slug, "3", "root_marketing", msg[:80]))
+            continue
+        ok, msg = _board_shape_check(digest, url)
+        if not ok:
+            rows.append((slug, "3", "board_shape", msg[:80]))
+            continue
+        rows.append((slug, "6", "no_match", "수동 작업 필요 (손-config 또는 새 게이트)"))
+
+    # 결과 표
+    w_slug = max((len(r[0]) for r in rows), default=4)
+    print(f"{'slug':<{w_slug}}  rc  gate            hint")
+    for slug, rc, gate, hint in rows:
+        print(f"{slug:<{w_slug}}  {rc:<2}  {gate:<14}  {hint}")
+    # summary
+    counts: dict[str, int] = {}
+    for _, rc, _, _ in rows:
+        counts[rc] = counts.get(rc, 0) + 1
+    print(f"\n[post-fix-cleanup] dry-run summary: " + ", ".join(f"rc={rc} {n}" for rc, n in sorted(counts.items())))
+    print(f"\n  rc=2/3 = 게이트 잡힘 — `--execute` 호출 시 N100 cleanup 자동")
+    print(f"  rc=6   = no gate match — 수동 작업 필요 (손-config 또는 새 게이트)")
+    print(f"  rc=7   = artifact 없음 — probe 새 실행 권장 (scripts/probe.py)")
+    print(f"\n  실행: python scripts/triage.py post-fix-cleanup --execute")
+    return 0
+
+
+def _post_fix_cleanup_execute(host: str, path: str) -> int:
+    """N100 ssh + register --gate-only per slug."""
+    # N100 의 FAILED 목록 조회
+    rc, out = _run(["ssh", host, f"ls {path}/output/poll_state/*FAILED.json 2>/dev/null"])
+    if rc != 0 and not out.strip():
+        print(f"[post-fix-cleanup --execute] N100 에 FAILED.json 없음.")
+        return 0
+    if rc != 0:
+        print(f"[post-fix-cleanup --execute] ssh 실패 (rc={rc}): {out[:200]}", file=sys.stderr)
+        print(f"  Tailscale 확인: tailscale status — `n100-noticewatcher` 보이는지. 운영 메모 §1~2.", file=sys.stderr)
+        return 2
+    n100_failed = [Path(p.strip()).name[:-len(_FAILED_SUFFIX)]
+                   for p in out.strip().splitlines() if p.strip().endswith(_FAILED_SUFFIX)]
+    if not n100_failed:
+        print(f"[post-fix-cleanup --execute] N100 FAILED.json 0건.")
+        return 0
+    print(f"[post-fix-cleanup --execute] N100 — {len(n100_failed)} slug 처리 시작:\n")
+    rows: list[tuple[str, str, str]] = []  # (slug, rc, msg)
+    for slug in sorted(n100_failed):
+        # N100 의 FAILED.json 에서 url 추출
+        rc_get, out_get = _run(["ssh", host, f"cat {path}/output/poll_state/{slug}{_FAILED_SUFFIX}"])
+        if rc_get != 0:
+            rows.append((slug, "ssh_error", f"FAILED.json read 실패 (rc={rc_get})"))
+            continue
+        try:
+            d = json.loads(out_get)
+            url = (d.get("url") or "").strip()
+        except json.JSONDecodeError as e:
+            rows.append((slug, "json_err", f"FAILED.json parse 실패: {e}"))
+            continue
+        if not url:
+            rows.append((slug, "no_url", "FAILED.json 에 url 없음"))
+            continue
+        # register --gate-only 호출
+        cmd = ["ssh", host,
+               f"cd {path} && .venv/bin/python scripts/register.py --reuse-probe --gate-only {_shell_quote(url)}"]
+        rc_reg, out_reg = _run(cmd)
+        # 마지막 의미있는 줄 = rc 메시지 또는 게이트 사유
+        last_line = ""
+        for line in reversed(out_reg.splitlines()):
+            s = line.strip()
+            if s:
+                last_line = s[:80]
+                break
+        rows.append((slug, str(rc_reg), last_line))
+
+    # 결과 표
+    w_slug = max((len(r[0]) for r in rows), default=4)
+    print(f"{'slug':<{w_slug}}  rc  last_line")
+    for slug, rc, msg in rows:
+        print(f"{slug:<{w_slug}}  {rc:<2}  {msg}")
+    # summary
+    counts: dict[str, int] = {}
+    for _, rc, _ in rows:
+        counts[rc] = counts.get(rc, 0) + 1
+    print(f"\n[post-fix-cleanup --execute] summary: " + ", ".join(f"rc={rc} {n}" for rc, n in sorted(counts.items())))
+    n_cleaned = counts.get("2", 0) + counts.get("3", 0)
+    n_manual = counts.get("6", 0)
+    n_no_artifact = counts.get("7", 0)
+    if n_cleaned:
+        print(f"  ✅ {n_cleaned} slug 자동 cleanup (REJECTED + FAILED.json 삭제 + triage_queue prune)")
+    if n_manual:
+        print(f"  ⚠ {n_manual} slug 수동 작업 필요 (손-config 또는 새 게이트)")
+    if n_no_artifact:
+        print(f"  ⚠ {n_no_artifact} slug probe artifact 없음 (probe 새 실행 권장)")
+    return 0
+
+
+def _shell_quote(s: str) -> str:
+    """ssh 통한 single-quote escape — 공백·특수문자 안전."""
+    return "'" + s.replace("'", "'\\''") + "'"
+
+
 def main(argv: list[str]) -> int:
     if not argv or argv[0] in ("-h", "--help", "help"):
         print(__doc__)
@@ -405,7 +581,14 @@ def main(argv: list[str]) -> int:
             print("usage: python scripts/triage.py show <slug>")
             return 2
         return cmd_show(rest[0])
-    print(f"알 수 없는 명령: {cmd!r}  (pull | list | show <slug>)  [--skip-later]")
+    if cmd == "post-fix-cleanup":
+        execute = "--execute" in rest
+        host = None
+        for a in rest:
+            if a.startswith("--host="):
+                host = a.split("=", 1)[1]
+        return cmd_post_fix_cleanup(execute=execute, host=host)
+    print(f"알 수 없는 명령: {cmd!r}  (pull | list | show <slug> | post-fix-cleanup [--execute] [--host=<host>])  [--skip-later]")
     return 2
 
 

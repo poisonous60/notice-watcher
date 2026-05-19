@@ -250,6 +250,13 @@ dynamic family (`recognizer:*`, `[FAIL]:<check>`) 는 추가 필요 X — 자동
    - `requirements.txt` 변경 시 앞에 `.venv/bin/pip install -r requirements.txt &&`.
    - 확인: `register.py --list` 에 slug 가 `registered`. SSH 안 되면 Tailscale 먼저 (`tailscale status` 로 `n100-noticewatcher` 보이는지) → LAN-only 면 콘솔 `ip a` 로 IP 확인 (운영 메모 §1~2).
 
+8b. **post-fix-cleanup** (영구 게이트 박는 변경 *후*) — `python scripts/triage.py post-fix-cleanup --execute` 호출.
+   - **언제**: engine/probe/scripts/register 의 *게이트 로직* 자리 박은 변경 (예: 새 휴리스틱 + `_<gate>_check` + register 게이트 추가). N100 의 옛 FAILED.json 큐가 새 게이트로 자동 cleanup.
+   - **언제 X**: 손-config 변경 (configs/ 만) — 게이트 영향 X.
+   - 동작: N100 ssh + 각 FAILED.json 의 url 에 대해 `register.py --reuse-probe --gate-only` 호출. rc=2/3 = 게이트 잡힘 → 자동 cleanup (REJECTED + FAILED.json 삭제 + triage_queue prune). rc=6 = no gate match → 수동 작업 필요. rc=7 = artifact 없음 → probe 새 실행 권장.
+   - **비용 0 보장** (--gate-only 옵션): probe 새 실행 X · preflight 네트워크 re-probe X · LLM 호출 X. 게이트만 검사.
+   - 먼저 `--execute` 없이 호출 = dry-run (dev 박스 snapshot artifact 시뮬레이션, write X) — 예상 결과 확인 후 `--execute`.
+
 9. (자동) `.FAILED.json`·`triage_queue.jsonl` 의 slug 항목은 `register.py` 가 자동 정리.
 
 10. **vocab_candidates 임계 알림** (ADR 0003) — `python scripts/cases_index.py vocab-trigger --silent-if-empty` 호출. 출력:

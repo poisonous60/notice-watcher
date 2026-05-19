@@ -1232,6 +1232,11 @@ def _main_inner(argv) -> int:
     p.add_argument("--clear-bug", metavar="SLUG",
                    help=".BUG.json 마커 제거 (bug-fix workflow 마지막 step). 다른 인자 무시. "
                         "REMOVED / NOT_FOUND 한 줄 print.")
+    p.add_argument("--gate-only", action="store_true",
+                   help="*strict reuse + 게이트만 검사* — preflight + LLM 호출 모두 skip. "
+                        "비용 0 보장 (probe 새 실행 X · 네트워크 re-probe X · gemini X). "
+                        "rc=2/3 = 게이트 잡힘 (REJECTED + cleanup 그대로) · rc=6 = no gate match · "
+                        "rc=7 = probe artifact 없음. post-fix-cleanup 의 호출 자리.")
     args = p.parse_args(argv)
 
     if args.unlearn:
@@ -1257,6 +1262,18 @@ def _main_inner(argv) -> int:
 
     if not args.url and not args.slug and not args.config:
         p.error("url / --slug / --config / --list 중 하나 필요")
+
+    # --- --gate-only: strict reuse + 게이트만 검사 + LLM/preflight skip ---
+    if args.gate_only:
+        if args.config:
+            p.error("--gate-only 와 --config 동시 사용 X")
+        args.reuse_probe = True   # strict reuse — probe 새 실행 X (artifact 없으면 rc=7)
+        # probe artifact 검사 (slug 결정 후)
+        _slug_check = args.slug or url_to_slug(args.url or "")
+        _probe_dir = ROOT / "output" / "probe" / _slug_check
+        if not (_probe_dir.exists() and (_probe_dir / "diagnosis.json").exists()):
+            print(f"[register --gate-only] probe artifact 없음: {_probe_dir}. skip.", file=sys.stderr)
+            return 7
 
     # --- --config 모드: 이미 작성된 config 를 그대로 등록 (probe/gemini 생략) ---
     if args.config:
@@ -1307,13 +1324,18 @@ def _main_inner(argv) -> int:
                     print(f"[register] ⚠ REJECTED 마커 저장 실패: {e}", file=sys.stderr)
                 _prune_triage_queue(slug)
                 return 3
-            tr = current_trace()
-            print("[PHASE] recognize", flush=True)
-            with tr.span("known_platform_try", attrs={"slug": slug, "url": url}) as sp:
-                rc = _try_known_platform(url, slug, out=args.out, force=args.force)
-                sp.set_attr("matched", rc is not None)
-            if rc is not None:
-                return rc
+            # _try_known_platform 은 *알려진 플랫폼* 으로 보이면 fetch_list (네트워크) + state.json write 한다.
+            # --gate-only 의 비용 0 보장 위해 skip — recognize_reject 만 거치고 게이트 chain 으로 진행.
+            if args.gate_only:
+                print("[register --gate-only] _try_known_platform skip — 네트워크/write 회피.")
+            else:
+                tr = current_trace()
+                print("[PHASE] recognize", flush=True)
+                with tr.span("known_platform_try", attrs={"slug": slug, "url": url}) as sp:
+                    rc = _try_known_platform(url, slug, out=args.out, force=args.force)
+                    sp.set_attr("matched", rc is not None)
+                if rc is not None:
+                    return rc
         out_dir = output_dir(slug)
         if not (args.reuse_probe and out_dir.exists() and (out_dir / "diagnosis.json").exists()):
             _run_probe(url, lite=not args.full_probe)
@@ -1415,6 +1437,12 @@ def _main_inner(argv) -> int:
         except Exception as e:  # noqa: BLE001
             print(f"[register] ⚠ REJECTED 마커 저장 실패 (rc=3): {e}", file=sys.stderr)
         return 3
+
+    # --gate-only: 모든 게이트 통과. preflight (네트워크 re-probe) + LLM 호출 *직전* 종료.
+    # 비용 0 보장 — post-fix-cleanup 의 "수동 작업 필요" 신호.
+    if args.gate_only:
+        print("[register --gate-only] 모든 게이트 통과 — preflight + LLM skip. 손-config 또는 새 게이트 작업 필요.")
+        return 6
 
     # preflight: gemini 부르기 전에 정보 수집을 끝낸다 (옛 escalation 의 "N회 실패 후" 대신 "처음부터").
     #   --article-url 가 있으면 그 글 URL 로 first_article_url 교정 + re-probe + 강한 hint (probe 의 '첫 글' 휴리스틱이

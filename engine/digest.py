@@ -216,6 +216,33 @@ def _hydration_digest(raw_list_html: str) -> dict:
     return out
 
 
+def _backfill_missing_heuristics(list_cands: dict, *, base_url: Optional[str]) -> None:
+    """list_candidates.json 의 누락 휴리스틱 키 자동 보강 — 옛 artifact 호환.
+
+    artifact 파일은 안 건드림. digest 의 list_cands dict 안에만 박음. 호출 자리:
+    `build_digest` 의 list_cands 로드 직후. 입력 = artifact 의 *이미 있는* 키만 (휴리스틱이
+    artifact 재실행 없이 재호출 가능 — html_repeating_patterns 같은 base 키는 옛 artifact 에도 있음).
+
+    미래 같은 자리 휴리스틱 추가 시 이 함수에 한 줄 더. 옛 artifact 자동 호환.
+    """
+    if not isinstance(list_cands, dict) or not base_url:
+        return
+    # root_marketing_homepage — 2026-05-19 추가. 입력: base_url + html_repeating_patterns +
+    # nav_only_same_host + body_empty_likely (모두 옛 artifact 에도 있는 base 키).
+    if "root_marketing_homepage" not in list_cands:
+        try:
+            from probe.extract import root_marketing_homepage  # noqa: PLC0415
+            list_cands["root_marketing_homepage"] = root_marketing_homepage(
+                base_url=base_url,
+                html_candidates=list_cands.get("html_repeating_patterns") or [],
+                nav_only_same_host=list_cands.get("nav_only_same_host"),
+                body_empty_likely=bool(list_cands.get("body_empty_likely") or False),
+            )
+        except Exception:  # noqa: BLE001
+            # 보강 실패 = 그냥 키 없음 (None). 게이트는 안 잡지만 다른 게이트 / LLM 으로 계속.
+            list_cands["root_marketing_homepage"] = None
+
+
 def build_digest(
     *,
     slug: Optional[str] = None,
@@ -246,6 +273,11 @@ def build_digest(
     article_body_apis = _read_json(out_dir / "article_candidates.json")  # register.py 의 글페이지 re-probe 가 씀 (없으면 None)
     click_meta = _read_json(out_dir / "article_click.json") or {}        # probe Phase 9b: 목록에서 글 링크 클릭 → 최종 URL/페이지
     results = diag.get("results") or []
+
+    # 누락 휴리스틱 키 자동 보강 — 옛 artifact 호환 (post-fix-cleanup 의 핵심).
+    # list_candidates.json 의 *기존 키* 만 입력으로 받는 휴리스틱은 artifact 재실행 없이 재호출 가능.
+    # 디스크 X — digest 의 list_cands dict 안에만 박음. 미래 같은 자리 휴리스틱 추가 시 같은 패턴.
+    _backfill_missing_heuristics(list_cands, base_url=diag.get("url") or url)
 
     # 통과한 정적 프리셋의 request 헤더
     static_ok = next((r for r in results if r.get("target") == "list"
