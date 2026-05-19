@@ -100,6 +100,18 @@ def _robots_path_matches(path: str, pattern: str) -> bool:
         return path.startswith(pattern.split("*", 1)[0])
 
 
+def _policy_reject_is_host_wide(verdict: str) -> bool:
+    """policy_check 거부의 scope 가 host-wide 인지. learned_blacklist 학습 결정.
+
+    host-wide (학습 OK): login / BLOCKED / cert_or_dns_broken — 같은 host 의 다른 URL 도 동일 막힘.
+    url-specific (학습 X): target_not_found — 그 URL 만 404, 같은 host 의 다른 board 는 정상.
+
+    2026-05-20 grill-with-docs (4) 결정 + codex 리뷰 후속.
+    """
+    v = (verdict or "").lower()
+    return "target_not_found" not in v
+
+
 def _policy_check(digest: dict, url: str) -> tuple[bool, list[str]]:
     """(등록 가능?, 메시지들). 차단/로그인이면 False. robots Disallow 면 경고만(True 유지)."""
     msgs: list[str] = []
@@ -582,16 +594,19 @@ def _clear_learned_by_id(pat_id: str) -> bool:
     return True
 
 
-def _save_rejected(slug: str, url: str, reason: str, note: Optional[str] = None, *, learn: bool = True) -> Path:
+def _save_rejected(slug: str, url: str, reason: str, note: Optional[str] = None, *, learn: bool = False) -> Path:
     """`.REJECTED.json` 마커. 봇 `is_rejected(slug)`=True 가 되어 `/preview`·`/watch` 가 자동경로
     안 타고 "이전에 거부됨" 메시지로 응답. `is_registered` 와 분리 — REJECTED 는 polling 대상도 아님.
     같은 slug 의 `.FAILED.json` 마커가 있었으면 함께 제거 (REJECTED 가 우선).
 
-    + learn=True (default): 같은 URL 의 host+path_prefix 패턴을 `output/learned_blacklist.json` 에
-      자동 학습 (한 명의 거부 → 모두에게 적용). 이 자동 학습은 atomic write — `output/` 가 없으면 만들어줌.
-    + learn=False: REJECTED 마커만 박고 learned_blacklist 학습 *X*. `recognize_reject` 의
-      `skip_learn=True` 패턴 (보드/article 이 같은 첫 path segment 공유 — nature/iln-ieee/jobplanet 등)
-      처리용 — path_prefix(=첫 segment) 차단이 보드 URL 까지 막는 걸 회피.
+    learn 정책 (2026-05-20 grill-with-docs (4) 결정):
+    + default `learn=False` — REJECTED 마커만 박고 learned_blacklist 학습 X.
+      대다수 거부 사유 (board_shape / nav_only / meta_diverging / multi_host_hub /
+      root_marketing_homepage / recognize_reject 등) 는 *board-specific* — 같은 host 의 다른 board
+      URL 은 정상 가능. 첫 path segment 자동 학습은 cross-pollution false positive 가 크다.
+    + `learn=True` — *host-wide* 거부 사유에만 명시. 현재 단 한 곳: `_policy_check` 의
+      `LOGIN_REQUIRED` / `BLOCKED_*` (host 전체 로그인 요구 / 차단). 같은 host 의 다른 URL 도 어차피
+      막히므로 path_prefix preemptive 차단으로 LLM 비용 절약 가치 있음.
 
     `slug` 는 `[A-Za-z0-9._%-]+` 만 (path traversal 방어) — admin/스크립트 외 호출 없지만 보수적으로.
     """
@@ -769,19 +784,18 @@ def _prune_triage_queue(slug: str) -> None:
 
 
 def _save_failed(slug: str, url: str, reason: str, last_config, last_feedback: str) -> Path:
-    """`.FAILED.json` 마커. gemini 자동 등록 실패 (triage 큐 진입). 자동 패턴 학습도 함께 박음 —
-    같은 host+path_prefix 의 다음 시도는 url_gate stage 2 에서 즉시 거부 (probe skip)."""
+    """`.FAILED.json` 마커. gemini 자동 등록 실패 (triage 큐 진입).
+
+    자동 패턴 학습 (`_learn_pattern`) **호출 X** — 2026-05-20 grill-with-docs (4) 결정.
+    gen_fail 은 *board-specific* (그 board 의 content 가 LLM 추출 실패) — 같은 host 의 다른 board
+    URL 은 정상 가능. host+path_prefix 자동 학습은 cross-pollution false positive 만 키움.
+    같은 slug 재시도 차단은 marker (`is_rejected(slug)`) 가 함."""
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     p = STATE_DIR / f"{slug}.FAILED.json"
     p.write_text(json.dumps({
         "slug": slug, "url": url, "failed_at": _now_iso(),
         "reason": reason, "last_config": last_config, "last_feedback": last_feedback,
     }, ensure_ascii=False, indent=2), encoding="utf-8")
-    # 자동 패턴 학습 — 어떤 실패 경로든 한 번 떨어지면 같은 패턴 다음 시도는 probe 안 돌게.
-    try:
-        _learn_pattern(url, f"register failed: {reason}", slug=slug)
-    except Exception as e:  # noqa: BLE001
-        print(f"[register] ⚠ learned_blacklist 학습 실패 — FAILED 마커는 박힘: {e}", file=sys.stderr)
     return p
 
 
@@ -1319,7 +1333,10 @@ def _main_inner(argv) -> int:
                 print(f"[register] ❌ 등록 거부 — {reason}")
                 print("[register] note: 게시판/공지 목록 페이지의 URL 을 주세요. 한 글 페이지의 in-text 참고 링크는 폴링 대상 아님.")
                 try:
-                    _save_rejected(slug, url, reason, note=f"recognizer={name} fast-path", learn=not skip_learn)
+                    # learn=False — recognize_reject 는 *article-page 호스트* 식별 (wiki/Britannica/nature 류).
+                    # 그 host 의 *board URL* (예: wiki Special:RecentChanges) 은 정상 — board-specific 거부.
+                    # 2026-05-20 (4) 결정: article-page reject 학습 X. `skip_learn` 파라미터는 vestigial (legacy).
+                    _save_rejected(slug, url, reason, note=f"recognizer={name} fast-path", learn=False)
                 except Exception as e:  # noqa: BLE001
                     print(f"[register] ⚠ REJECTED 마커 저장 실패: {e}", file=sys.stderr)
                 _prune_triage_queue(slug)
@@ -1352,13 +1369,17 @@ def _main_inner(argv) -> int:
         print(f"[register] {m}")
     if not ok_policy:
         print("[register] ❌ 등록 거부 (위 사유).")
-        # policy 거부 = LOGIN_REQUIRED / BLOCKED. 같은 host+path_prefix 재시도해도 똑같이 막힘.
-        # `.REJECTED.json` 마커 박음 (worker 의 is_rejected(slug) 가드가 same-slug 2nd 잡 즉시 거부)
-        # + _learn_pattern 자동 호출 (host+path_prefix 학습, url_gate 단에서 차단). learn=True 가 default.
+        # policy 거부의 *scope* 는 verdict 코드별로 갈림. 2026-05-20 (4) 결정 + codex 리뷰:
+        #   - host-wide (학습 OK)  = login / BLOCKED / cert_or_dns_broken — 같은 host 다른 URL 도 동일 막힘.
+        #   - url-specific (학습 X) = target_not_found — URL 의 글이 사라졌을 뿐, 같은 host 의 다른
+        #     board URL 은 정상 접근 가능. host+path_prefix 학습 시 sibling false-positive.
+        verdict = (digest.get("verdict") or "").lower()
+        host_wide = _policy_reject_is_host_wide(verdict)
         try:
             _save_rejected(slug, url,
                            reason=f"policy_check 거부: {'; '.join(msgs)[:200]}",
-                           note="policy_check rc=2 (BLOCKED/LOGIN_REQUIRED)")
+                           note=f"policy_check rc=2 verdict={verdict!r}",
+                           learn=host_wide)
         except Exception as e:  # noqa: BLE001
             print(f"[register] ⚠ REJECTED 마커 저장 실패 (rc=2): {e}", file=sys.stderr)
         return 2
@@ -1372,10 +1393,11 @@ def _main_inner(argv) -> int:
         print("[register] ❌ 등록 거부 — 단일 article (nav-only same-host).")
         # manual `register.py "<url>"` 직호출 경로에서도 REJECTED 마커 박힘 (codex 발견: 옛 코드는 _learn_pattern
         # 만 호출 — learned 됐는데 marker 없는 orphan 상태. worker 경로에서만 _save_rejected 가 사후 처리됐음).
-        # learn=True — 호스트 명시 fast-path 못 잡는 unknown host 단일 article. path_prefix 차단 안전.
+        # learn=False — 2026-05-20 (4) 결정: nav_only 는 *board-specific* 거부 (그 article 페이지만), 같은
+        # host 의 *board URL* (`.../board/<id>`) 은 정상. path_prefix 자동 학습은 false-positive 큼.
         try:
             _save_rejected(slug, url, "single_article_nav_only 거부 (nav 안 사이드바 메뉴만 잡힘)",
-                           note="gate: _single_article_nav_only_check", learn=True)
+                           note="gate: _single_article_nav_only_check", learn=False)
         except Exception as e:  # noqa: BLE001
             print(f"[register] ⚠ REJECTED 마커 저장 실패 (rc=3): {e}", file=sys.stderr)
         return 3
@@ -1430,10 +1452,12 @@ def _main_inner(argv) -> int:
         print(f"[register] {board_msg}")
         print("[register] ❌ 등록 거부 — 게시판 형식 아님.")
         # board_shape 거부 = 비-게시판. manual 직호출 경로에서도 REJECTED 마커 박힘 (codex 발견: 옛 코드는
-        # _learn_pattern 만 — learned 됐는데 marker 없는 orphan). learn=True — 호스트 path_prefix 차단 OK.
+        # _learn_pattern 만 — learned 됐는데 marker 없는 orphan).
+        # learn=False — 2026-05-20 (4) 결정: board_shape 거부는 *page-specific* (예: arca 의 채널이 없거나
+        # 빈 페이지여서 거부됐을 때 같은 host 의 다른 채널까지 막으면 false-positive 큼).
         try:
             _save_rejected(slug, url, "board_shape_check 거부 (게시판 형식 아님)",
-                           note="gate: _board_shape_check", learn=True)
+                           note="gate: _board_shape_check", learn=False)
         except Exception as e:  # noqa: BLE001
             print(f"[register] ⚠ REJECTED 마커 저장 실패 (rc=3): {e}", file=sys.stderr)
         return 3

@@ -149,18 +149,60 @@ def run() -> list[tuple[str, bool, str]]:
             cases.append(("clear_by_id_empties", len(_list_learned()) == 0, ""))
             cases.append(("clear_by_id_absent", _clear_learned_by_id("zzzzzzzzzzzz") is False, ""))
 
-            # 10b. _save_failed 학습 hook — gemini/policy 실패 경로도 learned 박힘.
+            # 10b. _save_failed 학습 hook — **2026-05-20 (4) 결정: _save_failed 자동 학습 X**.
+            # gen_fail 은 board-specific (그 board 의 LLM 추출 실패). 같은 host 의 다른 board 영향 X.
             # STATE_DIR 도 redirect 됐으니 .FAILED.json 은 tmp 안에 박힘 (실제 poll_state 오염 X).
             from scripts.register import _save_failed
             _save_failed("host_test_failpath", "https://example-fail.com/board/list?p=1",
                          reason="gemini 생성+검증 3회 실패 (sim)",
                          last_config=None, last_feedback="[FAIL] posts_nonempty: 0건")
             patterns = _list_learned()
-            ok = any(p.get("host_suffix") == "example-fail.com" and p.get("path_prefix") == "/board"
-                     for p in patterns)
-            cases.append(("save_failed_learns_pattern", ok,
+            ok = not any(p.get("host_suffix") == "example-fail.com" for p in patterns)
+            cases.append(("save_failed_does_not_learn", ok,
                           f"after _save_failed, patterns={[(p['host_suffix'], p['path_prefix']) for p in patterns]}"))
             # cleanup learned (STATE_DIR 의 .FAILED.json 은 tmp 안이라 TemporaryDirectory 가 자동 정리)
+            for p in _list_learned():
+                _clear_learned_by_id(p["id"])
+
+            # 10c. _save_rejected default (learn=False) — board-specific 거부 (board_shape /
+            # nav_only 등 다수 경로 default). 학습 X.
+            from scripts.register import _save_rejected
+            _save_rejected("host_test_reject_default", "https://example-reject.com/board/12",
+                           reason="board_shape_check 거부 (게시판 형식 아님)",
+                           note="default learn=False")
+            patterns = _list_learned()
+            ok = not any(p.get("host_suffix") == "example-reject.com" for p in patterns)
+            cases.append(("save_rejected_default_no_learn", ok,
+                          f"patterns={[(p['host_suffix'], p['path_prefix']) for p in patterns]}"))
+            for p in _list_learned():
+                _clear_learned_by_id(p["id"])
+
+            # 10c2. policy reject scope helper — target_not_found 만 url-specific.
+            from scripts.register import _policy_reject_is_host_wide
+            cases.append(("policy_scope_login_host_wide",
+                          _policy_reject_is_host_wide("login_required") is True, ""))
+            cases.append(("policy_scope_blocked_host_wide",
+                          _policy_reject_is_host_wide("blocked_bot") is True, ""))
+            cases.append(("policy_scope_cert_dns_host_wide",
+                          _policy_reject_is_host_wide("cert_or_dns_broken") is True, ""))
+            cases.append(("policy_scope_target_not_found_url_specific",
+                          _policy_reject_is_host_wide("target_not_found") is False,
+                          "URL 의 글이 사라졌을 뿐 — 같은 host 의 다른 URL 은 정상"))
+            cases.append(("policy_scope_empty_verdict_host_wide",
+                          _policy_reject_is_host_wide("") is True,
+                          "verdict 비어있으면 보수적으로 host-wide (BLOCKED fallback path)"))
+
+            # 10d. _save_rejected learn=True opt-in — host-wide reject (policy_check rc=2).
+            # 학습 박혀 url_gate stage 2 에서 같은 host+path_prefix 차단.
+            _save_rejected("host_test_policy_blocked", "https://example-blocked.com/board/99",
+                           reason="policy_check 거부: LOGIN_REQUIRED",
+                           note="host-wide login req",
+                           learn=True)
+            patterns = _list_learned()
+            ok = any(p.get("host_suffix") == "example-blocked.com" and p.get("path_prefix") == "/board"
+                     for p in patterns)
+            cases.append(("save_rejected_learn_true_learns", ok,
+                          f"patterns={[(p['host_suffix'], p['path_prefix']) for p in patterns]}"))
             for p in _list_learned():
                 _clear_learned_by_id(p["id"])
 
@@ -281,6 +323,28 @@ def run() -> list[tuple[str, bool, str]]:
             cases.append(("root_and_path_coexist_multi_root_passes",
                           _reject_check("https://multi-test.example.com/") == "",
                           "multi-test host root 는 학습 X → 통과 (path-specific 만 학습됐음)"))
+
+            # ----- (4) 결정 sibling URL 회귀 — 가장 중요한 회귀 차단 ----- #
+            # 19. arca-style 시나리오: 한 채널 fail → 같은 host 의 다른 채널 *통과*.
+            # _save_failed (학습 X) 가 박혔으니 sibling URL gate 통과해야 함.
+            _save_failed("host_arca_wuthering", "https://arca-test.example.com/b/wuthering",
+                         reason="posts_nonempty 0건 (채널 없음)",
+                         last_config=None, last_feedback="[FAIL] posts_nonempty")
+            url_gate._blacklist_cache = None
+            cases.append(("sibling_unaffected_after_save_failed",
+                          _reject_check("https://arca-test.example.com/b/maplestory") == "",
+                          "wuthering fail 해도 maplestory 통과 — (4) 결정 핵심"))
+            # _save_rejected board-specific (default learn=False) 도 sibling 영향 X
+            _save_rejected("host_arca_nonboard", "https://arca-test.example.com/b/nonexistent",
+                           reason="board_shape_check 거부", note="default learn=False")
+            url_gate._blacklist_cache = None
+            cases.append(("sibling_unaffected_after_save_rejected_board_specific",
+                          _reject_check("https://arca-test.example.com/b/proseka") == "",
+                          "nonexistent 거부해도 proseka 통과 — board-specific"))
+            # 정리
+            for p in _list_learned():
+                _clear_learned_by_id(p["id"])
+            url_gate._blacklist_cache = None
         finally:
             _restore_paths(saved)
 
