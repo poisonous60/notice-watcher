@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "site": "news.blizzard.com",
+  "board": "en-us",
+  "strategy": "httpx_json",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://news.blizzard.com/en-us/"
+  },
+  "timeout": 15,
+  "list": {
+    "url_template": "https://news.blizzard.com/{board}/api/news",
+    "pagination": {"kind": "none"},
+    "page_size_max": 24,
+    "list_path": ["feed", "contentItems"],
+    "fields": {
+      "post_id": [{"from": "json", "path": ["properties", "newsId"]}],
+      "title": [{"from": "json", "path": ["properties", "title"]}],
+      "url": [{"from": "json", "path": ["properties", "newsUrl"]}],
+      "published_at": [{"from": "json", "path": ["properties", "lastUpdated"]}],
+      "author": [{"from": "json", "path": ["properties", "author"]}],
+      "summary": [{"from": "json", "path": ["properties", "summary"]}],
+      "category": [{"from": "json", "path": ["properties", "category"]}]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "body_empty_acceptable": true,
+    "content": [
+      {"from": "css", "selector": "article", "html": true},
+      {"from": "css", "selector": "main", "html": true}
+    ]
+  }
+}
