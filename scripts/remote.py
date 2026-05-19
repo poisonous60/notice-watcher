@@ -34,6 +34,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import shlex
 import subprocess
 import sys
 from typing import Optional
@@ -170,17 +171,17 @@ def cmd_daemon_reload() -> int:
 
 
 def _remote_python_cmd(*args: str) -> str:
-    """`cd $DEPLOY_PATH && .venv/bin/python <args>` 한 줄. args 는 *모두 사전 검증된* 토큰이어야 함.
+    """`cd $DEPLOY_PATH && .venv/bin/python <args>` 한 줄.
 
     venv 의 python 을 명시 사용 — 시스템 python 엔 httpx/discord 등 의존성 없음. systemd 유닛은
     `ExecStart=.venv/bin/python …` 로 떠 있어 문제 없지만 ad-hoc SSH 호출은 `$PATH` 의 system
     python 으로 떨어져 ModuleNotFoundError 가 남.
 
-    quote 안 함 — DEPLOY_PATH 는 모듈 로드 시점에 _DEPLOY_PATH_RE 로 검증되었고, 호출자가 넘긴
-    args 는 _require*() 정규식을 통과한 토큰 (slug/snowflake/base64/`--flag` 형태)이라 shell
-    metachar 가 없다. 임의 사용자 입력을 quote 없이 넘기는 일은 없어야 함.
+    args 는 `shlex.quote` 로 shell-escape — 호출자 regex 가 차단 못한 metachar (예: `_URL_ARG_RE`
+    가 허용하는 `;` `$` `&` `(` `)`) 가 흘러도 안전. DEPLOY_PATH 는 unquoted (tilde 확장 필요).
     """
-    return f"cd {DEPLOY_PATH_RAW} && .venv/bin/python " + " ".join(args)
+    quoted_args = " ".join(shlex.quote(a) for a in args)
+    return f"cd {DEPLOY_PATH_RAW} && .venv/bin/python {quoted_args}"
 
 
 def cmd_poll_now_slug(slugs_csv: str) -> int:
