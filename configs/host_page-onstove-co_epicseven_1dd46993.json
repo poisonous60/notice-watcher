@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "site": "page.onstove.com",
+  "board": "epicseven_e7kr001",
+  "strategy": "httpx_json",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "ko-KR,ko;q=0.9",
+    "Origin": "https://page.onstove.com",
+    "Referer": "https://page.onstove.com/epicseven/kr/list/e7kr001"
+  },
+  "timeout": 15,
+  "list": {
+    "url_template": "https://api.onstove.com/cwms/v3.0/article_group/BOARD/995/article/list?interaction_type_code=LIKE,DISLIKE,COMMENT,VIEW",
+    "pagination": {
+      "kind": "query_param",
+      "page_param": "page",
+      "size_param": "size"
+    },
+    "page_size_max": 15,
+    "success_when": {"path": ["code"], "equals": 0},
+    "list_path": ["value", "list"],
+    "fields": {
+      "post_id": [{"from": "json", "path": ["article_id"]}],
+      "title": [{"from": "json", "path": ["title"]}],
+      "url": [{"from": "template", "value": "https://page.onstove.com/epicseven/kr/view/{post_id}"}],
+      "published_at": [{"from": "json", "path": ["create_datetime"], "transform": [["unixtime_to_iso", "+09:00", "ms"]]}],
+      "author": [{"from": "json", "path": ["user_info", "nickname"]}],
+      "summary": [{"from": "json", "path": ["subtitle"]}],
+      "cover_image": [{"from": "json", "path": ["media_thumbnail_url"]}]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "body_empty_acceptable": true,
+    "content": [
+      {"from": "css", "selector": "article", "html": true},
+      {"from": "css", "selector": "main", "html": true}
+    ]
+  }
+}
