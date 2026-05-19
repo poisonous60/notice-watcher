@@ -228,6 +228,12 @@ def fetch_with_capture(
                     "record_har_content": "attach",
                     "viewport": {"width": 1280, "height": 800},
                     "locale": "ko-KR",
+                    # SW 차단 — daemon chromium 의 shared chromium 안에 다른 사이트(예: hoyolab.com)
+                    # 가 등록한 service_worker 가 attach 시점 race 로 CRBrowser assertion crash
+                    # (microsoft/playwright Service Worker target type 미처리). Node driver 죽고
+                    # subprocess pipe block → 600s timeout. SW 없으면 probe 영향 없음 — RSS/HTML/
+                    # JSON list 다 메인 페이지 응답 확보가 목적.
+                    "service_workers": "block",
                     "user_agent": (
                         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                         "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -471,6 +477,7 @@ def fetch_article_by_click(
                     "record_har_content": "attach",
                     "viewport": {"width": 1280, "height": 800},
                     "locale": "ko-KR",
+                    "service_workers": "block",  # SW assertion crash 차단 — fetch_with_capture 코멘트 참조.
                     "user_agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                                    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"),
                 }

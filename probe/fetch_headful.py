@@ -50,6 +50,7 @@ def ensure_login_and_fetch(
             ctx_kwargs = {
                 "viewport": {"width": 1280, "height": 800},
                 "locale": "ko-KR",
+                "service_workers": "block",  # SW assertion crash 차단 — fetch_headless.py 참조.
             }
             if state_path.exists():
                 ctx_kwargs["storage_state"] = str(state_path)
