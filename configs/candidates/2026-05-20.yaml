@@ -1,0 +1,244 @@
+# 2026-05-20 chunk — grill-with-docs 세션 결과 ~100 게시판 사이트 후보.
+# (헤더는 dashboard add/remove 시 자동 재박음.)
+#
+# 모델: docs/사이트 카탈로그 자동 등록 파이프라인 계획.md §2 (multi-file catalog, monotonic pool).
+# 의도: probe / recognizer / engine 다양 surface 측정. 게시판 + 게시판-아닌 일부 (gate_reject 측정).
+# 이름 가벼움: 파일명 = 박은 날짜.
+
+version: 1
+schema: 2
+entries:
+# --- Korean game community: inven sub-boards ---
+- name: 인벤 — FF14
+  url: https://www.inven.co.kr/board/ff14/4467
+- name: 인벤 — 월드오브워크래프트
+  url: https://www.inven.co.kr/board/wow/4625
+- name: 인벤 — 패스 오브 엑자일
+  url: https://www.inven.co.kr/board/poe/4506
+- name: 인벤 — 원신
+  url: https://www.inven.co.kr/board/genshin/5439
+- name: 인벤 — 스타크래프트
+  url: https://www.inven.co.kr/board/starcraft/3604
+- name: 인벤 — 리그오브레전드
+  url: https://www.inven.co.kr/board/lol/3582
+- name: 인벤 — 던전앤파이터
+  url: https://www.inven.co.kr/board/df/3573
+- name: 인벤 — 디아블로4
+  url: https://www.inven.co.kr/board/diablo4/5797
+# --- DCinside galleries (모바일) ---
+- name: 디시 — 로스트아크 갤
+  url: https://m.dcinside.com/board/lostark
+- name: 디시 — 원신 갤
+  url: https://m.dcinside.com/board/genshin_new1
+- name: 디시 — 메이플스토리 갤
+  url: https://m.dcinside.com/board/maple
+- name: 디시 — 블루아카이브 갤
+  url: https://m.dcinside.com/board/bluearchive
+- name: 디시 — 스타레일 갤
+  url: https://m.dcinside.com/board/star
+- name: 디시 — 명조 갤
+  url: https://m.dcinside.com/board/wuthering
+- name: 디시 — 명일방주 갤
+  url: https://m.dcinside.com/board/arknights
+- name: 디시 — 발로란트 갤
+  url: https://m.dcinside.com/board/valorant
+# --- 아카라이브 채널 ---
+- name: 아카 — 원신 채널
+  url: https://arca.live/b/genshin
+- name: 아카 — 붕괴 3rd 채널
+  url: https://arca.live/b/houkai3rd
+- name: 아카 — 붕괴 스타레일 채널
+  url: https://arca.live/b/hkstarrail
+- name: 아카 — 명조 채널
+  url: https://arca.live/b/wuthering
+- name: 아카 — 로스트아크 채널
+  url: https://arca.live/b/lostark
+- name: 아카 — 메이플스토리 채널
+  url: https://arca.live/b/maplestory
+- name: 아카 — 프로젝트 세카이 채널
+  url: https://arca.live/b/proseka
+- name: 아카 — 블루아카이브 채널
+  url: https://arca.live/b/bluearchive
+# --- 게임사 공식 공지 ---
+- name: 로스트아크 — 공지 (모바일)
+  url: https://m-lostark.game.onstove.com/News/Notice/List
+- name: 로스트아크 — 공지 (PC)
+  url: https://lostark.game.onstove.com/News/Notice/List
+- name: 카카오게임즈 — 공지
+  url: https://gghhrnotice.kakaogames.com/ko/board-list?key=NTC&menu=GENERAL
+- name: 넷마블 — 공지/이벤트
+  url: https://www.netmarble.com/ko/article/list/notice
+- name: 컴투스 — 공지
+  url: https://www.com2us.com/ko/community/notice
+- name: 펄어비스 — 공지
+  url: https://www.pearlabyss.com/ko-kr/news/notice
+- name: 검은사막 모바일 — 공지
+  url: https://www.kr.playblackdesertm.com/ko/notice
+- name: 그랑사가 — 공지
+  url: https://grandsaga.netmarble.com/notice
+- name: 넥슨 포럼 — 로스트아크
+  url: https://forum.nexon.com/lostark-kr/board_list?board=1015
+- name: 넥슨 포럼 — 메이플스토리
+  url: https://forum.nexon.com/maple/board_list?board=1009
+- name: 넥슨 포럼 — 던전앤파이터
+  url: https://forum.nexon.com/df/board_list?board=1012
+# --- 한국 종합 커뮤니티 ---
+- name: 클리앙 — 강좌
+  url: https://www.clien.net/service/board/lecture
+- name: 클리앙 — 사용기
+  url: https://www.clien.net/service/board/use
+- name: 클리앙 — 모바일사용기
+  url: https://www.clien.net/service/board/mobile_use
+- name: 뽐뿌 — 자유게시판
+  url: https://www.ppomppu.co.kr/zboard/zboard.php?id=ppomppu
+- name: 뽐뿌 — 핸드폰
+  url: https://www.ppomppu.co.kr/zboard/zboard.php?id=phone
+- name: 뽐뿌 — 컴퓨터
+  url: https://www.ppomppu.co.kr/zboard/zboard.php?id=computer
+- name: 오늘의유머 — BestOfBest
+  url: https://www.todayhumor.co.kr/board/list.php?table=bestofbest
+- name: 오늘의유머 — 유머BEST
+  url: https://www.todayhumor.co.kr/board/list.php?table=humorbest
+- name: 82쿡 — 자유게시판
+  url: https://www.82cook.com/entiz/enti.php?bn=15
+- name: FM코리아 — 베스트
+  url: https://www.fmkorea.com/best
+- name: 더쿠 — 핫게시판
+  url: https://theqoo.net/hot
+- name: 인스티즈 — 일상
+  url: https://www.instiz.net/name
+# --- 대학 공지 ---
+- name: 성균관대 — 공지사항
+  url: https://www.skku.edu/skku/campus/skk_comm/notice01.do
+- name: 성균관대 — 학부대학 통합게시판
+  url: https://hakbu.skku.edu/hakbu/community/under_notice.do
+- name: 성균관대 — 소프트웨어학과 공지
+  url: https://sw.skku.edu/sw/notice.do
+- name: 서울대 — 공지사항
+  url: https://www.snu.ac.kr/snunow/snu_notice
+- name: 서울대 — 컴퓨터공학부 공지
+  url: https://cse.snu.ac.kr/department-notices
+- name: KAIST — 공지사항
+  url: https://www.kaist.ac.kr/kr/html/sub05/0501.html
+- name: KAIST — 전산학부 공지
+  url: https://cs.kaist.ac.kr/board/notice
+- name: 연세대 — 학사 공지
+  url: https://www.yonsei.ac.kr/sc/support/notice.jsp
+- name: 고려대 — 일반공지
+  url: https://www.korea.ac.kr/mbshome/mbs/university/subview.do?id=university_010102000000
+- name: UNIST — 공지사항
+  url: https://www.unist.ac.kr/unist-news/notice/
+- name: POSTECH — 공지사항
+  url: https://www.postech.ac.kr/posri-notice/
+# --- International Discourse forums ---
+- name: Python Discuss (Discourse)
+  url: https://discuss.python.org/latest
+- name: Discourse Meta — Latest
+  url: https://meta.discourse.org/latest
+- name: Django Forum
+  url: https://forum.djangoproject.com/latest
+- name: Rust Users Forum
+  url: https://users.rust-lang.org/latest
+- name: Rust Internals Forum
+  url: https://internals.rust-lang.org/latest
+- name: Elastic Discuss
+  url: https://discuss.elastic.co/latest
+- name: Godot Forum
+  url: https://forum.godotengine.org/latest
+- name: Bubble Forum
+  url: https://forum.bubble.io/latest
+- name: KNIME Forum
+  url: https://forum.knime.com/latest
+- name: freeCodeCamp Forum
+  url: https://forum.freecodecamp.org/latest
+- name: JUCE Forum
+  url: https://forum.juce.com/latest
+- name: HuggingFace Forum
+  url: https://discuss.huggingface.co/latest
+- name: Streamlit Forum
+  url: https://discuss.streamlit.io/latest
+# --- 위키 RecentChanges (MediaWiki 패턴) ---
+- name: English Wikipedia — RecentChanges
+  url: https://en.wikipedia.org/wiki/Special:RecentChanges
+- name: 한국어 위키백과 — 최근 바뀜
+  url: https://ko.wikipedia.org/wiki/%ED%8A%B9%EC%88%98:%EC%B5%9C%EA%B7%BC%EB%B0%94%EB%80%9C
+- name: Japanese Wikipedia — RecentChanges
+  url: https://ja.wikipedia.org/wiki/%E7%89%B9%E5%88%A5:%E6%9C%80%E8%BF%91%E3%81%AE%E6%9B%B4%E6%96%B0
+- name: Wikitionary EN — RecentChanges
+  url: https://en.wiktionary.org/wiki/Special:RecentChanges
+- name: Genshin Impact Fandom — Recent Changes
+  url: https://genshin-impact.fandom.com/wiki/Special:RecentChanges
+- name: MapleStory Fandom — Recent Changes
+  url: https://maplestory.fandom.com/wiki/Special:RecentChanges
+- name: Honkai Star Rail Fandom — Recent Changes
+  url: https://honkai-star-rail.fandom.com/wiki/Special:RecentChanges
+# --- GitHub releases (changelog 패턴) ---
+- name: GitHub — microsoft/vscode releases
+  url: https://github.com/microsoft/vscode/releases
+- name: GitHub — python/cpython releases
+  url: https://github.com/python/cpython/releases
+- name: GitHub — nodejs/node releases
+  url: https://github.com/nodejs/node/releases
+- name: GitHub — rust-lang/rust releases
+  url: https://github.com/rust-lang/rust/releases
+- name: GitHub — golang/go releases
+  url: https://github.com/golang/go/releases
+- name: GitHub — kubernetes/kubernetes releases
+  url: https://github.com/kubernetes/kubernetes/releases
+- name: GitHub — anthropics/claude-code releases
+  url: https://github.com/anthropics/claude-code/releases
+# --- Reddit subs (게임 + general) ---
+- name: Reddit — r/Maplestory
+  url: https://www.reddit.com/r/Maplestory/
+- name: Reddit — r/lostarkgame
+  url: https://www.reddit.com/r/lostarkgame/
+- name: Reddit — r/WutheringWaves
+  url: https://www.reddit.com/r/WutheringWaves/
+- name: Reddit — r/Eldenring
+  url: https://www.reddit.com/r/Eldenring/
+- name: Reddit — r/leagueoflegends
+  url: https://www.reddit.com/r/leagueoflegends/
+- name: Reddit — r/factorio
+  url: https://www.reddit.com/r/factorio/
+- name: Reddit — r/programming
+  url: https://www.reddit.com/r/programming/
+- name: Reddit — r/MachineLearning
+  url: https://www.reddit.com/r/MachineLearning/
+# --- Tech blog / RSS ---
+- name: Hacker News RSS
+  url: https://news.ycombinator.com/rss
+- name: Lobsters RSS
+  url: https://lobste.rs/rss
+- name: The Verge RSS
+  url: https://www.theverge.com/rss/index.xml
+- name: TechCrunch RSS
+  url: https://techcrunch.com/feed/
+- name: Python Insider Blog
+  url: https://blog.python.org/feeds/posts/default
+- name: Rust Blog RSS
+  url: https://blog.rust-lang.org/feed.xml
+- name: Kotlin Blog RSS
+  url: https://kotlinlang.org/feed.xml
+# --- 게임 뉴스 매체 ---
+- name: 게임메카 — 뉴스
+  url: https://www.gamemeca.com/news.php
+- name: 게임톡 — 메인
+  url: https://www.gametoc.co.kr/
+- name: 인벤 뉴스 — 메인
+  url: https://www.inven.co.kr/webzine/news/
+# --- 정부/공공 게시판 ---
+- name: 한국게임산업협회 (K-GAMES) — 공지
+  url: https://kgames.or.kr/board/notice/list
+- name: 한국콘텐츠진흥원 — 공지
+  url: https://www.kocca.kr/kocca/bbs/list/B0158948.do
+# --- 의도적 negative test (게시판-아닌, gate_reject 측정) ---
+- name: (네거티브) Apple — Homepage
+  url: https://www.apple.com/
+- name: (네거티브) Google — Homepage
+  url: https://www.google.com/
+- name: (네거티브) Airbnb — Homepage
+  url: https://www.airbnb.com/
+- name: (네거티브) GitLab — About 페이지
+  url: https://about.gitlab.com/
+- name: (네거티브) Wikipedia — Main Page
+  url: https://en.wikipedia.org/wiki/Main_Page
