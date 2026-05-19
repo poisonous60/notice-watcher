@@ -4,7 +4,7 @@
 <h1>🌐 사이트 카탈로그 — 목록</h1>
 
 {% if jobs_db_error %}
-<article style="border-left:4px solid #c0392b;padding:0.5rem 1rem;background:#fde8e6;color:#7c1f15;margin:1rem 0">
+<article style="border-left:4px solid var(--nw-err-fg);padding:0.5rem 1rem;background:var(--nw-err-bg);color:var(--nw-err-fg);margin:1rem 0">
   <strong>⚠ snapshot bot.sqlite3 jobs 읽기 실패</strong><br>{{ jobs_db_error }}
 </article>
 {% endif %}
@@ -51,8 +51,8 @@
           <small class="muted">{{ c.path }}</small></td>
       <td>{{ c.total }}</td>
       <td>
-        <div style="background:#eee;border-radius:4px;height:0.6rem;width:6rem;position:relative;overflow:hidden">
-          <div style="background:#27ae60;height:100%;width:{{ c.progress_pct }}%"></div>
+        <div style="background:var(--nw-surface-2);border-radius:4px;height:0.6rem;width:6rem;position:relative;overflow:hidden">
+          <div style="background:var(--nw-ok-fg);height:100%;width:{{ c.progress_pct }}%"></div>
         </div>
         <small class="muted">{{ c.progress_pct }}%</small>
       </td>

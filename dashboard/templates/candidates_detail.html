@@ -10,13 +10,13 @@
 </p>
 
 {% if jobs_db_error %}
-<article style="border-left:4px solid #c0392b;padding:0.5rem 1rem;background:#fde8e6;color:#7c1f15;margin:1rem 0">
+<article style="border-left:4px solid var(--nw-err-fg);padding:0.5rem 1rem;background:var(--nw-err-bg);color:var(--nw-err-fg);margin:1rem 0">
   <strong>⚠ snapshot bot.sqlite3 jobs 읽기 실패</strong><br>{{ jobs_db_error }}
 </article>
 {% endif %}
 
 {# ---------- batch run hint (button X — Claude/CLI) ---------- #}
-<article style="border-left:3px solid #3498db;padding:0.4rem 0.8rem;background:#eaf4fb;margin:0.5rem 0;font-size:0.85rem">
+<article style="border-left:3px solid var(--nw-primary);padding:0.4rem 0.8rem;margin:0.5rem 0;font-size:0.85rem">
   batch run 은 Claude/CLI 에서: <code>python scripts/remote.py batch-register --catalog={{ catalog_name }}</code><br>
   실패 재시도: <code>--catalog={{ catalog_name }} --failed</code> · 특정 rc: <code>--catalog={{ catalog_name }} --rc=1,-99</code>
 </article>
