@@ -57,18 +57,18 @@
       <header class="topbar">
         <div class="snap">
           <span class="muted">snapshot:</span> <code>{{ snapshot_ts }}</code>
+          {% if pull_result %}
+            {% if pull_result.ok %}
+              <span class="badge ok" title="Preflight pull 완료 — TTL 내 재방문은 즉시">✓ 최신</span>
+            {% else %}
+              <span class="badge error"
+                    title="{{ pull_result.error or pull_result.output or 'pull 실패' }}">
+                ⚠ Pull 실패 — stale 데이터
+              </span>
+            {% endif %}
+          {% endif %}
         </div>
-        <span id="auto-pull"
-              hx-post="/actions/pull"
-              hx-trigger="load once"
-              hx-target="#pull-result"
-              hx-swap="innerHTML"
-              hx-indicator="#pull-spinner"></span>
-        <span class="muted">🔄 자동 Pull</span>
-        <span id="pull-spinner" class="htmx-indicator">…진행중</span>
       </header>
-
-      <div id="pull-result" aria-live="polite"></div>
 
       {% block body %}{% endblock %}
     </main>

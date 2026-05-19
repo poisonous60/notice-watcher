@@ -1,12 +1,21 @@
-"""subprocess·async 액션 — Pull, fetch_sim.
+"""subprocess·async 액션 — Snapshot fresh 보장, fetch_sim.
 
-Pull 은 scripts/inspect_subs.py pull 을 그대로 호출 (구현 중복 회피). fetch_sim 은 inspector.fetch_sim 을
-직접 await — adapter 가 비동기라 같은 event loop 에서 돌리는 게 안전.
+ensure_fresh_snapshot 가 핵심: dashboard 의 HTTP middleware (`app.py::_preflight_pull`) 가
+페이지 GET 요청 전에 호출. 룰:
+  - in-flight pull 있으면 같은 task 를 await — 중복 SSH 회피 + freshness 이벤트 유실 없음
+  - 마지막 pull 완료 후 TTL (기본 60초) 이내면 skip
+  - 아니면 새 pull task 시작 후 await
+
+기존 "task 진행 중 = 요청 버림" 정책은 navigation 흐름에서 사용자가 stale 데이터를 보는
+원인이었음 (Codex 분석 결과). 이번에 "task 진행 중 = 완료 관찰" 로 바꿈.
+
+fetch_sim 은 inspector.fetch_sim 을 직접 await — adapter 가 비동기라 같은 event loop 안전.
 """
 from __future__ import annotations
 
 import asyncio
 import sys
+import time
 from typing import Any, Optional
 
 from bot import inspector
@@ -14,18 +23,14 @@ from dashboard.shell import async_run
 from dashboard.state import snapshot_paths, ROOT
 
 
-# 자동 Pull (페이지 로드 hx-trigger="load") 이 새로고침마다 발사된다.
-# 진행 중인 Pull 이 있으면 새 요청은 **즉시 버린다** — 큐에 쌓아 처리하면 SSH/scp 가
-# 같은 snapshot 을 N번 덮어써 시간 낭비. asyncio.Lock 으로 직렬화하면 락 대기 큐가 그대로
-# 누적 큐가 되므로 사용 금지. 대신 진행 중 task ref 로 check 한다.
-#
-# check (task is None or task.done()) 와 task 생성/할당 사이에 await 점이 없어야
-# atomic 하게 동작 (asyncio 는 single-threaded — await 없이는 다른 코루틴 진입 불가).
-# 따라서 검사·할당은 모두 동기 구문, await 는 그 뒤 shield 한 번만.
-#
-# 진행 중 handler 가 사용자 새로고침으로 cancel 돼도 subprocess 살아남게 `asyncio.shield`
-# 로 감싼다 (rc=STATUS_CONTROL_C_EXIT/0xC000013A 방지).
 _pull_task: Optional[asyncio.Task[dict[str, Any]]] = None
+# 마지막으로 완료된 pull 의 result 와 완료 시각. TTL skip 경로에서 그대로 반환 — 직전 pull 이
+# 실패였으면 TTL 만료 전엔 계속 실패 결과 노출 (stale snapshot 을 fresh 처럼 보이는 사고 방지).
+# 초기값 ok=False — TTL 조건이 비정상적으로 충족돼서 첫 pull 전에 반환되는 경우에도
+# 사용자가 fresh 라고 오인하지 않도록.
+_last_pull_result: dict[str, Any] = {"ok": False, "skipped": True, "reason": "no_pull_yet"}
+_last_pull_completed_at: float = 0.0
+_PULL_TTL_SEC = 60.0
 
 
 async def _pull_inner() -> dict[str, Any]:
@@ -33,24 +38,58 @@ async def _pull_inner() -> dict[str, Any]:
     return await async_run(cmd)
 
 
-async def run_pull() -> dict[str, Any]:
-    """`python scripts/inspect_subs.py pull` 을 별도 프로세스로 실행. stdout/stderr·rc 캡처해 반환.
+def _on_pull_done(task: asyncio.Task[dict[str, Any]]) -> None:
+    """task 완료(또는 cancel/exception) 시 한 번 발사 — caller fate 와 무관하게 state 갱신.
 
-    UI 흐름: HTMX POST 가 await → 정상 완료·skip 은 app.py 가 204 로 응답해 swap 안 됨.
-    실패(ok=False) 일 때만 `#pull-result` 에 partial 주입. 자동 페이지 갱신 없음 (무한 루프 방지).
-    보통 5~30 초 (SSH + scp). Windows 호환성은 `dashboard.shell.async_run` 이 담당.
+    caller A·B 가 모두 cancel 돼도 task 자체는 `asyncio.shield` 로 살아남아 정상 완료.
+    이 callback 이 그 결과를 _last_pull_result 에 캐시 → 후속 TTL skip 이 stale 안 됨.
+    """
+    global _last_pull_result, _last_pull_completed_at
+    try:
+        _last_pull_result = task.result()
+    except BaseException as e:  # noqa: BLE001
+        _last_pull_result = {
+            "ok": False, "error": f"{type(e).__name__}: {e}", "output": str(e),
+        }
+    _last_pull_completed_at = time.monotonic()
+
+
+async def ensure_fresh_snapshot(*, ttl: float = _PULL_TTL_SEC,
+                                 force: bool = False) -> dict[str, Any]:
+    """Snapshot fresh 보장 후 반환.
+
+    반환 dict 키:
+      ok (bool)        — pull 또는 skip 성공 여부
+      skipped (bool)   — TTL 내라 실제 pull 안 한 경우 True
+      reason (str)     — "within_ttl" / "no_pull_yet" / 없음
+      rc, output       — 실제 pull 한 경우 subprocess 결과
+      trace_id         — async_run 이 trace 활성화 시 부여
+
+    force=True 면 TTL 무시.
+
+    race 처리:
+      - in-flight 검사 ~ task 할당까지 await 없음 → asyncio single-threaded 에서 atomic
+      - caller cancellation 안전: state 갱신은 task done callback 으로 caller 와 분리
+      - pull 실패도 _last_pull_result 에 저장 → TTL skip 시 stale 로 오인 X
     """
     global _pull_task
-    # 아래 check + 할당까지 동기 — 중간에 await 없음 → atomic.
+
+    # in-flight 가 있으면 같은 task 결과를 공유 — 중복 SSH 회피, freshness 유실 없음.
     if _pull_task is not None and not _pull_task.done():
-        return {
-            "ok": True,
-            "rc": 0,
-            "output": "이미 Pull 진행 중 — 이번 요청은 버림. 완료되면 다음 새로고침에 반영.",
-            "skipped": True,
-        }
-    _pull_task = asyncio.create_task(_pull_inner())
-    return await asyncio.shield(_pull_task)
+        return await asyncio.shield(_pull_task)
+
+    if not force and time.monotonic() - _last_pull_completed_at < ttl:
+        # 직전 결과를 그대로 — ok=True/skipped 든 ok=False/error 든 캐시된 진실 그대로 노출.
+        # skipped 표시는 cache hit 임을 알리는 용도 (badge 는 ok 값으로 판단).
+        cached = dict(_last_pull_result)
+        cached["skipped"] = True
+        cached.setdefault("reason", "within_ttl")
+        return cached
+
+    task = asyncio.create_task(_pull_inner())
+    task.add_done_callback(_on_pull_done)
+    _pull_task = task
+    return await asyncio.shield(task)
 
 
 async def run_fetch(slug: str, n: int = 5) -> dict[str, Any]:

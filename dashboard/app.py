@@ -65,6 +65,39 @@ app.mount("/static", StaticFiles(directory=str(HERE / "static")), name="static")
 
 
 # --------------------------------------------------------------------------- #
+# Preflight pull middleware — 페이지 GET 전에 N100 snapshot 을 TTL 기반으로 갱신.
+# Codex 분석(2026-05-19): 기존 "render → async pull → reload" 흐름이 navigation 중에
+# stale 데이터를 보이고 "skipped" 메시지만 띄우는 근본 원인. middleware 가 pull 을 await
+# 한 뒤 라우트가 실행되도록 흐름을 뒤집음.
+# --------------------------------------------------------------------------- #
+@app.middleware("http")
+async def _preflight_pull(request: Request, call_next):
+    """페이지 렌더 전에 snapshot fresh 보장.
+
+    범위: 일반 페이지 GET 만. /static, /actions, /healthz 와 HTMX sub-request 는 skip.
+    HTMX sub-request 는 `HX-Request: true` 헤더로 식별 — 이미 부모 페이지에서 preflight 끝났음.
+
+    실패 시 stale snapshot 으로 fallback + 토픽바에 경고 표시 (`pull_result.ok=False`).
+    """
+    path = request.url.path
+    skip_prefix = ("/static", "/actions", "/healthz")
+    is_page = (
+        request.method == "GET"
+        and not path.startswith(skip_prefix)
+        and request.headers.get("hx-request") != "true"
+    )
+    if is_page:
+        try:
+            request.state.pull_result = await act.ensure_fresh_snapshot()
+        except Exception as e:  # noqa: BLE001
+            request.state.pull_result = {
+                "ok": False,
+                "error": f"{type(e).__name__}: {e}",
+            }
+    return await call_next(request)
+
+
+# --------------------------------------------------------------------------- #
 # DI
 # --------------------------------------------------------------------------- #
 def get_conn():
@@ -94,6 +127,8 @@ def _render(name: str, request: Request, *, status_code: int = 200, **extra: Any
     ctx: dict[str, Any] = {
         "snapshot_ts": state.last_pull_str(),
         "snapshot_present": state.snapshot_exists(),
+        # preflight middleware 가 채움. 페이지 GET 이 아닌 경로(HTMX partial 등) 에선 None.
+        "pull_result": getattr(request.state, "pull_result", None),
     }
     ctx.update(extra)
     return templates.TemplateResponse(request, name, ctx, status_code=status_code)
@@ -879,16 +914,8 @@ async def settings_page(request: Request):
 # --------------------------------------------------------------------------- #
 # Actions (HTMX)
 # --------------------------------------------------------------------------- #
-@app.post("/actions/pull", response_class=HTMLResponse)
-async def actions_pull(request: Request):
-    res = await act.run_pull()
-    # 정상 완료·skip 모두 204 반환 — HTMX 는 204 시 swap 안 함 → #pull-result 그대로 빔.
-    # 실패(ok=False) 일 때만 partial 로 알린다.
-    # HX-Refresh 헤더는 절대 쓰지 않는다 — 자동 Pull (hx-trigger="load") 환경에서
-    # 페이지 reload 가 다시 load 이벤트를 발사해 무한 루프를 만든다.
-    if res.get("ok"):
-        return Response(status_code=204)
-    return _partial("_pull_result.html", request, res=res)
+# 자동 Pull 라우트는 사라짐 — middleware `_preflight_pull` 가 페이지 GET 전에 ensure_fresh_snapshot
+# 으로 처리. 사용자가 force refresh 원하면 단순히 페이지를 다시 GET 하거나 TTL 만료 기다리면 됨.
 
 
 @app.post("/actions/fetch", response_class=HTMLResponse)
