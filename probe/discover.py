@@ -19,10 +19,36 @@ from .headers import preset_h2_chrome_min
 
 _FEED_PATHS = ("/rss", "/feed", "/atom.xml", "/rss.xml", "/feed.xml", "/feeds")
 
+# 입력 URL 자체가 RSS/Atom 피드인 경우 path 매칭. catalog 의
+# `bbs.ruliweb.com/news/board/<id>/rss` / `steamcommunity.com/.../rss/` /
+# `*/feeds/news.xml` / `*.atom` 류 — 기존 `_FEED_PATHS` 는 호스트 *루트* 에서만
+# 관용 경로 시도라 board-별 RSS path 를 못 잡았음. board_shape 게이트의 false-positive
+# 거부 원인 (2026-05-19 catalog batch 분포).
+_FEED_URL_RE = re.compile(
+    r"(?i)(?:/rss/?|/feed/?|/feeds(?:/|$)|\.rss|\.atom|\.xml)(?:[?#]|$)"
+)
+
+
+def _looks_like_feed_url(url: str) -> bool:
+    """입력 URL path 가 RSS/Atom 피드 모양인지 (board_shape gate 우회 + discover_feeds self-include)."""
+    try:
+        path_with_query = urlsplit(url).path + ("?" + urlsplit(url).query if urlsplit(url).query else "")
+    except ValueError:
+        return False
+    return bool(_FEED_URL_RE.search(path_with_query))
+
 
 def discover_feeds(*, page_url: str, page_html: str, out_dir: Path) -> dict:
-    """페이지 head에서 alternate 피드 + 관용 경로 추측."""
+    """페이지 head에서 alternate 피드 + 관용 경로 추측 + 입력 URL 자체 feed 검출."""
     candidates: list[dict] = []
+
+    # 입력 URL 자체가 feed path 면 1st candidate 로 박는다 — `_board_shape_check` 가
+    # feed_candidates 비어있지 않음을 보드 시그널로 인정하므로 게이트 통과 보장.
+    if _looks_like_feed_url(page_url):
+        candidates.append({
+            "source": "input-url-feed-path",
+            "url": page_url,
+        })
 
     soup = BeautifulSoup(page_html or "", "lxml")
     for link in soup.select('link[rel="alternate"]'):
