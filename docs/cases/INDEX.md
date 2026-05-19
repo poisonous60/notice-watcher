@@ -2,11 +2,18 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 58 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 65 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
 | [`infra_wikipedia_learned_blacklist_skip_learn_2026-05-19`](infra_wikipedia_learned_blacklist_skip_learn_2026-05-19.md) | ✅ 일반화 (recognize_reject wikipedia 패턴 skip_learn=True) | 2026-05-19 | F | learned_blacklist_overbroad, shared_path_prefix_board, not_a_board | https://en.wikipedia.org/wiki/Special:RecentChanges?hidebots=1&hidecategorization=1&hideWikibase=1&limit=50&days=1&urlversion=2 |
+| [`infra_ushmm_learned_blacklist_skip_learn_2026-05-19`](infra_ushmm_learned_blacklist_skip_learn_2026-05-19.md) | ✅ 일반화 (USHMM 패턴 skip_learn=True + 모듈 docstring 강화) | 2026-05-19 | F | learned_blacklist_overbroad, shared_path_prefix_board, not_a_board | https://encyclopedia.ushmm.org/content/en |
+| [`host_vimeo-com_root_c6a102cf`](host_vimeo-com_root_c6a102cf.md) | ❌ 자동 등록 실패 (tailwind utility-class explosion → CSS parser malformed). | 2026-05-19 |  | fetch_list_selector_syntax_error, tailwind_arbitrary_value_class, posts_nonempty | https://vimeo.com/ |
+| [`host_reuters-com_root_9c8aa57a`](host_reuters-com_root_9c8aa57a.md) | ❌ 자동 등록 실패 (httpx 401 + playwright 0건 — fingerprint hide 필요). | 2026-05-19 |  | fetch_list_401, fingerprint_hide_required, posts_nonempty | https://www.reuters.com/ |
+| [`host_nationalgeograp_root_2be4a852`](host_nationalgeograp_root_2be4a852.md) | ❌ 자동 등록 실패 (row_selector 가 article/tv/movies mix 잡음). 손 config 또는 prompt 개선 대기. | 2026-05-19 |  | post_id_stable_shape, title_nonempty, article_body_len, row_type_mix | https://www.nationalgeographic.com/ |
+| [`host_investopedia-co_news-4427706_c33346a4`](host_investopedia-co_news-4427706_c33346a4.md) | 🚫 거부 (게시판 형식 아닌 것으로 판정 — candidates_zero / list_url_none). | 2026-05-19 |  | candidates_zero, list_url_none, posts_nonempty, hub_url_not_board | https://www.investopedia.com/news-4427706 |
+| [`host_edition-cnn-com_root_82356c05`](host_edition-cnn-com_root_82356c05.md) | ❌ 자동 등록 실패 (carousel 재사용 + iso8601 mash). 손 config 또는 prompt 개선 대기. | 2026-05-19 |  | post_id_unique, title_nonempty, published_at_iso, carousel_dedup, tile_card_iso_parse | https://edition.cnn.com/ |
+| [`host_bbc-com_news_7e763da2`](host_bbc-com_news_7e763da2.md) | ❌ 자동 등록 실패 (carousel 재사용 — narrow/wide sweet spot 없음). 손 config 또는 prompt 개선 대기. | 2026-05-19 |  | post_id_unique, carousel_dedup, narrow_wide_no_sweet_spot | https://www.bbc.com/news |
 | [`infra_probe_sitemap_discovery_2026-05-18`](infra_probe_sitemap_discovery_2026-05-18.md) | 🏗 인프라 (probe Phase 6 의 sitemap.xml 디스커버리 — docstring 의도 미구현분 채움) | 2026-05-18 | C | posts_nonempty, user_url_not_board_page | (인프라 case — 특정 사이트 X. 트리거 = prior-art 조사 followup-plan Action |
 | [`tistory_leedakyeong_e0e58b0f`](tistory_leedakyeong_e0e58b0f.md) | ✅ 일반화 완료 (Tistory 플랫폼 — known-platform 인식기 + RSS adapter) | 2026-05-17 | F | posts_nonempty, static_vs_headless, feed_candidates, post_id_stable_shape | https://leedakyeong.tistory.com/entry/Python-pandas-tutorial-drop-duplicates-in-pandas |
 | [`infra_worker_rc2_triage_double_record_2026-05-17`](infra_worker_rc2_triage_double_record_2026-05-17.md) | 🏗 인프라 (bot/worker rc=2 분기 append_triage_queue 중복 호출 제거) | 2026-05-17 | F | triage_queue_dashboard_mismatch, rc2_double_record, queue_noise | (인프라 case — 특정 사이트 X. 트리거 = triage queue 잡음 진단) |
@@ -71,7 +78,7 @@
 
 | layer | count |
 |---|---|
-| (미기재) | 13 |
+| (미기재) | 19 |
 | C | 2 |
 | C+A | 1 |
 | C+D | 2 |
@@ -79,7 +86,7 @@
 | C+F+A | 1 |
 | E | 1 |
 | E+A+C+D | 1 |
-| F | 23 |
+| F | 24 |
 | F+A | 1 |
 | F+C | 3 |
 | none | 9 |
@@ -88,14 +95,14 @@
 
 | strategy | count |
 |---|---|
-| (미기재) | 28 |
+| (미기재) | 34 |
 | handwritten | 9 |
 | httpx_html | 6 |
 | httpx_json | 4 |
-| none | 7 |
+| none | 8 |
 | playwright_html | 4 |
 
-### 최근 90일 (≥ 2026-02-17)
+### 최근 90일 (≥ 2026-02-18)
 
-케이스 58 건.
+케이스 65 건.
 

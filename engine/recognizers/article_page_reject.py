@@ -17,12 +17,35 @@ PATTERN tuple 형식:
     같은 path_prefix `/articles` 로 묶여 차단됨. 호스트의 *전체 path-prefix* 가 article-only 가 아닌
     (보드와 article 이 같은 첫 segment 를 공유하는) 사이트는 skip_learn=True.
 
-새 호스트 추가 룰:
-  - 사용자가 폴링 *목적으로 줄 가능성이 있는* 같은-host *목록* URL (분류/카테고리/Special)
-    이 패턴에 안 걸려야 함 — `?!` 부정-look-ahead 로 명시 제외.
-  - 단일 article URL 폼이 *명확* 해야 함 (path 1~2 segment, query 없이 또는 query-only).
-  - 보드 URL 이 같은 first-path-segment 를 쓰면(예: nature.com `/articles?type=news` 보드 vs
-    `/articles/<doi>` article) → skip_learn=True 박을 것.
+새 호스트 추가 룰 (skip_learn 결정 — 이 순서로 점검):
+
+  1. **사용자가 폴링 *목적으로 줄 수 있는* 같은-host *목록* URL** (분류/카테고리/Special/lang index/
+     보드 인덱스) 이 패턴에 안 걸려야 함 — `?!` 부정-look-ahead 또는 narrow pattern 으로 명시 제외.
+
+  2. **단일 article URL 폼이 *명확*** 해야 함 (path 1~2 segment, query 없이 또는 query-only).
+
+  3. **skip_learn 결정**:
+     - 단일 article URL 의 *첫 path segment* 를 식별.
+     - 그 첫 segment 로 시작하는 *다른* URL 폼이 정상 보드/인덱스가 될 수 있는가?
+       - YES → `skip_learn=True` **필수** (3-tuple).
+       - NO  → `skip_learn=False` (2-tuple OK; host 전체가 article-only).
+     - 판정 기준: recognize_reject 가 보드를 통과시키는데 (test fixture 로 확인) learned_blacklist
+       의 `_extract_url_pattern` (첫 segment 만) 으로 학습되면 그 보드까지 url_gate 에서 차단되는가?
+       - 차단됨 → skip_learn=True. 안전 망 (반복 학습은 막되 잘못 학습은 안 함).
+     - 예시:
+       - wikipedia `/wiki/Article` article + `/wiki/Special:RecentChanges` 보드 → 같은 `/wiki` →
+         skip_learn=True.
+       - ushmm `/content/<lang>/article/<X>` article + `/content/<lang>` 인덱스 → 같은 `/content` →
+         skip_learn=True.
+       - nature `/articles/<doi>` article + `/articles?type=news` 보드 → 같은 `/articles` →
+         skip_learn=True.
+       - britannica `/event/<X>`, `/topic/<X>`, ... 각각 첫 segment 별 분리 → article-only →
+         skip_learn=False (각 segment 가 모두 article).
+       - github-wiki-see `/m/<user>/<repo>/wiki/` → host 전체가 wiki 미러 → skip_learn=False.
+
+  4. **fixture 강제** — 새 호스트 추가 시 `tests/recognizers/test_article_page_reject.py` 에 두 개:
+     - article URL → 거부 + `out[2]` (skip_learn) 값 명시 (`is True` 또는 `is False`).
+     - 같은 host 의 *보드/인덱스* URL → 통과 (`out is None`). 같은 첫 segment 공유면 더 중요.
 
 이 PATTERNS 는 위에서부터 첫 매칭 — 다른 인식기(`PATTERNS`)보다 *먼저* 검사돼야 안전
 (예: 위키 분류페이지를 board 로 등록하려는 시도가 있다면 이 모듈은 통과시키고 일반 파이프라인이 처리).
@@ -56,9 +79,11 @@ PATTERNS_REJECT: list[tuple] = [
         r"[^/?#]+/?(?:[?#].*)?$", re.I,
     ), "Britannica 단일 article — 게시판 아님. 폴링 대상 X."),
     # USHMM Encyclopedia — `/content/<lang>/article/<slug>` 단일 article.
+    # 인덱스 `/content/<lang>` (예: `/content/en`) 은 같은 첫 segment `/content` 공유 → skip_learn=True.
     (re.compile(
         r"^https?://encyclopedia\.ushmm\.org/content/[a-z]+/article/[^/?#]+/?(?:[?#].*)?$", re.I,
-    ), "USHMM Encyclopedia 단일 article — 게시판 아님. 폴링 대상 X."),
+    ), "USHMM Encyclopedia 단일 article — 게시판 아님. 폴링 대상 X. 인덱스 `/content/<lang>` 은 별도.",
+        True),
     # Nature — `/articles/<doi-like-id>` 단일 article. 보드(`/articles?type=news`)와 같은 첫 segment 공유 → skip_learn=True.
     (re.compile(
         r"^https?://www\.nature\.com/articles/[^/?#]+/?(?:[?#].*)?$", re.I,

@@ -65,9 +65,11 @@ def run() -> list[tuple[str, bool, str]]:
     out = recognize_reject("https://www.britannica.com/quizzes")
     cases.append(("britannica_quizzes_passes", out is None, f"got {out!r}"))
 
-    # 12. USHMM Encyclopedia
+    # 12. USHMM Encyclopedia — skip_learn=True (보드 인덱스 `/content/<lang>` 가 같은 `/content` 공유)
     out = recognize_reject("https://encyclopedia.ushmm.org/content/en/article/the-great-depression")
-    cases.append(("ushmm_article", out is not None, f"got {out!r}"))
+    cases.append(("ushmm_article",
+                  out is not None and "USHMM" in out[1] and out[2] is True,
+                  f"got {out!r}"))
 
     # 13. USHMM 인덱스 — 통과
     out = recognize_reject("https://encyclopedia.ushmm.org/content/en")
