@@ -30,6 +30,20 @@ description: >-
 - `python -c "from engine.recognizers import recognize; print(recognize('<URL>'))"` — 매칭 시 `register.py "<URL>"` → §5 배포.
 - 미매칭이면 `register.py "<URL>"` 1회 — 성공이면 §5, 실패면 `.FAILED.json` 생기니 §1 흐름.
 
+## 0a. batch 사후 처리 우선순위 (drain 완료 후 fail_kind 분포 받았을 때)
+
+`scripts/remote.py batch-register` drain 후 fail_kind 분포(`bot.sqlite3` jobs / dashboard `/jobs` `/candidates`)를 보고 **아래 순서대로** 처리. 2026-05-21 사용자 결정 — 다음 batch 부터 항상 이 우선순위.
+
+1. **bug (rc=-1/-2/-3/-5/-99, `.BUG.json`)** — **무조건 fix**. 최우선. traceback 분석 → bot/scripts/engine 코드 수정 → 테스트 → commit+push+N100 pull+restart → `.BUG.json` clear. hand-config 와 별 카테고리 (bug-fix workflow, CONTEXT.md). batch 의 `register.py 실행 시간 초과(300s)` 류 timeout 도 여기 — 왜 느린지 root-cause.
+
+2. **gate_reject (rc=3, `.REJECTED.json`)** — board_shape / nav_only / single-article 게이트가 **게시판형태 글을 오탐 거부**하는 게 현재 약점 (단일게시판·글없음 vs 게시판형태 구분 부정확). 대부분 진짜 게시판인데 거부됨 → 게이트 휴리스틱 고쳐야 함. **단 사용자가 case 확인 후 알려줌** — 임의로 "의도된 거부"라 신뢰 X, 사용자 신호 대기. 받으면 probe 휴리스틱(2c/2d) 개선으로 false-positive 차단.
+
+3. **capability_blocked (rc=5, `.FAILED.json`)** — captcha/anti-bot/cloudflare 차단 = **능력 부족(정책 아님)**. `register.py` 가 자동으로 rc=5+FAILED 박음 (2026-05-21 policy_reject 에서 split). stealth/anti-detection 어댑터로 재도전 (§2e + docs/크롤링 지침.md §6 stealth 허용). `policy_reject`(rc=2 LOGIN_REQUIRED)·`url_dead`(rc=4 죽은 URL)와 **구분** — 이 둘은 의도된 거부, 작업 X.
+
+4. **gen_fail (rc=1, `.FAILED.json`)** — 기존 hand-config §1~§5 그대로 (진단 → 손-config 또는 probe/prompt 개선).
+
+`policy_reject`(rc=2)·`url_dead`(rc=4) = 작업 대상 아님 (정상 거부). 분포 확인은 `python scripts/triage.py list` + dashboard.
+
 ## 0b. preflight — 이미 고쳐졌나 / 옆 작업이 큐를 stale 화했나
 
 §1 진단 진입 *전*, 각 큐 slug 에 대해 두 검사 강제. 본 검사 = 자가개선 인프라 (CLAUDE.md §6 + ADR 0003) 의 부산물 — prompt / engine / probe / recognizer 옆 작업이 큐 진입 후에 일어났으면 큐가 *옛 상태* 일 가능성. SKILL 이 그 가능성 인지 안 하면 *이미 회복 가능한 사이트에 손-config 작업 박는 낭비* 발생 (CLAUDE.md §8a 의 영구 게이트 정신).

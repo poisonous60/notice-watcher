@@ -16,6 +16,7 @@
 | `gen_fail` | rc=1 | LLM 생성·검증 실패 | error |
 | `url_dead` | rc=4 (새 runs) 또는 rc=2 + tail 에 TARGET_NOT_FOUND / CERT_OR_DNS_BROKEN (옛 entries) | URL 잘못/죽음 | warn |
 | `policy_reject` | rc=2 | 사이트 정책 거부 | error |
+| `capability_blocked` | rc=5 | 차단(능력 부족) | warn |
 | `gate_reject` | rc=3 | 휴리스틱 게이트 거부 | warn |
 | `bug` | rc=-1/-2/-3/-5/-99 또는 status='failed' AND rc=0 | 시스템 결함 | error |
 
@@ -55,6 +56,14 @@
 | `blocked_bot` | 봇 차단 | User-Agent 또는 행동 기반 봇 감지. |
 | `blocked_ip` | IP 차단 | IP/네트워크 단위 차단. |
 | `blocked_geo` | 지역 차단 | 지역(GEO) 단위 차단. |
+
+### capability_blocked
+
+| subkind | label | hint |
+|---|---|---|
+| `cloudflare` | Cloudflare 챌린지 | Cloudflare anti-bot 챌린지 — stealth 어댑터로 재도전. |
+| `baseline_blocked` | 정적·headless 진입 차단 | static·headless 둘 다 차단 — anti-bot 의심. stealth 재도전. |
+| `entry_blocked` | 진입 차단(미분류) | anti-bot/captcha 추정 — verdict 미분류. stealth 재도전 후보. |
 
 ### gate_reject
 

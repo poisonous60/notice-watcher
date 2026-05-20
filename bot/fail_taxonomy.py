@@ -233,6 +233,29 @@ FAIL_CATALOG: tuple[FailKind, ...] = (
                     _has_any("BLOCKED_GEO", name="blocked_geo")),
         ),
     ),
+    # capability_blocked: anti-bot/captcha/cloudflare 차단 — 사이트를 *못 들어감* (능력 부족).
+    # 2026-05-21 사용자 결정: policy_reject 에서 split. "captcha 못 들어가는 건 능력 부족이지 정책 아님".
+    # register.py 가 rc=5 + FAILED.json (재시도 가능, learned_blacklist X) 박음. batch --failed 재집음 +
+    # hand-config 가 stealth/storage_state 어댑터로 재도전 대상 (docs/크롤링 지침.md: captcha stealth 허용).
+    FailKind(
+        name="capability_blocked",
+        label_ko="차단(능력 부족)",
+        severity="warn",
+        rc=5,
+        subkinds=(
+            Subkind("cloudflare", "Cloudflare 챌린지",
+                    "Cloudflare anti-bot 챌린지 — stealth 어댑터로 재도전.",
+                    _has_any("CLOUDFLARE", name="cloudflare")),
+            Subkind("baseline_blocked", "정적·headless 진입 차단",
+                    "static·headless 둘 다 차단 — anti-bot 의심. stealth 재도전.",
+                    _has_any("BASELINE_BLOCKED", name="baseline_blocked")),
+            # generic fallback — rc=5 인데 위 토큰 다 미스 (분류 보류 / BLOCKED_BOT/IP/GEO 등). 마지막.
+            # blocked_bot/ip/geo 세분화는 policy_reject(legacy rc=2)에만 — rc=5 는 entry_blocked 로 흡수.
+            Subkind("entry_blocked", "진입 차단(미분류)",
+                    "anti-bot/captcha 추정 — verdict 미분류. stealth 재도전 후보.",
+                    _has_any("능력 부족", "접근 실패", "BLOCKED", name="entry_blocked")),
+        ),
+    ),
     FailKind(
         name="gate_reject",
         label_ko="휴리스틱 게이트 거부",

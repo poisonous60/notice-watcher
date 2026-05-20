@@ -15,7 +15,7 @@ scope axis (둘 중 하나 이상 필수):
 
 filter axis (택1):
     (default)            untried 만 — jobs row 없는 URL 만 enqueue.
-    --failed             rc ∈ {1, -1, -2, -3, -99} 마커 가진 URL retry (마커 자동 clear).
+    --failed             rc ∈ {1, 5, -1, -2, -3, -99} 마커 가진 URL retry (마커 자동 clear).
     --rc=<list>          comma-list (e.g. --rc=1,-99). 그 rc 가진 URL retry (마커 자동 clear).
     --force              jobs row / marker 다 무시. filter override.
 
@@ -57,8 +57,9 @@ MARKER_SUFFIXES = (".REJECTED.json", ".FAILED.json", ".BUG.json")
 
 CATALOG_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
-# `--failed` preset — retry-worthy rcs (gen_fail + bug variants).
-FAILED_PRESET_RCS = (1, -1, -2, -3, -99)
+# `--failed` preset — retry-worthy rcs (gen_fail + bug variants + capability_blocked).
+# rc=5 (capability_blocked, 2026-05-21) = anti-bot/captcha 차단 = 능력 부족 → stealth 어댑터로 재도전 가능.
+FAILED_PRESET_RCS = (1, 5, -1, -2, -3, -99)
 
 
 def _load_one_catalog(path: Path) -> list[dict]:

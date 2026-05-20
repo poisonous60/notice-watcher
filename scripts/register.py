@@ -155,7 +155,7 @@ def _policy_check(digest: dict, url: str) -> tuple[bool, list[str]]:
                            f"(verdict={digest.get('verdict')!r}). 도메인 자체는 정상이므로 사이트 차단이 아니라 "
                            "URL 이 잘못됐거나 글이 삭제된 것 — 게시판 목록 URL 또는 다른 글 URL 로 재시도."]
         return False, [f"목록 페이지에 정적으로도 headless 로도 접근 실패 (verdict={digest.get('verdict')!r}). "
-                       "차단(BLOCKED) 사이트로 보임 — 차단 우회는 하지 않음. 등록 거부."]
+                       "anti-bot/captcha 차단 — 능력 부족(정책 아님). stealth/storage_state 어댑터 재도전 대상."]
     # robots Disallow — 경고만 (와일드카드 * / 끝앵커 $ 도 처리)
     path = urlsplit(url).path or "/"
     for dis in (digest.get("robots") or {}).get("disallow") or []:
@@ -1414,26 +1414,41 @@ def _main_inner(argv) -> int:
         print(f"[register] {m}")
     if not ok_policy:
         print("[register] ❌ 등록 거부 (위 사유).")
-        # policy 거부의 *scope* 는 verdict 코드별로 갈림. 2026-05-20 (4) 결정 + codex 리뷰:
-        #   - host-wide (학습 OK)  = login / BLOCKED / cert_or_dns_broken — 같은 host 다른 URL 도 동일 막힘.
-        #   - url-specific (학습 X) = target_not_found — URL 의 글이 사라졌을 뿐, 같은 host 의 다른
-        #     board URL 은 정상 접근 가능. host+path_prefix 학습 시 sibling false-positive.
-        # rc 분기 (2026-05-20 추가):
-        #   - rc=4 (url_dead): target_not_found / cert_or_dns_broken — 카탈로그 URL 편집이 답.
-        #     `bot/fail_taxonomy.py` 의 `url_dead` FailKind 가 잡음. retry-worthy X
-        #     (`register_batch.py` 의 FAILED_PRESET_RCS 에 4 미포함 — `--failed` 가 안 잡음).
-        #   - rc=2 (policy_reject): BLOCKED / LOGIN_REQUIRED — 사이트 정책상 거부.
+        # 거부 kind 는 verdict 로 갈림 (2026-05-21 capability_blocked split — rc=5):
+        #   - rc=2 (policy_reject): LOGIN_REQUIRED — 사이트 *정책상* 미지원 (로그인 필요). REJECTED + 학습.
+        #     진짜 정책 거부 = 우리가 *안* 하는 것 (능력 문제 아님).
+        #   - rc=4 (url_dead): target_not_found / cert_or_dns_broken — 카탈로그 URL 편집이 답. REJECTED.
+        #   - rc=5 (capability_blocked): anti-bot/captcha/cloudflare 차단 — *능력 부족* (정책 아님).
+        #     2026-05-21 사용자 결정: "captcha 못 들어가는 건 능력 부족이지 정책 거부 아님". FAILED.json
+        #     (재시도 가능, learned_blacklist X) → batch --failed 재집음 + hand-config 가 stealth/
+        #     storage_state 어댑터로 재도전. docs/크롤링 지침.md: captcha 사이트 stealth 허용으로 정책 변경.
         verdict = (digest.get("verdict") or "").lower()
-        host_wide = _policy_reject_is_host_wide(verdict)
+        is_login = "login" in verdict
         is_url_dead = ("target_not_found" in verdict) or ("cert_or_dns_broken" in verdict)
-        rc_out = 4 if is_url_dead else 2
-        try:
-            _save_rejected(slug, url,
-                           reason=f"policy_check 거부: {'; '.join(msgs)[:200]}",
-                           note=f"policy_check rc={rc_out} verdict={verdict!r}",
-                           learn=host_wide)
-        except Exception as e:  # noqa: BLE001
-            print(f"[register] ⚠ REJECTED 마커 저장 실패 (rc={rc_out}): {e}", file=sys.stderr)
+        if is_url_dead:
+            rc_out = 4
+        elif is_login:
+            rc_out = 2
+        else:
+            rc_out = 5  # anti-bot/captcha/blocked = 능력 부족 (정책 아님)
+        if rc_out == 5:
+            try:
+                _save_failed(slug, url,
+                             reason=f"capability_blocked (anti-bot/captcha): {'; '.join(msgs)[:200]}",
+                             last_config=None,
+                             last_feedback=(f"[BLOCKED] verdict={verdict} — 정적·headless 진입 차단 "
+                                            "(능력 부족, 정책 아님). stealth/storage_state 어댑터 재도전 대상."))
+            except Exception as e:  # noqa: BLE001
+                print(f"[register] ⚠ FAILED 마커 저장 실패 (rc=5): {e}", file=sys.stderr)
+        else:
+            host_wide = _policy_reject_is_host_wide(verdict)
+            try:
+                _save_rejected(slug, url,
+                               reason=f"policy_check 거부: {'; '.join(msgs)[:200]}",
+                               note=f"policy_check rc={rc_out} verdict={verdict!r}",
+                               learn=host_wide)
+            except Exception as e:  # noqa: BLE001
+                print(f"[register] ⚠ REJECTED 마커 저장 실패 (rc={rc_out}): {e}", file=sys.stderr)
         return rc_out
 
     # Discourse 포지티브 검출 — probe 가 정적 HTML 의 generator meta 로 Discourse 판정 (detect_discourse_platform).

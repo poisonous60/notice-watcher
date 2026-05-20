@@ -94,15 +94,17 @@ _Avoid_: "batch register" (`/preview` 와 같은 단어라 헷갈림), "bulk pre
 **fail_kind** (대시보드 `/jobs` 1차 분류, `result_rc` 단독으로 파생):
 - `done` (rc=0) — 등록 성공
 - `gen_fail` (rc=1, `.FAILED.json`) — LLM gen+검증 실패 → hand-config pipeline 대상
-- `policy_reject` (rc=2, `.REJECTED.json`) — `_policy_check` 거부 (LOGIN_REQUIRED / BLOCKED_*)
+- `policy_reject` (rc=2, `.REJECTED.json`) — `_policy_check` 거부, **LOGIN_REQUIRED 만** (사이트 *정책상* 미지원 — 로그인 필요). 우리가 *안* 하는 것, 능력 문제 아님
 - `gate_reject` (rc=3, `.REJECTED.json`) — recognizer / nav_only / meta_diverging / multi_host_hub / board_shape 게이트 거부
-- `bug` (rc=-1/-2/-3/-99, `.BUG.json`) — 시스템 결함 → bug-fix workflow 대상
+- `url_dead` (rc=4, `.REJECTED.json`) — target_not_found(404) / cert_or_dns_broken — 입력 URL 자체 잘못/죽음, 카탈로그 yaml URL 편집이 답 (코드 X). `--failed` 재집음 X
+- `capability_blocked` (rc=5, `.FAILED.json`) — anti-bot/captcha/cloudflare 차단 = 사이트 *못 들어감* (**능력 부족, 정책 아님** — 2026-05-21 policy_reject 에서 split). 영구거부 X, learned_blacklist X, `--failed` 재집음 → hand-config 가 stealth/storage_state 어댑터로 재도전 (docs/크롤링 지침.md §6: captcha stealth 허용)
+- `bug` (rc=-1/-2/-3/-5/-99, `.BUG.json`) — 시스템 결함 → bug-fix workflow 대상
 
-marker 보다 한 단계 더 세분화 — `.REJECTED.json` 한 마커가 `policy_reject`/`gate_reject` 둘로 갈림 (rc 로 구분).
-_Avoid_: "fail_category" / "error_type" / "reject_kind" — 어휘 떠다님.
+marker 보다 한 단계 더 세분화 — `.REJECTED.json` 한 마커가 `policy_reject`/`gate_reject`/`url_dead` 로 갈림 (rc 로 구분). `.FAILED.json` 은 `gen_fail`/`capability_blocked` 로 갈림.
+_Avoid_: "fail_category" / "error_type" / "reject_kind" — 어휘 떠다님. "정책 거부"로 captcha 부르지 X (= `capability_blocked`, 능력 부족).
 
 **fail_subkind** (대시보드 `/jobs` 2차 분류, `result_tail` regex 파생):
-fail_kind 안의 sub. gen_fail → `[FAIL] <check>` 이름 (`posts_nonempty` / `article_body_len` / `published_at_iso` / `post_id_*` / `title_nonempty` / `gemini_api`); policy_reject → `login_required` / `blocked_bot/ip/geo`; gate_reject → `recognizer:<name>` / `nav_only` / `meta_diverging` / `multi_host_hub` / `board_shape`; bug → `chromium_lock_timeout` / `subprocess_timeout` / `subprocess_exception` / `worker_exception`.
+fail_kind 안의 sub. gen_fail → `[FAIL] <check>` 이름 (`posts_nonempty` / `article_body_len` / `published_at_iso` / `post_id_*` / `title_nonempty` / `gemini_api`); policy_reject → `login_required` (+ legacy rc=2 `blocked_bot/ip/geo`); capability_blocked → `cloudflare` / `baseline_blocked` / `entry_blocked`(미분류 fallback); gate_reject → `recognizer:<name>` / `nav_only` / `meta_diverging` / `multi_host_hub` / `board_shape`; bug → `chromium_lock_timeout` / `subprocess_timeout` / `subprocess_exception` / `worker_exception`.
 
 `/jobs` 셀 2줄째에 작은 회색 글로 표시, hover 에 풀 reason text. DB 컬럼 X — `bot/fail_taxonomy.py:classify_fail()` 가 읽을 때 파생 (ADR 0002).
 

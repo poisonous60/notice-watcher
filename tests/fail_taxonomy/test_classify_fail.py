@@ -77,6 +77,17 @@ CASES: list[tuple[str, tuple[Optional[str], Optional[int], Optional[str]], str, 
      ("failed", 2, "[register] 목록 페이지 접근 단계 이전에 SSL 인증서/DNS 가 깨짐 (verdict='CERT_OR_DNS_BROKEN')."),
      "url_dead", "cert_or_dns_broken"),
 
+    # capability_blocked (rc=5) — anti-bot/captcha 차단 = 능력 부족 (2026-05-21 policy_reject split) ----
+    ("cap_cloudflare",
+     ("failed", 5, "[register] 목록 페이지에 정적으로도 headless 로도 접근 실패 (verdict='CLOUDFLARE_PROTECTED_SITE'). anti-bot/captcha 차단 — 능력 부족(정책 아님)."),
+     "capability_blocked", "cloudflare"),
+    ("cap_baseline_blocked",
+     ("failed", 5, "[register] 목록 페이지에 정적으로도 headless 로도 접근 실패 (verdict='BASELINE_BLOCKED'). anti-bot/captcha 차단 — 능력 부족(정책 아님)."),
+     "capability_blocked", "baseline_blocked"),
+    ("cap_entry_blocked_unclassified",
+     ("failed", 5, "[register] 목록 페이지에 정적으로도 headless 로도 접근 실패 (verdict='분류 보류'). anti-bot/captcha 차단 — 능력 부족(정책 아님)."),
+     "capability_blocked", "entry_blocked"),
+
     # gate_reject (rc=3) ----
     ("gate_recognizer",
      ("failed", 3, "[PHASE] recognize_reject (wikipedia_article)\n[register] ❌ 등록 거부 — ..."),
