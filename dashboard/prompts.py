@@ -1,7 +1,7 @@
 """Skill 트리거 프롬프트 빌더.
 
 각 함수는 사용자가 클립보드에 복사한 뒤 VSCode Claude Code 창에 붙여넣을 텍스트를 반환한다.
-키워드(`손 config 작성`, `report-triage` 등)는 해당 SKILL.md 의 트리거에 맞춰 잡힘 — Claude 가
+키워드(`수동 config 작성`, `report-triage` 등)는 해당 SKILL.md 의 트리거에 맞춰 잡힘 — Claude 가
 자동으로 매칭 스킬을 실행.
 
 복사 후 사용자는 [Enter] 만 누르면 됨.
@@ -14,7 +14,7 @@ from typing import Optional
 def hand_config_for_url(*, url: str, slug: Optional[str] = None,
                         fail_reason: Optional[str] = None,
                         job_id: Optional[int] = None) -> str:
-    lines = ["다음 사이트 손 config 작성해줘 (skill: hand-config 모드 A).", ""]
+    lines = ["다음 사이트 수동 config 작성해줘 (skill: hand-config 모드 A).", ""]
     lines.append(f"URL: {url}")
     if slug:
         lines.append(f"slug: {slug}")
@@ -24,7 +24,7 @@ def hand_config_for_url(*, url: str, slug: Optional[str] = None,
         lines.append(f"관련 잡: #{job_id}")
     lines.append("")
     lines.append("두 트랙 *동시* 진행 (한쪽 막는 게이트 X):")
-    lines.append("  - 트랙 A (사용자 향 — 사이트 즉시 작동): 손-config / 손어댑터 작성 → configs/ → N100 배포.")
+    lines.append("  - 트랙 A (사용자 향 — 사이트 즉시 작동): 수동 config / 손어댑터 작성 → configs/ → N100 배포.")
     lines.append("  - 트랙 B (미래 향 — 같은 패턴 자동 처리): 진단 중 분기 2a (인식기 확장) / 2b (--article-url) / "
                  "2c (probe 휴리스틱 + retry feedback hint) / 2d (probe artifact 수정) 후보 한 줄씩 enumerate. "
                  "매칭 있으면 그 자리도 같은 PR 에 박음. 매칭 0이면 case 파일에 이유 한 줄.")
@@ -36,7 +36,7 @@ def hand_config_for_url(*, url: str, slug: Optional[str] = None,
 
 
 def hand_config_redo_slug(*, slug: str, url: Optional[str] = None) -> str:
-    lines = ["다음 사이트 손 config 재작성해줘 (skill: hand-config).", ""]
+    lines = ["다음 사이트 수동 config 재작성해줘 (skill: hand-config).", ""]
     lines.append(f"slug: {slug}")
     if url:
         lines.append(f"URL: {url}")
@@ -58,7 +58,7 @@ def hand_config_triage_queue(*, failed_slugs: list[str]) -> str:
         lines.append(f"- {s}  (output/snapshot/poll_state/{s}.FAILED.json)")
     lines.append("")
     lines.append("각 항목 두 트랙 *동시* 진행 (한쪽 막는 게이트 X):")
-    lines.append("  - 트랙 A (사용자 향 — 사이트 즉시 작동): 손-config / 손어댑터 작성 → configs/ → N100 배포.")
+    lines.append("  - 트랙 A (사용자 향 — 사이트 즉시 작동): 수동 config / 손어댑터 작성 → configs/ → N100 배포.")
     lines.append("  - 트랙 B (미래 향 — 같은 패턴 자동 처리): 진단 중 2a (인식기 확장) / 2b (--article-url) / "
                  "2c (probe 휴리스틱 + retry feedback hint) / 2d (probe artifact 수정) 후보 한 줄씩 enumerate. "
                  "매칭 있으면 같은 PR 에 박음. 0 이면 case 파일에 이유.")
@@ -68,7 +68,7 @@ def hand_config_triage_queue(*, failed_slugs: list[str]) -> str:
                  "(last_feedback `[FAIL]` 줄 / diagnosis verdict / 매칭 §번호 / 분기 후보+이유). "
                  "— SKILL.md \"§2 진입 전 강제 인용\" 박스.")
     lines.append("")
-    lines.append("REJECT된 사이트라도 구조를 분석하여 probe를 개선, 이후 손config 의존도를 줄여야 함.")
+    lines.append("REJECT된 사이트라도 구조를 분석하여 probe를 개선, 이후 수동 config 의존도를 줄여야 함.")
     lines.append("특수한 경우나 tradeoff가 명확한 경우에 한해 probe 개선을 스킵하고 case log에 이유를 명확히 남김.")
     return "\n".join(lines)
 
@@ -118,13 +118,13 @@ def catalog_run_and_fix(*, catalog_name: str,
     lines.append("   1) **bug** (rc=-1/-2/-3/-5/-99, `.BUG.json`): *무조건 fix*, 최우선. traceback → bot/scripts/engine 코드 수정 (bug-fix workflow). `register.py 실행 시간 초과(300s)` 류 timeout 도 여기 — root-cause.")
     lines.append("   2) **gate_reject** (rc=3): board_shape/nav_only/single-article 게이트가 *게시판형태 글을 오탐 거부* 하는 게 현재 약점. 대부분 진짜 게시판인데 거부됨 — 임의로 '의도된 거부'라 신뢰 X. **사용자에게 분포·샘플 보고하고 확인 대기**, 받으면 probe 휴리스틱(2c/2d) 개선으로 false-positive 차단.")
     lines.append("   3) **capability_blocked** (rc=5, `.FAILED.json`): captcha/anti-bot/cloudflare 차단 = *능력 부족(정책 아님)*. stealth/anti-detection 어댑터로 재도전 (§2e + `docs/크롤링 지침.md` §6 stealth 허용).")
-    lines.append("   4) **gen_fail** (rc=1, `.FAILED.json`): hand-config 진단 → 손-config 또는 probe/prompt 개선 (두 트랙 동시).")
+    lines.append("   4) **gen_fail** (rc=1, `.FAILED.json`): hand-config 진단 → 수동 config 또는 probe/prompt 개선 (두 트랙 동시).")
     lines.append("   - **policy_reject** (rc=2, LOGIN_REQUIRED) · **url_dead** (rc=4, 404/cert·dns 깨짐) = 작업 X (정상 거부, `docs/크롤링 지침.md`). 우회 X.")
     lines.append(f"5. 재시도: `python scripts/remote.py batch-register --catalog={catalog_name} --failed` (rc∈{{1,5,-1,-2,-3,-99}} — capability_blocked 포함).")
     lines.append("6. registered 100% 또는 root-cause 못 잡는 사이트만 남을 때까지 반복.")
     lines.append("")
     lines.append("각 fail 두 트랙 *동시* 진행 (한쪽 막는 게이트 X):")
-    lines.append("  - 트랙 A (사용자 향 — 사이트 즉시 작동): 손-config / 손어댑터 → configs/ → 배포.")
+    lines.append("  - 트랙 A (사용자 향 — 사이트 즉시 작동): 수동 config / 손어댑터 → configs/ → 배포.")
     lines.append("  - 트랙 B (미래 향 — 같은 패턴 자동 처리): probe 휴리스틱 / 인식기 / prompt 개선 → 같은 패턴 자동.")
     lines.append("매칭 있으면 같은 PR 에 박음. 매칭 0이면 case 파일에 이유.")
     lines.append("")
@@ -162,5 +162,5 @@ def diagnose_slug(*, slug: str) -> str:
         f"slug `{slug}` 진단해줘.\n"
         f"- `python scripts/inspect_subs.py diagnose {slug}` 결과 살펴보고\n"
         f"- 필요하면 `python scripts/inspect_subs.py fetch {slug}` 로 fetch 결과 확인\n"
-        f"- 깨졌으면 손 config 재작성 (hand-config skill) 까지 진행."
+        f"- 깨졌으면 수동 config 재작성 (hand-config skill) 까지 진행."
     )

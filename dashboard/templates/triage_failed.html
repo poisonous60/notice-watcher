@@ -6,7 +6,7 @@
 <h2>🛠 자동등록 실패 (FAILED) — 활성 {{ items | length }}건 · 나중에 {{ later_items | length }}건</h2>
 <p class="muted">
   봇·polling 이 자동 등록 시도 실패 → <code>output/poll_state/&lt;slug&gt;.FAILED.json</code> 으로 쌓인 큐.
-  처리: hand-config 스킬 모드 B (probe 진단 → 손 config / 손 adapter → <code>register --config</code> → N100 배포).
+  처리: hand-config 스킬 모드 B (probe 진단 → 수동 config / 손 adapter → <code>register --config</code> → N100 배포).
   바로 못 할 항목은 체크 후 <b>→ 나중에</b>로 내려두면 일괄 hand-config 프롬프트에서도 빠짐 (N100 polling 영향 X).
 </p>
 
