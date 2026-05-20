@@ -44,6 +44,19 @@ def run() -> list[tuple[str, bool, str]]:
     out = _body_is_feed('<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/"></urlset>')
     cases.append(("xml_sitemap_not_feed", out is False, f"got {out!r}"))
 
+    # 8a. Chromium XML-viewer 래퍼 (headless 렌더 결과) — 원본 rss 가 안에 박힘 → feed
+    chromium = ('<html xmlns="http://www.w3.org/1999/xhtml"><head>'
+                '<style id="xml-viewer-style">/* ... */</style></head><body>'
+                '<div id="webkit-xml-viewer-source-xml"><rss version="2.0"><channel/></rss></div></body></html>')
+    out = _body_is_feed(chromium)
+    cases.append(("chromium_xml_viewer_rss", out is True, f"got {out!r}"))
+
+    # 8b. Chromium XML-viewer 래퍼인데 안이 sitemap (rss 아님) — feed 아님
+    chromium_sm = ('<html><head><style id="xml-viewer-style"></style></head><body>'
+                   '<div id="webkit-xml-viewer-source-xml"><urlset></urlset></div></body></html>')
+    out = _body_is_feed(chromium_sm)
+    cases.append(("chromium_xml_viewer_sitemap_not_feed", out is False, f"got {out!r}"))
+
     # 9. content-sniff 가 path 휴리스틱 gap 을 메우는지 — 직접-피드 URL path 는 매칭 X (회귀 가드)
     cases.append(("hnrss_url_shape_miss", _looks_like_feed_url("https://hnrss.org/newest") is False,
                   "hnrss /newest path 는 _looks_like_feed_url 가 못 잡음 (body sniff 가 필요한 이유)"))

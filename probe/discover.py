@@ -39,18 +39,44 @@ def _looks_like_feed_url(url: str) -> bool:
 
 
 def _body_is_feed(text: str) -> bool:
-    """fetch 한 page 본문이 RSS/Atom/RDF 피드인지 (URL path 모양 무관 content-sniff).
+    """본문 텍스트가 RSS/Atom/RDF 피드인지 (URL path 모양 무관 content-sniff).
+
+    raw XML(`<?xml`/`<rss`/`<feed`/`<rdf` 로 시작) 또는 headless 가 렌더한 Chromium XML-viewer
+    래퍼(`<html>...<style id="xml-viewer-style">...` — 원본 XML 을 감쌈) 둘 다 검출.
+    """
+    if not text:
+        return False
+    head = text.lstrip()[:1024].lower()
+    if head.startswith(("<?xml", "<rss", "<feed", "<rdf")):
+        return ("<rss" in head) or ("<feed" in head) or ("<rdf" in head and "rss" in head)
+    # Chromium/headless XML-viewer 래퍼 — 원본 feed 가 div#webkit-xml-viewer-source-xml 등에 박힘.
+    low = text[:8192].lower()
+    if "webkit-xml-viewer-source-xml" in low or "xml-viewer-style" in low:
+        body = text.lower()
+        return ("<rss" in body) or ("<feed" in body) or ("<rdf" in body and "rss" in body)
+    return False
+
+
+def _url_serves_feed(url: str) -> bool:
+    """입력 URL 을 raw httpx 로 직접 fetch 해 RSS/Atom 피드 응답인지 (content-type/본문 root).
 
     `_looks_like_feed_url` 는 path 휴리스틱 — `hnrss.org/newest`(피드 토큰 없음)·
-    `phoronix.com/rss.php`(rss 뒤 `.php`)·`gamespot.com/feeds/news/`(`/feeds/` 뒤 path 계속)
-    류 직접-피드 URL 을 못 잡음. 그런데 page_html 자체가 RSS XML → 본문 root 태그로 검출하면
-    path 모양과 무관하게 board_shape false-reject 회피 (2026-05-20-b batch).
+    `phoronix.com/rss.php`(rss 뒤 `.php`)·`gamespot.com/feeds/news/`(`/feeds/` 뒤 계속) 류
+    직접-피드 URL 을 못 잡음. probe 의 page_html 은 headless 가 렌더한 XML-viewer DOM 이라
+    본문 sniff 도 불안정 → raw fetch 로 content-type/root 확인 (board_shape false-reject 회피,
+    2026-05-20-b batch). 실패는 fail-soft(False) — probe 일회성 정찰이라 fetch 1회 추가 OK.
     """
-    head = (text or "").lstrip()[:1024].lower()
-    if not head.startswith("<?xml") and not head.startswith("<rss") \
-            and not head.startswith("<feed") and not head.startswith("<rdf"):
+    try:
+        with httpx.Client(headers=preset_h2_chrome_min(), timeout=10.0, follow_redirects=True) as client:
+            r = client.get(url)
+        if r.status_code != 200:
+            return False
+        ct = (r.headers.get("content-type", "")).lower()
+        if "xml" in ct or "rss" in ct or "atom" in ct:
+            return True
+        return _body_is_feed(r.text)
+    except (httpx.HTTPError, OSError):
         return False
-    return ("<rss" in head) or ("<feed" in head) or ("<rdf" in head and "rss" in head)
 
 
 def discover_feeds(*, page_url: str, page_html: str, out_dir: Path) -> dict:
@@ -59,17 +85,13 @@ def discover_feeds(*, page_url: str, page_html: str, out_dir: Path) -> dict:
 
     # 입력 URL 자체가 feed path 면 1st candidate 로 박는다 — `_board_shape_check` 가
     # feed_candidates 비어있지 않음을 보드 시그널로 인정하므로 게이트 통과 보장.
-    # path 모양(url) 또는 본문 content-sniff(html) 둘 중 하나라도 feed 면 박음.
+    # (1) path 모양 (no fetch) → (2) page_html 본문 sniff (no fetch) → (3) raw fetch content-type.
     if _looks_like_feed_url(page_url):
-        candidates.append({
-            "source": "input-url-feed-path",
-            "url": page_url,
-        })
+        candidates.append({"source": "input-url-feed-path", "url": page_url})
     elif _body_is_feed(page_html):
-        candidates.append({
-            "source": "input-url-feed-content",
-            "url": page_url,
-        })
+        candidates.append({"source": "input-url-feed-content", "url": page_url})
+    elif _url_serves_feed(page_url):
+        candidates.append({"source": "input-url-feed-fetch", "url": page_url})
 
     soup = BeautifulSoup(page_html or "", "lxml")
     for link in soup.select('link[rel="alternate"]'):
