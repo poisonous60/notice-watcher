@@ -38,15 +38,36 @@ def _looks_like_feed_url(url: str) -> bool:
     return bool(_FEED_URL_RE.search(path_with_query))
 
 
+def _body_is_feed(text: str) -> bool:
+    """fetch 한 page 본문이 RSS/Atom/RDF 피드인지 (URL path 모양 무관 content-sniff).
+
+    `_looks_like_feed_url` 는 path 휴리스틱 — `hnrss.org/newest`(피드 토큰 없음)·
+    `phoronix.com/rss.php`(rss 뒤 `.php`)·`gamespot.com/feeds/news/`(`/feeds/` 뒤 path 계속)
+    류 직접-피드 URL 을 못 잡음. 그런데 page_html 자체가 RSS XML → 본문 root 태그로 검출하면
+    path 모양과 무관하게 board_shape false-reject 회피 (2026-05-20-b batch).
+    """
+    head = (text or "").lstrip()[:1024].lower()
+    if not head.startswith("<?xml") and not head.startswith("<rss") \
+            and not head.startswith("<feed") and not head.startswith("<rdf"):
+        return False
+    return ("<rss" in head) or ("<feed" in head) or ("<rdf" in head and "rss" in head)
+
+
 def discover_feeds(*, page_url: str, page_html: str, out_dir: Path) -> dict:
     """페이지 head에서 alternate 피드 + 관용 경로 추측 + 입력 URL 자체 feed 검출."""
     candidates: list[dict] = []
 
     # 입력 URL 자체가 feed path 면 1st candidate 로 박는다 — `_board_shape_check` 가
     # feed_candidates 비어있지 않음을 보드 시그널로 인정하므로 게이트 통과 보장.
+    # path 모양(url) 또는 본문 content-sniff(html) 둘 중 하나라도 feed 면 박음.
     if _looks_like_feed_url(page_url):
         candidates.append({
             "source": "input-url-feed-path",
+            "url": page_url,
+        })
+    elif _body_is_feed(page_html):
+        candidates.append({
+            "source": "input-url-feed-content",
             "url": page_url,
         })
 

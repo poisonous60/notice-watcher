@@ -54,6 +54,18 @@ def run() -> list[tuple[str, bool, str]]:
     out = recognize_reject("https://en.wikipedia.org/wiki/Main_Page")
     cases.append(("wikipedia_en_main_page_passes", out is None, f"got {out!r}"))
 
+    # 5d. wikipedia de `Spezial:` — RecentChanges (board) 통과 (2026-05-20-b fix).
+    out = recognize_reject("https://de.wikipedia.org/wiki/Spezial:Letzte_%C3%84nderungen")
+    cases.append(("wikipedia_de_special_passes", out is None, f"got {out!r}"))
+
+    # 5e. wikipedia fr `Spécial:` URL-encoded — RecentChanges (board) 통과 (2026-05-20-b fix).
+    out = recognize_reject("https://fr.wikipedia.org/wiki/Sp%C3%A9cial:Modifications_r%C3%A9centes")
+    cases.append(("wikipedia_fr_special_passes_encoded", out is None, f"got {out!r}"))
+
+    # 5f. wikipedia es `Especial:` — CambiosRecientes (board) 통과 (2026-05-20-b fix).
+    out = recognize_reject("https://es.wikipedia.org/wiki/Especial:CambiosRecientes")
+    cases.append(("wikipedia_es_special_passes", out is None, f"got {out!r}"))
+
     # 6. 네이버 지식백과 entry.naver
     out = recognize_reject("https://terms.naver.com/entry.naver?docId=3579743&cid=59054&categoryId=59061")
     cases.append(("naver_terms_entry",

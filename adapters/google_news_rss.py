@@ -49,27 +49,35 @@ class GoogleNewsRssAdapter(BaseAdapter):
     def __init__(
         self,
         *,
-        query: str,
+        query: str = "",
+        feed_url: str = "",
+        board: str = "",
         hl: str = "ko",
         gl: str = "KR",
         ceid: str = "KR:ko",
         timeout: float = 15.0,
     ):
+        # 두 모드: (1) search — `query` 로 rss/search 피드 합성. (2) feed — `feed_url` 직접
+        # (top-stories `news.google.com/rss`, topic `rss/topics/<id>`, section 등 검색 아닌 피드).
         q = str(query or "").strip()
-        if not q:
-            raise ValueError(f"google news query 필요: {query!r}")
+        fu = str(feed_url or "").strip()
+        if not q and not fu:
+            raise ValueError(f"google news query 또는 feed_url 필요: query={query!r} feed_url={feed_url!r}")
         self.query = q
+        self._direct_feed_url = fu
         self.hl = hl or "ko"
         self.gl = gl or "KR"
         self.ceid = ceid or "KR:ko"
         self.site = "news.google.com"
         self.host = "news.google.com"
-        self.board = q
+        self.board = str(board or "").strip() or q or "top"
         self.timeout = float(timeout)
         self._client: Optional[httpx.AsyncClient] = None
 
     @property
     def _feed_url(self) -> str:
+        if self._direct_feed_url:
+            return self._direct_feed_url
         qs = urlencode({
             "q": self.query,
             "hl": self.hl,

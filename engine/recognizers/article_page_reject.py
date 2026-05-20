@@ -70,10 +70,14 @@ PATTERNS_REJECT: list[tuple] = [
         # main page (각 lang): en `Main_Page`, ko `대문`/URL-encoded `%EB%8C%80%EB%AC%B8`,
         # ja `メインページ`/URL-encoded `%E3%83%A1%E3%82%A4%E3%83%B3%E3%83%9A%E3%83%BC%E3%82%B8`.
         # 기존 `특수기능:` 은 *오타* — 한국어 Wikipedia 의 Special namespace 는 `특수:` (이전 룰 보존 위해 유지).
+        # 유럽어 lang Wikipedia 의 Special namespace 별명 (de `Spezial:`, fr `Spécial:`/URL-encoded
+        # `Sp%C3%A9cial:`, es·pt `Especial:`, it `Speciale:`, nl `Speciaal:`, pl `Specjalna:`) 도 박음 —
+        # 안 박으면 `Spezial:Letzte_Änderungen`(RecentChanges) 류가 단일 article 로 false-reject (2026-05-20-b batch).
         r"(?!"
         r"Special:|Category:|Portal:|Help:|File:|Talk:|User:|Wikipedia:|Template:|"
         r"특수:|특수기능:|분류:|위키백과:|"
         r"特別:|特别:|分类:|分類:|"
+        r"Spezial:|Spécial:|Sp%C3%A9cial:|Especial:|Speciale:|Speciaal:|Specjalna:|"
         r"Main_Page|대문|%EB%8C%80%EB%AC%B8|메인_화면|메인페이지|메인_페이지|"
         r"メインページ|%E3%83%A1%E3%82%A4%E3%83%B3%E3%83%9A%E3%83%BC%E3%82%B8|"
         r"%ED%8A%B9%EC%88%98|%E7%89%B9%E5%88%A5|%E7%89%B9%E5%88%AB"
