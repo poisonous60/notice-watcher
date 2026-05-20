@@ -1,6 +1,9 @@
-"""사이트 카탈로그 일괄 enqueue driver (rev5).
+"""사이트 카탈로그 일괄 enqueue driver (rev6).
 
-`configs/candidates/<name>.yaml` (schema 2: name + url) multi-file 을 읽어 각 entry url
+rev6 변경: catalog yaml 의 위치 `configs/candidates/` → `output/candidates/`. git-ignored 데이터.
+dev box 의 dashboard 가 직접 편집, N100 동기는 `scripts/remote.py batch-register` 의 atomic scp.
+
+`output/candidates/<name>.yaml` (schema 2: name + url) multi-file 을 읽어 각 entry url
 마다 N100 의 bot.sqlite3 jobs 테이블에 `kind='register', via='batch'` 잡을 enqueue.
 실행은 N100 만 — bot worker 가 `/preview` 와 동일한 path 로 처리.
 
@@ -47,7 +50,8 @@ sys.path.insert(0, str(ROOT))
 from bot import db  # noqa: E402
 from probe.paths import url_to_slug  # noqa: E402
 
-CATALOG_DIR = ROOT / "configs" / "candidates"
+CATALOG_DIR = ROOT / "output" / "candidates"  # rev6: git-ignored 데이터. dev box dashboard 직접 편집.
+                                                # N100 은 `scripts/remote.py batch-register` 의 atomic scp 로 동기 (CLAUDE.md §5 예외).
 STATE_DIR = ROOT / "output" / "poll_state"
 MARKER_SUFFIXES = (".REJECTED.json", ".FAILED.json", ".BUG.json")
 

@@ -278,6 +278,82 @@ _URL_ARG_RE = re.compile(r"^https?://[A-Za-z0-9._~\-]+(?::\d+)?/[A-Za-z0-9._~%:/
 _CATALOG_NAME_ARG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _RC_LIST_ARG_RE = re.compile(r"^-?\d+(?:,-?\d+)*$")
 
+# rev6: dev box 의 output/candidates/ 가 catalog 단일 진본. N100 은 batch-register 시 atomic
+# scp 로 동기. configs/candidates/ 는 폐기 (예전 git-tracked 위치).
+_LOCAL_CATALOG_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "output", "candidates",
+)
+
+
+def _sync_catalogs_to_n100(catalogs: list[str]) -> int:
+    """각 catalog yaml 을 dev box → N100 atomic scp.
+
+    절차 (per catalog):
+      1. dev box 의 `output/candidates/<name>.yaml` 존재 확인 — 없으면 abort.
+      2. SSH `mkdir -p $HOME/notice-watcher/output/candidates/` (idempotent).
+      3. scp local → N100 의 `output/candidates/.tmp.<name>.<pid>.yaml`.
+      4. SSH `mv` → `output/candidates/<name>.yaml` (atomic rename).
+      5. 실패 시 N100 의 temp 정리 시도 + return 0 아닌 값.
+
+    quoting: DEPLOY_PATH_RAW + name 둘 다 module-load 시점 regex 검증 (`_DEPLOY_PATH_RE`,
+    `_CATALOG_NAME_ARG_RE`) — shell metachar 없음. tilde 확장 보존 위해 unquoted.
+
+    rc:
+      0  모든 catalog 동기 성공
+      5  로컬 yaml 없음
+      6  scp / SSH 실패
+    """
+    pid = os.getpid()
+    for name in catalogs:
+        if not _CATALOG_NAME_ARG_RE.match(name):
+            print(f"[remote] invalid catalog name: {name!r}", file=sys.stderr)
+            return 4
+        local = os.path.join(_LOCAL_CATALOG_DIR, f"{name}.yaml")
+        if not os.path.isfile(local):
+            print(f"[remote] catalog yaml 없음: {local}", file=sys.stderr)
+            return 5
+        # DEPLOY_PATH_RAW 의 tilde 확장 보존 — unquoted. name·pid 도 regex 검증된 안전 토큰.
+        remote_dir = f"{DEPLOY_PATH_RAW}/output/candidates"
+        remote_final = f"{remote_dir}/{name}.yaml"
+        remote_tmp = f"{remote_dir}/.tmp.{name}.{pid}.yaml"
+        # 1. mkdir (idempotent)
+        rc = subprocess.run(
+            ["ssh", DEPLOY_HOST, f"mkdir -p {remote_dir}"],
+            capture_output=True, text=True,
+        )
+        if rc.returncode != 0:
+            print(f"[remote] N100 mkdir 실패: {rc.stderr}", file=sys.stderr)
+            return 6
+        # 2. scp → temp. scp 의 remote dest 는 unquoted — tilde 확장 위함 (sshd 측 shell 처리).
+        rc = subprocess.run(
+            ["scp", "-q", local, f"{DEPLOY_HOST}:{remote_tmp}"],
+            capture_output=True, text=True,
+        )
+        if rc.returncode != 0:
+            print(f"[remote] scp 실패 ({name}): {rc.stderr or rc.stdout}", file=sys.stderr)
+            # temp 청소 시도 (best-effort)
+            subprocess.run(
+                ["ssh", DEPLOY_HOST, f"rm -f {remote_tmp}"],
+                capture_output=True, text=True,
+            )
+            return 6
+        # 3. atomic rename
+        rc = subprocess.run(
+            ["ssh", DEPLOY_HOST, f"mv {remote_tmp} {remote_final}"],
+            capture_output=True, text=True,
+        )
+        if rc.returncode != 0:
+            print(f"[remote] N100 mv 실패 ({name}): {rc.stderr}", file=sys.stderr)
+            # 실패한 temp 청소
+            subprocess.run(
+                ["ssh", DEPLOY_HOST, f"rm -f {remote_tmp}"],
+                capture_output=True, text=True,
+            )
+            return 6
+        print(f"[remote] catalog 동기: {name}.yaml → N100")
+    return 0
+
 
 def cmd_batch_register(
     catalogs: list[str],
@@ -287,6 +363,10 @@ def cmd_batch_register(
     force: bool,
 ) -> int:
     """N100 의 `scripts/register_batch.py` 호출 — catalog/url scope × filter (untried/failed/rc/force).
+
+    rev6 변경: catalog scope 면 *호출 전* dev box 의 `output/candidates/<name>.yaml` 을 N100 으로
+    atomic scp 동기. 즉 dashboard live edit 이 git 안 거치고 즉시 다음 batch run 에 반영됨.
+    scp 실패 시 hard abort — stale yaml 로 register 진행 X.
 
     - scope: `--catalog` 이름 / `--url` 직접 URL 중 하나 이상.
     - filter: default(untried) / `--failed` (rc∈{1,-1,-2,-3,-99}) / `--rc=<list>` / `--force` (모두 override).
@@ -298,8 +378,14 @@ def cmd_batch_register(
     if failed and rc:
         print("[remote] --failed 와 --rc 동시 사용 불가", file=sys.stderr)
         return 4
+    # catalog 인자 검증 + dev → N100 동기 (scp 실패 시 abort).
+    if catalogs:
+        sync_rc = _sync_catalogs_to_n100(catalogs)
+        if sync_rc != 0:
+            return sync_rc
     args = ["scripts/register_batch.py"]
     for c in catalogs:
+        # _sync_catalogs_to_n100 가 이미 검증 — 중복이지만 보수적.
         if not _CATALOG_NAME_ARG_RE.match(c):
             print(f"[remote] invalid catalog name: {c!r}", file=sys.stderr)
             return 4

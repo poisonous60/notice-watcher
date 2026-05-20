@@ -1,6 +1,9 @@
-"""`/candidates` 라우트 (rev5) — multi-file catalog × N100 snapshot jobs 분포.
+"""`/candidates` 라우트 (rev6) — multi-file catalog × N100 snapshot jobs 분포.
 
-`configs/candidates/<name>.yaml` (schema 2: name+url) 각 파일 ↔ snapshot `bot.sqlite3`
+rev6 변경: catalog yaml 위치 `configs/candidates/` → `output/candidates/`. git-ignored.
+dashboard 가 dev box 의 copy 직접 편집. N100 은 `scripts/remote.py batch-register` 호출 시점에 동기.
+
+`output/candidates/<name>.yaml` (schema 2: name+url) 각 파일 ↔ snapshot `bot.sqlite3`
 jobs (LEFT JOIN on url) + `configs.snapshot/<slug>.json` config 존재 여부 → status ×
 fail_kind/fail_subkind 분포. dev box 전용.
 
@@ -33,7 +36,8 @@ from bot import fail_taxonomy
 from dashboard import prompts, state
 
 ROOT = Path(__file__).resolve().parent.parent
-CATALOG_DIR = ROOT / "configs" / "candidates"
+CATALOG_DIR = ROOT / "output" / "candidates"  # rev6: git-ignored 데이터. dashboard 가 dev box copy 직접 편집.
+                                                # N100 동기는 `scripts/remote.py batch-register` atomic scp 가 함.
 CONFIGS_SNAPSHOT = ROOT / "configs.snapshot"
 
 CATALOG_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
