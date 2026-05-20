@@ -76,15 +76,16 @@ templates.env.globals["label_for_kind"] = _label_for_kind
 # 아래 선언 순서와 무관하게 _sources_for_path 가 길이 desc 로 정렬해서 매칭 — 순서 footgun 제거.
 # --------------------------------------------------------------------------- #
 PAGE_SOURCES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    # 0-source (snapshot 미사용)
+    # 0-source (snapshot 미사용 — control_audit/traces/cases.sqlite3 등 dev 로컬 또는 미pull)
     ("/control",     ()),
     ("/settings",    ()),
     ("/history",     ()),
     ("/timings",     ()),
     ("/cases",       ()),
-    ("/candidates",  ()),
-    ("/bugs",        ()),
     ("/vocab",       ()),
+    # snapshot 의존 — 0-source 아님
+    ("/candidates",  ("bot_db", "configs")),  # catalog yaml(로컬) × jobs 분포(bot_db) × config 존재(configs)
+    ("/bugs",        ("poll_state",)),         # *.BUG.json (poll_state dir)
     ("/learned",     ("learned",)),
     # 단일 source
     ("/usage",        ("usage_db",)),
