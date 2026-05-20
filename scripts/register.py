@@ -411,6 +411,58 @@ def _board_shape_check(digest: dict, url: str) -> tuple[bool, str]:
                    f"[신호: {detail}]")
 
 
+# --------------------------------------------------------------------------- #
+# LLM 분류기 veto — 위 5개 구조 게이트의 false-reject 봉합.
+# 게이트가 거부하려 할 때 LLM index/content 분류기를 호출. 'index'(게시판) 면 거부 취소.
+# PoC: board recall 0.905 / article precision 1.000 (docs/plans/llm-index-content-classifier.md).
+# - --gate-only: veto skip (LLM 0콜 보장).
+# - 호출당 1회 memoize (digest 에 캐시 — root_marketing 이 board_shape 내부 호출 + override 후
+#   later 게이트 재진입에도 단일 콜). 게이트 *전부* 같은 verdict 공유 → drift 불가.
+# - 분류 실패/HTML 부재 → class='?' → override 안 함 = 현 동작(거부) 유지 (fail-safe, regression 0).
+# --------------------------------------------------------------------------- #
+_CLASSIFY_OVERRIDE_MIN_CONF = 0.5
+
+
+def _classify_veto(digest: dict, url: str, slug: str, gate_only: bool) -> Optional[dict]:
+    """LLM 분류 결과 dict 반환 (memoized). gate_only 면 None (분류 skip)."""
+    if gate_only:
+        return None
+    cache = digest.setdefault("_classify_veto_cache", {})
+    key = (slug, url)
+    if key not in cache:
+        try:
+            from generate.classify import classify_index_content
+            cache[key] = classify_index_content(url=url, digest=digest, slug=slug)
+        except Exception as e:  # noqa: BLE001 — 분류기 import/호출 실패가 등록을 막으면 안 됨
+            cache[key] = {"class": "?", "confidence": 0.0, "reason": f"veto_error: {e}"}
+    return cache[key]
+
+
+def _veto_override(res: Optional[dict]) -> bool:
+    return bool(res and res.get("class") == "index"
+                and res.get("confidence", 0.0) >= _CLASSIFY_OVERRIDE_MIN_CONF)
+
+
+def _gate_reject_or_veto(digest: dict, url: str, slug: str, gate_only: bool, *,
+                         reason: str, note: str, learn: bool = False) -> Optional[int]:
+    """게이트 거부 시점 공통 처리. 분류기가 board(index) 판단하면 None(거부 취소 → 계속),
+    아니면 _save_rejected 후 3 반환. _save_rejected *전* 에 veto 결정 → override 시 마커/learn 미발생."""
+    res = _classify_veto(digest, url, slug, gate_only)
+    if _veto_override(res):
+        print(f"[register] 🔵 '{note}' 거부를 LLM 분류기가 board(index)로 판단 — 거부 취소 "
+              f"(conf={res.get('confidence')}, {res.get('reason', '')[:80]})")
+        return None
+    if res:
+        cnote = f" [classifier={res.get('class')} conf={res.get('confidence')}: {res.get('reason', '')[:80]}]"
+    else:
+        cnote = " [classifier skip (--gate-only)]"
+    try:
+        _save_rejected(slug, url, reason + cnote, note=note, learn=learn)
+    except Exception as e:  # noqa: BLE001
+        print(f"[register] ⚠ REJECTED 마커 저장 실패 (rc=3): {e}", file=sys.stderr)
+    return 3
+
+
 def _save_state(slug: str, url: str, config_path: Path, post_ids: list[str],
                 body_empty_at_baseline: Optional[bool] = None) -> Path:
     """state.json 작성. `body_empty_at_baseline`: 등록 직후 첫 글 1~3건 본문 fetch 결과 —
@@ -1485,17 +1537,14 @@ def _main_inner(argv) -> int:
     ok_nav, nav_msg = _single_article_nav_only_check(digest)
     if not ok_nav:
         print(f"[register] {nav_msg}")
-        print("[register] ❌ 등록 거부 — 단일 article (nav-only same-host).")
-        # manual `register.py "<url>"` 직호출 경로에서도 REJECTED 마커 박힘 (codex 발견: 옛 코드는 _learn_pattern
-        # 만 호출 — learned 됐는데 marker 없는 orphan 상태. worker 경로에서만 _save_rejected 가 사후 처리됐음).
-        # learn=False — 2026-05-20 (4) 결정: nav_only 는 *board-specific* 거부 (그 article 페이지만), 같은
-        # host 의 *board URL* (`.../board/<id>`) 은 정상. path_prefix 자동 학습은 false-positive 큼.
-        try:
-            _save_rejected(slug, url, "single_article_nav_only 거부 (nav 안 사이드바 메뉴만 잡힘)",
-                           note="gate: _single_article_nav_only_check", learn=False)
-        except Exception as e:  # noqa: BLE001
-            print(f"[register] ⚠ REJECTED 마커 저장 실패 (rc=3): {e}", file=sys.stderr)
-        return 3
+        # LLM 분류기 veto — 게시판이면 거부 취소. learn=False — 2026-05-20 (4) 결정: nav_only 는
+        # *board-specific* 거부 (그 article 페이지만), path_prefix 자동 학습은 false-positive 큼.
+        rc = _gate_reject_or_veto(digest, url, slug, args.gate_only,
+                                  reason="single_article_nav_only 거부 (nav 안 사이드바 메뉴만 잡힘)",
+                                  note="gate: _single_article_nav_only_check", learn=False)
+        if rc is not None:
+            print("[register] ❌ 등록 거부 — 단일 article (nav-only same-host).")
+            return rc
 
     # single-article meta+diverging 게이트 — og:type=article / schema.org NewsArticle 선언했고
     # probe '진짜 글 후보' 가 *다른 섹션* 인 페이지 (예: nature.com 의 `/articles/<doi>` — input 은 /articles/X,
@@ -1504,13 +1553,12 @@ def _main_inner(argv) -> int:
     ok_meta, meta_msg = _meta_article_diverging_check(digest, url)
     if not ok_meta:
         print(f"[register] {meta_msg}")
-        print("[register] ❌ 등록 거부 — 단일 article (meta 선언 + 발산 first_article).")
-        try:
-            _save_rejected(slug, url, "meta_article_diverging 거부 (og/schema article + first_article 다른 섹션)",
-                           note="gate: _meta_article_diverging_check", learn=False)
-        except Exception as e:  # noqa: BLE001
-            print(f"[register] ⚠ REJECTED 마커 저장 실패 (rc=3): {e}", file=sys.stderr)
-        return 3
+        rc = _gate_reject_or_veto(digest, url, slug, args.gate_only,
+                                  reason="meta_article_diverging 거부 (og/schema article + first_article 다른 섹션)",
+                                  note="gate: _meta_article_diverging_check", learn=False)
+        if rc is not None:
+            print("[register] ❌ 등록 거부 — 단일 article (meta 선언 + 발산 first_article).")
+            return rc
 
     # multi-host hub 게이트 — list row 의 글 링크가 ≥3 unique 외부 호스트로 분산 + external_ratio ≥0.95.
     # tistory root / brunch hub / 기사 aggregator 패턴. _board_shape_check 보다 정확한 거부 사유.
@@ -1518,13 +1566,12 @@ def _main_inner(argv) -> int:
     ok_hub, hub_msg = _multi_host_hub_check(digest, url)
     if not ok_hub:
         print(f"[register] {hub_msg}")
-        print("[register] ❌ 등록 거부 — multi-host hub root.")
-        try:
-            _save_rejected(slug, url, "multi_host_hub 거부 (3+ unique external hosts, ratio≥0.95)",
-                           note="gate: _multi_host_hub_check", learn=False)
-        except Exception as e:  # noqa: BLE001
-            print(f"[register] ⚠ REJECTED 마커 저장 실패 (rc=3): {e}", file=sys.stderr)
-        return 3
+        rc = _gate_reject_or_veto(digest, url, slug, args.gate_only,
+                                  reason="multi_host_hub 거부 (3+ unique external hosts, ratio≥0.95)",
+                                  note="gate: _multi_host_hub_check", learn=False)
+        if rc is not None:
+            print("[register] ❌ 등록 거부 — multi-host hub root.")
+            return rc
 
     # root marketing homepage 게이트 — 메이저 미디어/플랫폼 root 도메인 (CNN/Reuters/NatGeo/Vimeo 류) 차단.
     # board_shape 가 hero/carousel 의 same-host article 1-2개 만으로 통과시키는 걸 막음. learn=False —
@@ -1532,30 +1579,26 @@ def _main_inner(argv) -> int:
     ok_rmh, rmh_msg = _root_marketing_homepage_check(digest, url)
     if not ok_rmh:
         print(f"[register] {rmh_msg}")
-        print("[register] ❌ 등록 거부 — root 도메인 마케팅 랜딩/허브.")
-        try:
-            _save_rejected(slug, url, "root_marketing_homepage 거부 (root + nav/carousel-heavy + same-host rows 작음)",
-                           note="gate: _root_marketing_homepage_check", learn=False)
-        except Exception as e:  # noqa: BLE001
-            print(f"[register] ⚠ REJECTED 마커 저장 실패 (rc=3): {e}", file=sys.stderr)
-        return 3
+        rc = _gate_reject_or_veto(digest, url, slug, args.gate_only,
+                                  reason="root_marketing_homepage 거부 (root + nav/carousel-heavy + same-host rows 작음)",
+                                  note="gate: _root_marketing_homepage_check", learn=False)
+        if rc is not None:
+            print("[register] ❌ 등록 거부 — root 도메인 마케팅 랜딩/허브.")
+            return rc
 
     # board-shape 게이트 — gemini 부르기 전에 한 번 더. probe 가 같은 호스트로 가는 반복 글 링크/목록 API/피드를
     # 하나도 못 찾았으면 그냥 일반 페이지(랜딩/문서/단일 글) — gemini 4회 돌릴 가치 없음 + triage 큐 오염 방지.
     ok_board, board_msg = _board_shape_check(digest, url)
     if not ok_board:
         print(f"[register] {board_msg}")
-        print("[register] ❌ 등록 거부 — 게시판 형식 아님.")
-        # board_shape 거부 = 비-게시판. manual 직호출 경로에서도 REJECTED 마커 박힘 (codex 발견: 옛 코드는
-        # _learn_pattern 만 — learned 됐는데 marker 없는 orphan).
         # learn=False — 2026-05-20 (4) 결정: board_shape 거부는 *page-specific* (예: arca 의 채널이 없거나
         # 빈 페이지여서 거부됐을 때 같은 host 의 다른 채널까지 막으면 false-positive 큼).
-        try:
-            _save_rejected(slug, url, "board_shape_check 거부 (게시판 형식 아님)",
-                           note="gate: _board_shape_check", learn=False)
-        except Exception as e:  # noqa: BLE001
-            print(f"[register] ⚠ REJECTED 마커 저장 실패 (rc=3): {e}", file=sys.stderr)
-        return 3
+        rc = _gate_reject_or_veto(digest, url, slug, args.gate_only,
+                                  reason="board_shape_check 거부 (게시판 형식 아님)",
+                                  note="gate: _board_shape_check", learn=False)
+        if rc is not None:
+            print("[register] ❌ 등록 거부 — 게시판 형식 아님.")
+            return rc
 
     # --gate-only: 모든 게이트 통과. preflight (네트워크 re-probe) + LLM 호출 *직전* 종료.
     # 비용 0 보장 — post-fix-cleanup 의 "수동 작업 필요" 신호.
