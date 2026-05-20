@@ -160,4 +160,36 @@ def run() -> list[tuple[str, bool, str]]:
                   and out["external_ratio"] == 0.6,
                   f"got {out!r}"))
 
+    # 13. multi_host_hub: sibling subdomain only — False (2026-05-20 fix).
+    # m.dcinside.com ↔ gall.dcinside.com/game.dcinside.com/www.dcinside.com 인프라 분리.
+    cands = [
+        {"selector": "li", "child_count": 10, "sample_url": "https://gall.dcinside.com/board/view/?id=maple&no=1",
+         "href_common_prefix": "https://", "href_is_js": None},
+        {"selector": "li", "child_count": 10, "sample_url": "https://game.dcinside.com/x",
+         "href_common_prefix": "https://", "href_is_js": None},
+        {"selector": "li", "child_count": 10, "sample_url": "https://www.dcinside.com/y",
+         "href_common_prefix": "https://", "href_is_js": None},
+    ]
+    out = list_row_external_host(cands, base_url="https://m.dcinside.com/board/maple")
+    cases.append(("multi_host_hub_sibling_subdomain_negative",
+                  out is not None and out["multi_host_hub"] is False
+                  and len(out["unique_external_hosts"]) == 3
+                  and out.get("base_registered_domain") == "dcinside.com",
+                  f"got {out!r}"))
+
+    # 14. multi_host_hub: 1 sibling + 2 다른 etld+1 → True (sibling 있어도 *다른* etld+1 섞이면 hub).
+    cands = [
+        {"selector": "li", "child_count": 10, "sample_url": "https://other.dcinside.com/x",
+         "href_common_prefix": "https://", "href_is_js": None},
+        {"selector": "li", "child_count": 10, "sample_url": "https://example.com/x",
+         "href_common_prefix": "https://", "href_is_js": None},
+        {"selector": "li", "child_count": 10, "sample_url": "https://other.com/x",
+         "href_common_prefix": "https://", "href_is_js": None},
+    ]
+    out = list_row_external_host(cands, base_url="https://m.dcinside.com/")
+    cases.append(("multi_host_hub_mixed_etld_positive",
+                  out is not None and out["multi_host_hub"] is True
+                  and len(out["unique_external_hosts"]) == 3,
+                  f"got {out!r}"))
+
     return cases

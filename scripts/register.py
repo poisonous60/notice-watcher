@@ -204,6 +204,11 @@ def _first_path_segment(u: Optional[str]) -> str:
     return parts[0].lower() if parts else ""
 
 
+# PHP/ASP/JSP 등 *router file* 확장자 — 한 .php 파일이 list, 다른 .php 가 article 인 패턴.
+# 게임메카 (`news.php` → `view.php/...`) 같은 게시판이 false-positive 로 잡히는 걸 차단.
+_ROUTER_FILE_EXT_RE = re.compile(r"\.(php|asp|aspx|jsp|cgi|do)$", re.I)
+
+
 def _meta_article_diverging_check(digest: dict, url: str) -> tuple[bool, str]:
     """probe digest 의 article_meta_signals.is_article_page=True AND first_article_url 의
     첫 path-segment 가 input URL 과 *다르면* single-article 페이지 판정.
@@ -212,6 +217,10 @@ def _meta_article_diverging_check(digest: dict, url: str) -> tuple[bool, str]:
     선언했고 probe 가 '진짜 글 후보' 로 input 과 *다른 섹션* 의 URL 을 잡았다면 input 은 그 섹션의
     article 페이지일 가능성 큼. board 페이지가 우연히 og:type=article 박은 경우(omate 등)는
     first_article 이 같은 section/path-prefix → 통과 (false-positive 차단).
+
+    router-file 사이트 false-positive (2026-05-20 gamemeca 케이스) — 첫 segment 가 둘 다 .php/.asp/...
+    같은 router file 확장자면 path-prefix 비교 의미 없음. 한 .php = list, 다른 .php = article 이 정상.
+    이 경우 게이트 skip 후 일반 파이프라인.
 
     skip_learn 처리: 이 gate 가 잡는 사이트는 보드/article 이 같은 첫 segment 공유할 수 있어
     (예: nature 가 인식기 미커버 였을 때) `_learn_pattern` 호출 X. REJECTED 마커만 박음 — 호출자
@@ -229,6 +238,9 @@ def _meta_article_diverging_check(digest: dict, url: str) -> tuple[bool, str]:
     if not inp_seg or not fau_seg:
         return True, ""
     if inp_seg == fau_seg:
+        return True, ""
+    # router-file 사이트 (PHP/ASP/JSP 등) — 둘 다 router file 확장자면 segment 비교 무의미.
+    if _ROUTER_FILE_EXT_RE.search(inp_seg) and _ROUTER_FILE_EXT_RE.search(fau_seg):
         return True, ""
     signals = meta.get("signals") or []
     return False, (f"단일 article 페이지로 보임 — meta 가 article 임을 선언({signals[:3]})하고 "

@@ -64,7 +64,20 @@ PATTERNS_REJECT: list[tuple] = [
     # → skip_learn=True. recognize_reject 는 article 만 막고, learned_blacklist 학습은 X.
     (re.compile(
         r"^https?://[a-z]{2,3}\.wikipedia\.org/wiki/"
-        r"(?!Special:|Category:|Portal:|Help:|File:|Talk:|User:|Wikipedia:|Template:|특수기능:|분류:|위키백과:)"
+        # 보드/메타 페이지 — namespace prefix 또는 main page title 은 제외.
+        # 영어 외 lang Wikipedia 의 Special: 별명 (ko `특수:`, ja `特別:`, zh `特别:`/`特別:`) 도
+        # negative look-ahead 에 박음. URL-encoded 형 (`%ED%8A%B9%EC%88%98`/`%E7%89%B9%E5%88%A5`/...)도 같이.
+        # main page (각 lang): en `Main_Page`, ko `대문`/URL-encoded `%EB%8C%80%EB%AC%B8`,
+        # ja `メインページ`/URL-encoded `%E3%83%A1%E3%82%A4%E3%83%B3%E3%83%9A%E3%83%BC%E3%82%B8`.
+        # 기존 `특수기능:` 은 *오타* — 한국어 Wikipedia 의 Special namespace 는 `특수:` (이전 룰 보존 위해 유지).
+        r"(?!"
+        r"Special:|Category:|Portal:|Help:|File:|Talk:|User:|Wikipedia:|Template:|"
+        r"특수:|특수기능:|분류:|위키백과:|"
+        r"特別:|特别:|分类:|分類:|"
+        r"Main_Page|대문|%EB%8C%80%EB%AC%B8|메인_화면|메인페이지|메인_페이지|"
+        r"メインページ|%E3%83%A1%E3%82%A4%E3%83%B3%E3%83%9A%E3%83%BC%E3%82%B8|"
+        r"%ED%8A%B9%EC%88%98|%E7%89%B9%E5%88%A5|%E7%89%B9%E5%88%AB"
+        r")"
         r"[^/?#]+/?(?:[?#].*)?$", re.I,
     ), "위키피디아 단일 article — 게시판 아님. 폴링 대상 X (한 글 안의 참고 링크를 새 글로 감시할 수 없음). 보드는 `/wiki/Special:RecentChanges` 등.",
         True),

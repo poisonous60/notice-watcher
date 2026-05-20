@@ -2,11 +2,12 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 85 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 86 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
 | [`infra_url_dead_split_2026-05-20`](infra_url_dead_split_2026-05-20.md) | ✅ 자동 (FailKind split — url_dead rc=4 분리) | 2026-05-20 | F | target_not_found, cert_or_dns_broken | (인프라 — 분류 카탈로그 변경, 사이트 N/A) |
+| [`infra_gate_false_positive_fixes_2026-05-20`](infra_gate_false_positive_fixes_2026-05-20.md) | ✅ 자동 (article_page_reject + meta_diverging + multi_host_hub 3개 fix) | 2026-05-20 | C+F | recognizer_article_page_reject, meta_diverging, multi_host_hub | (인프라 — 3 게이트 false-positive fix, 사이트 N/A) |
 | [`host_ppomppu-co-kr_zboard_66450ede`](host_ppomppu-co-kr_zboard_66450ede.md) | ✅ 손-config (같은 도메인 working config 베낌) | 2026-05-20 | none | posts_nonempty | https://www.ppomppu.co.kr/zboard/zboard.php?id=ppomppu |
 | [`host_pearlabyss-com_ko-kr_21e98c22`](host_pearlabyss-com_ko-kr_21e98c22.md) | 🟡 보류 — SPA fully shielded (API endpoint unknown without browser inspection) | 2026-05-20 | none | posts_nonempty, spa_no_api_hint | https://www.pearlabyss.com/ko-kr/news/notice |
 | [`discourse_discuss.python.org_16ebc619`](discourse_discuss.python.org_16ebc619.md) | ✅ 자동 (Discourse recognizer + DiscourseAdapter 신규 — JSON API 직접 호출) | 2026-05-20 | F | posts_nonempty, article_body_len | https://discuss.python.org/latest |
@@ -102,7 +103,7 @@
 | C | 7 |
 | C+A | 1 |
 | C+D | 2 |
-| C+F | 1 |
+| C+F | 2 |
 | C+F+A | 1 |
 | E | 3 |
 | E+A+C+D | 1 |
@@ -116,7 +117,7 @@
 | strategy | count |
 |---|---|
 | (미기재) | 31 |
-| handwritten | 12 |
+| handwritten | 13 |
 | httpx_html | 7 |
 | httpx_json | 11 |
 | mixed | 1 |
@@ -125,5 +126,5 @@
 
 ### 최근 90일 (≥ 2026-02-19)
 
-케이스 85 건.
+케이스 86 건.
 

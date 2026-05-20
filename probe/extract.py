@@ -20,6 +20,36 @@ from ._contract import validate_payload
 from ._heuristic import heuristic
 from .hydration import find_list_in_json
 
+try:
+    import tldextract as _tldextract
+except ImportError:  # pragma: no cover — tldextract 가 requirements 에 있음. 없는 환경 fallback.
+    _tldextract = None
+
+
+def _registered_domain(host: str) -> str:
+    """host (netloc) → registered domain (etld+1) 소문자.
+
+    `m.dcinside.com`/`gall.dcinside.com` → `dcinside.com` (sibling subdomain 같은 사이트로 묶음).
+    `www.example.co.kr` → `example.co.kr` (3-segment public suffix 정확 처리 — tldextract 사용).
+
+    tldextract 없으면 last-2-segments fallback (부정확하지만 동작).
+    """
+    if not host:
+        return ""
+    h = host.lower().split(":", 1)[0]  # port 제거
+    if _tldextract is not None:
+        try:
+            ex = _tldextract.extract(h)
+            if ex.domain and ex.suffix:
+                return f"{ex.domain}.{ex.suffix}"
+        except Exception:
+            pass
+    # fallback — 2-segment (.co.kr 같은 public suffix 는 부정확하지만 대부분 OK)
+    parts = h.split(".")
+    if len(parts) >= 2:
+        return ".".join(parts[-2:])
+    return h
+
 
 @heuristic
 def html_repeating_patterns(html: str, base_url: str, *, min_children: int = 5) -> list[dict]:
@@ -667,20 +697,31 @@ def list_row_external_host(
     필터: child_count ≥ 5 (의미 있는 반복 패턴) + sample_url 이 http(s) + sibling-page 패턴 제외
     (href_common_prefix 가 base_url 의 path 와 시작 일치 = pagination/sidebar 링크).
 
-    출력: {base_host, total_count, external_count, external_ratio, sample_external_urls,
-           unique_external_hosts, multi_host_hub} 또는 None.
+    output: {base_host, base_registered_domain, total_count, external_count, external_ratio,
+             sample_external_urls, unique_external_hosts, multi_host_hub} 또는 None.
     None = 의미 있는 row 후보 0건.
 
-    multi_host_hub: True 면 *플랫폼 hub root* — `unique_external_hosts ≥ 3 AND external_ratio ≥ 0.95`.
-    tistory root (3+ unique blog 호스트) / 기사 aggregator hub 패턴. 단일 sponsor link (poly-pizza
-    total=1) / single wiki mirror (github-wiki-see external_count=1) 같은 false-positive 안 잡힘.
-    register.py 가 이 신호 보면 사전 REJECTED 마커 (인식기 fast-path 없는 새 hub 호스트 자동 cover).
+    multi_host_hub: True 면 *플랫폼 hub root* — `unique_external_hosts ≥ 3 AND external_ratio ≥ 0.95`
+    AND (외부 호스트들이 base 와 *다른* etld+1 를 *하나라도* 포함). tistory root (3+ unique blog
+    호스트 *.tistory.com + daum.net 같이 다른 etld+1 섞임) / 기사 aggregator hub 패턴. 단일 sponsor
+    link (poly-pizza total=1) / single wiki mirror (github-wiki-see external_count=1) false-positive
+    안 잡힘.
+
+    sibling subdomain (2026-05-20 fix): 모든 외부 host 가 base 와 *같은* etld+1 면 sibling subdomain —
+    `m.dcinside.com` ↔ `gall.dcinside.com`/`www.dcinside.com` 같은 인프라 분리. multi_host_hub=False.
+    (이전엔 m.dcinside/board/maple 이 gall.dcinside.com row URL 로 false-positive multi_host_hub.)
+    base 와 같은 etld+1 의 sibling subdomain 은 여전히 external 카운트에는 들어감 (ratio 계산용) —
+    *multi_host_hub flag* 만 끔. 검색결과/aggregator 패턴 (`external_ratio≥0.8` 신호) 은 그대로 유지.
+
+    register.py 가 multi_host_hub 신호 보면 사전 REJECTED 마커 (인식기 fast-path 없는 새 hub 호스트
+    자동 cover).
     """
     from urllib.parse import urlsplit
     base_host = urlsplit(base_url or "").netloc
     if not base_host:
         return None
     base_path = (urlsplit(base_url or "").path or "/").rstrip("/") or "/"
+    base_reg = _registered_domain(base_host)
     total = 0
     external = 0
     ext_samples: list[str] = []
@@ -710,14 +751,18 @@ def list_row_external_host(
     if total == 0:
         return None
     ratio = round(external / total, 3)
+    # sibling subdomain 가드 — 모든 외부 호스트가 base 와 같은 etld+1 면 hub 아님 (m.dcinside ↔ gall.dcinside).
+    ext_etlds = {_registered_domain(h) for h in ext_hosts if h}
+    same_etld_only = bool(ext_etlds) and ext_etlds == {base_reg}
     return {
         "base_host": base_host,
+        "base_registered_domain": base_reg,
         "total_count": total,
         "external_count": external,
         "external_ratio": ratio,
         "sample_external_urls": ext_samples,
         "unique_external_hosts": sorted(ext_hosts),
-        "multi_host_hub": (len(ext_hosts) >= 3 and ratio >= 0.95),
+        "multi_host_hub": (len(ext_hosts) >= 3 and ratio >= 0.95 and not same_etld_only),
     }
 
 

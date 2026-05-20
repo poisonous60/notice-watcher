@@ -42,6 +42,18 @@ def run() -> list[tuple[str, bool, str]]:
     out = recognize_reject("https://ko.wikipedia.org/wiki/분류:한국의_사람")
     cases.append(("wikipedia_category_passes_raw", out is None, f"got {out!r}"))
 
+    # 5a. wikipedia ko `특수:` URL-encoded — RecentChanges (board) 통과 (2026-05-20 fix).
+    out = recognize_reject("https://ko.wikipedia.org/wiki/%ED%8A%B9%EC%88%98:%EC%B5%9C%EA%B7%BC%EB%B0%94%EB%80%9C")
+    cases.append(("wikipedia_ko_special_passes_encoded", out is None, f"got {out!r}"))
+
+    # 5b. wikipedia ja `特別:` URL-encoded — RecentChanges (board) 통과 (2026-05-20 fix).
+    out = recognize_reject("https://ja.wikipedia.org/wiki/%E7%89%B9%E5%88%A5:%E6%9C%80%E8%BF%91%E3%81%AE%E6%9B%B4%E6%96%B0")
+    cases.append(("wikipedia_ja_special_passes_encoded", out is None, f"got {out!r}"))
+
+    # 5c. wikipedia en Main_Page — 메인 페이지는 폴링 대상 가능 (featured/news 섹션) — 통과 (2026-05-20 fix).
+    out = recognize_reject("https://en.wikipedia.org/wiki/Main_Page")
+    cases.append(("wikipedia_en_main_page_passes", out is None, f"got {out!r}"))
+
     # 6. 네이버 지식백과 entry.naver
     out = recognize_reject("https://terms.naver.com/entry.naver?docId=3579743&cid=59054&categoryId=59061")
     cases.append(("naver_terms_entry",
