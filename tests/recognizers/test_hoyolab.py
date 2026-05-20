@@ -41,8 +41,9 @@ def run() -> list[tuple[str, bool, str]]:
     cases.append(("gid6_api_template", ok, f"got {cfg and cfg['list']['url_template']!r}"))
 
     # 3) round-trip: repo 의 기존 hoyolab config 전부 재현 (기능 필드 동일)
-    repro_ok, repro_detail = True, []
+    repro_ok, repro_detail, repro_n = True, [], 0
     for p in sorted(glob.glob("configs/host_hoyolab-com_circles_*.json")):
+        repro_n += 1
         existing = json.load(open(p, encoding="utf-8"))
         url = (existing.get("headers") or {}).get("Referer")
         built = _try(url) if url else None
@@ -56,8 +57,12 @@ def run() -> list[tuple[str, bool, str]]:
             diffs = [k for k in set(_functional(built)) | set(_functional(existing))
                      if _functional(built).get(k) != _functional(existing).get(k)]
             repro_detail.append(f"{Path(p).name}: diff keys {diffs}")
+    # glob 0개면 vacuous pass — 비교 ≥1 강제 (codex)
+    if repro_n == 0:
+        repro_ok = False
+        repro_detail.append("기존 hoyolab config 0개 — round-trip 무검증 (configs/host_hoyolab-com_circles_*.json 확인)")
     cases.append(("roundtrip_reproduces_existing", repro_ok,
-                  "; ".join(repro_detail) or "all reproduced"))
+                  f"{repro_n}건 비교 · " + ("; ".join(repro_detail) or "all reproduced")))
 
     # 4) recognize() 통합 — _recognized_platform=hoyolab
     cfg = recognize("https://www.hoyolab.com/circles/8/0/official?lang=ko-kr")

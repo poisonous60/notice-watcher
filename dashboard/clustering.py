@@ -74,8 +74,11 @@ def load_members(configs_dir: Path, poll_state_dir: Path) -> list[dict]:
         url = c.get("_source_url") or ps_url.get(slug)
         src = "src_url" if c.get("_source_url") else ("poll_state" if url else None)
         if not url:
-            url = (c.get("headers") or {}).get("Referer")
-            src = "referer?" if url else None
+            # Referer fallback (옛 config 복구) — 단 config 의 site 와 같은 host 일 때만.
+            # api/login/cdn 등 등록 url 아닌 Referer 가 phantom cluster 만드는 것 방지 (codex).
+            ref = (c.get("headers") or {}).get("Referer")
+            if ref and c.get("site") and urlsplit(ref).netloc == c["site"]:
+                url, src = ref, "referer?"
         if not url:
             continue
         members.append({
