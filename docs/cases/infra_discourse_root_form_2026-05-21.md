@@ -1,15 +1,15 @@
 ---
 slug: infra_discourse_root_form_2026-05-21
 url: https://forum.openwrt.org/
-status: ✅ 자동 (probe generator-meta 휴리스틱 → DiscourseAdapter — root-form 봉합)
-outcome: improved
+status: ✅ 자동 등록 (probe generator-meta 신호 → DiscourseAdapter dispatch — root-form 봉합)
+outcome: handcrafted
 date: 2026-05-21
 fix_layer: C
 failure_keys: [posts_nonempty, article_body_len]
 config_strategy: handwritten
 adapters_changed: []
 engine_files_touched: [probe/extract.py, probe/_contract.py, scripts/probe.py, scripts/register.py, engine/recognizers/discourse.py]
-tags: [discourse, platform-recognizer, probe-heuristic, generator-meta, json-api, batch-2026-05-21-forums]
+tags: [discourse, platform-config, probe-heuristic, generator-meta, json-api, batch-2026-05-21-forums]
 ---
 
 ## 무엇이 일어났나
@@ -67,11 +67,24 @@ tags: [discourse, platform-recognizer, probe-heuristic, generator-meta, json-api
 - `probe_smoke.py --stage 3 --stage 5` PASS (exit 0). 전체 stage 1/2 fail 은 pre-existing stale fixture (skku/trickcal/arca/mabinogi — hook 무관).
 - cloudflare.com: adapter fetch_list 0건 → 폴백 → 정책 게이트 거부 유지 (우회 X, 정상).
 
-## 트랙 B 검토 (이 변경 자체가 트랙 B)
+## outcome = handcrafted (improved 아님 — 주의)
 
-- (2a) recognizer — root-form 은 URL-only 라 불가 (위 분기 4). 기각.
+fix_layer 는 C(probe 휴리스틱)지만 **outcome 은 handcrafted**. detect_discourse_platform 은
+*알려진 플랫폼* Discourse 를 더 많은 URL 형태(root)에서 검출해 *기존* DiscourseAdapter 로
+**dispatch** 할 뿐 — 자동 솔버의 generic 추론(LLM 생성·검증)이 *미지 유형*을 더 푸는 건 아님.
+CONTEXT.md 19/21/32줄: Discourse=알려진 유형, dispatch-to-adapter=플랫폼 config=handcrafted.
+"커버리지 늘림 = 진보 X". 기존 `discourse_discuss.python.org` case 도 handcrafted 와 일관.
+대조: `recognize_reject`(거부 *분류*)는 improved 지만, 이건 fetch *어댑터 dispatch* 라 handcrafted.
+→ dashboard "파이프 진보" 카운트에서 빠짐 (의도).
+
+## 트랙 B 검토 (커버리지 확장 — 진보 X)
+
+이 변경은 트랙 B(같은 패턴 재발 차단)지만 *플랫폼 config 확장*이라 handcrafted (위 박스).
+
+- (2a) recognizer URL PATTERNS 확장 — root-form 은 URL-only 라 불가 (위 분기 4). 기각, probe 신호로 대체.
 - (2b) `--article-url` — 무관 (목록 자체 문제).
-- (2c) **probe 휴리스틱 — 본 변경의 본질.** generator meta = 페이지에 박힌 fact, 휴리스틱화 가치 high.
+- (2c) **probe 휴리스틱 — 본 변경의 본질.** generator meta = 페이지에 박힌 fact. 단 known-platform
+  검출→dispatch 목적이라 outcome 은 handcrafted (fix_layer C 라고 자동 improved 아님).
 - (2d) probe 산출물 정상.
 
 ## 같은 batch 의 나머지 fail 분류 (이 PR scope 밖 — 별도 기록)

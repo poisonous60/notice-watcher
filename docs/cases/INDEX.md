@@ -6,7 +6,7 @@
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
-| [`infra_discourse_root_form_2026-05-21`](infra_discourse_root_form_2026-05-21.md) | ✅ 자동 (probe generator-meta 휴리스틱 → DiscourseAdapter — root-form 봉합) | 2026-05-21 | C | posts_nonempty, article_body_len | https://forum.openwrt.org/ |
+| [`infra_discourse_root_form_2026-05-21`](infra_discourse_root_form_2026-05-21.md) | ✅ 자동 등록 (probe generator-meta 신호 → DiscourseAdapter dispatch — root-form 봉합) | 2026-05-21 | C | posts_nonempty, article_body_len | https://forum.openwrt.org/ |
 | [`steam-news-recognizer`](steam-news-recognizer.md) | ✅ recognizer 승급 (cluster 10건 → engine/recognizers/steam_news.py) | 2026-05-20 |  |  | https://store.steampowered.com/feeds/news/app/730/ |
 | [`inven-recognizer`](inven-recognizer.md) | ✅ recognizer 승급 (cluster 6건 → engine/recognizers/inven.py) | 2026-05-20 |  |  | https://www.inven.co.kr/board/lol/4625 |
 | [`infra_url_dead_split_2026-05-20`](infra_url_dead_split_2026-05-20.md) | ✅ 자동 (FailKind split — url_dead rc=4 분리) | 2026-05-20 | F | target_not_found, cert_or_dns_broken | (인프라 — 분류 카탈로그 변경, 사이트 N/A) |
