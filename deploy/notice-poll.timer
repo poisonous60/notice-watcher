@@ -1,12 +1,12 @@
-# 매일 08:20(±2분) KST 에 폴링 (2026-05-11 변경: 전엔 매시 13분 = 하루 24회).
-# ⚠️ 다이제스트(구독 schedule=HH:MM)와 notify_empty('새 공지 없음') 는 폴링이 돌 때만 발송됨 →
-#   하루 1회면 다이제스트 시각은 사실상 폴링 시각(08시)에만 비워짐. 다이제스트를 제대로 쓰려면 OnCalendar 를 매시(*:13:00) 등으로 되돌리거나
-#   notify.py 의 flush_digests 를 "지난 시각도 비우기"로 고칠 것. (자세한 건 docs/배포 가이드.md §4)
+# 매시 :20(±2분) KST 폴링 (ADR 0006 — 발송 시각 분리. 폴링은 새 글을 posts 캐시에 모으고
+#   봇 내부 1분 tick(delivery_tick)이 사용자 발송 시각에 deliver_due.py 로 요약·필터·발송).
+# 시간당 폴링 = 사용자마다 흩어진 발송 시각에 신선한 데이터 공급. (realtime 즉시 발송 폐지.)
+# notify_empty('새 공지 없음') 도 발송창에서 처리 — 폴링 시각과 분리됨.
 [Unit]
-Description=Run notice poll once a day (08:20 KST)
+Description=Run notice poll hourly (:20 KST) — ADR 0006
 
 [Timer]
-OnCalendar=*-*-* 08:20:00 Asia/Seoul
+OnCalendar=*-*-* *:20:00 Asia/Seoul
 Persistent=true
 RandomizedDelaySec=120
 
