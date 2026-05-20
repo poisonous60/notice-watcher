@@ -19,7 +19,7 @@
 
 | outcome | 의미 (재정의) | 자리 |
 |---|---|---|
-| `improved` | **추론 개선** — 자동 솔버(probe 추출·LLM 생성·검증·거부 게이트)가 *미지* 유형을 더 풂. **유일한 진보** | C(probe 휴리스틱)·E(schema)·A(prompt)·D(retry)·reject-gate recognizer·register 플로우·blacklist 학습 |
+| `improved` | **추론 개선** — 자동 솔버(probe 추출·LLM 생성·검증·거부 게이트)가 *미지* 유형을 더 풂. **유일한 진보** | C(probe 휴리스틱)·E(schema)·A(prompt)·D(retry)·거부 필터(`recognize_reject`)·register 거부 게이트·blacklist 학습 |
 | `handcrafted` | **수동 config** — 자동이 못 푼 걸 직접 박은 패치 (진보 X) | 단일 config(URL 1개)·플랫폼 config(config 발급 recognizer)·손-adapter |
 | `rejected` / `rejected_with_policy` | 거부 리스트 등록 | policy/gate reject |
 

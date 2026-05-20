@@ -17,7 +17,7 @@ _Avoid_: hand-config pipeline (등록 실패는 사이트 인식 못 한 케이�
 _Avoid_: "거부"(REJECTED rc=2/3 = 정상 결과, 실패 아님), "버그"(rc<0 `.BUG.json` = 시스템 결함, bug-fix workflow).
 
 **추론 개선** (= 자동 솔버가 *미지* 유형을 더 풂 — 유일한 진보):
-register 의 generic 추론(probe 추출·LLM 생성·검증·거부 게이트)을 똑똑하게 만들어 *처음 보는* 유형도 자동 생성/거부되게 — triage 큐를 *근본적으로* 줄임. fix-layer C(probe 휴리스틱)·E(schema)·A(prompt)·D(retry)·reject-gate recognizer·register 플로우·blacklist 학습. **시스템이 스스로 똑똑해진 유일한 경우** → case `outcome: improved`. dashboard "파이프 진보" 카운트 = 이것만. [scope→mechanism re-cut: ADR 0005]
+register 의 generic 추론(probe 추출·LLM 생성·검증·거부 게이트)을 똑똑하게 만들어 *처음 보는* 유형도 자동 생성/거부되게 — triage 큐를 *근본적으로* 줄임. fix-layer C(probe 휴리스틱)·E(schema)·A(prompt)·D(retry)·거부 필터(`recognize_reject`)·register 거부 게이트·blacklist 학습. **시스템이 스스로 똑똑해진 유일한 경우** → case `outcome: improved`. dashboard "파이프 진보" 카운트 = 이것만. [scope→mechanism re-cut: ADR 0005]
 _Avoid_: "toil 줄임" 단독 (수동 config 도 toil 줄이나 자동 솔버 안 똑똑 — 핵심은 *미지 유형* 자동화), "커버리지 늘림" (플랫폼 config 도 커버는 늘리나 진보 X).
 
 **수동 config** (= 자동이 커버 못 해 직접 박은 config — 진보 아닌 패치):
@@ -28,26 +28,22 @@ _Avoid_: "즉답"(구 이름 — 속도 어감, 폐기), "명시 config"(의도�
 gpt-5.4-mini 가 retry 후 못 만든 config 를 dev 세션에서 (coding agent) selector/path 채워 `configs/<slug>.json` 한 파일 작성. canonical URL 1개만 메움. `outcome: handcrafted`. 같은 패턴 다음 사이트 = 또 수동. **선택**: 대상이 *단일 사이트* (재발 0) 일 때.
 _Avoid_: "per-slug 손-config"(구 이름), "손-config" 단독 (스킬명 / `strategy:handwritten` 값과 떠다님).
 
-**플랫폼 config** (수동 config 의 한 형태, config 발급 recognizer):
-`engine/recognizers/<plat>.py` 가 URL *클래스* 인식 → config 즉시 발급 (probe+LLM skip). 한 플랫폼 전체 메움 — **단일 config 의 parameterized 버전** (1 URL 대신 클래스). 단 자동 추론은 *여전히 그대로* → `outcome: handcrafted` (커버 넓어도 진보 X — dispatch table). 손-adapter 동반해도 수동 config 의 fetch 코드. **선택**: 대상이 *플랫폼* 일 때 (§8a 가 단일보다 위로 미는 건 *덜 나쁜 패치*(한 번에 클래스) 라서지 진보라서가 아님).
-**나쁨의 결** (case body 1줄): (a) 추론 개선 *가능했는데* 안 함 = 게을렀음, 트랙 B 재도전 후보 / (b) 추론 *원천 불가*(arca Cloudflare·google ToS·anti-bot·휘발토큰) = recognizer+stealth adapter 가 유일 경로, 영구 종결.
-_Avoid_: "recognizer 일반화"(구 이름), "improved"/"leverage 승리"(진보 아님 — handcrafted), "플랫폼 hand-config"(hand-config 은 스킬명).
+**플랫폼 config** (수동 config 의 한 형태 — URL 클래스용):
+`engine/recognizers/<plat>.py` 가 URL *클래스* 패턴 매칭(`recognize()` / `PATTERNS` / builder, registry `_RECOGNIZERS`) → config 즉시 발급 (probe+LLM skip). 한 플랫폼 전체 메움 — **단일 config 의 parameterized 버전** (1 URL 대신 클래스, 같은 클래스 다음 URL 부터 자동 재사용). 단 자동 추론은 *여전히 그대로* → `outcome: handcrafted` (커버 넓어도 진보 X — dispatch table). 손-adapter 동반해도 수동 config 의 fetch 코드. arca/google-news/naver-blog/tistory/discourse 등. **선택**: 대상이 *플랫폼* 일 때 (§8a 가 단일보다 위로 미는 건 *덜 나쁜 패치*(한 번에 클래스) 라서지 진보라서가 아님).
+**나쁨의 결** (case body 1줄): (a) 추론 개선 *가능했는데* 안 함 = 게을렀음, 트랙 B 재도전 후보 / (b) 추론 *원천 불가*(arca Cloudflare·google ToS·anti-bot·휘발토큰) = `engine/recognizers/` + stealth adapter 가 유일 경로, 영구 종결.
+_Avoid_: "recognizer"/"recognizer 일반화" (개념어 X — `engine/recognizers/`·`recognize()` 는 *코드 구현 이름* 일 뿐, 개념은 플랫폼 config), "improved"/"leverage 승리"(진보 아님 — handcrafted), "플랫폼 hand-config"(hand-config 은 스킬명).
 
 **플랫폼** (= 재발 source 있는 URL 형태):
 한 `host+path` 형태가 *서로 다른 여러 게시판/검색* 을 instance 로 내놓고, 그 instance 가 system 에 더 들어올 source 가 있는 것. **판정 test**: "이 URL 의 host+path 형태를 가진 *다른* 게시판이 앞으로 또 `/watch` 될 source 가 있나?" 재발 source 3종 — ① multi-tenant 호스트 (arca 채널 `/b/<ch>`·reddit `/r/<sub>`·네이버/다음 카페·tistory), ② parametric service (google search `?q=`), ③ 공유 CMS (여러 host 가 같은 SW — discourse·그누보드). → 수동 config 만들 거면 *플랫폼 config* 로 (단일보다 덜 나쁜 패치).
 _Avoid_: "큰 사이트" (규모 무관 — 형태 재발이 기준), "게시판 여러 개" (한 사이트 고정 3판 ≠ 플랫폼 — instance source 가 아님).
 
 **단일 사이트** (= 재발 source 없음):
-URL 형태 재발 source 0. 한 기관의 고정 게시판 (예: ACM 윤리강령 페이지·대학 공지판). recognizer regex 가 딱 1개 URL 만 매칭 → 추상화 비용만, 일반성 0 (over-engineering). → 수동 config 만들 거면 *단일 config* 로. case body 에 "재발 0 이유" 1줄 (CLAUDE.md §8a).
+URL 형태 재발 source 0. 한 기관의 고정 게시판 (예: ACM 윤리강령 페이지·대학 공지판). URL 패턴 regex 박아도 딱 1개 URL 만 매칭 → 추상화 비용만, 일반성 0 (over-engineering). → 수동 config 만들 거면 *단일 config* 로. case body 에 "재발 0 이유" 1줄 (CLAUDE.md §8a).
 _Avoid_: "단일 게시판" (오해 source — arca 단일 채널도 게시판 1개지만 플랫폼 instance 라 플랫폼 config).
 
-**recognizer** (`engine/recognizers/<plat>.py` 코드 아티팩트):
-register 가 probe 전에 `recognize(url)` 호출 — URL 패턴 매칭 함수. **두 종류, 정반대 성격**:
-- **config 발급 recognizer** (arca/google-news/naver-blog/tistory/discourse) → 플랫폼 config = 수동 config 패치. `outcome: handcrafted`.
-- **reject-gate recognizer** (`article_page_reject` 류) → 미지 사이트를 *올바르게 거부* = 자동 분류 똑똑해짐. **추론 개선**. `outcome: improved`.
-
-→ "recognizer 추가" 자체로는 outcome 안 정해짐 — *config 발급(수동 패치)이냐 거부 게이트(추론 개선)냐* 가 정함.
-_Avoid_: "recognizer = 일반화/개선" (config 발급은 수동 config — F-layer 자리일 뿐 의미 bucket X).
+**거부 필터** (`engine/recognizers/article_page_reject.py` — `recognize_reject()` / `PATTERNS_REJECT`):
+플랫폼 config 발급(`recognize()`)과 **별 코드 경로**. register 가 probe 전에 `recognize_reject(url)` *도* 호출 — URL 이 알려진 *단일 article/백과 페이지* 패턴이면 즉시 REJECTED + (skip_learn=False 면) learned_blacklist 학습. **config 안 만듦, builder 없음 — pass/block 필터**. 미지 사이트를 *올바르게 거부* = 자동 분류 똑똑 → **추론 개선**, `outcome: improved`. (registry `_REJECTS` / `PATTERNS_REJECT` — `_RECOGNIZERS` 와 별개)
+_Avoid_: "recognizer"(config 발급 코드 — 별 registry/함수), "reject-gate recognizer"(구 표현 — 인식·발급이 아니라 거부 필터).
 
 **handwritten strategy**:
 config 의 `strategy` 필드값. 손-adapter 클래스 경로 (`adapter:"<클래스>"` + kwargs) — LLM-gen schema 대신. **작성자 무관** — recognizer 가 자동 발급한 config 도 이 값 가짐 (arca/google-news). "손으로 썼다" 가 아니라 "손-adapter 경로 쓴다" 는 뜻.

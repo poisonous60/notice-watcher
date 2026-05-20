@@ -8,14 +8,14 @@ ADR 0005 결정의 실행 단계. **A(어휘+ADR)는 2026-05-20 완료**. 이 �
 
 case 의 **주된 산출** 이:
 - 아는 것에 답 박음 (단일 config / 플랫폼 config / 손-adapter) → `handcrafted`
-- AUTO path 가 *미지* 사이트 더 잘 풀게 함 (probe 휴리스틱 C / schema E / prompt A / retry D / reject-gate recognizer / register 플로우 / blacklist 학습) → `improved`
+- AUTO path 가 *미지* 사이트 더 잘 풀게 함 (probe 휴리스틱 C / schema E / prompt A / retry D / 거부 필터 recognize_reject / register 거부 게이트 / blacklist 학습) → `improved`
 - mixed 면 **dominant** 로. (예: google-news = recognizer+adapter(수동 config) + `_STABLE_ID_RE` cap fix(약한 추론개선) → main 은 플랫폼 config → `handcrafted`)
 
 ## Step 1 — enum 정의 갱신 (단일 진실원)
 
 `bot/case_runs_meta.py` line 12-13 주석 재작성:
 ```python
-"improved",     # 추론 개선 — AUTO path 가 미지 사이트 더 잘 풂 (probe휴리스틱/schema/prompt/retry/reject-gate/register플로우). ADR 0005
+"improved",     # 추론 개선 — AUTO path 가 미지 사이트 더 잘 풂 (probe휴리스틱/schema/prompt/retry/거부필터recognize_reject/register거부게이트). ADR 0005
 "handcrafted",  # 수동 config — 자동이 못 푼 걸 직접 박은 패치, 진보 X (단일 config / 플랫폼 config = 발급 recognizer / 손-adapter). ADR 0005
 ```
 (`OUTCOME_LABELS` 값 `✨ improved`/`🔧 handcrafted` 그대로 OK — 키 안 바뀜, drift assert 통과.)
@@ -24,7 +24,7 @@ case 의 **주된 산출** 이:
 
 `.claude/skills/hand-config/SKILL.md` (+ `.agents/skills/hand-config/SKILL.md` 동일본 — **둘 다**) 의 outcome enum 표:
 ```
-| improved | 추론 개선 — AUTO path 가 미지 사이트 더 잘 풂 (fix_layer C/E/A/D·reject-gate·register플로우) |
+| improved | 추론 개선 — AUTO path 가 미지 사이트 더 잘 풂 (fix_layer C/E/A/D·거부 필터(recognize_reject)·register 거부 게이트) |
 | handcrafted | 수동 config — 자동이 못 푼 패치(진보 X). 단일 config·플랫폼 config(발급 recognizer)·손-adapter. fix_layer 무관(F 여도 handcrafted) |
 ```
 "handcrafted = fix_layer X" 문구 폐기 — 플랫폼 config 는 handcrafted + fix_layer F.
@@ -41,8 +41,8 @@ config 발급 recognizer case 6개 — 각각 dominant=수동 config 재확인 �
 - `docs/cases/naver-blog_ghangth_5a895e5f.md`
 - `docs/cases/tistory_leedakyeong_e0e58b0f.md`
 
-**flip 안 함 (improved 유지)** — reject-gate/blacklist/infra recognizer 는 추론개선:
-`infra_article_page_reject_*`, `infra_*_learned_blacklist_skip_*`, `infra_single_article_gate_*`, `infra_gate_false_positive_fixes_*` 등. (recognizer=Y 여도 *거부 게이트* 라 improved 맞음.)
+**flip 안 함 (improved 유지)** — 거부 필터(`recognize_reject`)/blacklist/register 거부 게이트 infra 는 추론개선:
+`infra_article_page_reject_*`, `infra_*_learned_blacklist_skip_*`, `infra_single_article_gate_*`, `infra_gate_false_positive_fixes_*` 등. (config 발급 recognizer 아님 — 거부 메커니즘이라 자동 분류 똑똑해짐 → improved 맞음.)
 
 확인 명령: `for f in <6개>; do grep -H "^outcome:" $f; done` 로 현재값 보고, flip 후 재확인.
 
