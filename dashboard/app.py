@@ -25,6 +25,7 @@ from dashboard import candidates_view
 from dashboard import cases_view
 from dashboard import learned_view
 from dashboard import vocab_deferred_view
+from dashboard import clustering
 from dashboard import prompts, state, triage_later
 from dashboard import usage_view
 from dashboard import user_view
@@ -90,6 +91,7 @@ PAGE_SOURCES: tuple[tuple[str, tuple[str, ...]], ...] = (
     # 단일 source
     ("/usage",        ("usage_db",)),
     ("/triage/failed", ("poll_state",)),  # *.FAILED.json 만 봄
+    ("/clusters",    ("configs", "poll_state")),  # recognizer 승급 후보 — config 묶음 × url(poll_state)
     # bot_db 위주 + 일부 부수
     ("/jobs",        ("bot_db",)),
     ("/reports",     ("bot_db",)),
@@ -290,6 +292,22 @@ async def triage_failed_later(request: Request):
         else:
             triage_later.remove_many(slugs)
     return RedirectResponse(url="/triage/failed", status_code=303)
+
+
+@app.get("/clusters", response_class=HTMLResponse)
+async def clusters_page(request: Request):
+    """recognizer 승급 후보 — 자동생성 config 중 같은 platform(param 만 다름) 묶음.
+
+    snapshot 의 configs.snapshot/ + poll_state/ 를 소스로 clustering.compute_clusters 호출.
+    [A] same-host (검색어/board 만 다름) / [B] cross-host CMS. 이미 recognize() 되는 건 제외(봉합).
+    각 cluster 마다 recognizer-extension 스킬 트리거 프롬프트 첨부 (복사 → 붙여넣기).
+    """
+    paths = state.snapshot_paths()
+    res = clustering.compute_clusters(paths.configs_dir, paths.state_dir)
+    for c in res["same_host"] + res["cross_host"]:
+        c["prompt"] = prompts.recognizer_extension_cluster(
+            host_or_template=c["key"], members=c["member_pairs"])
+    return _render("clusters.html", request, res=res, active="clusters")
 
 
 # --------------------------------------------------------------------------- #

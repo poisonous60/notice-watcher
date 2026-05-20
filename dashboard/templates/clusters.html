@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Clusters — recognizer 승급 후보{% endblock %}
+{% block body %}
+
+<h2>🧩 recognizer 승급 후보 (cluster)</h2>
+<p class="muted">
+  자동생성된 개별 config 중 <b>같은 platform 인데 param 만 다른</b> 묶음.
+  recognizer 로 승급하면 이후 같은 사이트 등록이 <b>토큰 0</b> (probe/LLM 생략).
+  처리: 각 cluster 의 <b>📋 복사</b> → 붙여넣기 → <code>recognizer-extension</code> 스킬.
+  이미 recognize() 되는 건 자동 제외(봉합) — recognizer 박고 pull 하면 여기서 사라짐.
+</p>
+<p class="muted">
+  config {{ res.total }}개 · recognized {{ res.recognized }} (봉합) · unrecognized {{ res.candidates }} (후보 풀)
+</p>
+
+<h3>[A] SAME-HOST — 같은 사이트, param/board 만 다름 ({{ res.same_host | length }}곳)</h3>
+{% if not res.same_host %}
+<p class="muted">없음. ✨ (snapshot pull 후에도 비면 운영 등록분에 묶일 cluster 가 없는 것)</p>
+{% endif %}
+{% for c in res.same_host %}
+<div class="prompt-card">
+  <div class="row">
+    <span class="label">
+      🧩 <b class="mono">{{ c.key }}</b> — {{ c.members | length }}개 config
+      {% if c.strategy_uniform %}<span class="muted">· ✅ strategy 동일</span>
+      {% else %}<span style="color:#c80;">· ⚠️ strategy 혼재 (같은 platform 아닐 수 있음)</span>{% endif %}
+    </span>
+    <button class="secondary" data-copy-target="#qp-cl-a-{{ loop.index }}">📋 복사</button>
+  </div>
+  <table class="compact striped">
+    <thead><tr><th>path</th><th>strategy</th><th>slug ← url</th></tr></thead>
+    <tbody>
+      {% for m in c.members %}
+      <tr>
+        <td class="mono">{{ m.path }}</td>
+        <td>{{ m.strategy }}{% if m.adapter %} <span class="muted">/{{ m.adapter }}</span>{% endif %}</td>
+        <td class="mono" style="max-width:34em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+          <a href="/subs/{{ m.slug | urlencode }}?from=clusters">{{ m.slug }}</a>
+          {% if m.url and is_http_url(m.url) %} <a href="{{ m.url }}" target="_blank" rel="noopener noreferrer" title="원본 URL">↗</a>{% endif %}
+          <span class="muted" title="url 출처">[{{ m.src }}]</span>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <details>
+    <summary>승급 프롬프트 미리보기</summary>
+    <pre id="qp-cl-a-{{ loop.index }}">{{ c.prompt }}</pre>
+  </details>
+</div>
+{% endfor %}
+
+<h3 style="margin-top:1.5em;">[B] CROSS-HOST CMS — 다른 사이트, 같은 게시판 솔루션 ({{ res.cross_host | length }}곳)</h3>
+{% if not res.cross_host %}
+<p class="muted">없음.</p>
+{% endif %}
+{% for c in res.cross_host %}
+<div class="prompt-card">
+  <div class="row">
+    <span class="label">🧩 <b class="mono">{{ c.key }}</b> — {{ c.members | length }}개 / 여러 host</span>
+    <button class="secondary" data-copy-target="#qp-cl-b-{{ loop.index }}">📋 복사</button>
+  </div>
+  <table class="compact striped">
+    <thead><tr><th>host</th><th>strategy</th><th>slug ← url</th></tr></thead>
+    <tbody>
+      {% for m in c.members %}
+      <tr>
+        <td class="mono">{{ m.host }}</td>
+        <td>{{ m.strategy }}</td>
+        <td class="mono" style="max-width:34em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+          <a href="/subs/{{ m.slug | urlencode }}?from=clusters">{{ m.slug }}</a>
+          {% if m.url and is_http_url(m.url) %} <a href="{{ m.url }}" target="_blank" rel="noopener noreferrer">↗</a>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <details>
+    <summary>승급 프롬프트 미리보기</summary>
+    <pre id="qp-cl-b-{{ loop.index }}">{{ c.prompt }}</pre>
+  </details>
+</div>
+{% endfor %}
+
+{% endblock %}
