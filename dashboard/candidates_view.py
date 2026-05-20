@@ -21,6 +21,7 @@ batch run 트리거 X (rev5 정책 — Claude/CLI 가 트리거).
 from __future__ import annotations
 
 import datetime as _dt
+import json
 import os
 import re
 import sqlite3
@@ -159,6 +160,44 @@ def _url_to_slug(url: str) -> str:
     return url_to_slug(url)
 
 
+def _canon(url: str) -> Optional[str]:
+    try:
+        from engine.slug import canonical_url
+        return canonical_url(url)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _registered_alias_index() -> dict[str, str]:
+    """canonical_url → 등록된 slug. snapshot poll_state 역조회.
+
+    bot/site_ops.find_registered_alias 의 dashboard 판박이 (commit 0692a42). recognizer 추가/슬러그
+    스키마 변경으로 같은 board URL 이 deploy 전후 다른 slug 를 받으면 `configs.snapshot/<새 slug>.json`
+    부재 → 거짓 'done(race)' 로 보임. canonical 신원으로 기존 등록 slug 를 찾아 흡수한다.
+    config 가 실제 존재하는 (등록된) slug 만 인덱싱.
+    """
+    state_dir = state.SNAPSHOT_DIR / "poll_state"
+    if not state_dir.exists():
+        return {}
+    idx: dict[str, str] = {}
+    for f in state_dir.glob("*.json"):
+        nm = f.name
+        if nm.endswith(".FAILED.json") or nm.endswith(".REJECTED.json"):
+            continue
+        try:
+            d = json.loads(f.read_text(encoding="utf-8")) or {}
+        except (json.JSONDecodeError, OSError):
+            continue
+        url = d.get("url")
+        slug = d.get("slug") or nm[:-5]
+        if not url or not (CONFIGS_SNAPSHOT / f"{slug}.json").exists():
+            continue
+        canon = _canon(url)
+        if canon:
+            idx[canon] = slug
+    return idx
+
+
 def _classify(slug: str, job_row: Optional[dict]) -> dict:
     config_exists = (CONFIGS_SNAPSHOT / f"{slug}.json").exists()
     if config_exists:
@@ -207,13 +246,26 @@ def _latest_jobs_by_url(conn: sqlite3.Connection) -> dict[str, dict]:
 # --------------------------------------------------------------------------- #
 # Row build / KPI / distribution
 # --------------------------------------------------------------------------- #
-def _build_rows(entries: list[dict], jobs_by_url: dict[str, dict]) -> list[dict]:
+def _build_rows(entries: list[dict], jobs_by_url: dict[str, dict],
+                alias_index: Optional[dict[str, str]] = None) -> list[dict]:
+    alias_index = alias_index or {}
     out: list[dict] = []
     for e in entries:
         name = e["name"]
         url = e["url"]
         slug = _url_to_slug(url)
+        via_alias = False
+        # 슬러그 스키마 drift 흡수: computed slug 의 config 가 없으면 canonical 신원으로
+        # 기존 등록 slug 채택 (bot find_registered_alias 와 동일 — 거짓 'done(race)' 방지).
+        if not (CONFIGS_SNAPSHOT / f"{slug}.json").exists():
+            canon = _canon(url)
+            alias = alias_index.get(canon) if canon else None
+            if alias and alias != slug:
+                slug = alias
+                via_alias = True
         cls = _classify(slug, jobs_by_url.get(url))
+        if via_alias and cls["status"] == "registered":
+            cls["subkind"] = "alias"
         emoji, label = STATUS_DISPLAY.get(cls["status"], ("?", cls["status"]))
         out.append({
             "name": name, "url": url, "slug": slug,
@@ -317,10 +369,11 @@ def _auto_catalog_name(today: Optional[_dt.date] = None) -> str:
 # --------------------------------------------------------------------------- #
 # Per-catalog summary (index 표용)
 # --------------------------------------------------------------------------- #
-def _catalog_summary(path: Path, jobs_by_url: dict[str, dict]) -> dict:
+def _catalog_summary(path: Path, jobs_by_url: dict[str, dict],
+                     alias_index: Optional[dict[str, str]] = None) -> dict:
     name = path.stem
     entries = _entries_from(_load_catalog_doc(path))
-    rows = _build_rows(entries, jobs_by_url)
+    rows = _build_rows(entries, jobs_by_url, alias_index)
     kpis = _kpis(rows)
     last_ts = ""
     for r in rows:
@@ -335,11 +388,14 @@ def _catalog_summary(path: Path, jobs_by_url: dict[str, dict]) -> dict:
         "pending": kpis["pending"],
         "running": kpis["running"],
         "gen_fail": kpis["gen_fail"],
+        "url_dead": kpis["url_dead"],
         "policy_reject": kpis["policy_reject"],
         "gate_reject": kpis["gate_reject"],
         "bug": kpis["bug"],
+        "unknown": kpis["unknown"],
+        "done": kpis["done"],
         "last_ts": last_ts,
-        "progress_pct": (100 * kpis["registered"] // max(1, kpis["total"])),
+        "progress_pct": (100 * (kpis["registered"] + kpis["done"]) // max(1, kpis["total"])),
     }
 
 
@@ -362,13 +418,15 @@ def register(app, templates, _render):  # noqa: ARG001
             finally:
                 conn.close()
 
-        catalogs = [_catalog_summary(p, jobs_by_url) for p in files]
+        alias_index = _registered_alias_index()
+        catalogs = [_catalog_summary(p, jobs_by_url, alias_index) for p in files]
         catalogs.sort(key=lambda c: c["name"])
 
         # Aggregate KPI
         agg = {k: sum(c[k] for c in catalogs) for k in
                ("total", "registered", "untried", "pending", "running",
-                "gen_fail", "policy_reject", "gate_reject", "bug")}
+                "gen_fail", "url_dead", "policy_reject", "gate_reject",
+                "bug", "unknown", "done")}
 
         return _render(
             "candidates_index.html", request,
@@ -406,7 +464,7 @@ def register(app, templates, _render):  # noqa: ARG001
             finally:
                 conn.close()
 
-        all_rows = _build_rows(entries, jobs_by_url)
+        all_rows = _build_rows(entries, jobs_by_url, _registered_alias_index())
         rows = _filter_rows(all_rows, status=status, subkind=subkind, q=q)
         rows.sort(key=lambda r: (STATUS_ORDER.index(r["status"])
                                   if r["status"] in STATUS_ORDER else 99,

@@ -18,15 +18,18 @@
 </p>
 
 {# ---------- 전체 KPI ---------- #}
-<section style="display:grid;grid-template-columns:repeat(8,1fr);gap:0.5rem;margin:1rem 0">
+<section style="display:grid;grid-template-columns:repeat(auto-fit,minmax(6.5rem,1fr));gap:0.5rem;margin:1rem 0">
   <article><strong>총</strong><br>{{ agg.total }}</article>
   <article><strong>· 미시도</strong><br>{{ agg.untried }}</article>
   <article><strong>⏳ 큐</strong><br>{{ agg.pending }}</article>
   <article><strong>🔁 진행</strong><br>{{ agg.running }}</article>
   <article><strong>✅ 등록</strong><br>{{ agg.registered }}</article>
   <article><strong>❌ gen_fail</strong><br>{{ agg.gen_fail }}</article>
+  <article><strong>🔗 URL죽음</strong><br>{{ agg.url_dead }}</article>
   <article><strong>🚫 거부</strong><br>{{ agg.policy_reject + agg.gate_reject }}</article>
   <article><strong>🐞 bug</strong><br>{{ agg.bug }}</article>
+  <article><strong>⚠ 미분류</strong><br>{{ agg.unknown }}</article>
+  <article><strong>✅ done(race)</strong><br>{{ agg.done }}</article>
 </section>
 
 {# ---------- 카탈로그 목록 ---------- #}
@@ -39,8 +42,11 @@
       <th>등록</th>
       <th>·미시도</th>
       <th>❌</th>
+      <th>🔗</th>
       <th>🚫</th>
       <th>🐞</th>
+      <th>⚠</th>
+      <th>✅race</th>
       <th>마지막 시도</th>
     </tr>
   </thead>
@@ -59,12 +65,15 @@
       <td>{{ c.registered }}</td>
       <td>{{ c.untried }}</td>
       <td>{{ c.gen_fail }}</td>
+      <td>{{ c.url_dead }}</td>
       <td>{{ c.policy_reject + c.gate_reject }}</td>
       <td>{{ c.bug }}</td>
+      <td>{{ c.unknown }}</td>
+      <td>{{ c.done }}</td>
       <td><small class="muted">{{ c.last_ts or '—' }}</small></td>
     </tr>
     {% else %}
-    <tr><td colspan="9" class="muted">카탈로그 없음 — 아래 "+ 새 catalog" 폼으로 박으세요.</td></tr>
+    <tr><td colspan="13" class="muted">카탈로그 없음 — 아래 "+ 새 catalog" 폼으로 박으세요.</td></tr>
     {% endfor %}
   </tbody>
 </table>
