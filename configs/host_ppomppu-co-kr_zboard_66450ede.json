@@ -1,0 +1,115 @@
+{
+  "version": 1,
+  "site": "www.ppomppu.co.kr",
+  "board": "ppomppu",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+    "Referer": "https://www.ppomppu.co.kr/zboard/zboard.php?id=ppomppu"
+  },
+  "timeout": 15,
+  "_source_url": "https://www.ppomppu.co.kr/zboard/zboard.php?id=ppomppu",
+  "_note": "ppomppu 자유게시판 — 손-config (자동 등록 시 LLM 가 generic selector 박아 0건). 같은 도메인의 phone/computer 보드 config 패턴 베낌. selector `#revolution_main_table tr.baseList` 가 안정.",
+  "list": {
+    "url_template": "https://www.ppomppu.co.kr/zboard/zboard.php?id={board}",
+    "pagination": {
+      "kind": "query_param",
+      "page_param": "page",
+      "size_param": "page_num"
+    },
+    "page_size_max": 30,
+    "row_selector": "#revolution_main_table tr.baseList",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a.baseList-title",
+          "attr": "href",
+          "transform": [["regex_extract", "[?&]no=(\\d+)"]]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "a.baseList-title",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a.baseList-title",
+          "attr": "href",
+          "transform": [["urljoin", "https://www.ppomppu.co.kr/zboard/"]]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "td.baseList-time",
+          "attr": "title",
+          "match": "^\\d{2}\\.\\d{2}\\.\\d{2} \\d{2}:\\d{2}:\\d{2}$",
+          "transform": [["iso8601", ["%y.%m.%d %H:%M:%S"], "+09:00"]]
+        },
+        {
+          "from": "css",
+          "selector": "td.baseList-time",
+          "text": true,
+          "match": "^\\d{2}/\\d{2}/\\d{2}$",
+          "transform": [["iso8601", ["%y/%m/%d"], "+09:00"]]
+        }
+      ],
+      "author": [
+        {
+          "from": "css",
+          "selector": "a.baseList-name span.baseList-name",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "a.baseList-title",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {"from": "css", "selector": "div.JS_ContentMain td.board-contents", "html": true},
+      {"from": "css", "selector": "td.board-contents", "html": true}
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "#topTitle h1",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "div.topTitle-box > ul.topTitle-mainbox > li",
+          "pick": "first_matching",
+          "match": "^등록일\\s+\\d{4}-\\d{2}-\\d{2}\\s+\\d{2}:\\d{2}$",
+          "text": true,
+          "transform": [
+            ["regex_extract", "등록일\\s+(\\d{4}-\\d{2}-\\d{2}\\s+\\d{2}:\\d{2})"],
+            ["replace", " ", "T"],
+            ["append", ":00+09:00"]
+          ]
+        }
+      ]
+    }
+  }
+}
