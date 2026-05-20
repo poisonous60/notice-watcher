@@ -9,8 +9,8 @@ from __future__ import annotations
 
 
 OUTCOMES: tuple[str, ...] = (
-    "improved",              # fix_layer 기반 코드 일반화 + 효과
-    "handcrafted",           # 손-config / 손어댑터 — 그 사이트만 작동
+    "improved",              # 추론 개선 — AUTO path 가 미지 사이트 더 잘 풂 (probe휴리스틱/schema/prompt/retry/거부필터recognize_reject/register거부게이트). ADR 0005
+    "handcrafted",           # 수동 config — 자동이 못 푼 걸 직접 박은 패치, 진보 X (단일 config / 플랫폼 config = 발급 recognizer / 손-adapter). ADR 0005
     "no_change",             # 시도했지만 효과 X
     "rejected",              # 정책 거부 마커
     "rejected_with_policy",  # no-change 인데 영구 기록 가치 정책 결정

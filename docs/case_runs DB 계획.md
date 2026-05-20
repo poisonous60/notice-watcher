@@ -98,16 +98,16 @@ CREATE INDEX idx_case_runs_user ON case_runs(requested_by);
 
 | outcome | 의미 | case .md? | 코드 변경? |
 |---|---|---|---|
-| `improved` | 코드 일반화 (probe 휴리스틱 / prompt 룰 추가 / 인식기 확장 / 손어댑터 / 엔진 변경) + 효과 검증 | ✅ | ✅ |
-| `handcrafted` | 손-config (configs/<slug>.json) 또는 신규 손어댑터로 *그 사이트만* 작동. 코드 일반화 X | ✅ | ✅ (configs/ + adapters/ 만) |
+| `improved` | 추론 개선 — AUTO path 가 미지 사이트 더 잘 풂 (probe 휴리스틱 C / schema E / prompt 룰 A / retry D · 거부 필터 recognize_reject · register 거부 게이트) + 효과 검증. ADR 0005 | ✅ | ✅ |
+| `handcrafted` | 수동 config — 자동이 못 푼 걸 직접 박은 패치(진보 X). 단일 config(configs/<slug>.json)·플랫폼 config(발급 recognizer)·손-adapter. fix_layer 무관(F 여도 handcrafted). ADR 0005 | ✅ | ✅ |
 | `no_change` | 시도했지만 효과 X (revert 또는 동등 출력). 사이트 상태 변동 X | 보통 X | X |
 | `rejected` | 정책상 거부 마커 (`.REJECTED.json` 또는 등록 거부) | ✅ | 가능 (preflight·휴리스틱 추가) |
 | `rejected_with_policy` | no-change 인데 영구 기록 가치 정책 결정 ("이 SERP 류 휴리스틱 안 박기로 결정") | ✅ | X |
 | `error` | skill 도중 미완 (Claude 죽음·사용자 abort·CLI 호출 자체 실패) | X | 변동 |
 
-**중요 — 자가개선 인프라 §0c "fix_layer 분류" 와 정합**:
-- `improved` ↔ fix_layer A/B/C/D/F/G 박힌 케이스
-- `handcrafted` ↔ fix_layer 키 X — 자가개선 인프라 명시 ("손-config 자체는 fix_layer 키 X, case file status 에 🔧 으로 표시")
+**중요 — outcome 은 mechanism 기준 (ADR 0005), fix_layer 와 1:1 X**:
+- `improved` = 추론 개선 — 보통 fix_layer C/E/A/D + 거부 필터/게이트. 단 fix_layer F(엔진 코드)여도 발급 recognizer 면 `handcrafted`.
+- `handcrafted` = 수동 config 패치 — fix_layer 키 X(단일 config) 이거나 F(플랫폼 config = 발급 recognizer)·adapter. fix_layer 무관.
 
 13건 backfill 시 9건 (`🔧/🧩`) → `handcrafted`. 1건 (`🚫 + 후속 완료`, naver-cafe_31104609) → 손 분류 (`rejected_with_policy` + 별 row `improved`). 나머지 → 본문 본 후 분류 (§2).
 

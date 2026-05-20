@@ -75,8 +75,8 @@ requested_by: <선택 — Discord 사용자 또는 N/A>
 
 | 값 | 의미 |
 |---|---|
-| `improved` | fix_layer 기반 코드 일반화 + 효과 (이 사이트만 X, 다른 사이트도 같은 룰 혜택) |
-| `handcrafted` | 손-config / 손어댑터 — 그 사이트만 작동 (룰 일반화 X) |
+| `improved` | 추론 개선 — AUTO path 가 미지 사이트 더 잘 풂 (probe 휴리스틱 C/schema E/prompt A/retry D·거부 필터 recognize_reject·register 거부 게이트). ADR 0005 |
+| `handcrafted` | 수동 config — 자동이 못 푼 걸 직접 박은 패치(진보 X). 단일 config·플랫폼 config(발급 recognizer)·손-adapter. fix_layer 무관(F 여도 handcrafted). ADR 0005 |
 | `no_change` | 시도했지만 효과 X (실패 분석만 남김) |
 | `rejected` | 정책 거부 (게시판 아님, robots 차단 등) |
 | `rejected_with_policy` | no-change + 영구 정책 결정 (예: cafe.naver.com 의 본문 추출 차단) |

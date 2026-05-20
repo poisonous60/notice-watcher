@@ -2,7 +2,7 @@
 slug: naver-cafe_gutterlife_all_e0009e69
 url: https://cafe.naver.com/gutterlife
 status: ✅ 자동 (recognizer 확장 — cafe 홈 URL 인식, NaverCafeAdapter 가 cafe_slug→cafe_id 런타임 해소)
-outcome: improved
+outcome: handcrafted
 date: 2026-05-16
 fix_layer: F
 failure_keys: [posts_nonempty]

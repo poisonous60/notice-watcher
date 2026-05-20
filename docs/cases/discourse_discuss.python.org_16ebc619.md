@@ -2,7 +2,7 @@
 slug: discourse_discuss.python.org_16ebc619
 url: https://discuss.python.org/latest
 status: ✅ 자동 (Discourse recognizer + DiscourseAdapter 신규 — JSON API 직접 호출)
-outcome: improved
+outcome: handcrafted
 date: 2026-05-20
 fix_layer: F
 failure_keys: [posts_nonempty, article_body_len]

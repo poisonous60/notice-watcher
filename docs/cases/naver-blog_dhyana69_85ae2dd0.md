@@ -2,7 +2,7 @@
 slug: naver-blog_dhyana69_85ae2dd0
 url: https://m.blog.naver.com/PostView.nhn?blogId=dhyana69&logNo=150071320787&proxyReferer=https:%2F%2Fwww.google.co.kr%2F
 status: ✅ 자동 (recognizer 신규 — naver-blog 플랫폼 인식, NaverBlogRssAdapter 가 RSS 피드 직접 파싱)
-outcome: improved
+outcome: handcrafted
 date: 2026-05-16
 requested_by: poi23619
 failure_keys: [posts_nonempty, list_url_none, candidates_zero]

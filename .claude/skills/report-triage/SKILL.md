@@ -191,8 +191,8 @@ python scripts/case_log.py log \
   [--fix-layer <F>] [--failure-keys <key>] [--case-md-slug <slug if 만들었으면>]
 ```
 outcome 분류 (hand-config 와 동일):
-- `improved` — recognizer/엔진 fix 로 코드 일반화 + 효과
-- `handcrafted` — 손-config 또는 어댑터 fix 로 그 사이트만
+- `improved` — 추론 개선: AUTO path 가 미지 사이트 더 잘 풂 (probe 휴리스틱 C/schema E/prompt A/retry D·거부 필터·register 거부 게이트). ADR 0005
+- `handcrafted` — 수동 config 패치(진보 X): 단일 config·플랫폼 config(발급 recognizer)·손-adapter. fix_layer 무관(F 여도 handcrafted)
 - `no_change` — 재현 안 됨 / 사용자 오해 / 이미 작동
 - `rejected` — 정책상 처리 안 함 (예: 사이트가 차단 정책 변경)
 - `rejected_with_policy` — no-change 인데 영구 기록 가치

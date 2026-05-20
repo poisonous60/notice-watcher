@@ -44,4 +44,4 @@
 
 ## Status
 
-**Decision 합의 (2026-05-20). 마이그레이션 미실행 — 다음 세션 예정.** 실행 항목: `docs/B-task_outcome-migration.md` 참조 (SKILL §6.5 enum 재정의 + config 발급 recognizer 6 case frontmatter improved→handcrafted + `cases_index.py --backfill-db` + dashboard label 확인).
+**Decision 합의 (2026-05-20). 마이그레이션 완료 (2026-05-20).** 실행 산출: `bot/case_runs_meta.py` enum 주석 재정의 + SKILL §6.5 outcome 표 재정의(×2) + config 발급 recognizer 6 case frontmatter improved→handcrafted + `cases.sqlite3` UPDATE(8 row) + INDEX.md 재생성. dashboard 는 `OUTCOME_LABELS` 데이터 구동 — 코드 변경 X (6 case 가 🔧 handcrafted 로 표시, improved 카운트 46).

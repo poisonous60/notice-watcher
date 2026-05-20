@@ -2,7 +2,7 @@
 slug: tistory_leedakyeong_e0e58b0f
 url: https://leedakyeong.tistory.com/entry/Python-pandas-tutorial-drop-duplicates-in-pandas
 status: ✅ 일반화 완료 (Tistory 플랫폼 — known-platform 인식기 + RSS adapter)
-outcome: improved
+outcome: handcrafted
 date: 2026-05-17
 fix_layer: F
 failure_keys: [posts_nonempty, static_vs_headless, feed_candidates, post_id_stable_shape]

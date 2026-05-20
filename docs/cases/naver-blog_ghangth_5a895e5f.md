@@ -2,7 +2,7 @@
 slug: naver-blog_ghangth_5a895e5f
 url: https://blog.naver.com/ghangth/221299970841
 status: ✅ 자동 (recognizer 신규 — naver-blog, naver-blog_dhyana69 와 같은 PR 에서 동시 풀림)
-outcome: improved
+outcome: handcrafted
 date: 2026-05-16
 requested_by: poi23619
 failure_keys: [posts_nonempty, list_url_none, candidates_zero]

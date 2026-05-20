@@ -1,8 +1,8 @@
 ---
 slug: google-news_gnews_gemini_3.5_flash_270bb44a
 url: https://www.google.com/search?q=gemini+3.5+flash&tbm=nws
-status: ✅ 일반화 완료 (Google 검색 → News RSS recognizer + adapter — 모든 검색어 자동 처리)
-outcome: improved
+status: ✅ 플랫폼 config 등록 (Google 검색 → News RSS recognizer + adapter — 모든 검색어 자동 처리)
+outcome: handcrafted
 date: 2026-05-20
 fix_layer: F
 failure_keys: [google_serp_not_board, serp_volatile_token_slug_drift]
@@ -27,10 +27,10 @@ register 거부:
 
 거부 자체는 정상 — Google SERP 는 게시판 X, anti-bot(`/sorry/`) 챌린지, URL 휘발 토큰.
 
-## 왜 단일 config(§2e) 가 아니라 F-recognizer 일반화인가
+## 왜 단일 config(§2e) 가 아니라 플랫폼 config 인가
 
-> 어휘: **단일 config** = config 파일 1개, 그 URL 만, 일반화 X (`outcome: handcrafted`).
-> **F-recognizer 일반화** = recognizer 가 플랫폼 전체 자동 처리 (`outcome: improved`). 손-adapter 동반해도 일반화임. (CONTEXT.md 참조)
+> 어휘: **단일 config** = config 파일 1개, 그 URL 만 (`outcome: handcrafted`).
+> **플랫폼 config** = 발급 recognizer 가 플랫폼 전체 자동 처리 — 손-adapter 동반. 자동이 못 푼 걸 박은 수동 config 라 `outcome: handcrafted` (단일 config 보다 scope 만 넓을 뿐 AUTO path 진보 X). ADR 0005 / CONTEXT.md 참조.
 
 Google 검색은 *플랫폼* — 검색어만 바뀌는 같은 패턴이 무한히 들어옴. 단일 config 1개로 끝낼 케이스 X.
 또 SERP 직접 크롤은 영원히 불가(ToS·anti-bot·휘발 토큰)지만, Google 이 **공식 News RSS endpoint**

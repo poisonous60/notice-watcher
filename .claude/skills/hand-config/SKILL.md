@@ -87,7 +87,7 @@ python scripts/triage.py show <slug>         # 그 slug 의 .FAILED.json + 요�
 
 **진단 직후 — 두 트랙 동시** (한쪽이 다른 쪽 막는 게이트 X):
 - **트랙 A** (사용자 향 — 사이트 즉시 작동): 2a~2d 중 매칭 있으면 그게 해결 수단, 없으면 2e (손-config/손어댑터). 항상 결과물 있음 (작동 또는 거부 마커).
-- **트랙 B** (미래 향 — probe 일반화): 손-config 으로 끝낸 케이스도 의무 검토. 후보 — 2a (인식기 PATTERNS 한 줄 추가), 2b (`first_article_url` 잘못 잡힘 → `--article-url` 재시도), 2c (probe artifact 에 신호 있는데 휴리스틱화 안 됨), 2d (probe 자체 오작동).
+- **트랙 B** (미래 향 — 같은 패턴 재발 차단): 손-config 으로 끝낸 케이스도 의무 검토. 후보 — 2a (인식기 PATTERNS 한 줄 추가 = 플랫폼 config, handcrafted), 2b (`first_article_url` 잘못 잡힘 → `--article-url` 재시도, 추론 개선), 2c (probe artifact 에 신호 있는데 휴리스틱화 안 됨, 추론 개선), 2d (probe 자체 오작동, 추론 개선).
 
 각 후보 한 줄 점검 (`X — 이유` 또는 `O — 자리`). 매칭 시 같은 PR. 0건이면 case body 에 이유 1줄.
 
@@ -299,8 +299,8 @@ probe/prompt/schema/코드 손대기 전 다음 여섯 질문에 답해보면 �
 
      | outcome | 의미 |
      |---|---|
-     | `improved` | fix_layer 기반 코드 일반화 + 효과 |
-     | `handcrafted` | 손-config/손어댑터 — 그 사이트만 (fix_layer X) |
+     | `improved` | 추론 개선 — AUTO path 가 미지 사이트 더 잘 풂 (fix_layer C/E/A/D·거부 필터(recognize_reject)·register 거부 게이트) |
+     | `handcrafted` | 수동 config — 자동이 못 푼 패치(진보 X). 단일 config·플랫폼 config(발급 recognizer)·손-adapter. fix_layer 무관(F 여도 handcrafted) |
      | `rejected` | 정책 거부 마커 |
      | `rejected_with_policy` | no-change + 영구 기록 가치 정책 결정 |
      | `no_change` | 시도했으나 효과 X (case .md narrative 가치 있을 때만) |
