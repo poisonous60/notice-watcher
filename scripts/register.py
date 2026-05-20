@@ -1191,6 +1191,12 @@ def _try_known_platform(url: str, slug: str, *, out: Optional[str], force: bool)
     cfg = recognize_platform(url)
     if cfg is None:
         return None
+    return _register_built_config(cfg, slug, url, out=out, force=force)
+
+
+def _register_built_config(cfg: dict, slug: str, url: str, *, out: Optional[str], force: bool) -> Optional[int]:
+    """이미 만들어진 platform cfg(recognizer 또는 probe-후 detect 신호 산출)를 등록.
+    fetch_list 0건/예외/검증 실패면 None 반환 → 호출 측이 일반 파이프라인으로 폴백."""
     name = cfg.get("_recognized_platform", "?")
     out_path = Path(out) if out else (CONFIGS_DIR / f"{slug}.json")
     if out_path.exists() and not force:
@@ -1429,6 +1435,25 @@ def _main_inner(argv) -> int:
         except Exception as e:  # noqa: BLE001
             print(f"[register] ⚠ REJECTED 마커 저장 실패 (rc={rc_out}): {e}", file=sys.stderr)
         return rc_out
+
+    # Discourse 포지티브 검출 — probe 가 정적 HTML 의 generator meta 로 Discourse 판정 (detect_discourse_platform).
+    # recognizer 는 URL `/latest` 폼만 매칭 — root 도메인(`https://forum.openwrt.org/`)은 URL 만으로 판정 불가라
+    # 못 잡고 일반 파이프라인에서 Ember-shell `posts_nonempty:0` 으로 LLM 실패했었다. 이 신호로 root-form 봉합.
+    # 정책 게이트 *후* (BLOCKED Discourse 는 그대로 거부) · board-shape/nav 게이트 *전* (마케팅처럼 보이는 Discourse root 도 등록).
+    # --gate-only 는 네트워크/write 회피라 skip.
+    if not args.gate_only:
+        disc = ((digest.get("list_candidates") or {}).get("discourse_platform") or {})
+        if disc.get("is_discourse") and disc.get("base_url"):
+            from engine.recognizers.discourse import build_config as _disc_build
+            dcfg = _disc_build(disc["base_url"])
+            if dcfg is not None:
+                dcfg["_recognized_platform"] = "discourse (probe generator meta)"
+                print("[PHASE] discourse_detect", flush=True)
+                print(f"[register] 🔎 Discourse generator meta 검출 — DiscourseAdapter 등록 시도 (base={disc['base_url']})")
+                rc = _register_built_config(dcfg, slug, url, out=args.out, force=args.force)
+                if rc is not None:
+                    return rc
+                print("[register] DiscourseAdapter 폴백 — 일반 파이프라인 계속.")
 
     # single-article nav-only 게이트 — board_shape 가 nav 안 사이드바 메뉴를 same-host 신호로 false-positive
     # 통과시키는 걸 차단. holocaustexplained 같은 *unknown host* 단일 article 페이지가 여기서 잡힌다.

@@ -171,6 +171,12 @@ _ARTIFACTS: dict[str, ArtifactContract] = {
                                 "트리거: path='/' AND html_repeating_patterns top7 중 nav/footer/dropdown/carousel/swiper/menu 키워드 ≥ 2 AND same-host article rows ≤ 15. "
                                 "register.py `_root_marketing_homepage_check` 가 이 신호 보고 LLM 호출 *전* REJECTED 마커 + 카테고리/섹션 URL 권장 메시지. "
                                 "learn=False — root 만 차단, 카테고리 path 는 진짜 board 가능성 있어 path_prefix 차단 X."),
+            _ContractField("discourse_platform", type_hint="dict|null", required=False,
+                           note="정적 HTML 의 `<meta name=generator content=Discourse>` 로 Discourse 포럼 판정 — detect_discourse_platform 산출. "
+                                "None=Discourse 아님. dict={is_discourse, base_url, version}. "
+                                "Discourse 는 Ember.js shell 이라 정적에 topic rows 없어 LLM 이 posts_nonempty:0 으로 실패하지만 generator meta 는 항상 있음. "
+                                "scripts/register.py 가 is_discourse=true 면 LLM 호출 *전* DiscourseAdapter config 만들어 등록 시도 (fetch_list 빈 목록이면 일반 파이프라인 폴백). "
+                                "recognizer(`engine/recognizers/discourse.py`)는 URL `/latest` 폼만 매칭 — root 도메인은 이 휴리스틱이 봉합."),
         ),
     ),
 

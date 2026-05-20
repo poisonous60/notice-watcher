@@ -2,10 +2,11 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 96 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 97 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
+| [`infra_discourse_root_form_2026-05-21`](infra_discourse_root_form_2026-05-21.md) | ✅ 자동 (probe generator-meta 휴리스틱 → DiscourseAdapter — root-form 봉합) | 2026-05-21 | C | posts_nonempty, article_body_len | https://forum.openwrt.org/ |
 | [`steam-news-recognizer`](steam-news-recognizer.md) | ✅ recognizer 승급 (cluster 10건 → engine/recognizers/steam_news.py) | 2026-05-20 |  |  | https://store.steampowered.com/feeds/news/app/730/ |
 | [`inven-recognizer`](inven-recognizer.md) | ✅ recognizer 승급 (cluster 6건 → engine/recognizers/inven.py) | 2026-05-20 |  |  | https://www.inven.co.kr/board/lol/4625 |
 | [`infra_url_dead_split_2026-05-20`](infra_url_dead_split_2026-05-20.md) | ✅ 자동 (FailKind split — url_dead rc=4 분리) | 2026-05-20 | F | target_not_found, cert_or_dns_broken | (인프라 — 분류 카탈로그 변경, 사이트 N/A) |
@@ -110,7 +111,7 @@
 | layer | count |
 |---|---|
 | (미기재) | 21 |
-| C | 8 |
+| C | 9 |
 | C+A | 1 |
 | C+D | 2 |
 | C+F | 2 |
@@ -127,7 +128,7 @@
 | strategy | count |
 |---|---|
 | (미기재) | 31 |
-| handwritten | 15 |
+| handwritten | 16 |
 | httpx_html | 12 |
 | httpx_json | 12 |
 | mixed | 1 |
@@ -136,5 +137,5 @@
 
 ### 최근 90일 (≥ 2026-02-19)
 
-케이스 96 건.
+케이스 97 건.
 

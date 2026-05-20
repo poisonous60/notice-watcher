@@ -840,6 +840,52 @@ _MARKETING_SELECTOR_KEYWORDS = (
 )
 
 
+_DISCOURSE_GENERATOR_RE = re.compile(
+    r'<meta[^>]+name=["\']generator["\'][^>]*content=["\']\s*Discourse'
+    r'(?:\s+(?P<ver>[\w.\-]+))?',
+    re.I,
+)
+
+
+@heuristic
+def detect_discourse_platform(html: str, base_url: str) -> Optional[dict]:
+    """정적 HTML 의 `<meta name="generator" content="Discourse ...">` 로 Discourse 포럼 판정.
+
+    Discourse 는 모든 페이지(root `/`, `/latest`, `/c/<cat>`, `/t/<id>`)에 이 generator meta 를
+    박는다 — Ember.js shell 이라 topic rows 는 정적에 없어 `posts_nonempty: 0건` 으로 LLM 이 실패하지만,
+    이 meta 는 항상 정적에 있다. 신뢰도 매우 높음(false-positive ~0) — Discourse 외 사이트는 안 박음.
+
+    `engine/recognizers/discourse.py` 의 recognizer 는 URL `/latest` 폼만 매칭 — root 도메인
+    (`https://forum.openwrt.org/`)은 URL 만으로 Discourse 판정 불가(모든 root 가 매칭되면 false-positive
+    폭발)라 못 잡았다. 이 휴리스틱이 probe *후* generator meta 로 root-form 까지 봉합.
+
+    출력:
+      None — Discourse meta 없음.
+      dict = {is_discourse: True, base_url: "<scheme>://<host>", version: "<x|null>"}.
+
+    register.py 가 이 신호 보면 LLM 호출 *전* DiscourseAdapter config 를 만들어 등록 시도 — fetch_list
+    가 빈 목록이면 일반 파이프라인으로 폴백(안전망)."""
+    from urllib.parse import urlsplit
+    if not html or not base_url:
+        return None
+    m = _DISCOURSE_GENERATOR_RE.search(html)
+    if m is None:
+        return None
+    try:
+        parts = urlsplit(base_url)
+        host = (parts.netloc or "").strip().lower()
+        scheme = parts.scheme or "https"
+    except (ValueError, AttributeError):
+        return None
+    if not host or "." not in host:
+        return None
+    return {
+        "is_discourse": True,
+        "base_url": f"{scheme}://{host}",
+        "version": m.group("ver") or None,
+    }
+
+
 @heuristic
 def root_marketing_homepage(
     *,
@@ -1178,6 +1224,7 @@ def write_list_candidates(
     row_interactive_action: Optional[dict] = None,
     nav_only_same_host: Optional[dict] = None,
     article_meta_signals: Optional[dict] = None,
+    discourse_platform: Optional[dict] = None,
 ) -> None:
     # body_empty_likely summary — 본문이 본질적으로 없는 사이트 신호.
     # row_external_host (검색결과/aggregator) OR row_interactive_action (게임/투표/SPA) 중 하나라도 true 면 박힘.
@@ -1229,6 +1276,10 @@ def write_list_candidates(
         # 트리거: path='/' AND html_repeating_patterns top7 의 nav/footer/dropdown/carousel/swiper/menu 키워드 ≥ 2 AND same-host article rows ≤ 15.
         # register.py `_root_marketing_homepage_check` 가 LLM 호출 *전* REJECTED 마커 + 카테고리/섹션 URL 권장 메시지. learn=False.
         "root_marketing_homepage": root_marketing,
+        # 정적 HTML 의 generator meta 로 Discourse 포럼 판정. None=Discourse 아님.
+        # dict={is_discourse, base_url, version}. register.py 가 이 신호 보면 LLM 전 DiscourseAdapter
+        # config 만들어 등록 시도 (fetch_list 빈 목록이면 일반 파이프라인 폴백).
+        "discourse_platform": discourse_platform,
     }
     validate_payload("list_candidates.json", payload, allow_extra=False)
     (out_dir / "list_candidates.json").write_text(

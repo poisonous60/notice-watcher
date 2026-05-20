@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "site": "community.fly.io",
+  "board": "latest",
+  "strategy": "handwritten",
+  "adapter": "DiscourseAdapter",
+  "kwargs": {
+    "base_url": "https://community.fly.io"
+  },
+  "_slug_board": "community.fly.io",
+  "_source_url": "https://community.fly.io/",
+  "_note": "Discourse 포럼 — known-platform 자동 인식. 손어댑터 DiscourseAdapter 가 <base>/latest.json (목록) + <base>/t/<id>.json (본문) JSON API 를 직접 호출. /latest 정적 HTML 은 Ember.js shell 이라 row 가 정적에 없음 — JSON API 가 안정.",
+  "_recognized_platform": "discourse (probe generator meta)"
+}

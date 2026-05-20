@@ -31,19 +31,27 @@ _NOTE = ("Discourse 포럼 — known-platform 자동 인식. 손어댑터 Discou
 _LATEST_RE = re.compile(r"^https?://([^/?#]+)/latest/?(?:\?|#|$)", re.I)
 
 
-def _build(m: "re.Match", url: str) -> Optional[dict]:
-    host = m.group(1).lower()
+def build_config(base_url: str) -> Optional[dict]:
+    """`https://<host>` → DiscourseAdapter config. recognizer(`/latest` URL) 와
+    register.py 의 probe-후 detect_discourse_platform 신호 양쪽이 공유."""
+    from urllib.parse import urlsplit
+    parts = urlsplit(base_url)
+    host = (parts.netloc or "").strip().lower()
     if not host or "." not in host:
         return None
-    base_url = f"https://{host}"
+    base = f"{parts.scheme or 'https'}://{host}"
     return {
         "version": 1, "site": host, "board": "latest",
         "strategy": "handwritten", "adapter": "DiscourseAdapter",
-        "kwargs": {"base_url": base_url},
+        "kwargs": {"base_url": base},
         "_slug_board": host,
-        "_source_url": f"{base_url}/latest",
+        "_source_url": f"{base}/latest",
         "_note": _NOTE,
     }
+
+
+def _build(m: "re.Match", url: str) -> Optional[dict]:
+    return build_config(f"https://{m.group(1).lower()}")
 
 
 PATTERNS = [

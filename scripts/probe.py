@@ -30,6 +30,7 @@ from probe.extract import (
     runtime_id_candidates,
     traffic_api_candidates,
     write_list_candidates,
+    detect_discourse_platform,
 )
 from probe.external import try_crawl4ai, try_firecrawl, try_jina
 from probe.fetch_headful import (
@@ -382,6 +383,7 @@ def _run(args: argparse.Namespace, url: str, slug: str) -> int:
                 base_url=url,
             )
             meta_signals = article_meta_signals(html=page_html or "")
+            discourse_platform = detect_discourse_platform(html=page_html or "", base_url=url)
             write_list_candidates(
                 out_dir,
                 base_url=url,
@@ -395,6 +397,7 @@ def _run(args: argparse.Namespace, url: str, slug: str) -> int:
                 row_interactive_action=row_interactive_action,
                 nav_only_same_host=nav_only_same_host,
                 article_meta_signals=meta_signals,
+                discourse_platform=discourse_platform,
             )
         print(f"  HTML 반복 패턴: {len(html_lists)}건")
         print(f"  JSON API 후보: {len(json_api_lists)}건 (관련도순)")
