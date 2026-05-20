@@ -1,0 +1,144 @@
+{
+  "version": 1,
+  "site": "store.steampowered.com",
+  "board": "feeds/daily_deals.xml",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+    "Referer": "https://store.steampowered.com/feeds/daily_deals.xml"
+  },
+  "timeout": 15,
+  "list": {
+    "url_template": "https://store.steampowered.com/feeds/daily_deals.xml",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "item",
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": ":self",
+          "attr": "rdf:about"
+        },
+        {
+          "from": "css",
+          "selector": "guid",
+          "text": true
+        },
+        {
+          "from": "css",
+          "selector": "link",
+          "text": true
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "strip"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": ":self",
+          "attr": "rdf:about"
+        },
+        {
+          "from": "css",
+          "selector": "link",
+          "text": true,
+          "transform": [
+            [
+              "strip"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "dc\\:date",
+          "text": true,
+          "transform": [
+            [
+              "iso8601",
+              [
+                "%Y-%m-%dT%H:%M:%S%z"
+              ],
+              "+09:00"
+            ]
+          ]
+        },
+        {
+          "from": "css",
+          "selector": "pubDate",
+          "text": true,
+          "transform": [
+            [
+              "iso8601",
+              [
+                "%a, %d %b %Y %H:%M:%S %z"
+              ],
+              "+09:00"
+            ]
+          ]
+        }
+      ],
+      "author": [
+        {
+          "from": "css",
+          "selector": "author",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "css",
+          "selector": "category",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "content\\:encoded",
+          "text": true
+        }
+      ],
+      "cover_image": [
+        {
+          "from": "css",
+          "selector": "content\\:encoded img",
+          "attr": "src"
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "body_empty_acceptable": true,
+    "content": []
+  }
+}

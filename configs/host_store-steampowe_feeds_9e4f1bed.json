@@ -1,0 +1,151 @@
+{
+  "version": 1,
+  "site": "store.steampowered.com",
+  "board": "feeds/news.xml",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+    "Referer": "https://store.steampowered.com/feeds/news.xml"
+  },
+  "timeout": 15,
+  "polite_sleep": {
+    "min": 5,
+    "max": 6
+  },
+  "list": {
+    "url_template": "https://store.steampowered.com/feeds/news.xml",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "item",
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": ":self",
+          "attr": "rdf:about",
+          "transform": [
+            [
+              "regex_extract",
+              "/news/(\\d+)/"
+            ],
+            [
+              "to_str"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "template",
+          "value": "Steam News {post_id}"
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": ":self",
+          "attr": "rdf:about",
+          "transform": [
+            [
+              "urljoin",
+              "https://store.steampowered.com"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "dc\\:date",
+          "text": true,
+          "transform": [
+            [
+              "iso8601",
+              [
+                "%Y-%m-%dT%H:%M:%S%z"
+              ]
+            ]
+          ]
+        },
+        {
+          "from": "css",
+          "selector": "pubDate",
+          "text": true,
+          "transform": [
+            [
+              "iso8601",
+              [
+                "%a, %d %b %Y %H:%M:%S %z"
+              ]
+            ]
+          ]
+        }
+      ],
+      "author": [
+        {
+          "from": "css",
+          "selector": "author",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "css",
+          "selector": "category",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "content\\:encoded",
+          "html": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "url_template": "https://store.steampowered.com/news/{post_id}/",
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "div.news_postbody",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "div.news_content",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "div.news_post_container",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "body",
+        "html": true
+      }
+    ]
+  }
+}

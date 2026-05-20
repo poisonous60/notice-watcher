@@ -1,0 +1,173 @@
+{
+  "version": 1,
+  "site": "store.steampowered.com",
+  "board": "1245620",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-CH-UA": "\"Chromium\";v=\"147\", \"Not.A/Brand\";v=\"8\"",
+    "Sec-CH-UA-Mobile": "?0",
+    "Sec-CH-UA-Platform": "\"Windows\""
+  },
+  "timeout": 15,
+  "list": {
+    "url_template": "https://store.steampowered.com/feeds/news/app/{board}/",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "channel > item",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "css",
+          "selector": "guid",
+          "text": true,
+          "transform": [
+            [
+              "regex_extract",
+              "/view/(\\d+)"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "css",
+          "selector": "link",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "strip"
+            ],
+            [
+              "strip_brackets"
+            ]
+          ]
+        },
+        {
+          "from": "css",
+          "selector": "guid",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "strip"
+            ],
+            [
+              "strip_brackets"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "pubDate",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "iso8601",
+              [
+                "%a, %d %b %Y %H:%M:%S %z"
+              ]
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "description",
+          "text": true,
+          "transform": [
+            [
+              "html_unescape"
+            ],
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "cover_image": [
+        {
+          "from": "css",
+          "selector": "enclosure",
+          "attr": "url"
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [],
+    "body_empty_acceptable": true,
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "div.news_post_header h2",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        },
+        {
+          "from": "css",
+          "selector": "title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "div.news_post_header .date",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "iso8601",
+              [
+                "%b %d, %Y %I:%M %p"
+              ],
+              "+00:00"
+            ]
+          ]
+        }
+      ]
+    }
+  }
+}
