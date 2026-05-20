@@ -8,6 +8,7 @@ from .daumcafe import DaumCafeAdapter
 from .naver_blog import NaverBlogRssAdapter
 from .tistory import TistoryRssAdapter
 from .reddit import RedditAdapter
+from .discourse import DiscourseAdapter
 
 __all__ = [
     "BaseAdapter",
@@ -21,4 +22,5 @@ __all__ = [
     "NaverBlogRssAdapter",
     "TistoryRssAdapter",
     "RedditAdapter",
+    "DiscourseAdapter",
 ]

@@ -2,10 +2,11 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 81 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 82 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
+| [`discourse_discuss.python.org_16ebc619`](discourse_discuss.python.org_16ebc619.md) | ✅ 자동 (Discourse recognizer + DiscourseAdapter 신규 — JSON API 직접 호출) | 2026-05-20 | F | posts_nonempty, article_body_len | https://discuss.python.org/latest |
 | [`infra_wikipedia_learned_blacklist_skip_learn_2026-05-19`](infra_wikipedia_learned_blacklist_skip_learn_2026-05-19.md) | ✅ 일반화 (recognize_reject wikipedia 패턴 skip_learn=True) | 2026-05-19 | F | learned_blacklist_overbroad, shared_path_prefix_board, not_a_board | https://en.wikipedia.org/wiki/Special:RecentChanges?hidebots=1&hidecategorization=1&hideWikibase=1&limit=50&days=1&urlversion=2 |
 | [`infra_ushmm_learned_blacklist_skip_learn_2026-05-19`](infra_ushmm_learned_blacklist_skip_learn_2026-05-19.md) | ✅ 일반화 (USHMM 패턴 skip_learn=True + 모듈 docstring 강화) | 2026-05-19 | F | learned_blacklist_overbroad, shared_path_prefix_board, not_a_board | https://encyclopedia.ushmm.org/content/en |
 | [`infra_root_marketing_homepage_gate_2026-05-19`](infra_root_marketing_homepage_gate_2026-05-19.md) | ✅ 영구 게이트 박힘 — root_marketing_homepage 휴리스틱 + register fail-fast + prompt 룰 | 2026-05-19 | C | root_marketing_homepage | (infra — 영구 게이트 박힘) |
@@ -102,7 +103,7 @@
 | C+F+A | 1 |
 | E | 3 |
 | E+A+C+D | 1 |
-| F | 34 |
+| F | 35 |
 | F+A | 1 |
 | F+C | 3 |
 | none | 10 |
@@ -112,14 +113,14 @@
 | strategy | count |
 |---|---|
 | (미기재) | 31 |
-| handwritten | 9 |
+| handwritten | 10 |
 | httpx_html | 6 |
 | httpx_json | 11 |
 | mixed | 1 |
 | none | 16 |
 | playwright_html | 7 |
 
-### 최근 90일 (≥ 2026-02-18)
+### 최근 90일 (≥ 2026-02-19)
 
-케이스 81 건.
+케이스 82 건.
 
