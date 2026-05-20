@@ -173,6 +173,12 @@ async def watch(interaction: discord.Interaction, url: str, filter: Optional[str
         return
 
     slug = url_to_slug(url)
+    # 같은 board 가 다른 slug 로 이미 등록돼 있으면(recognizer 도입 등 slug 스키마 변화) 그 slug 로 흡수 —
+    # 새 config 중복 등록·중복 폴링(새 글 2번 알림) 방지.
+    if not _is_registered(slug):
+        alias = site_ops.find_registered_alias(url, exclude_slug=slug)
+        if alias:
+            slug = alias
     if site_ops.is_blocked(slug):
         kind_m = site_ops.marker_kind(slug)
         if kind_m == "bug":
@@ -268,6 +274,11 @@ async def preview(interaction: discord.Interaction, url: str, article_url: Optio
         return
 
     slug = url_to_slug(url)
+    # watch 와 동일 — 다른 slug 로 이미 등록된 board 면 그 slug 로 흡수(중복 등록 방지).
+    if not _is_registered(slug):
+        alias = site_ops.find_registered_alias(url, exclude_slug=slug)
+        if alias:
+            slug = alias
     if site_ops.is_blocked(slug):
         kind_m = site_ops.marker_kind(slug)
         if kind_m == "bug":
@@ -343,8 +354,16 @@ async def _own_slug_autocomplete(interaction: discord.Interaction, current: str
 @app_commands.autocomplete(target=_own_slug_autocomplete)
 async def unwatch(interaction: discord.Interaction, target: str):
     t = target.strip()
-    slug = url_to_slug(t) if re.match(r"^https?://", t) else t
-    n = db.remove_subscription(_conn, user_id=str(interaction.user.id), slug=slug)
+    is_url = bool(re.match(r"^https?://", t))
+    slug = url_to_slug(t) if is_url else t
+    uid = str(interaction.user.id)
+    n = db.remove_subscription(_conn, user_id=uid, slug=slug)
+    if is_url:
+        # 같은 board 가 old/new slug 양쪽에 구독돼 있을 수 있음(slug 스키마 drift) — 둘 다 제거.
+        # (computed slug 에 구독이 있었어도 alias 쪽이 남으면 새 글 2번 알림 계속됨.)
+        alias = site_ops.find_registered_alias(t, exclude_slug=slug)
+        if alias:
+            n += db.remove_subscription(_conn, user_id=uid, slug=alias)
     if n:
         await interaction.response.send_message(msg("unwatch_removed", slug=slug, n=n), ephemeral=True)
     else:

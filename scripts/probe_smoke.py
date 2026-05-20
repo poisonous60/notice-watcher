@@ -429,7 +429,8 @@ HEURISTIC_TESTS_DIR = ROOT / "tests" / "probe_heuristics"
 EXTRA_UNIT_TEST_DIRS = [ROOT / "tests" / "validate",
                         ROOT / "tests" / "fail_taxonomy",
                         ROOT / "tests" / "state_lifecycle",
-                        ROOT / "tests" / "recognizers"]  # 비-휴리스틱 engine 회귀 테스트
+                        ROOT / "tests" / "recognizers",  # 비-휴리스틱 engine 회귀 테스트
+                        ROOT / "tests" / "bot"]          # 봇 헬퍼(db/site_ops) 단위 테스트
 
 
 def _load_test_module(test_py: Path):

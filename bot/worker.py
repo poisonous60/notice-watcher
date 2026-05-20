@@ -26,6 +26,7 @@ from bot.site_ops import (
     baseline_count,
     blocked_info,
     body_warning,
+    find_registered_alias,
     is_blocked,
     marker_kind,
     public_reason,
@@ -219,6 +220,17 @@ async def _process_job_inner(client, conn, job, dm_owner) -> None:
             db.mark_job_finished(conn, job_id, ok=True, rc=0, tail="(already registered)")
             await _post_register_success(client, conn, job)
             return
+        # slug 스키마 drift — 같은 board 가 다른 slug 로 이미 등록돼 있으면(recognizer 도입 등)
+        # 중복 register 안 함. enqueue 전에 watch/preview 가 흡수하지만, deploy 전 큐에 쌓였거나
+        # enqueue~claim 사이 다른 잡이 등록한 race 를 worker 에서도 막는다. 구독은 기존 slug 로.
+        if kind == "register":
+            alias = find_registered_alias(url, exclude_slug=slug)
+            if alias:
+                log.info("잡 #%d 같은 board 가 다른 slug(%s)로 이미 등록 — register 스킵", job_id, alias)
+                db.mark_job_finished(conn, job_id, ok=True, rc=0,
+                                     tail=f"(already registered as {alias})")
+                await _post_register_success(client, conn, job, slug_override=alias)
+                return
 
         # 자동 fail — 같은 잡이 봇을 ATTEMPTS_LIMIT 회 이상 죽였으면 BUG 마커 박고 종결.
         # 한 번 봐주고 (외부 사고 가능성) 두 번째 죽음에 즉시 BUG (잡 자체 원인 명백).
@@ -418,9 +430,13 @@ def _phase_to_message(label: str, slug: str) -> Optional[str]:
     return None
 
 
-async def _post_register_success(client, conn, job) -> None:
-    """register 성공 후처리: subscription 추가(있으면) + 예시 알림 만들어 ack 갱신."""
-    slug = job["slug"]
+async def _post_register_success(client, conn, job, *, slug_override: Optional[str] = None) -> None:
+    """register 성공 후처리: subscription 추가(있으면) + 예시 알림 만들어 ack 갱신.
+
+    `slug_override`: 같은 board 가 다른 slug 로 이미 등록된(alias) 경우, 구독·예시를 *그 기존 slug* 로
+    건다 — job slug(중복이라 config 없음)가 아니라. 중복 폴링·끊긴 구독 방지.
+    """
+    slug = slug_override or job["slug"]
     url = job["url"]
     sub: Optional[dict] = None
     if job["sub_payload"]:

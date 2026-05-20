@@ -63,6 +63,47 @@ def is_registered(slug: str) -> bool:
             and not (STATE_DIR / f"{slug}.BUG.json").exists())
 
 
+_ALIAS_MARKER_SUFFIX = (".FAILED.json", ".REJECTED.json", ".BUG.json")
+
+
+def find_registered_alias(url: str, *, exclude_slug: Optional[str] = None) -> Optional[str]:
+    """`url` 과 같은 canonical 을 가진 *이미 등록된* slug 를 poll_state 에서 역조회.
+
+    recognizer 추가/슬러그 스키마 변경으로 같은 게시판 URL 이 deploy 전후 다른 slug 를 받으면,
+    `is_registered(새 slug)`=False 가 되어 같은 board 가 2번째 config 로 중복 등록·폴링될 수 있다
+    (사용자가 그 board 를 다시 `/watch` 하면 old/new 양쪽 구독 → 새 글 2번 알림).
+    canonical_url 신원으로 기존 slug 를 찾아 그쪽으로 흡수해 중복을 막는다.
+    `exclude_slug`(보통 방금 계산한 새 slug) 는 후보에서 제외. 없으면 None.
+    """
+    from engine.slug import canonical_url
+    if not url or not STATE_DIR.exists():
+        return None
+    try:
+        target = canonical_url(url)
+    except Exception:  # noqa: BLE001
+        return None
+    for f in STATE_DIR.glob("*.json"):
+        name = f.name
+        if name.endswith(_ALIAS_MARKER_SUFFIX):
+            continue
+        slug = name[:-5]  # ".json" 제거
+        if slug == exclude_slug:
+            continue
+        try:
+            stored = (json.loads(f.read_text(encoding="utf-8")) or {}).get("url")
+        except Exception:  # noqa: BLE001
+            continue
+        if not stored:
+            continue
+        try:
+            same = canonical_url(stored) == target
+        except Exception:  # noqa: BLE001
+            continue
+        if same and is_registered(slug):
+            return slug
+    return None
+
+
 def marker_kind(slug: str) -> Optional[str]:
     """slug 의 차단 마커 종류 반환. 'rejected' / 'failed' / 'bug' / None (없음).
     여럿 동시 존재 시 우선순위: rejected > bug > failed (영구 거부가 가장 단호, BUG 는 운영자 점검, FAILED 는 hand-config).

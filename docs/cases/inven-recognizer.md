@@ -63,6 +63,18 @@ list `td.date` 에 연도가 없어 `published_at` 이 `1900-MM-DD`/`1900-01-01T
 신규-글 감지는 단조 증가 post_id 로 하므로 영향 없고, article enrich 는 `%Y-%m-%d %H:%M` 풀 연도 → 정확.
 기존 inven 멤버(maple `%m-%d` 등)도 동일 동작 — recognizer 가 도입한 회귀 아님.
 
+## 슬러그 drift 중복 폴링 봉합 (후속)
+recognizer 추가 = 같은 board URL 의 slug 파생 규칙 변경(Rule D 상황). 기존 6 멤버는 옛 fallback slug
+(`host_inven-co-kr_board_<hash>`)로 등록돼 있고, recognizer 적용 후 같은 URL 은 `inven_<game>_<board>_<hash>`.
+slug 다름 → 같은 board 가 2번째 config 로 중복 등록·폴링 → 같은 사람이 양쪽 구독 시 새 글 2번 알림 위험.
+
+봉합(prevention): `bot/site_ops.find_registered_alias(url)` — canonical_url 신원으로 기존 등록 slug 역조회.
+`/watch`·`/preview`·worker register 가 enqueue/등록 전 alias 흡수(기존 slug 재사용), `/unwatch`(URL)는 old/new
+양쪽 제거. 모든 platform·미래 recognizer 공통 게이트. (codex 리뷰 반영: unwatch 양쪽 제거 버그, worker race 가드 추가.)
+
+남은 한계(미구현, 의도): *이미 양쪽 등록된* 과거 중복의 사후 정리(migration)·notify-level canonical dedup 은 안 함 —
+현재 6 board 는 new-slug config 가 아직 없어 중복 없음. prevention 으로 충분, 사후 정리는 필요 시 별도.
+
 ## 비고
 2번째 recognizer-extension 실증 (hoyolab 다음). hoyolab=byte-동일(쉬움), inven=구조 divergent(어려움) 케이스.
 divergent 일 때 표준 round-trip(멤버 재현)은 적용 불가 → URL 추출 + 라이브 e2e + same-host negative 로 대체.
