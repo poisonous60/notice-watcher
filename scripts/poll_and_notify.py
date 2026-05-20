@@ -1,10 +1,9 @@
-"""poll.py + notify.py 를 한 번에 (systemd notice-poll.service 가 호출).
+"""폴링 1회 (systemd notice-poll.service 가 호출). 이름은 legacy — 발송은 안 한다 (ADR 0006).
 
 - poll.py 가 chromium 을 띄움 (playwright_html / handwritten 사이트, 재-probe) → chromium_lock 안.
-- 새 글은 collected/<ts>/<slug>.new.json 에 떨어짐.
-- 폴링 직후 notify.py --no-digest 1회 — collected 새 글을 즉시 요약/필터/Discord 발송 (모든 구독 realtime).
-- notice-notify.timer (15분 간격) 는 retry 용도: .notified 마커 작성 실패한 collected dir 나
-  옛 다이제스트(HH:MM) 시절의 pending 잔재만 처리. 정상 흐름에서 할 일 없음.
+- 새 글은 posts 캐시 + collected/<ts>/<slug>.new.json 에 떨어짐.
+- 발송은 *분리* (ADR 0006): 봇 내부 1분 tick(bot/delivery_tick.py)이 수신처 발송 시각 도래 시
+  scripts/deliver_due.py 로 요약·필터·발송. 이 스크립트는 폴링만 — 즉시 발송 폐지.
 - env HEALTHCHECK_PING_URL 있으면 시작/끝에 GET ping (실패해도 무시).
 - 치명적 실패 시 종료코드 != 0.
 

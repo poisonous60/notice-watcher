@@ -1,9 +1,10 @@
-# 폴링 + 알림 1회 (notice-poll.timer 가 매시 호출). chromium 락 안에서 poll.py → notify.py.
+# 폴링 1회 (notice-poll.timer 가 매시 호출). chromium 락 안에서 poll.py 만 — 발송은 분리 (ADR 0006,
+# 봇 1분 tick → deliver_due.py). poll_and_notify 는 legacy 이름이고 실제로 발송 안 함.
 # 설치: sudo cp deploy/notice-poll.service deploy/notice-poll.timer /etc/systemd/system/
 #       sudo systemctl daemon-reload && sudo systemctl enable --now notice-poll.timer
 # 즉시 1회 실행: sudo systemctl start notice-poll.service   |   로그: journalctl -u notice-poll
 [Unit]
-Description=Notice poll + notify (one shot)
+Description=Notice poll (one shot) — ADR 0006, 발송 분리
 After=network-online.target
 Wants=network-online.target
 

@@ -5,8 +5,9 @@ DB 파일: output/bot.sqlite3 (이미 .gitignore 됨).
 
 테이블:
   subscriptions(user_id, slug, url, filter_prompt, schedule, target_kind, target_id, notify_empty, created_at)
-      schedule = 'realtime' (전 행 고정). 폴링 직후 notify.py 가 즉시 발송. 사용자 시각 선택 옵션 없음.
-                 컬럼은 유지 — _migrate 가 HH:MM/그 외 값을 일괄 'realtime' 으로 강제 변환(idempotent).
+      schedule = 'realtime' (전 행 고정) — *vestigial*. ADR 0006 이후 발송 시각은 이 컬럼이 아니라
+                 user_settings/channel_settings.deliver_at 가 결정 (봇 1분 tick → deliver_due.py).
+                 컬럼은 유지 — _migrate 가 옛 HH:MM/그 외 값을 일괄 'realtime' 으로 강제 변환(idempotent).
       target_kind = 'dm' (target_id = user_id) | 'channel' (target_id = channel_id)
       notify_empty = 1 이면 폴링 결과 새 글이 없어도 "새 공지 없음" 한 줄을 보냄 (기본 0).
                  realtime_notify_empty_subs() 가 schedule='realtime' AND notify_empty=1 행을 잡음.

@@ -4,7 +4,7 @@
   1. output/poll_state/<slug>.json 읽기 (slug, url, config_path, seen_post_ids, consecutive_breakage)
   2. **구독자 체크** — bot.sqlite3 의 subscriptions 에 그 slug 가 1건도 없으면 *lurking* 모드:
      - fetch_list 는 함(seen 갱신 + 깨짐 판정 + 자가복구 위해)
-     - 본문 fetch 안 함, collected/*.new.json 안 씀 → notify.py 가 자동 스킵 (Gemini/Discord 호출 0)
+     - 본문 fetch 안 함, collected/*.new.json 안 씀 → 발송 단계(deliver_due.py)가 자동 스킵 (LLM/Discord 호출 0)
      - 등록 ≠ 구독: /preview 만 한 사이트·실험 등록 사이트는 비용 0
   3. config 로 ConfigAdapter 만들어 fetch_list
      - 에러 / 0건(이전엔 글 있었는데) / 포맷 급변(post_id 모양 이상·title 대부분 빔) → 깨짐 신호
@@ -419,7 +419,7 @@ async def _run_inner(args) -> int:
     finally:
         posts_conn.close()
 
-    # 요약 (사람용 summary.txt + 기계용 poll_result.json — notify.py 의 heartbeat 가 읽음)
+    # 요약 (사람용 summary.txt + 기계용 poll_result.json — 디버그 아티팩트, 현재 reader 없음)
     lines = [f"[poll {ts}]", ""]
     for slug, status, npos, nnew, note in rows:
         lines.append(f"  {slug}\n      status={status}  posts={npos}  new={nnew}  {note}")
