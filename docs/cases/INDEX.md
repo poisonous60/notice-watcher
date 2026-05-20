@@ -2,12 +2,13 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 92 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 93 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
 | [`infra_url_dead_split_2026-05-20`](infra_url_dead_split_2026-05-20.md) | ✅ 자동 (FailKind split — url_dead rc=4 분리) | 2026-05-20 | F | target_not_found, cert_or_dns_broken | (인프라 — 분류 카탈로그 변경, 사이트 N/A) |
 | [`infra_gate_false_positive_fixes_2026-05-20`](infra_gate_false_positive_fixes_2026-05-20.md) | ✅ 자동 (article_page_reject + meta_diverging + multi_host_hub 3개 fix) | 2026-05-20 | C+F | recognizer_article_page_reject, meta_diverging, multi_host_hub | (인프라 — 3 게이트 false-positive fix, 사이트 N/A) |
+| [`hoyolab-recognizer`](hoyolab-recognizer.md) | ✅ recognizer 승급 (cluster 3건 → engine/recognizers/hoyolab.py) | 2026-05-20 |  |  | https://www.hoyolab.com/circles/2/0/official?lang=ko-kr |
 | [`host_smashingmagazin_feed_cb3fed96`](host_smashingmagazin_feed_cb3fed96.md) | ✅ register feed-override (Cloudflare HTML 차단 + 공개 RSS 피드 → 피드로 등록) | 2026-05-20 | F | blocked_bot, cloudflare_html_open_feed | https://www.smashingmagazine.com/feed/ |
 | [`host_ppomppu-co-kr_zboard_66450ede`](host_ppomppu-co-kr_zboard_66450ede.md) | ✅ 손-config (같은 도메인 working config 베낌) | 2026-05-20 | none | posts_nonempty | https://www.ppomppu.co.kr/zboard/zboard.php?id=ppomppu |
 | [`host_pearlabyss-com_ko-kr_21e98c22`](host_pearlabyss-com_ko-kr_21e98c22.md) | 🟡 보류 — SPA fully shielded (API endpoint unknown without browser inspection) | 2026-05-20 | none | posts_nonempty, spa_no_api_hint | https://www.pearlabyss.com/ko-kr/news/notice |
@@ -105,7 +106,7 @@
 
 | layer | count |
 |---|---|
-| (미기재) | 17 |
+| (미기재) | 18 |
 | C | 8 |
 | C+A | 1 |
 | C+D | 2 |
@@ -125,12 +126,12 @@
 | (미기재) | 31 |
 | handwritten | 15 |
 | httpx_html | 9 |
-| httpx_json | 11 |
+| httpx_json | 12 |
 | mixed | 1 |
 | none | 18 |
 | playwright_html | 7 |
 
 ### 최근 90일 (≥ 2026-02-19)
 
-케이스 92 건.
+케이스 93 건.
 

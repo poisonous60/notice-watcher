@@ -135,6 +135,26 @@ def catalog_run_and_fix(*, catalog_name: str,
     return "\n".join(lines)
 
 
+def recognizer_extension_cluster(*, host_or_template: str,
+                                 members: list[tuple[str, str]]) -> str:
+    """cluster 1개 → recognizer-extension 스킬 트리거. dashboard `/clusters` 또는 cluster_report 에서 복사.
+
+    members = [(slug, url), ...] — 묶을 개별 config 멤버들.
+    """
+    n = len(members)
+    lines = [f"이 cluster recognizer 로 승급해줘 (skill: recognizer-extension). 총 {n}개 멤버.", ""]
+    lines.append(f"패턴: {host_or_template}")
+    lines.append("멤버 (config + url):")
+    for slug, url in members:
+        lines.append(f"- configs/{slug}.json   ← {url}")
+    lines.append("")
+    lines.append("절차: 멤버 config 비교 → canonical 템플릿·변수 슬롯 판단 → "
+                 "engine/recognizers/<platform>.py 작성 → round-trip 테스트(멤버 전부 재현) → "
+                 "reject 충돌 검사 → cluster_report 봉합 확인 → reviewer → push → N100 배포.")
+    lines.append("URL 에서 못 뽑는 변수 슬롯 있으면 그 멤버 빼고 보고. SKILL.md 절차 따름.")
+    return "\n".join(lines)
+
+
 def diagnose_slug(*, slug: str) -> str:
     """skill 아님 — 그냥 자연어 진단 요청. 사용자가 인터랙티브하게 파고들고 싶을 때."""
     return (
