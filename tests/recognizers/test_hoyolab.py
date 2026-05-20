@@ -76,9 +76,20 @@ def run() -> list[tuple[str, bool, str]]:
                   cfg is not None and cfg["headers"]["x-rpc-language"] == "ko-kr",
                   f"got {cfg and cfg['headers'].get('x-rpc-language')!r}"))
 
-    # 6) non-official 게시판은 매칭 안 함 (official literal 요구)
-    cfg = _try("https://www.hoyolab.com/circles/2/0/recommend?lang=ko-kr")
-    cases.append(("non_official_unmatched", cfg is None, f"got {cfg!r}"))
+    # 6) 같은-host 다른-종류 negative (false-match 핵심 가드 — SKILL §4):
+    #    hoyolab.com 의 official 외 페이지가 이 recognizer 로 잡히면 안 됨 (regex /official literal 방어).
+    same_host_neg = [
+        "https://www.hoyolab.com/circles/2/0/recommend?lang=ko-kr",   # 추천 탭
+        "https://www.hoyolab.com/topic/123?lang=ko-kr",               # 토픽 페이지
+        "https://www.hoyolab.com/article/456",                        # 개별 글
+        "https://www.hoyolab.com/accountCenter/postList?id=7",        # 유저 게시물
+    ]
+    for u in same_host_neg:
+        r = recognize(u)
+        hit = r is not None and r.get("_recognized_platform") == "hoyolab"
+        tag = u.split("hoyolab.com")[1][:22]
+        cases.append((f"same_host_neg[{tag}]", not hit,
+                      f"recognize→ {r and r.get('_recognized_platform')!r} (None/타platform 이어야)"))
 
     return cases
 

@@ -62,7 +62,13 @@ worked example: `tests/recognizers/test_hoyolab.py`.
 반드시 포함:
 - **roundtrip**: 각 멤버 URL → builder → 기존 config 의 *기능 필드* 재현 (메타키 `_recognized_platform`/`_source_url`/`_note`/`_slug_board` 제외하고 동일).
 - **recognize() 통합**: `recognize(url)["_recognized_platform"] == NAME`.
-- **negative**: 비대상 URL (다른 게시판/host) 은 None.
+- **다른-host negative**: 무관 host URL 은 None.
+- **같은-host 다른-종류 negative (필수 — false-match 핵심 가드)**: 같은 platform 의 *다른 종류 페이지* ≥2개를 **능동적으로 찾아** None(또는 다른 platform) 검증.
+  recognizer 정규식이 너무 넓으면 같은 host 의 엉뚱한 페이지를 이 platform 으로 잡아 *valid 하지만 의미가 틀린* config 빌드 → fetch 검증도 통과해 silent 오등록 (예: github release recognizer 가 `/issues`·`/wiki`·repo 홈을 release 로 잡음). regex literal(`/releases`·`/official` 등)이 유일한 방어.
+  샘플 소스:
+    1. `cluster_report` / `compute_clusters` 가 같은 host 인데 *이 cluster 에 안 묶인* 다른 path-template config — 천연 counter-example.
+    2. 그 platform 의 알려진 다른 페이지 종류 (github: `/issues` `/wiki` `/pulls` `/tree/...` `/owner/repo`(홈); hoyolab: `/recommend` `/topic/...`).
+  각 → `recognize()` 가 이 recognizer 로 *안* 잡는지(None 또는 타 platform) assert. 하나라도 잡히면 정규식 좁혀 재작성.
 - 재현 안 되는 멤버 → §2 로 돌아가 cluster 재정의.
 
 ## 5. reject 충돌 검사
