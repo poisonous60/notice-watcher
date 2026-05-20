@@ -36,7 +36,7 @@ worker 가 큐에서 잡 꺼내 처리 시작할 때 (`_process_job_inner` 첫 �
 `scripts/register.py` 가 별도 OS 프로세스로 도는 무거운 작업 (~30초~수분). chromium 띄워 probe→recognize→generate→preflight→digest→baseline. 등록 시도 1회 = subprocess 1회. `blocking_register` 가 `subprocess.run(...)` 으로 호출.
 
 **catalog**:
-name+url 짝 모음 1개 단위. 파일 1개 = catalog 1개 (`configs/candidates/<name>.yaml`, 파일명 stem = catalog 이름). 분류 단위 X — 사용자가 한 번에 추가한 chunk 의 *git/편집 편의 partition*. 의미적으론 모든 catalog 합쳐서 1개 monotonic pool ("아직 안 해본 사이트들"). 이름은 가벼움 (날짜·번호 — 예: `2026-05-20.yaml`, `chunk-2.yaml`). dashboard "+ 새 catalog" 시 이름 비우면 `auto-YYYY-MM-DD-<seq>.yaml` 자동. 이름 규칙: `^[a-z0-9][a-z0-9_-]{0,63}$`. 같은 url cross-catalog dedup 강제 (driver load 시 검증, 겹치면 fail).
+name+url 짝 모음 1개 단위. 파일 1개 = catalog 1개 (`output/candidates/<name>.yaml`, 파일명 stem = catalog 이름). git-ignored — 데이터 (URL list 자주 mutate). dev box 가 진본, `scripts/remote.py batch-register` 가 atomic scp 로 N100 동기 (CLAUDE.md §5 rule B 의 *shared operational input* 예외 — output/ 중 dev box 가 *쓰고* N100 이 *읽는* 유일한 자리). 분류 단위 X — 사용자가 한 번에 추가한 chunk 의 *git/편집 편의 partition*. 의미적으론 모든 catalog 합쳐서 1개 monotonic pool ("아직 안 해본 사이트들"). 이름은 가벼움 (날짜·번호 — 예: `2026-05-20.yaml`, `chunk-2.yaml`). dashboard "+ 새 catalog" 시 이름 비우면 `auto-YYYY-MM-DD-<seq>.yaml` 자동. 이름 규칙: `^[a-z0-9][a-z0-9_-]{0,63}$`. 같은 url cross-catalog dedup 강제 (driver load 시 검증, 겹치면 fail).
 _Avoid_: "batch" (실행 단위 아님), "candidate list" (어휘 떠다님), "cohort" (분류 의도 X).
 
 **catalog batch run**:
@@ -68,6 +68,14 @@ _Avoid_: "fail_category" / "error_type" / "reject_kind" — 어휘 떠다님.
 fail_kind 안의 sub. gen_fail → `[FAIL] <check>` 이름 (`posts_nonempty` / `article_body_len` / `published_at_iso` / `post_id_*` / `title_nonempty` / `gemini_api`); policy_reject → `login_required` / `blocked_bot/ip/geo`; gate_reject → `recognizer:<name>` / `nav_only` / `meta_diverging` / `multi_host_hub` / `board_shape`; bug → `chromium_lock_timeout` / `subprocess_timeout` / `subprocess_exception` / `worker_exception`.
 
 `/jobs` 셀 2줄째에 작은 회색 글로 표시, hover 에 풀 reason text. DB 컬럼 X — `bot/fail_taxonomy.py:classify_fail()` 가 읽을 때 파생 (ADR 0002).
+
+**LLM call_site**:
+코드 안의 LLM 호출 지점 식별자 (`notify_summarize`, `notify_filter`, `config_generate`, `config_retry`, ...). `output/llm_routing.json` 이 call_site → `<provider>:<model>` 매핑. provider/model 바꿀 때 호출 코드 안 건드리게 하는 indirection. 새 호출 지점 추가 = 새 call_site 박고 routing.json 에 entry 추가.
+_Avoid_: "Gemini 호출" / "LLM API 호출" (provider 박힌 어휘 — 실제 매핑은 routing.json 결정), "endpoint" (HTTP 어휘 — codex 는 subprocess).
+
+**provider**:
+LLM 백엔드 종류. 현재 박힌 것: `gemini` (HTTP API, multi-key rotation), `codex` (subprocess CLI, ChatGPT Plus OAuth 5h quota window), `openrouter` (HTTP API). `llm_routing.json` 의 `<provider>:<model>` 좌측 값. notify·generate 의 span name·로그·type hint 는 provider-neutral 로 유지 (`summarize_llm` / `LLMClient`) — 매핑만 바꿔도 코드 안 바뀜.
+_Avoid_: "Gemini" 단독 (현재 notify path 는 codex), "백엔드" (모호 — DB 백엔드와 헷갈림).
 
 ## Flagged ambiguities
 

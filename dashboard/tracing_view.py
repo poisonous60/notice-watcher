@@ -384,6 +384,9 @@ def _color_for(name: str, *, ok: bool) -> str:
         "body_fetch": "span-poll",
         "body_fetch_all": "span-poll",
         "notify": "span-notify",
+        "summarize_llm": "span-llm",
+        "filter_llm": "span-llm",
+        # 옛 span name (provider-neutral rename 이전) — 아카이브된 trace 색상 유지.
         "summarize_gemini": "span-llm",
         "filter_gemini": "span-llm",
         "discord_deliver": "span-notify",

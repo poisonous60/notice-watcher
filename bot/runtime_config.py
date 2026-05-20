@@ -62,6 +62,9 @@ class ChromiumLockSection:
 @dataclass
 class NotifySection:
     delivered_cap: int = 5000
+    # 2-phase parallel notify (summarize/filter) 의 동시 LLM 호출 상한. ThreadPoolExecutor max_workers.
+    # paid Gemini Tier 1 (4000 RPM) 한참 밑, HTTP I/O 라 RAM 영향 X. 손튠으로 늘리거나 1 로 내려 직렬화 가능.
+    llm_concurrency: int = 8
 
 
 @dataclass

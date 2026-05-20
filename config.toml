@@ -29,6 +29,10 @@ register_subprocess_timeout = 600   # register.py 실행 자체 한도 — 넘�
 
 [notify]
 delivered_cap = 5000         # bot.sqlite3 의 deliveries 한도 (오래된 거 잘림)
+# notify 의 summarize/filter LLM 호출을 ThreadPoolExecutor 로 병렬화할 때 동시 호출 상한.
+# 1 로 내리면 옛 sequential 동작 회귀. paid Gemini Tier 1 (4000 RPM) 한참 밑이라 8 안전.
+# ChatGPT Plus quota burst 발생 시 임시로 낮춰 핫픽스 가능.
+llm_concurrency = 8
 
 [rate_limit]
 # 사용자 1명이 /preview·/watch 로 register 잡을 짧게 폭주 시키는 걸 막는다 (bot/main.py::_check_rate_limit

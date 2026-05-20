@@ -25,10 +25,12 @@
 from __future__ import annotations
 
 import argparse
+import contextvars
 import json
 import os
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
@@ -38,7 +40,7 @@ from bs4 import BeautifulSoup
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from generate import GeminiClient, GeminiError, LLMError, parse_json  # noqa: E402
+from generate import LLMClient, LLMError, parse_json  # noqa: E402
 from generate import get_default_recorder, compute_cost, client_for, set_process_override  # noqa: E402
 from generate.prompts import load_prompt, render_prompt  # noqa: E402
 from bot import db  # noqa: E402
@@ -139,14 +141,14 @@ SUMMARY_SYSTEM = load_prompt("notify_summary.system")
 FILTER_SYSTEM = load_prompt("notify_filter.system")
 
 
-def summarize_post(client: GeminiClient, post: dict, *, slug: Optional[str] = None) -> str:
+def summarize_post(client: LLMClient, post: dict, *, slug: Optional[str] = None) -> str:
     title = (post.get("title") or "").strip()
     body = body_text_from_html(post.get("content_html"))
     if len(body) < 30:
         return body or title or "(내용 없음)"
     user_text = render_prompt("notify_summary.user", title=title, body=body)
     tr = current_trace()
-    with tr.span("summarize_gemini",
+    with tr.span("summarize_llm",
                  attrs={"slug": slug, "post_id": str(post.get("post_id")),
                         "body_chars": len(body)}) as sp:
         try:
@@ -159,18 +161,18 @@ def summarize_post(client: GeminiClient, post: dict, *, slug: Optional[str] = No
         except LLMError as e:
             sp.set_attr("fallback", "body_excerpt")
             sp.set_attr("err_short", type(e).__name__)
-            print(f"  [warn] Gemini 요약 실패({post.get('post_id')}), 본문 발췌로 폴백: {e}", file=sys.stderr)
+            print(f"  [warn] LLM 요약 실패({post.get('post_id')}), 본문 발췌로 폴백: {e}", file=sys.stderr)
             return body[:400] + ("…" if len(body) > 400 else "")
 
 
-def filter_pass(client: GeminiClient, filter_prompt: str, post: dict, summary: str,
+def filter_pass(client: LLMClient, filter_prompt: str, post: dict, summary: str,
                 *, slug: Optional[str] = None) -> bool:
     title = (post.get("title") or "").strip()
     cat = post.get("category") or ""
     user_text = render_prompt("notify_filter.user", filter_prompt=filter_prompt,
                               title=title, category=cat, summary=summary)
     tr = current_trace()
-    with tr.span("filter_gemini",
+    with tr.span("filter_llm",
                  attrs={"slug": slug, "post_id": str(post.get("post_id"))}) as sp:
         try:
             resp = client.generate(system_instruction=FILTER_SYSTEM, user_text=user_text,
@@ -375,7 +377,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     p.add_argument("--collected-dir", help="처리할 collected 디렉터리 (기본: 가장 최근)")
     p.add_argument("--targets", default=str(DEFAULT_TARGETS), help="(webhook fallback) slug→webhook URL JSON")
     p.add_argument("--delivered", default=str(DEFAULT_DELIVERED), help="(webhook fallback) 보낸 글 기록 JSON")
-    p.add_argument("--model", help="Gemini 모델 (기본 GEMINI_MODEL env 또는 gemini-2.5-flash)")
+    p.add_argument("--model", help="LLM provider:model (예: gemini:gemini-2.5-flash-lite, codex:gpt-5.4-mini). 기본은 output/llm_routing.json")
     p.add_argument("--max-notify", type=int, default=12, help="한 slug 당 한 번에 처리할 최대 글 수 (초과분은 스킵)")
     p.add_argument("--no-digest", action="store_true", help="다이제스트 flush 생략")
     p.add_argument("--no-collected", action="store_true",
@@ -409,8 +411,13 @@ def main(argv: Optional[list[str]] = None) -> int:
           f"sub_slugs={db.all_slugs(conn)}  webhook_slugs={list(targets)}  token={'yes' if tok else 'no'}  dry_run={dry_run}")
 
     # CLI `--model` 은 process-wide override — routing.json 무시하고 모든 call_site 에 적용.
+    # 형식: `<provider>:<model>` (예: `gemini:gemini-2.5-flash-lite`, `codex:gpt-5.4-mini`).
+    # ":" 없으면 routing._parse_target 가 gemini 로 가정 — 의도와 다를 수 있으니 warn.
     if args.model:
-        set_process_override(f"gemini:{args.model}")
+        if ":" not in args.model:
+            print(f"[notify] WARN: --model 에 provider prefix 없음 → 'gemini:{args.model}' 로 가정. "
+                  f"codex 쓰려면 --model codex:{args.model}", file=sys.stderr)
+        set_process_override(args.model)
 
     realtime_sent = 0
     digest_sent = 0
@@ -430,21 +437,25 @@ def main(argv: Optional[list[str]] = None) -> int:
     trace_cm = start_trace(trace_kind, attrs=trace_attrs)
     trace_cm.__enter__()  # try 밖에서 — __enter__ 실패 시 __exit__ 호출 안 함.
     try:
+        # ===== Phase 0: 계획 =====
+        # slug 별 subs/webhook 결정, max_notify trim+마킹 (skipped 는 다음 run 에서 보이지 X).
+        # 그 후 unique summary task 와 filter task 수집 — Phase A/B 에서 병렬 실행.
+        slug_plans: list[dict] = []
+        summary_tasks: dict[tuple[str, str], dict] = {}  # (slug, pid) → post dict — Phase A 입력
+        filter_tasks: list[tuple[str, str, str, str, dict]] = []  # (slug, pid, target_id, fp, post) — Phase B 입력
         for slug, posts in new_posts.items():
             subs = db.subscriptions_for_slug(conn, slug)
             # --only-target-* (M2/M3 replay) 활성이면 그 (kind,id) 외 구독자 skip.
-            # 둘 다 지정해야 활성 — 한쪽만 들어오면 효과 없음.
             if args.only_target_kind and args.only_target_id:
                 subs = [r for r in subs
                         if r["target_kind"] == args.only_target_kind
                         and r["target_id"] == args.only_target_id]
             webhook = targets.get(slug)
-            # only-target replay 중엔 webhook fallback 도 건너뜀 — replay 는 SQLite 구독자만 대상.
+            # only-target replay 중엔 webhook fallback 도 건너뜀.
             if args.only_target_kind and args.only_target_id:
                 webhook = None
             if not subs and not webhook:
                 continue
-            # 한 번에 너무 많으면 앞쪽(최신) max_notify 개만; 나머지는 처리됨 처리
             skipped: list[dict] = []
             if len(posts) > args.max_notify:
                 skipped = posts[args.max_notify:]
@@ -457,16 +468,94 @@ def main(argv: Optional[list[str]] = None) -> int:
                         db.mark_delivered(conn, slug, opid, r["target_id"])
             print(f"  [{slug}] 처리 {len(posts)}건{f' (+{len(skipped)} 스킵)' if skipped else ''}  "
                   f"subs={len(subs)}{' +webhook' if webhook else ''}")
+            slug_plans.append({"slug": slug, "subs": subs, "webhook": webhook, "posts": posts})
 
             for post in posts:
                 pid = str(post.get("post_id"))
-                summary: Optional[str] = None
+                # Phase A 대상: webhook 미발송 또는 미발송 sub 1개 이상이면 summary 필요.
+                needs_summary = False
+                if webhook and not subs and (slug, pid) not in delivered_file:
+                    needs_summary = True
+                if not needs_summary:
+                    for r in subs:
+                        if not db.was_delivered(conn, slug, pid, r["target_id"]):
+                            needs_summary = True
+                            break
+                if needs_summary:
+                    summary_tasks[(slug, pid)] = post
+                # Phase B 대상: filter_prompt 있는 미발송 sub.
+                for r in subs:
+                    target_id = r["target_id"]
+                    if db.was_delivered(conn, slug, pid, target_id):
+                        continue
+                    fp = r["filter_prompt"]
+                    if fp:
+                        filter_tasks.append((slug, pid, target_id, fp, post))
+
+        # llm_concurrency ≤ 0 면 ThreadPoolExecutor(max_workers=0) 크래시 — 1 로 클램프 (= sequential 회귀).
+        # Trace._spans / set / dict 의 concurrent 쓰기는 CPython GIL 의존 (list.append, set.add atomic).
+        # 단일 paid 키 가정에서 _KeyRing race 는 무해 (cosmetic 커서 어긋남 정도). 다중 키 + 키 고갈 race 가
+        # 문제되면 generate/gemini.py 의 _KEYRING 에 threading.Lock 추가 필요.
+        N = max(1, settings.notify.llm_concurrency)
+
+        # ===== Phase A: parallel summarize =====
+        # contextvars.copy_context().run → worker thread 가 main 의 _current_trace 를 본다.
+        # 없으면 span 들이 noop trace 로 빠져 trace 손실. (scripts/probe.py 동일 패턴.)
+        summaries: dict[tuple[str, str], str] = {}
+        if summary_tasks:
+            # main thread 에서 client warm-up — routing._client_cache race 회피.
+            sum_client = client_for("notify_summarize")
+            print(f"[notify] Phase A: summarize {len(summary_tasks)}건 (concurrency={N})")
+            with ThreadPoolExecutor(max_workers=N, thread_name_prefix="notify-sum") as ex:
+                fut_map: dict = {}
+                for (slug, pid), post in summary_tasks.items():
+                    ctx = contextvars.copy_context()
+                    fut = ex.submit(ctx.run, summarize_post, sum_client, post, slug=slug)
+                    fut_map[fut] = (slug, pid, post)
+                for fut in as_completed(fut_map):
+                    slug_k, pid_k, post_k = fut_map[fut]
+                    try:
+                        summaries[(slug_k, pid_k)] = fut.result()
+                    except Exception as e:  # noqa: BLE001 — fail-open (summarize_post 도 내부 fallback 있음)
+                        body = body_text_from_html(post_k.get("content_html"))
+                        fb = (body[:400] + ("…" if len(body) > 400 else "")) if body else (post_k.get("title") or "")
+                        summaries[(slug_k, pid_k)] = fb
+                        print(f"  [warn] LLM 요약 실패(unexpected) {pid_k}: {type(e).__name__}: {e}", file=sys.stderr)
+
+        # ===== Phase B: parallel filter =====
+        filter_results: dict[tuple[str, str, str], bool] = {}
+        if filter_tasks:
+            flt_client = client_for("notify_filter")
+            print(f"[notify] Phase B: filter {len(filter_tasks)}건 (concurrency={N})")
+            with ThreadPoolExecutor(max_workers=N, thread_name_prefix="notify-flt") as ex:
+                fut_map = {}
+                for (slug, pid, target_id, fp, post) in filter_tasks:
+                    summary = summaries.get((slug, pid), "")
+                    ctx = contextvars.copy_context()
+                    fut = ex.submit(ctx.run, filter_pass, flt_client, fp, post, summary, slug=slug)
+                    fut_map[fut] = (slug, pid, target_id)
+                for fut in as_completed(fut_map):
+                    key = fut_map[fut]
+                    try:
+                        filter_results[key] = fut.result()
+                    except Exception as e:  # noqa: BLE001 — fail-open
+                        filter_results[key] = True
+                        print(f"  [warn] LLM 필터 실패(unexpected) {key[1]}: {type(e).__name__}: {e}", file=sys.stderr)
+
+        # ===== Phase C: serial deliver (캐시 lookup) =====
+        for plan in slug_plans:
+            slug = plan["slug"]
+            subs = plan["subs"]
+            webhook = plan["webhook"]
+            posts = plan["posts"]
+
+            for post in posts:
+                pid = str(post.get("post_id"))
+                summary = summaries.get((slug, pid), "")
 
                 # --- webhook fallback (이 slug 에 SQLite 구독이 없을 때만) ---
                 if webhook and not subs:
                     if (slug, pid) not in delivered_file:
-                        if summary is None:
-                            summary = summarize_post(client_for("notify_summarize"), post, slug=slug)
                         content = format_message(post, summary)
                         if dry_run:
                             print(f"\n--- [webhook {slug}] {pid} ---\n{content}\n")
@@ -487,13 +576,8 @@ def main(argv: Optional[list[str]] = None) -> int:
                     if db.was_delivered(conn, slug, pid, target_id):
                         continue
                     fp = r["filter_prompt"]
-                    if fp:
-                        if summary is None:
-                            summary = summarize_post(client_for("notify_summarize"), post, slug=slug)
-                        if not filter_pass(client_for("notify_filter"), fp, post, summary, slug=slug):
-                            continue
-                    if summary is None:
-                        summary = summarize_post(client_for("notify_summarize"), post, slug=slug)
+                    if fp and not filter_results.get((slug, pid, target_id), True):
+                        continue
                     content = format_message(post, summary)
                     if dry_run:
                         print(f"\n--- [{target_kind}:{target_id} {slug}] {pid} ---\n{content}\n")
