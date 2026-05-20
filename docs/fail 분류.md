@@ -14,6 +14,7 @@
 |---|---|---|---|
 | `done` | rc=0 | 성공 | ok |
 | `gen_fail` | rc=1 | LLM 생성·검증 실패 | error |
+| `url_dead` | rc=4 (새 runs) 또는 rc=2 + tail 에 TARGET_NOT_FOUND / CERT_OR_DNS_BROKEN (옛 entries) | URL 잘못/죽음 | warn |
 | `policy_reject` | rc=2 | 사이트 정책 거부 | error |
 | `gate_reject` | rc=3 | 휴리스틱 게이트 거부 | warn |
 | `bug` | rc=-1/-2/-3/-5/-99 또는 status='failed' AND rc=0 | 시스템 결함 | error |
@@ -38,6 +39,13 @@
 | `title_nonempty` | 제목 비어 있음 | title selector 가 빈 문자열 반환. |
 | `[FAIL]:<check>` *(dynamic)* | 신규 fail_check 감지 | catalog 미등록 [FAIL] check_name — Subkind 추가 권장. |
 | `gemini_api` | Gemini API 호출 실패 | 429 RESOURCE_EXHAUSTED / UNAVAILABLE / 호출·파싱 실패. |
+
+### url_dead
+
+| subkind | label | hint |
+|---|---|---|
+| `target_not_found` | 404 (URL 없음) | 도메인 정상이지만 입력 URL 의 글/페이지가 없음 — 카탈로그 URL 편집 필요. |
+| `cert_or_dns_broken` | SSL/DNS 깨짐 | 도메인 자체 접근 단계 이전에 cert/DNS fail — 사이트가 사라졌거나 운영 오설정. |
 
 ### policy_reject
 

@@ -1373,16 +1373,23 @@ def _main_inner(argv) -> int:
         #   - host-wide (학습 OK)  = login / BLOCKED / cert_or_dns_broken — 같은 host 다른 URL 도 동일 막힘.
         #   - url-specific (학습 X) = target_not_found — URL 의 글이 사라졌을 뿐, 같은 host 의 다른
         #     board URL 은 정상 접근 가능. host+path_prefix 학습 시 sibling false-positive.
+        # rc 분기 (2026-05-20 추가):
+        #   - rc=4 (url_dead): target_not_found / cert_or_dns_broken — 카탈로그 URL 편집이 답.
+        #     `bot/fail_taxonomy.py` 의 `url_dead` FailKind 가 잡음. retry-worthy X
+        #     (`register_batch.py` 의 FAILED_PRESET_RCS 에 4 미포함 — `--failed` 가 안 잡음).
+        #   - rc=2 (policy_reject): BLOCKED / LOGIN_REQUIRED — 사이트 정책상 거부.
         verdict = (digest.get("verdict") or "").lower()
         host_wide = _policy_reject_is_host_wide(verdict)
+        is_url_dead = ("target_not_found" in verdict) or ("cert_or_dns_broken" in verdict)
+        rc_out = 4 if is_url_dead else 2
         try:
             _save_rejected(slug, url,
                            reason=f"policy_check 거부: {'; '.join(msgs)[:200]}",
-                           note=f"policy_check rc=2 verdict={verdict!r}",
+                           note=f"policy_check rc={rc_out} verdict={verdict!r}",
                            learn=host_wide)
         except Exception as e:  # noqa: BLE001
-            print(f"[register] ⚠ REJECTED 마커 저장 실패 (rc=2): {e}", file=sys.stderr)
-        return 2
+            print(f"[register] ⚠ REJECTED 마커 저장 실패 (rc={rc_out}): {e}", file=sys.stderr)
+        return rc_out
 
     # single-article nav-only 게이트 — board_shape 가 nav 안 사이드바 메뉴를 same-host 신호로 false-positive
     # 통과시키는 걸 차단. holocaustexplained 같은 *unknown host* 단일 article 페이지가 여기서 잡힌다.

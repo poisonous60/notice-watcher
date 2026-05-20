@@ -43,7 +43,7 @@ class Subkind:
     dynamic: bool = False  # True = name 이 pattern (catalog 외 실제 값 등장 가능).
 
 
-def _always_false(_s: str, _rc: Optional[int]) -> bool:  # 기본 rc_extra
+def _always_false(_s: str, _rc: Optional[int], _t: str) -> bool:  # 기본 rc_extra
     return False
 
 
@@ -53,7 +53,9 @@ class FailKind:
     label_ko: str
     severity: str  # 'ok' | 'warn' | 'error' | ''
     rc: Optional[int]  # rc==이 값 → 매칭. None = rc_extra 로만 분기 (예: bug).
-    rc_extra: Callable[[str, Optional[int]], bool] = field(default=_always_false)
+    # rc_extra: (status, rc, tail) -> bool. tail 인자 추가 (2026-05-20) — `url_dead` 가
+    # 옛 rc=2 entries 의 tail (TARGET_NOT_FOUND / CERT_OR_DNS_BROKEN) 도 매칭하기 위해.
+    rc_extra: Callable[[str, Optional[int], str], bool] = field(default=_always_false)
     rc_doc: str = ""  # doc gen 용 — 비어있으면 `rc={fk.rc}` 자동. 복합 조건은 명시.
     subkinds: tuple[Subkind, ...] = ()
 
@@ -107,9 +109,43 @@ def _race_subkind(_tail: str, rc: Optional[int]) -> Optional[str]:
     return "registered_but_no_state" if rc == 0 else None
 
 
-def _bug_rc_extra(_s: str, rc: Optional[int]) -> bool:
+def _bug_rc_extra(_s: str, rc: Optional[int], _t: str) -> bool:
     """bug FailKind 의 status/rc 매칭 — 음수 rc 또는 race."""
     return rc in (-1, -2, -3, -5, -99) or (_s == "failed" and rc == 0)
+
+
+# `_policy_check` 가 verdict TARGET_NOT_FOUND / CERT_OR_DNS_BROKEN 일 때 박는 tail 토큰들.
+# register.py 가 새로 emit 하는 rc=4 entries 도 위 토큰을 tail 에 박지만, rc=4 자체만으로도 매칭됨.
+_URL_DEAD_TOKENS_TARGET = (
+    "TARGET_NOT_FOUND",
+    "URL 이 잘못됐거나 글이 삭제된",
+)
+_URL_DEAD_TOKENS_CERT = (
+    "CERT_OR_DNS_BROKEN",
+    "SSL 인증서/DNS 가 깨짐",
+)
+
+
+def _url_dead_rc_extra(_s: str, rc: Optional[int], tail: str) -> bool:
+    """url_dead FailKind 매칭 — rc=4 또는 rc=2 + tail 에 url-dead verdict 토큰.
+
+    rc=2 매칭은 *옛* policy_reject 데이터를 url_dead 로 re-classify (2026-05-20 split 이전 데이터).
+    새 runs 는 register.py 가 직접 rc=4 박음. classify_fail 의 FAIL_CATALOG 순회 순서가
+    url_dead → policy_reject 라 rc=2 + url-dead-tail 이 정확히 잡힘.
+    """
+    if rc == 4:
+        return True
+    if rc == 2 and tail:
+        return any(t in tail for t in _URL_DEAD_TOKENS_TARGET + _URL_DEAD_TOKENS_CERT)
+    return False
+
+
+def _url_dead_target(_tail: str, _rc: Optional[int]) -> Optional[str]:
+    return "target_not_found" if any(t in _tail for t in _URL_DEAD_TOKENS_TARGET) else None
+
+
+def _url_dead_cert(_tail: str, _rc: Optional[int]) -> Optional[str]:
+    return "cert_or_dns_broken" if any(t in _tail for t in _URL_DEAD_TOKENS_CERT) else None
 
 
 # ============================================================================
@@ -156,6 +192,25 @@ FAIL_CATALOG: tuple[FailKind, ...] = (
                     "429 RESOURCE_EXHAUSTED / UNAVAILABLE / 호출·파싱 실패.",
                     _has_any("RESOURCE_EXHAUSTED", "UNAVAILABLE", "gemini 호출",
                              name="gemini_api")),
+        ),
+    ),
+    # url_dead: 입력 URL 자체가 잘못 — 사이트 정책과 무관. 카탈로그 yaml URL 편집이 답 (코드 X).
+    # 정책 거부와 분리 (2026-05-20) — 옛 rc=2 entries 중 tail 에 url-dead verdict 토큰 있는 것도
+    # 자동 re-classify (rc=2 + token = url_dead, FAIL_CATALOG 순회 순서로 policy_reject 보다 먼저).
+    FailKind(
+        name="url_dead",
+        label_ko="URL 잘못/죽음",
+        severity="warn",
+        rc=None,
+        rc_extra=_url_dead_rc_extra,
+        rc_doc="rc=4 (새 runs) 또는 rc=2 + tail 에 TARGET_NOT_FOUND / CERT_OR_DNS_BROKEN (옛 entries)",
+        subkinds=(
+            Subkind("target_not_found", "404 (URL 없음)",
+                    "도메인 정상이지만 입력 URL 의 글/페이지가 없음 — 카탈로그 URL 편집 필요.",
+                    _url_dead_target),
+            Subkind("cert_or_dns_broken", "SSL/DNS 깨짐",
+                    "도메인 자체 접근 단계 이전에 cert/DNS fail — 사이트가 사라졌거나 운영 오설정.",
+                    _url_dead_cert),
         ),
     ),
     FailKind(
@@ -333,7 +388,7 @@ def classify_fail(status: Optional[str], rc: Optional[int], tail: Optional[str]
             if rc != fk.rc:
                 continue
         else:
-            if not fk.rc_extra(s, rc):
+            if not fk.rc_extra(s, rc, t):
                 continue
         for sk in fk.subkinds:
             matched = sk.match(t, rc)

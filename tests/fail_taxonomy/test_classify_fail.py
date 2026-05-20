@@ -63,6 +63,20 @@ CASES: list[tuple[str, tuple[Optional[str], Optional[int], Optional[str]], str, 
     ("policy_blocked_geo", ("failed", 2, "[register] BLOCKED_GEO"), "policy_reject", "blocked_geo"),
     ("policy_no_match", ("failed", 2, "[register] something"), "policy_reject", None),
 
+    # url_dead (rc=4 = 새 runs / rc=2 + tail token = 옛 entries re-classify) ----
+    ("url_dead_target_rc4",
+     ("failed", 4, "[register] 입력 URL 의 글이 존재하지 않음 — 모든 진입 시도가 HTTP 404 (verdict='TARGET_NOT_FOUND')."),
+     "url_dead", "target_not_found"),
+    ("url_dead_cert_rc4",
+     ("failed", 4, "[register] 목록 페이지 접근 단계 이전에 SSL 인증서/DNS 가 깨짐 (verdict='CERT_OR_DNS_BROKEN')."),
+     "url_dead", "cert_or_dns_broken"),
+    ("url_dead_target_rc2_legacy",
+     ("failed", 2, "[register] 입력 URL 의 글이 존재하지 않음 (verdict='TARGET_NOT_FOUND'). 게시판 목록 URL 또는 다른 글 URL 로 재시도."),
+     "url_dead", "target_not_found"),
+    ("url_dead_cert_rc2_legacy",
+     ("failed", 2, "[register] 목록 페이지 접근 단계 이전에 SSL 인증서/DNS 가 깨짐 (verdict='CERT_OR_DNS_BROKEN')."),
+     "url_dead", "cert_or_dns_broken"),
+
     # gate_reject (rc=3) ----
     ("gate_recognizer",
      ("failed", 3, "[PHASE] recognize_reject (wikipedia_article)\n[register] ❌ 등록 거부 — ..."),

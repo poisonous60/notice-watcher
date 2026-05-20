@@ -52,13 +52,14 @@ STATUS_DISPLAY: dict[str, tuple[str, str]] = {
     "running":       ("🔁", "처리중"),
     "done":          ("✅", "완료 (config 부재 race)"),
     "gen_fail":      ("❌", "자동등록 실패"),
+    "url_dead":      ("🔗", "URL 잘못/죽음"),
     "policy_reject": ("🚫", "정책 거부"),
     "gate_reject":   ("🚫", "게이트 거부"),
     "bug":           ("🐞", "BUG"),
     "unknown":       ("⚠",  "분류 미스"),
 }
 STATUS_ORDER = [
-    "untried", "pending", "running", "gen_fail", "policy_reject",
+    "untried", "pending", "running", "gen_fail", "url_dead", "policy_reject",
     "gate_reject", "bug", "unknown", "done", "registered",
 ]
 
