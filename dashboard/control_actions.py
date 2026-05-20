@@ -29,13 +29,14 @@ REMOTE_SCRIPT = ROOT / "scripts" / "remote.py"
 PRICES_PATH = ROOT / "model_prices.json"
 
 
-# 4 call_site + _default. UI dropdown 순서/라벨용.
+# 5 call_site + _default. UI dropdown 순서/라벨용.
 CALL_SITES = [
-    ("config_generate",  "신규 config 생성 (1차)"),
-    ("config_retry",     "config 생성 retry (i≥2)"),
-    ("notify_summarize", "공지 본문 요약"),
-    ("notify_filter",    "사용자 필터 판정"),
-    ("_default",         "기본 (위 매핑 없을 때)"),
+    ("config_generate",       "신규 config 생성 (1차)"),
+    ("config_retry",          "config 생성 retry (i≥2)"),
+    ("classify_index_content", "게시판/단일글 veto 분류 (ADR 0007)"),
+    ("notify_summarize",      "공지 본문 요약"),
+    ("notify_filter",         "사용자 필터 판정"),
+    ("_default",              "기본 (위 매핑 없을 때)"),
 ]
 
 
@@ -203,7 +204,8 @@ def interpret_systemctl_status(output: str) -> str:
 # --------------------------------------------------------------------------- #
 # routing.json
 # --------------------------------------------------------------------------- #
-_VALID_CALL_SITES = {"config_generate", "config_retry", "notify_summarize", "notify_filter", "_default"}
+_VALID_CALL_SITES = {"config_generate", "config_retry", "classify_index_content",
+                     "notify_summarize", "notify_filter", "_default"}
 
 
 def load_routing_local() -> dict:
