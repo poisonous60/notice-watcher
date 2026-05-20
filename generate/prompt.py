@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Optional
 
 from engine import transform_names
+from engine.digest import compress_html_for_prompt
 
 from .prompts import render_prompt
 
@@ -59,8 +60,9 @@ def build_user_prompt(digest: dict, *, max_html_chars: int = 120_000) -> str:
     eh = d.pop("escalation_hint", None)  # 위 ⚠ 블록으로만 보여줌(meta JSON 중복 X)
     if eh:
         d["escalation_hint"] = "(위 '⚠ probe 분석 힌트' 블록 참고)"
-    lh = (list_html.get("html") or "")[:max_html_chars]
-    ah = (article.get("html") or "")[:max_html_chars]
+    # 토큰 절감: 반복형제 collapse + 긴 text/attr 값 cap (selector 신호 보존). slice 는 안전망.
+    lh = compress_html_for_prompt(list_html.get("html") or "")[:max_html_chars]
+    ah = compress_html_for_prompt(article.get("html") or "")[:max_html_chars]
 
     meta = json.dumps(d, ensure_ascii=False, indent=2)
     examples = _load_examples()

@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 from typing import Any, Optional
 
-from bs4 import BeautifulSoup, Comment
+from bs4 import BeautifulSoup, Comment, Tag
 
 
 # probe 패키지 import 를 위해 프로젝트 루트가 sys.path 에 있어야 함.
@@ -89,6 +89,99 @@ def clean_html(html: str, *, max_bytes: int = DEFAULT_MAX_HTML_BYTES) -> tuple[s
         out = cut + "\n<!-- [digest] HTML truncated -->"
         truncated = True
     return out, truncated
+
+
+# LLM 프롬프트 *입력 전용* 추가 압축 디폴트 (prompt.py 에서만 호출).
+_KEEP_SIBLINGS = 3       # T1: 동일구조 형제 그룹당 남길 예시 수
+_TEXT_NODE_CAP = 200     # T2: text 노드 최대 char (<a> 자손 제외)
+_ATTR_VALUE_CAP = 80     # T3: data-*/aria-* 값 최대 char
+
+
+def _sibling_signature(el: Tag) -> tuple:
+    """T1 동일구조 형제 판정용. tag + class set + data-* 키 set + 직속 자식 tag 순서.
+
+    class·data-* 키를 넣어야 핀/공지 row(보통 다른 class 또는 data-notice 류 키)가
+    정상 row 와 안 합쳐진다(codex 리뷰 B1). 값이 아닌 *키* presence 만 — 값은 T3 가 자름.
+    """
+    classes = frozenset(el.get("class") or [])
+    data_keys = frozenset(k for k in el.attrs if str(k).lower().startswith("data-"))
+    child_tags = tuple(c.name for c in el.children if isinstance(c, Tag))
+    return (el.name, classes, data_keys, child_tags)
+
+
+def compress_html_for_prompt(
+    html: str,
+    *,
+    keep_siblings: int = _KEEP_SIBLINGS,
+    text_cap: int = _TEXT_NODE_CAP,
+    attr_cap: int = _ATTR_VALUE_CAP,
+) -> str:
+    """clean_html 결과에 *추가* 압축 — selector 신호(tag/class/id/href/src/구조) 보존하면서 토큰 절감.
+
+    prompt.py build_user_prompt 에서만 호출. digest["list_html"]["html"] 원본은 안 건드림 →
+    validate(라이브 fetch)·retry enrich(list_candidates JSON)·probe_smoke 무영향(codex 리뷰 A/C).
+
+    T1 반복형제 collapse: 부모별 동일 signature 형제 그룹 > keep_siblings 면 앞 keep_siblings 만
+       남기고 나머지 제거 + `<!-- collapsed N similar <tag.class> -->` 주석.
+    T2 긴 text 노드 cap: text_cap 초과 text 자름. `<a>` 자손 text 는 제외(글 제목·post_id 소스).
+    T3 attr 값 cap: data-*/aria-* 값 attr_cap 초과 & 숫자-only 아니면 자름. class/id/href/src 불가침.
+    """
+    if not html:
+        return ""
+    soup = BeautifulSoup(html, "lxml")
+
+    # T1 — 부모별 동일구조 형제 collapse.
+    # find_all 은 정적 리스트. 바깥 부모를 먼저 collapse 하면 그 안 형제들이 decompose 돼
+    # 뒤에서 만나도 detached(name None / 자식 0) → skip. 안전하게 guard.
+    for parent in soup.find_all(True):
+        if parent.name is None:  # 이미 decompose 됨
+            continue
+        children = [c for c in parent.children if isinstance(c, Tag)]
+        if len(children) <= keep_siblings:
+            continue
+        groups: dict[tuple, list[Tag]] = {}
+        for c in children:
+            groups.setdefault(_sibling_signature(c), []).append(c)
+        for sig, els in groups.items():
+            if len(els) <= keep_siblings:
+                continue
+            drop = els[keep_siblings:]  # 문서 순서 유지 (children 순회 순)
+            cls = ".".join(sorted(sig[1])) if sig[1] else ""
+            label = f"{sig[0]}{('.' + cls) if cls else ''}"
+            drop[0].insert_before(Comment(f" collapsed {len(drop)} similar <{label}> "))
+            for d in drop:
+                d.decompose()
+
+    # T3 — data-*/aria-* 값 cap (class/id/href/src 불가침).
+    for el in soup.find_all(True):
+        if el.name is None:
+            continue
+        attrs = getattr(el, "attrs", None)
+        if not attrs:
+            continue
+        for k in list(attrs):
+            kl = str(k).lower()
+            if not (kl.startswith("data-") or kl.startswith("aria-")):
+                continue
+            v = attrs[k]
+            if isinstance(v, str) and len(v) > attr_cap and not v.isdigit():
+                attrs[k] = v[:attr_cap] + "…"
+
+    # T2 — 긴 text 노드 cap (<a> 자손 제외 — 제목/post_id 소스).
+    for node in list(soup.find_all(string=True)):
+        if isinstance(node, Comment):
+            continue
+        s = str(node)
+        if len(s) <= text_cap or node.find_parent("a") is not None:
+            continue
+        node.replace_with(s[:text_cap] + "…")
+
+    out = str(soup.body or soup)
+    out = re.sub(r"[ \t]+\n", "\n", out)
+    out = re.sub(r"\n[ \t]+", "\n", out)
+    out = re.sub(r"\n{3,}", "\n\n", out)
+    out = re.sub(r"[ \t]{2,}", " ", out)
+    return out.strip()
 
 
 def _read_json(path: Path) -> Optional[Any]:
