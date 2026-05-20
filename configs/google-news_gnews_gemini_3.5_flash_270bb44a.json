@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "site": "news.google.com",
+  "board": "gemini 3.5 flash",
+  "strategy": "handwritten",
+  "adapter": "GoogleNewsRssAdapter",
+  "kwargs": {
+    "query": "gemini 3.5 flash",
+    "hl": "ko",
+    "gl": "KR",
+    "ceid": "KR:ko",
+    "timeout": 15.0
+  },
+  "_slug_board": "gnews_gemini 3.5 flash",
+  "_source_url": "https://www.google.com/search?sca_esv=1286ea5d3510f2b0&sxsrf=ANbL-n64QIl7bWwcocZnh7Wm0fHUq6np4w:1779240961083&q=gemini+3.5+flash&tbm=nws&source=univ&tbo=u&sa=X&sqi=2&ved=2ahUKEwjG7NGL3caUAxWgafUHHYUUIf4Qt8YBKAd6BAgaEAw&biw=1707&bih=791&dpr=1.5",
+  "_note": "Google 검색 — known-platform 자동 인식. SERP 직접 크롤 불가(게시판 아님 + 휘발 토큰 + ToS)라 검색어 `q` 를 Google 공식 News RSS endpoint(news.google.com/rss/search)로 옮겨 수집. 본문은 RSS description 스니펫만(개별 기사는 제3자 + Google consent redirect).",
+  "_recognized_platform": "google-news"
+}

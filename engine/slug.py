@@ -45,6 +45,13 @@ SLUG_MAX = 100
 _SANITIZE_RE = re.compile(r"[^A-Za-z0-9._%-]+")
 _MULTI_SLASH_RE = re.compile(r"/+")
 
+# Google 검색 host — SERP URL 은 의미 없는 휘발 토큰(sca_esv/sxsrf/ved/ei/...)이 매번 달라
+# 같은 검색어라도 slug hash 가 갈려 중복 등록됨. host-gated 로 *의미 있는* 키만 남겨 정체성 고정
+# (engine.recognizers.google_news 가 이 키들로 News RSS 피드 식별). cross-site 무영향(host gate).
+_GOOGLE_SEARCH_HOST_RE = re.compile(r"(?:^|\.)google\.[a-z.]+$", re.I)
+_GOOGLE_SEARCH_PATH_RE = re.compile(r"^/(?:rss/)?search\b", re.I)
+_GOOGLE_SEARCH_KEEP = frozenset({"q", "hl", "gl", "ceid", "tbm"})
+
 # Tracking query 표는 별도 모듈에서 — engine.recognizers._common.qs 도 같은 표를 본다(import cycle 회피).
 from engine._tracking_query import is_tracking_query as _is_tracking_query  # noqa: E402
 
@@ -63,9 +70,13 @@ def canonical_url(url: str) -> str:
     path = _MULTI_SLASH_RE.sub("/", sp.path) or "/"
     if path != "/" and path.endswith("/"):
         path = path.rstrip("/")
+    google_search = bool(
+        _GOOGLE_SEARCH_HOST_RE.search(netloc) and _GOOGLE_SEARCH_PATH_RE.search(path)
+    )
     pairs = sorted(
         (k, v) for k, v in parse_qsl(sp.query, keep_blank_values=True)
         if v != "" and not _is_tracking_query(k)
+        and (not google_search or k in _GOOGLE_SEARCH_KEEP)
     )
     return (
         f"//{netloc}{path}"

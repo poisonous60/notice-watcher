@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 86 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 87 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -10,6 +10,7 @@
 | [`infra_gate_false_positive_fixes_2026-05-20`](infra_gate_false_positive_fixes_2026-05-20.md) | ✅ 자동 (article_page_reject + meta_diverging + multi_host_hub 3개 fix) | 2026-05-20 | C+F | recognizer_article_page_reject, meta_diverging, multi_host_hub | (인프라 — 3 게이트 false-positive fix, 사이트 N/A) |
 | [`host_ppomppu-co-kr_zboard_66450ede`](host_ppomppu-co-kr_zboard_66450ede.md) | ✅ 손-config (같은 도메인 working config 베낌) | 2026-05-20 | none | posts_nonempty | https://www.ppomppu.co.kr/zboard/zboard.php?id=ppomppu |
 | [`host_pearlabyss-com_ko-kr_21e98c22`](host_pearlabyss-com_ko-kr_21e98c22.md) | 🟡 보류 — SPA fully shielded (API endpoint unknown without browser inspection) | 2026-05-20 | none | posts_nonempty, spa_no_api_hint | https://www.pearlabyss.com/ko-kr/news/notice |
+| [`google-news_gnews_gemini_3.5_flash_270bb44a`](google-news_gnews_gemini_3.5_flash_270bb44a.md) | ✅ 일반화 완료 (Google 검색 → News RSS recognizer + adapter — 모든 검색어 자동 처리) | 2026-05-20 | F | google_serp_not_board, serp_volatile_token_slug_drift | https://www.google.com/search?q=gemini+3.5+flash&tbm=nws |
 | [`discourse_discuss.python.org_16ebc619`](discourse_discuss.python.org_16ebc619.md) | ✅ 자동 (Discourse recognizer + DiscourseAdapter 신규 — JSON API 직접 호출) | 2026-05-20 | F | posts_nonempty, article_body_len | https://discuss.python.org/latest |
 | [`infra_wikipedia_learned_blacklist_skip_learn_2026-05-19`](infra_wikipedia_learned_blacklist_skip_learn_2026-05-19.md) | ✅ 일반화 (recognize_reject wikipedia 패턴 skip_learn=True) | 2026-05-19 | F | learned_blacklist_overbroad, shared_path_prefix_board, not_a_board | https://en.wikipedia.org/wiki/Special:RecentChanges?hidebots=1&hidecategorization=1&hideWikibase=1&limit=50&days=1&urlversion=2 |
 | [`infra_ushmm_learned_blacklist_skip_learn_2026-05-19`](infra_ushmm_learned_blacklist_skip_learn_2026-05-19.md) | ✅ 일반화 (USHMM 패턴 skip_learn=True + 모듈 docstring 강화) | 2026-05-19 | F | learned_blacklist_overbroad, shared_path_prefix_board, not_a_board | https://encyclopedia.ushmm.org/content/en |
@@ -107,7 +108,7 @@
 | C+F+A | 1 |
 | E | 3 |
 | E+A+C+D | 1 |
-| F | 36 |
+| F | 37 |
 | F+A | 1 |
 | F+C | 3 |
 | none | 12 |
@@ -117,7 +118,7 @@
 | strategy | count |
 |---|---|
 | (미기재) | 31 |
-| handwritten | 13 |
+| handwritten | 14 |
 | httpx_html | 7 |
 | httpx_json | 11 |
 | mixed | 1 |
@@ -126,5 +127,5 @@
 
 ### 최근 90일 (≥ 2026-02-19)
 
-케이스 86 건.
+케이스 87 건.
 
