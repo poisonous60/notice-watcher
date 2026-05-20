@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 93 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 94 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -17,6 +17,7 @@
 | [`host_de-wikipedia-or_wiki_62e7a984`](host_de-wikipedia-or_wiki_62e7a984.md) | ✅ 인식기 거부필터 완화 (de/fr/es Wikipedia RecentChanges 통과 → 일반 파이프 등록) | 2026-05-20 | F | recognize_reject, article_page_reject_false_positive | https://de.wikipedia.org/wiki/Spezial:Letzte_%C3%84nderungen |
 | [`host_dcinside-com_board_8de37179`](host_dcinside-com_board_8de37179.md) | ✅ 플랫폼 인식기 추가 (디시 정식갤 m.dcinside.com/board/<id> 자동 등록) | 2026-05-20 | F | fetch_list_404, llm_url_rewrite, known_platform_unrecognized | https://m.dcinside.com/board/stock |
 | [`google-news_gnews_gemini_3.5_flash_270bb44a`](google-news_gnews_gemini_3.5_flash_270bb44a.md) | ✅ 플랫폼 config 등록 (Google 검색 → News RSS recognizer + adapter — 모든 검색어 자동 처리) | 2026-05-20 | F | google_serp_not_board, serp_volatile_token_slug_drift | https://www.google.com/search?q=gemini+3.5+flash&tbm=nws |
+| [`github-releases-recognizer`](github-releases-recognizer.md) | ✅ recognizer 승급 (cluster 19건 → engine/recognizers/github_releases.py) | 2026-05-20 |  |  | https://github.com/anthropics/claude-code/releases |
 | [`discourse_discuss.python.org_16ebc619`](discourse_discuss.python.org_16ebc619.md) | ✅ 자동 (Discourse recognizer + DiscourseAdapter 신규 — JSON API 직접 호출) | 2026-05-20 | F | posts_nonempty, article_body_len | https://discuss.python.org/latest |
 | [`infra_wikipedia_learned_blacklist_skip_learn_2026-05-19`](infra_wikipedia_learned_blacklist_skip_learn_2026-05-19.md) | ✅ 일반화 (recognize_reject wikipedia 패턴 skip_learn=True) | 2026-05-19 | F | learned_blacklist_overbroad, shared_path_prefix_board, not_a_board | https://en.wikipedia.org/wiki/Special:RecentChanges?hidebots=1&hidecategorization=1&hideWikibase=1&limit=50&days=1&urlversion=2 |
 | [`infra_ushmm_learned_blacklist_skip_learn_2026-05-19`](infra_ushmm_learned_blacklist_skip_learn_2026-05-19.md) | ✅ 일반화 (USHMM 패턴 skip_learn=True + 모듈 docstring 강화) | 2026-05-19 | F | learned_blacklist_overbroad, shared_path_prefix_board, not_a_board | https://encyclopedia.ushmm.org/content/en |
@@ -106,7 +107,7 @@
 
 | layer | count |
 |---|---|
-| (미기재) | 18 |
+| (미기재) | 19 |
 | C | 8 |
 | C+A | 1 |
 | C+D | 2 |
@@ -125,7 +126,7 @@
 |---|---|
 | (미기재) | 31 |
 | handwritten | 15 |
-| httpx_html | 9 |
+| httpx_html | 10 |
 | httpx_json | 12 |
 | mixed | 1 |
 | none | 18 |
@@ -133,5 +134,5 @@
 
 ### 최근 90일 (≥ 2026-02-19)
 
-케이스 93 건.
+케이스 94 건.
 

@@ -1,0 +1,149 @@
+{
+  "version": 1,
+  "site": "github.com",
+  "board": "microsoft/TypeScript",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+    "Referer": "https://github.com/microsoft/TypeScript/releases"
+  },
+  "timeout": 15,
+  "polite_sleep": {
+    "min": 1,
+    "max": 1
+  },
+  "list": {
+    "url_template": "https://github.com/microsoft/TypeScript/releases",
+    "pagination": {
+      "kind": "query_param",
+      "page_param": "page"
+    },
+    "row_selector": "section",
+    "row_required_selector": "h2.sr-only",
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a.Link--primary.Link",
+          "attr": "href",
+          "transform": [
+            [
+              "regex_extract",
+              "/releases/tag/([^/?#]+)"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "a.Link--primary.Link",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a.Link--primary.Link",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://github.com"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "relative-time",
+          "attr": "datetime",
+          "transform": [
+            [
+              "iso8601",
+              [
+                "%Y-%m-%dT%H:%M:%SZ"
+              ]
+            ]
+          ]
+        }
+      ],
+      "author": [
+        {
+          "from": "css",
+          "selector": "a[data-hovercard-type='user']",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "css",
+          "selector": "h2.sr-only",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "div.markdown-body.tmp-my-3",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "div.Box-body .markdown-body",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "span.f1.text-bold a.Link--primary",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "relative-time",
+          "attr": "datetime",
+          "transform": [
+            [
+              "iso8601",
+              [
+                "%Y-%m-%dT%H:%M:%SZ"
+              ]
+            ]
+          ]
+        }
+      ]
+    }
+  }
+}

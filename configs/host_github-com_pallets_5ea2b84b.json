@@ -1,0 +1,232 @@
+{
+  "version": 1,
+  "site": "github.com",
+  "board": "pallets/flask",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+    "Referer": "https://github.com/pallets/flask/releases"
+  },
+  "timeout": 15,
+  "polite_sleep": {
+    "min": 1,
+    "max": 1.5
+  },
+  "list": {
+    "url_template": "https://github.com/{board}/releases",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "section",
+    "row_required_selector": "div.Box-body div.markdown-body, h2.sr-only",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a.Link--primary.Link[href*='/releases/tag/']",
+          "attr": "href",
+          "transform": [
+            [
+              "regex_extract",
+              "/releases/tag/([^/?#]+)"
+            ],
+            [
+              "strip"
+            ]
+          ]
+        },
+        {
+          "from": "attr",
+          "selector": "a.Link[href*='/releases/tag/']",
+          "attr": "href",
+          "transform": [
+            [
+              "regex_extract",
+              "/releases/tag/([^/?#]+)"
+            ],
+            [
+              "strip"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "a.Link--primary.Link[href*='/releases/tag/']",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        },
+        {
+          "from": "css",
+          "selector": "h2.sr-only",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a.Link--primary.Link[href*='/releases/tag/']",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://github.com"
+            ]
+          ]
+        },
+        {
+          "from": "template",
+          "value": "https://github.com/{board}/releases/tag/{post_id}"
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "relative-time[datetime]",
+          "attr": "datetime",
+          "transform": [
+            [
+              "iso8601",
+              [
+                "%Y-%m-%dT%H:%M:%SZ"
+              ],
+              "Z"
+            ]
+          ]
+        },
+        {
+          "from": "css",
+          "selector": "relative-time[datetime]",
+          "attr": "datetime",
+          "transform": [
+            [
+              "iso8601",
+              [
+                "%Y-%m-%dT%H:%M:%S.%fZ",
+                "%Y-%m-%dT%H:%M:%SZ"
+              ],
+              "Z"
+            ]
+          ]
+        }
+      ],
+      "author": [
+        {
+          "from": "css",
+          "selector": "a[href^='/apps/']",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        },
+        {
+          "from": "css",
+          "selector": "a.color-fg-muted.wb-break-all",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "div.markdown-body.tmp-my-3",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "div.markdown-body.tmp-my-3[data-test-selector='body-content']",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "div.markdown-body.tmp-my-3",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "span.markdown-title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        },
+        {
+          "from": "css",
+          "selector": "h1.prc-PageHeader-Title-p0Mgh span.markdown-title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "relative-time[datetime]",
+          "attr": "datetime",
+          "transform": [
+            [
+              "iso8601",
+              [
+                "%Y-%m-%dT%H:%M:%SZ"
+              ],
+              "Z"
+            ]
+          ]
+        },
+        {
+          "from": "css",
+          "selector": "relative-time[datetime]",
+          "attr": "datetime",
+          "transform": [
+            [
+              "iso8601",
+              [
+                "%Y-%m-%dT%H:%M:%S.%fZ",
+                "%Y-%m-%dT%H:%M:%SZ"
+              ],
+              "Z"
+            ]
+          ]
+        }
+      ]
+    }
+  }
+}

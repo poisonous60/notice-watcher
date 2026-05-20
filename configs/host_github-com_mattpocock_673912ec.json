@@ -1,0 +1,184 @@
+{
+  "version": 1,
+  "site": "github.com",
+  "board": "mattpocock/skills",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9",
+    "Referer": "https://github.com/mattpocock/skills/tree/main"
+  },
+  "timeout": 15,
+  "polite_sleep": {
+    "min": 1,
+    "max": 2
+  },
+  "list": {
+    "url_template": "https://github.com/{board}/tree/main",
+    "pagination": {
+      "kind": "query_param",
+      "page_param": "page"
+    },
+    "row_selector": "tr.react-directory-row.undefined",
+    "row_required_selector": "a.Link--primary[href*='/blob/']",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a.Link--primary[href*='/blob/']",
+          "attr": "href",
+          "transform": [
+            [
+              "regex_extract",
+              "^/[^/]+/[^/]+/blob/main/(.+)$"
+            ],
+            [
+              "strip",
+              "/"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "a.Link--primary[href*='/blob/']",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a.Link--primary[href*='/blob/']",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://github.com"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "relative-time",
+          "attr": "datetime",
+          "transform": [
+            [
+              "iso8601",
+              [
+                "+00:00"
+              ]
+            ]
+          ]
+        },
+        {
+          "from": "css",
+          "selector": "relative-time",
+          "text": true
+        }
+      ],
+      "author": [
+        {
+          "from": "css",
+          "selector": "a[rel=\"author\"]",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "css",
+          "selector": "a.Link--primary[href*='/blob/']",
+          "attr": "aria-label",
+          "transform": [
+            [
+              "regex_extract",
+              ", \\\\((Directory|File)\\\\)$"
+            ],
+            [
+              "strip",
+              "/"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "article.markdown-body.entry-content.container-lg",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "div.Box-sc-g0xbh4-0.markdown-body",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "table.highlight",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "div.js-file-line-container",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "h1#file-name-id-wide",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        },
+        {
+          "from": "css",
+          "selector": "h1#file-name-id",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "relative-time",
+          "attr": "datetime",
+          "transform": [
+            [
+              "iso8601",
+              [
+                "+00:00"
+              ]
+            ]
+          ]
+        }
+      ]
+    }
+  }
+}

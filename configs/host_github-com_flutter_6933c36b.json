@@ -1,0 +1,138 @@
+{
+  "version": 1,
+  "site": "github.com",
+  "board": "flutter/flutter",
+  "strategy": "httpx_html",
+  "headers": {
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Referer": "https://github.com/flutter/flutter/releases"
+  },
+  "timeout": 15,
+  "polite_sleep": {
+    "min": 1,
+    "max": 2
+  },
+  "list": {
+    "url_template": "https://github.com/flutter/flutter/releases",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "div[data-hpc] > section",
+    "row_required_selector": "a[href*='/flutter/flutter/releases/tag/']",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a[href*='/flutter/flutter/releases/tag/']",
+          "attr": "href",
+          "transform": [
+            [
+              "regex_extract",
+              "/releases/tag/([^/?#]+)"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "a[href*='/flutter/flutter/releases/tag/']",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a[href*='/flutter/flutter/releases/tag/']",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://github.com"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "attr",
+          "selector": "relative-time",
+          "attr": "datetime",
+          "transform": [
+            [
+              "iso8601",
+              [
+                "%Y-%m-%dT%H:%M:%SZ"
+              ]
+            ]
+          ]
+        }
+      ],
+      "author": [
+        {
+          "from": "css",
+          "selector": "a[data-hovercard-type='user']",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "url_template": "https://github.com/flutter/flutter/releases/tag/{post_id}",
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "div.markdown-body.tmp-my-3",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "div.markdown-body",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "a[href*='/flutter/flutter/releases/tag/']",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "attr",
+          "selector": "relative-time",
+          "attr": "datetime",
+          "transform": [
+            [
+              "iso8601",
+              [
+                "%Y-%m-%dT%H:%M:%SZ"
+              ]
+            ]
+          ]
+        }
+      ]
+    }
+  }
+}
