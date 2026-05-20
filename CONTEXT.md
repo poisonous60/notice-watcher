@@ -12,6 +12,26 @@ _Avoid_: probe 개선 루프 (probe 만이 아님), hand-config 워크플로 (�
 *코드 버그* (.BUG.json 마커, rc=-1/-2/-3/-5/-99) 가 들어왔을 때 traceback 분석 → bot/scripts/engine 코드 자체 수정 → 테스트 → commit + push + N100 pull + 재시작 → `.BUG.json` clear. 사이트 구조 문제 아니라 시스템 측 결함. hand-config pipeline 과 별도.
 _Avoid_: hand-config pipeline (등록 실패는 사이트 인식 못 한 케이스, 버그는 timeout/예외).
 
+**플랫폼** (= 재발 source 있는 URL 형태):
+한 `host+path` 형태가 *서로 다른 여러 게시판/검색* 을 instance 로 내놓고, 그 instance 가 system 에 더 들어올 source 가 있는 것. **판정 test**: "이 URL 의 host+path 형태를 가진 *다른* 게시판이 앞으로 또 `/watch` 될 source 가 있나?" 재발 source 3종 — ① multi-tenant 호스트 (arca 채널 `/b/<ch>`·reddit `/r/<sub>`·네이버/다음 카페·tistory), ② parametric service (google search `?q=`), ③ 공유 CMS (여러 host 가 같은 SW — discourse·그누보드; URL 형태로 안 잡혀 probe 핑거프린트 또는 host-list recognizer). → **recognizer 일반화** 대상.
+_Avoid_: "큰 사이트" (규모 무관 — 형태 재발이 기준), "게시판 여러 개" (한 사이트 고정 3판 ≠ 플랫폼 — instance source 가 아님).
+
+**단일 사이트** (= 재발 source 없음):
+URL 형태 재발 source 0. 한 기관의 고정 게시판 (예: ACM 윤리강령 페이지·대학 공지판). recognizer regex 가 딱 1개 URL 만 매칭 → 추상화 비용만, 일반성 0 (over-engineering). → **단일 config** 대상. case body 에 "재발 0 이유" 1줄 (CLAUDE.md §8a).
+_Avoid_: "단일 게시판" (오해 source — arca 단일 채널도 게시판 1개지만 플랫폼 instance 라 recognizer; 게시판 수가 기준 X).
+
+**단일 config** (hand-config 스킬 §2e 산출):
+gpt-5.4-mini 가 retry 후 못 만든 config 를 사람이 selector/path 채워 `configs/<slug>.json` 한 파일 손작성. canonical URL 1개만 커버. 엔진/probe/prompt/recognizer 불변 — **일반화 X**. case `outcome: handcrafted`. 같은 패턴 다음 사이트 오면 또 손작성. **선택 기준**: 대상이 *단일 사이트* (플랫폼 판정 test = NO) 일 때만. 플랫폼이면 recognizer 일반화.
+_Avoid_: "per-slug 손-config" (구 이름 — 길어서 폐기), "손-config" 단독 (스킬명 / `strategy:handwritten` 값과 떠다님), "hand-config" (pipeline 전체와 혼동), "일반화" (정반대 — 이건 일반화 안 한 것).
+
+**recognizer 일반화** (fix-layer F):
+`engine/recognizers/<plat>.py` 가 URL *클래스* 인식 → config 를 register 시 자동 발급 (probe+LLM skip). 플랫폼 전체 커버, 같은 패턴 다음 사이트 `/watch` 만으로 자동. case `outcome: improved`. 손-adapter 를 동반해도 (예: GoogleNewsRssAdapter) recognizer 가 감싸므로 일반화임 — 단일 config 아님. **선택 기준**: 대상이 *플랫폼* (판정 test = YES) 일 때. CLAUDE.md §8a 가 1순위로 미는 자리.
+_Avoid_: "손-config" (정반대 — 이건 일반화), "손-adapter" (F 의 부품일 뿐 — F 전체 X), "플랫폼 hand-config" (hand-config 은 단일 config 라 모순).
+
+**handwritten strategy**:
+config 의 `strategy` 필드값. 손-adapter 클래스 경로 (`adapter:"<클래스>"` + kwargs) — LLM-gen schema 대신. **작성자 무관** — recognizer 가 자동 발급한 config 도 이 값 가짐 (arca/google-news). "손으로 썼다" 가 아니라 "손-adapter 경로 쓴다" 는 뜻.
+_Avoid_: "손-config" (작성자 의미로 오독 — strategy 종류일 뿐).
+
 **interaction 응답**:
 `/watch`·`/preview` 슬래시 명령 직후 Discord interaction token 으로 보낸 응답. ephemeral 가능, 토큰 ~15분 만료.
 

@@ -27,9 +27,12 @@ register 거부:
 
 거부 자체는 정상 — Google SERP 는 게시판 X, anti-bot(`/sorry/`) 챌린지, URL 휘발 토큰.
 
-## 왜 손-config 가 아니라 일반화인가
+## 왜 단일 config(§2e) 가 아니라 F-recognizer 일반화인가
 
-Google 검색은 *플랫폼* — 검색어만 바뀌는 같은 패턴이 무한히 들어옴. 손-config 1개로 끝낼 케이스 X.
+> 어휘: **단일 config** = config 파일 1개, 그 URL 만, 일반화 X (`outcome: handcrafted`).
+> **F-recognizer 일반화** = recognizer 가 플랫폼 전체 자동 처리 (`outcome: improved`). 손-adapter 동반해도 일반화임. (CONTEXT.md 참조)
+
+Google 검색은 *플랫폼* — 검색어만 바뀌는 같은 패턴이 무한히 들어옴. 단일 config 1개로 끝낼 케이스 X.
 또 SERP 직접 크롤은 영원히 불가(ToS·anti-bot·휘발 토큰)지만, Google 이 **공식 News RSS endpoint**
 를 노출:
 
