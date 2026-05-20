@@ -2,10 +2,11 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 97 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 98 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
+| [`infra_root_marketing_loosen_2026-05-21`](infra_root_marketing_loosen_2026-05-21.md) | ✅ 게이트 완화 — root_marketing 이 same-host self-article 있는 board 를 오거부하던 것 차단 | 2026-05-21 | C | gate_reject_root_marketing | https://community.nodebb.org/ |
 | [`infra_discourse_root_form_2026-05-21`](infra_discourse_root_form_2026-05-21.md) | ✅ 자동 등록 (probe generator-meta 신호 → DiscourseAdapter dispatch — root-form 봉합) | 2026-05-21 | C | posts_nonempty, article_body_len | https://forum.openwrt.org/ |
 | [`steam-news-recognizer`](steam-news-recognizer.md) | ✅ recognizer 승급 (cluster 10건 → engine/recognizers/steam_news.py) | 2026-05-20 |  |  | https://store.steampowered.com/feeds/news/app/730/ |
 | [`inven-recognizer`](inven-recognizer.md) | ✅ recognizer 승급 (cluster 6건 → engine/recognizers/inven.py) | 2026-05-20 |  |  | https://www.inven.co.kr/board/lol/4625 |
@@ -111,7 +112,7 @@
 | layer | count |
 |---|---|
 | (미기재) | 21 |
-| C | 9 |
+| C | 10 |
 | C+A | 1 |
 | C+D | 2 |
 | C+F | 2 |
@@ -132,10 +133,10 @@
 | httpx_html | 12 |
 | httpx_json | 12 |
 | mixed | 1 |
-| none | 18 |
+| none | 19 |
 | playwright_html | 7 |
 
 ### 최근 90일 (≥ 2026-02-19)
 
-케이스 97 건.
+케이스 98 건.
 

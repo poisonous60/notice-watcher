@@ -326,6 +326,15 @@ def _root_marketing_homepage_check(digest: dict, url: str) -> tuple[bool, str]:
     rm = lc.get("root_marketing_homepage")
     if not isinstance(rm, dict) or not rm.get("is_root_marketing_homepage"):
         return True, ""
+    # 완화 (2026-05-21): same-host self-article 증거가 있으면 거부 X — board_shape 가 통과시킬
+    # 페이지(first_article same-host / 같은-host 반복행 / 목록 JSON·feed)는 marketing 으로 오거부 안 함.
+    # NodeBB/XenForo/IPS 류 포럼 root 는 토픽 carousel(slick-slide 등)이 same-host 글로 가는데
+    # nav/dropdown selector 가 top7 에 같이 잡혀 marketing_hits≥2 + total_same_host 작게 떠 오발화했음
+    # (batch 2026-05-21-forums 14건 false-reject). board_shape 통과 여부를 escape 조건으로 공유 →
+    # 두 게이트가 drift 불가. root_marketing 은 board_shape-fail 의 marketing-구조 부분집합에만 발화하여
+    # 더 정확한 '카테고리/섹션 URL 권장' 메시지를 준다 ("확실히 게시판 아닌 것만 거부" — 사용자 결정).
+    if _board_shape_check(digest, url)[0]:
+        return True, ""
     hits = rm.get("marketing_hits")
     sels = rm.get("marketing_selectors") or []
     total = rm.get("total_same_host")
