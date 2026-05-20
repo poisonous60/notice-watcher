@@ -54,14 +54,15 @@ STATUS_DISPLAY: dict[str, tuple[str, str]] = {
     "done":          ("✅", "완료 (config 부재 race)"),
     "gen_fail":      ("❌", "자동등록 실패"),
     "url_dead":      ("🔗", "URL 잘못/죽음"),
-    "policy_reject": ("🚫", "정책 거부"),
+    "policy_reject": ("🚫", "정책 거부(로그인)"),
+    "capability_blocked": ("🛡", "차단(능력 부족)"),
     "gate_reject":   ("🚫", "게이트 거부"),
     "bug":           ("🐞", "BUG"),
     "unknown":       ("⚠",  "분류 미스"),
 }
 STATUS_ORDER = [
     "untried", "pending", "running", "gen_fail", "url_dead", "policy_reject",
-    "gate_reject", "bug", "unknown", "done", "registered",
+    "capability_blocked", "gate_reject", "bug", "unknown", "done", "registered",
 ]
 
 _CATALOG_HEADER_TEMPLATE = """# {name} catalog — `scripts/register_batch.py --catalog={name}` 입력.
@@ -390,6 +391,7 @@ def _catalog_summary(path: Path, jobs_by_url: dict[str, dict],
         "gen_fail": kpis["gen_fail"],
         "url_dead": kpis["url_dead"],
         "policy_reject": kpis["policy_reject"],
+        "capability_blocked": kpis["capability_blocked"],
         "gate_reject": kpis["gate_reject"],
         "bug": kpis["bug"],
         "unknown": kpis["unknown"],
@@ -425,8 +427,8 @@ def register(app, templates, _render):  # noqa: ARG001
         # Aggregate KPI
         agg = {k: sum(c[k] for c in catalogs) for k in
                ("total", "registered", "untried", "pending", "running",
-                "gen_fail", "url_dead", "policy_reject", "gate_reject",
-                "bug", "unknown", "done")}
+                "gen_fail", "url_dead", "policy_reject", "capability_blocked",
+                "gate_reject", "bug", "unknown", "done")}
 
         return _render(
             "candidates_index.html", request,

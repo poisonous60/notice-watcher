@@ -34,14 +34,15 @@
 </div>
 
 {# ---------- KPI ---------- #}
-<section style="display:grid;grid-template-columns:repeat(8,1fr);gap:0.5rem;margin:1rem 0">
+<section style="display:grid;grid-template-columns:repeat(9,1fr);gap:0.5rem;margin:1rem 0">
   <article><strong>총</strong><br>{{ kpis.total }}</article>
   <article><strong>· 미시도</strong><br>{{ kpis.untried }}</article>
-  <article><strong>⏳ 큐</strong><br>{{ kpis.pending }}</article>
-  <article><strong>🔁 진행</strong><br>{{ kpis.running }}</article>
+  <article><strong>🔁 진행</strong><br>{{ kpis.pending + kpis.running }}</article>
   <article><strong>✅ 등록</strong><br>{{ kpis.registered }}</article>
   <article><strong>❌ gen_fail</strong><br>{{ kpis.gen_fail }}</article>
-  <article><strong>🚫 거부</strong><br>{{ kpis.policy_reject + kpis.gate_reject }}</article>
+  <article><strong>🛡 차단(능력)</strong><br>{{ kpis.capability_blocked }}</article>
+  <article><strong>🚫 게이트</strong><br>{{ kpis.gate_reject }}</article>
+  <article><strong>🔗 정책/죽음</strong><br>{{ kpis.policy_reject + kpis.url_dead }}</article>
   <article><strong>🐞 bug</strong><br>{{ kpis.bug }}</article>
 </section>
 
