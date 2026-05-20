@@ -2,21 +2,21 @@
 
 ADR 0005 결정의 실행 단계. **A(어휘+ADR)는 2026-05-20 완료**. 이 문서 = 남은 코드/데이터 마이그.
 
-배경 한 줄: `outcome` 의미를 scope→mechanism 으로 re-cut. config 발급 recognizer(=플랫폼 config 즉답)는 `improved` 아니라 `handcrafted`. 상세 = `docs/adr/0005-outcome-mechanism-not-scope.md`, 어휘 = `CONTEXT.md` (즉답 / 추론 개선 / 단일 config / 플랫폼 config / recognizer 2종).
+배경 한 줄: `outcome` 의미를 scope→mechanism 으로 re-cut. config 발급 recognizer(=플랫폼 config = 자동이 못 푼 걸 박은 수동 config 패치)는 `improved` 아니라 `handcrafted`. 상세 = `docs/adr/0005-outcome-mechanism-not-scope.md`, 어휘 = `CONTEXT.md` (등록 실패 / 추론 개선 / 수동 config / 단일 config / 플랫폼 config / recognizer 2종).
 
 ## 핵심 룰 (마이그 판정 기준)
 
 case 의 **주된 산출** 이:
 - 아는 것에 답 박음 (단일 config / 플랫폼 config / 손-adapter) → `handcrafted`
 - AUTO path 가 *미지* 사이트 더 잘 풀게 함 (probe 휴리스틱 C / schema E / prompt A / retry D / reject-gate recognizer / register 플로우 / blacklist 학습) → `improved`
-- mixed 면 **dominant** 로. (예: google-news = recognizer+adapter(즉답) + `_STABLE_ID_RE` cap fix(약한 추론개선) → main 은 플랫폼 config → `handcrafted`)
+- mixed 면 **dominant** 로. (예: google-news = recognizer+adapter(수동 config) + `_STABLE_ID_RE` cap fix(약한 추론개선) → main 은 플랫폼 config → `handcrafted`)
 
 ## Step 1 — enum 정의 갱신 (단일 진실원)
 
 `bot/case_runs_meta.py` line 12-13 주석 재작성:
 ```python
 "improved",     # 추론 개선 — AUTO path 가 미지 사이트 더 잘 풂 (probe휴리스틱/schema/prompt/retry/reject-gate/register플로우). ADR 0005
-"handcrafted",  # 즉답 — 아는 것에 답 박음 (단일 config / 플랫폼 config = 발급 recognizer / 손-adapter). ADR 0005
+"handcrafted",  # 수동 config — 자동이 못 푼 걸 직접 박은 패치, 진보 X (단일 config / 플랫폼 config = 발급 recognizer / 손-adapter). ADR 0005
 ```
 (`OUTCOME_LABELS` 값 `✨ improved`/`🔧 handcrafted` 그대로 OK — 키 안 바뀜, drift assert 통과.)
 
@@ -25,14 +25,14 @@ case 의 **주된 산출** 이:
 `.claude/skills/hand-config/SKILL.md` (+ `.agents/skills/hand-config/SKILL.md` 동일본 — **둘 다**) 의 outcome enum 표:
 ```
 | improved | 추론 개선 — AUTO path 가 미지 사이트 더 잘 풂 (fix_layer C/E/A/D·reject-gate·register플로우) |
-| handcrafted | 즉답 — 단일 config·플랫폼 config(발급 recognizer)·손-adapter. fix_layer 무관(F 여도 handcrafted) |
+| handcrafted | 수동 config — 자동이 못 푼 패치(진보 X). 단일 config·플랫폼 config(발급 recognizer)·손-adapter. fix_layer 무관(F 여도 handcrafted) |
 ```
 "handcrafted = fix_layer X" 문구 폐기 — 플랫폼 config 는 handcrafted + fix_layer F.
-§2e·§3 step 8·트랙B 서술 중 "recognizer = 일반화/개선" 뉘앙스도 "플랫폼 config 즉답" 으로 손볼 것 (grep `일반화` in SKILL).
+§2e·§3 step 8·트랙B 서술 중 "recognizer = 일반화/개선" 뉘앙스도 "플랫폼 config = 수동 config 패치" 로 손볼 것 (grep `일반화` in SKILL).
 
 ## Step 3 — 6 case frontmatter flip (improved → handcrafted)
 
-config 발급 recognizer case 6개 — 각각 dominant=즉답 재확인 후 `outcome: improved` → `outcome: handcrafted`:
+config 발급 recognizer case 6개 — 각각 dominant=수동 config 재확인 후 `outcome: improved` → `outcome: handcrafted`:
 
 - `docs/cases/google-news_gnews_gemini_3.5_flash_270bb44a.md` — **추가**: status 의 "✅ 일반화 완료" → "✅ 플랫폼 config 등록"; 본문 제목 "F-recognizer 일반화" → "플랫폼 config"; 어휘 박스 갱신 (A 세션에서 "일반화" 로 박아둔 것 정정)
 - `docs/cases/cafe.naver.com_home.md`
