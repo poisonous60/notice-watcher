@@ -116,7 +116,7 @@ def catalog_run_and_fix(*, catalog_name: str,
     lines.append("3. drain 완료 후 fail_kind 분포 확인 (dashboard 또는 jobs 테이블).")
     lines.append("4. **아래 우선순위대로** 처리 (2026-05-21 사용자 결정 — SKILL.md §0a):")
     lines.append("   1) **bug** (rc=-1/-2/-3/-5/-99, `.BUG.json`): *무조건 fix*, 최우선. traceback → bot/scripts/engine 코드 수정 (bug-fix workflow). `register.py 실행 시간 초과(300s)` 류 timeout 도 여기 — root-cause.")
-    lines.append("   2) **gate_reject** (rc=3): board_shape/nav_only/single-article 게이트가 *게시판형태 글을 오탐 거부* 하는 게 현재 약점. 대부분 진짜 게시판인데 거부됨 — 임의로 '의도된 거부'라 신뢰 X. **사용자에게 분포·샘플 보고하고 확인 대기**, 받으면 probe 휴리스틱(2c/2d) 개선으로 false-positive 차단.")
+    lines.append("   2) **gate_reject** (rc=3): board_shape/nav_only/single-article 게이트 거부 + LLM index/content 분류기(veto)도 content 판정(ADR 0007). 게시판/비게시판 false-reject 봉합은 *분류기 layer 의 일* — 임의로 '의도된 거부'라 신뢰 X. **사용자에게 분포·샘플 보고하고 확인 대기**, 받으면 fix 순서 = ① `prompts/classify.system.txt`/모델 보강 (게이트 휴리스틱 추가 X) → ② SPA(정적 HTML 에 목록 없음)면 render 트랙. SKILL.md §0a-2.")
     lines.append("   3) **capability_blocked** (rc=5, `.FAILED.json`): captcha/anti-bot/cloudflare 차단 = *능력 부족(정책 아님)*. stealth/anti-detection 어댑터로 재도전 (§2e + `docs/크롤링 지침.md` §6 stealth 허용).")
     lines.append("   4) **gen_fail** (rc=1, `.FAILED.json`): hand-config 진단 → 수동 config 또는 probe/prompt 개선 (두 트랙 동시).")
     lines.append("   - **policy_reject** (rc=2, LOGIN_REQUIRED) · **url_dead** (rc=4, 404/cert·dns 깨짐) = 작업 X (정상 거부, `docs/크롤링 지침.md`). 우회 X.")
