@@ -81,7 +81,7 @@
 
 이미 박혀 있음. `docs/크롤링 지침.md` §6 line 88 의 동작 정의 그대로. 이 ADR 은 *이유* 박는 doc — 코드 변경 X.
 
-`configs/candidates/*.yaml` 의 entry 필터 (`scripts/register_batch.py` load 시) 도 robots.txt 무시. cross-catalog dedup + dead domain check 만.
+`output/candidates/*.yaml` 의 entry 필터 (`scripts/register_batch.py` load 시) 도 robots.txt 무시. cross-catalog dedup + dead domain check 만. (rev6 마이그 후 위치 — git-ignored 데이터. `docs/사이트 카탈로그 자동 등록 파이프라인 계획.md` §rev6.)
 
 ## Future Review
 
