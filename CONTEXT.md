@@ -114,6 +114,18 @@ _Avoid_: "Gemini 호출" / "LLM API 호출" (provider 박힌 어휘 — 실제 �
 LLM 백엔드 종류. 현재 박힌 것: `gemini` (HTTP API, multi-key rotation), `codex` (subprocess CLI, ChatGPT Plus OAuth 5h quota window), `openrouter` (HTTP API). `llm_routing.json` 의 `<provider>:<model>` 좌측 값. notify·generate 의 span name·로그·type hint 는 provider-neutral 로 유지 (`summarize_llm` / `LLMClient`) — 매핑만 바꿔도 코드 안 바뀜.
 _Avoid_: "Gemini" 단독 (현재 notify path 는 codex), "백엔드" (모호 — DB 백엔드와 헷갈림).
 
+**발송 시각** (= 수신처가 digest 받는 wall-clock 시각, KST):
+사용자(DM)·채널이 *모든* 구독을 한 묶음으로 받는 `HH:MM`. per-subscription 아님 — 수신처 단위(`user_settings(user_id)` / `channel_settings(channel_id)`). 채널 시각은 Manage-Channel 권한자만 설정. 기본 08:30. **realtime 모드 폐지** — 발송 모드는 HH:MM 하나 [ADR 0006]. 폴링 시각(데이터 신선도, 사이트별 공유)과 *독립 축*.
+_Avoid_: "schedule"(구 per-sub 컬럼 — 폐기), "realtime"(폐지된 옛 즉시 발송 모드), "digest 시각"(옛 HH:MM digest 왕복 이력과 혼동 — 같은 값이나 새 메커니즘).
+
+**발송창** (= delivery window):
+봇 내부 1분 tick 이 `deliver_at` 도래를 감지해 그 수신처의 빚진 글을 flush 하는 시점. due 판정은 SQL(`deliver_at <= now_hhmm AND last_delivered_date < today`) — 메모리 루프 X. `last_delivered_date` 로 하루 1회 멱등 + 부팅 catch-up. systemd 외부 타이머(옛 15분) 아님.
+_Avoid_: "notify timer"(옛 15분 systemd — 격자 한계), "digest flush"(옛 `flush_digests` 경로 — 제거됨).
+
+**posts 저장소** (= 최근 글 본문 캐시):
+`posts(slug, post_id, …, body, summary, collected_at)` — 폴링이 raw 박고(LLM 0), 발송창에서 처음 필요할 때 `summary` 1회 lazy 계산·캐시(여러 발송창 재사용). TTL ~7일 GC(`prune_probe.py` 패턴). "누가 빚졌나"는 안 풂 — 그건 `deliveries` 네거티브 스페이스. 발송창 job = `posts ⨝ 구독slug − deliveries(대상)`.
+_Avoid_: "pending"(옛 per-target outbox 테이블 — 제거. fan-out 안 함), "collected 재스캔"(옛 임시 전달물 경로).
+
 ## Flagged ambiguities
 
 - "probe 개선 루프" / "hand-config 워크플로" / "자가개선 사이클" 셋이 같은 개념 가리킴 — 결정: **hand-config pipeline** 으로 통일 (2026-05-17).

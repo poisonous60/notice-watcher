@@ -71,19 +71,9 @@ def main(argv: list[str]) -> int:
             _ping(hc, "/fail")
             return rc
 
-        # collected 새 글 즉시 처리 (digest flush 는 notice-notify.timer 15분 슬랏이 마저 담당).
-        with tr.span("notify_subprocess"):
-            print("[poll_and_notify] notify.py --no-digest ...")
-            child_env = {**os.environ, **env_for_child()}
-            nrc = subprocess.call(
-                [PY, str(ROOT / "scripts" / "notify.py"), "--no-digest", "--heartbeat"],
-                cwd=str(ROOT), env=child_env,
-            )
-        if nrc != 0:
-            print(f"[poll_and_notify] notify.py 실패 rc={nrc}", file=sys.stderr)
-            _ping(hc, "/fail")
-            return nrc
-
+        # ADR 0006 — 폴링/발송 분리. poll.py 가 새 글을 posts 캐시에 박는 것으로 끝.
+        # 실제 요약·필터·발송은 봇 내부 1분 tick → scripts/deliver_due.py 가 사용자 발송 시각에 처리.
+        # (옛 realtime 즉시 notify 호출 폐지.)
         _ping(hc)
         return 0
 

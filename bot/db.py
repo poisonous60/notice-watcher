@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import sqlite3
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -168,7 +168,50 @@ CREATE TABLE IF NOT EXISTS feedback (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_feedback_created ON feedback(created_at DESC);
+
+-- 최근 글 본문 캐시 (ADR 0006). 폴링이 새 글을 raw 로 박음(LLM 0). summary 는 발송창에서
+-- 처음 필요할 때 1회 lazy 계산해 채움 → 여러 발송창이 재사용. TTL GC(prune_posts) 로 며칠 후 삭제.
+-- forward-only: seen_post_ids 에 없던 새 글만 들어옴 (마이그 이전·lurking 백로그 없음 = 의도).
+CREATE TABLE IF NOT EXISTS posts (
+    slug         TEXT NOT NULL,
+    post_id      TEXT NOT NULL,
+    title        TEXT,
+    url          TEXT,
+    published_at TEXT,
+    category     TEXT,
+    content_html TEXT,
+    summary      TEXT,
+    collected_at TEXT NOT NULL,
+    PRIMARY KEY (slug, post_id)
+);
+CREATE INDEX IF NOT EXISTS idx_posts_slug ON posts(slug, collected_at);
+CREATE INDEX IF NOT EXISTS idx_posts_collected ON posts(collected_at);
+
+-- per-user 발송 시각 (ADR 0006). DM 수신처. deliver_at = KST 'HH:MM'. 없는 user = 기본 08:30
+-- 으로 취급하나, 인덱스 due 쿼리를 위해 /watch·마이그가 행을 seed 한다.
+-- last_delivered_date = 마지막 발송한 KST 날짜 (하루 1회 멱등 + 부팅 catch-up 가드).
+CREATE TABLE IF NOT EXISTS user_settings (
+    user_id             TEXT PRIMARY KEY,
+    deliver_at          TEXT NOT NULL DEFAULT '08:30',
+    last_delivered_date TEXT,
+    updated_at          TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_user_deliver_at ON user_settings(deliver_at);
+
+-- per-channel 발송 시각 (ADR 0006). 채널 수신처 — 한 채널 = 한 시각 = 한 묶음. Manage-Channel
+-- 권한자만 설정. channel_id = subscriptions.target_id (target_kind='channel').
+CREATE TABLE IF NOT EXISTS channel_settings (
+    channel_id          TEXT PRIMARY KEY,
+    deliver_at          TEXT NOT NULL DEFAULT '08:30',
+    last_delivered_date TEXT,
+    updated_at          TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_channel_deliver_at ON channel_settings(deliver_at);
 """
+
+# 발송 시각 미설정 수신처의 기본값 (KST HH:MM). ADR 0006.
+DEFAULT_DELIVER_AT = "08:30"
+KST = timezone(timedelta(hours=9))
 
 
 def _now_iso() -> str:
@@ -200,6 +243,21 @@ def _migrate(conn: sqlite3.Connection) -> None:
         except sqlite3.OperationalError as e:
             if "duplicate column" not in str(e).lower():
                 raise
+    # ADR 0006 — 발송 시각 설정 seed. 기존 구독자(DM·채널)에 기본 deliver_at 행을 박아
+    # due 쿼리가 인덱스 스캔만으로 동작하게 (행 없음 = default 처리 분기 회피).
+    # INSERT OR IGNORE 라 이미 설정한 수신처는 안 건드림. additive — schedule 컬럼은 유지(reader
+    # 제거 후 후속 cleanup 마이그에서 DROP). [codex review: 마이그 순서]
+    now = _now_iso()
+    conn.execute(
+        "INSERT OR IGNORE INTO user_settings(user_id, deliver_at, last_delivered_date, updated_at) "
+        "SELECT DISTINCT target_id, ?, NULL, ? FROM subscriptions WHERE target_kind='dm'",
+        (DEFAULT_DELIVER_AT, now),
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO channel_settings(channel_id, deliver_at, last_delivered_date, updated_at) "
+        "SELECT DISTINCT target_id, ?, NULL, ? FROM subscriptions WHERE target_kind='channel'",
+        (DEFAULT_DELIVER_AT, now),
+    )
     conn.commit()
 
 
@@ -284,6 +342,143 @@ def counts(conn: sqlite3.Connection) -> dict:
     n_pending = conn.execute("SELECT COUNT(*) FROM pending").fetchone()[0]
     n_deliv = conn.execute("SELECT COUNT(*) FROM deliveries").fetchone()[0]
     return {"subscriptions": n_subs, "slugs": n_slugs, "pending": n_pending, "deliveries": n_deliv}
+
+
+def subscriptions_for_target(conn: sqlite3.Connection, target_id: str) -> list[sqlite3.Row]:
+    """한 수신처(DM user_id 또는 channel_id)의 모든 구독 — 발송창 flush 가 slug·필터·created_at 수집."""
+    return conn.execute(
+        "SELECT * FROM subscriptions WHERE target_id=? ORDER BY slug", (target_id,)
+    ).fetchall()
+
+
+# --------------------------------------------------------------------------- #
+# posts — 최근 글 본문 캐시 (ADR 0006)
+# --------------------------------------------------------------------------- #
+def upsert_post(conn: sqlite3.Connection, slug: str, post: dict) -> None:
+    """폴링이 발견한 새 글을 raw 로 박음 (summary=NULL). 이미 있으면 무시 — 재폴링이 같은 글을
+    덮어써 summary 캐시를 날리지 않게 INSERT OR IGNORE."""
+    def _do():
+        conn.execute(
+            "INSERT OR IGNORE INTO posts(slug,post_id,title,url,published_at,category,content_html,summary,collected_at) "
+            "VALUES(?,?,?,?,?,?,?,NULL,?)",
+            (slug, str(post.get("post_id")), post.get("title"), post.get("url"),
+             post.get("published_at"), post.get("category"), post.get("content_html"), _now_iso()),
+        )
+        conn.commit()
+    _retry(_do)
+
+
+def set_post_summary(conn: sqlite3.Connection, slug: str, post_id: str, summary: str) -> None:
+    """발송창에서 lazy 계산한 요약을 캐시 — 이후 다른 발송창이 재사용."""
+    def _do():
+        conn.execute("UPDATE posts SET summary=? WHERE slug=? AND post_id=?",
+                     (summary, slug, str(post_id)))
+        conn.commit()
+    _retry(_do)
+
+
+def posts_for_slug_since(conn: sqlite3.Connection, slug: str, since_iso: str) -> list[sqlite3.Row]:
+    """slug 의 글 중 collected_at >= since (구독 생성 시점 하한). published_at 오름차순.
+    [codex review CRITICAL: created_at 하한으로 신규 구독자 백로그 폭탄 차단]"""
+    return conn.execute(
+        "SELECT * FROM posts WHERE slug=? AND collected_at>=? ORDER BY published_at, post_id",
+        (slug, since_iso),
+    ).fetchall()
+
+
+def prune_posts(conn: sqlite3.Connection, *, keep_days: int = 7) -> int:
+    """TTL GC — collected_at 이 keep_days 보다 오래된 글 삭제. 단 아직 그 글을 받지 않은 구독
+    대상이 남아 있으면 보존 ([codex review MEDIUM: 미수신 글 삭제 방지]). 반환 = 삭제 row 수."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=keep_days)).isoformat()
+    def _do():
+        # 미수신 가드: 그 글을 구독하는 target 중 deliveries 에 없는 게 하나라도 있으면 skip.
+        cur = conn.execute(
+            "DELETE FROM posts WHERE collected_at < ? AND NOT EXISTS ("
+            "  SELECT 1 FROM subscriptions s WHERE s.slug = posts.slug "
+            "    AND posts.collected_at >= s.created_at "
+            "    AND NOT EXISTS (SELECT 1 FROM deliveries d "
+            "       WHERE d.slug=posts.slug AND d.post_id=posts.post_id AND d.target_id=s.target_id)"
+            ")",
+            (cutoff,),
+        )
+        conn.commit()
+        return cur.rowcount
+    return _retry(_do)
+
+
+# --------------------------------------------------------------------------- #
+# 발송 시각 설정 (ADR 0006) — user_settings / channel_settings
+# --------------------------------------------------------------------------- #
+def _settings_meta(target_kind: str) -> tuple[str, str]:
+    """(table, id_column) — target_kind 'dm'→user_settings, 'channel'→channel_settings."""
+    if target_kind == "dm":
+        return "user_settings", "user_id"
+    if target_kind == "channel":
+        return "channel_settings", "channel_id"
+    raise ValueError(f"bad target_kind: {target_kind}")
+
+
+def ensure_setting(conn: sqlite3.Connection, *, target_kind: str, target_id: str) -> None:
+    """수신처 설정 행 보장 (없으면 기본 deliver_at 으로 생성). /watch 가 호출 — due 쿼리가
+    인덱스 스캔만으로 동작하게."""
+    table, idcol = _settings_meta(target_kind)
+    def _do():
+        conn.execute(
+            f"INSERT OR IGNORE INTO {table}({idcol}, deliver_at, last_delivered_date, updated_at) "
+            f"VALUES(?,?,NULL,?)",
+            (target_id, DEFAULT_DELIVER_AT, _now_iso()),
+        )
+        conn.commit()
+    _retry(_do)
+
+
+def get_deliver_at(conn: sqlite3.Connection, *, target_kind: str, target_id: str) -> str:
+    """설정된 deliver_at (없으면 DEFAULT_DELIVER_AT)."""
+    table, idcol = _settings_meta(target_kind)
+    row = conn.execute(f"SELECT deliver_at FROM {table} WHERE {idcol}=?", (target_id,)).fetchone()
+    return row["deliver_at"] if row else DEFAULT_DELIVER_AT
+
+
+def set_deliver_at(conn: sqlite3.Connection, *, target_kind: str, target_id: str, deliver_at: str) -> None:
+    """발송 시각 설정/갱신 (HH:MM). 행 없으면 생성."""
+    table, idcol = _settings_meta(target_kind)
+    def _do():
+        conn.execute(
+            f"INSERT INTO {table}({idcol}, deliver_at, last_delivered_date, updated_at) "
+            f"VALUES(?,?,NULL,?) "
+            f"ON CONFLICT({idcol}) DO UPDATE SET deliver_at=excluded.deliver_at, updated_at=excluded.updated_at",
+            (target_id, deliver_at, _now_iso()),
+        )
+        conn.commit()
+    _retry(_do)
+
+
+def due_targets(conn: sqlite3.Connection, *, now_hhmm: str, today_kst: str) -> list[dict]:
+    """발송창 도래 + 오늘 아직 안 보낸 수신처 목록. due 조건: deliver_at <= now_hhmm AND
+    (last_delivered_date IS NULL OR < today). <= 라 봇이 분을 놓쳐도 다음 tick 이 catch-up.
+    반환 [{target_kind, target_id, deliver_at}]. (HH:MM 은 zero-padded 문자열 비교 = 시각 비교)"""
+    out: list[dict] = []
+    for kind, table, idcol in (("dm", "user_settings", "user_id"),
+                               ("channel", "channel_settings", "channel_id")):
+        rows = conn.execute(
+            f"SELECT {idcol} AS tid, deliver_at FROM {table} "
+            f"WHERE deliver_at <= ? AND (last_delivered_date IS NULL OR last_delivered_date < ?)",
+            (now_hhmm, today_kst),
+        ).fetchall()
+        for r in rows:
+            out.append({"target_kind": kind, "target_id": r["tid"], "deliver_at": r["deliver_at"]})
+    return out
+
+
+def mark_setting_delivered(conn: sqlite3.Connection, *, target_kind: str, target_id: str,
+                           today_kst: str) -> None:
+    """발송창 flush 완료 — last_delivered_date 박아 오늘 재발송 차단."""
+    table, idcol = _settings_meta(target_kind)
+    def _do():
+        conn.execute(f"UPDATE {table} SET last_delivered_date=? WHERE {idcol}=?",
+                     (today_kst, target_id))
+        conn.commit()
+    _retry(_do)
 
 
 # --------------------------------------------------------------------------- #

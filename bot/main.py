@@ -29,7 +29,7 @@ sys.path.insert(0, str(ROOT))
 import discord  # noqa: E402
 from discord import app_commands  # noqa: E402
 
-from bot import admin as admin_mod, db, inspector, site_ops, url_gate, worker  # noqa: E402
+from bot import admin as admin_mod, db, delivery_tick, inspector, site_ops, url_gate, worker  # noqa: E402
 from bot.config import (  # noqa: E402
     admin_guild_id, bot_token, feedback_max_len, guild_id, owner_user_id, safe_browsing_api_key,
 )
@@ -43,7 +43,9 @@ STATE_DIR = site_ops.STATE_DIR
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("bot")
 
-# 모든 구독은 polling 직후 notify.py 가 즉시 발송(schedule='realtime'). 사용자 시간 선택 없음.
+# ADR 0006 — 발송 시각은 수신처별 설정(user_settings/channel_settings, 기본 08:30 KST).
+# 폴링은 새 글을 posts 캐시에 모으고, 봇 내부 1분 tick(delivery_tick)이 사용자 발송 시각에
+# scripts/deliver_due.py 로 요약·필터·발송. realtime 즉시 발송 폐지.
 
 START_TS = time.time()
 LAST_ERROR: dict = {"when": None, "text": None}
@@ -202,6 +204,8 @@ async def watch(interaction: discord.Interaction, url: str, filter: Optional[str
                             filter_prompt=filter_prompt, schedule="realtime",
                             target_kind=target_kind, target_id=target_id,
                             notify_empty=notify_empty)
+        # 발송 시각 설정 행 보장 (ADR 0006) — due 쿼리 인덱스 스캔용. 기본 08:30.
+        db.ensure_setting(_conn, target_kind=target_kind, target_id=target_id)
         n = _baseline_count(slug)
         head = msg("watch_already_registered_head",
                    slug=slug,
@@ -478,6 +482,67 @@ async def announce_cmd(interaction: discord.Interaction,
     await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
 
+_HHMM_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
+
+
+def _normalize_hhmm(raw: str) -> Optional[str]:
+    """'8:30' / '08:30' → '08:30' (zero-pad). 형식 틀리면 None.
+    zero-pad 는 due 쿼리의 문자열 시각 비교(deliver_at <= now)가 맞으려면 필수."""
+    m = _HHMM_RE.match(raw.strip())
+    if not m:
+        return None
+    return f"{int(m.group(1)):02d}:{m.group(2)}"
+
+
+@tree.command(name="notify-time",
+              description="공지 받을 시각 설정 (KST HH:MM). 인자 없이 호출하면 현재 설정 표시.")
+@app_commands.describe(
+    time="받을 시각 HH:MM (예: 08:30). 미지정이면 현재 설정만 표시.",
+    channel="이 채널의 발송 시각을 바꿈 (true). 'Manage Channels' 권한 필요. 미지정/false 면 내 DM 설정.",
+)
+async def notify_time_cmd(interaction: discord.Interaction,
+                          time: Optional[str] = None,
+                          channel: Optional[bool] = None):
+    user_id = str(interaction.user.id)
+    is_guild = interaction.guild is not None
+    ch_id = str(interaction.channel_id) if interaction.channel_id else None
+    set_channel = bool(channel)
+
+    if time is not None:
+        hhmm = _normalize_hhmm(time)
+        if not hhmm:
+            await interaction.response.send_message(
+                "⏰ 시각 형식이 올바르지 않아요. `HH:MM` (24시간제, 예: `08:30`)으로 적어 주세요.",
+                ephemeral=True)
+            return
+        if set_channel:
+            if not is_guild or not ch_id:
+                await interaction.response.send_message(
+                    "이 옵션은 서버 채널에서만 쓸 수 있어요. (DM 발송 시각은 `channel` 옵션 없이 설정해요.)",
+                    ephemeral=True)
+                return
+            if not interaction.permissions.manage_channels:
+                await interaction.response.send_message(
+                    "채널 발송 시각은 'Manage Channels' 권한이 있어야 바꿀 수 있어요.", ephemeral=True)
+                return
+            db.set_deliver_at(_conn, target_kind="channel", target_id=ch_id, deliver_at=hhmm)
+            await interaction.response.send_message(
+                f"📣 이 채널의 공지 발송 시각을 매일 **{hhmm} (KST)** 로 맞췄어요.", ephemeral=True)
+        else:
+            db.set_deliver_at(_conn, target_kind="dm", target_id=user_id, deliver_at=hhmm)
+            await interaction.response.send_message(
+                f"⏰ 내 공지 발송 시각을 매일 **{hhmm} (KST)** 로 맞췄어요.", ephemeral=True)
+        return
+
+    # 무인자 — 현재 설정 표시.
+    lines = [f"⏰ 내 DM 발송 시각: **{db.get_deliver_at(_conn, target_kind='dm', target_id=user_id)} (KST)**"]
+    if is_guild and ch_id:
+        lines.append(f"📣 이 채널 발송 시각: **{db.get_deliver_at(_conn, target_kind='channel', target_id=ch_id)} (KST)**")
+    lines.append("")
+    lines.append("바꾸려면 `/notify-time time:08:30` (채널은 `channel:true` 추가, 권한 필요).")
+    await interaction.response.send_message("\n".join(lines), ephemeral=True)
+
+
 @tree.command(name="help", description="봇 명령어 안내")
 async def help_cmd(interaction: discord.Interaction):
     embed = discord.Embed(
@@ -618,6 +683,11 @@ async def on_ready():
         await worker.start(client, _conn, dm_owner=_dm_owner)
     except Exception as e:  # noqa: BLE001
         _record_error("worker.start", e)
+    # 발송창 tick 시작 (ADR 0006) — 1분 주기로 due 수신처 확인 후 deliver_due subprocess.
+    try:
+        await delivery_tick.start(_conn)
+    except Exception as e:  # noqa: BLE001
+        _record_error("delivery_tick.start", e)
     gid = guild_id()
     agid = admin_guild_id()
     try:

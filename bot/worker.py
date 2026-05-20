@@ -453,6 +453,8 @@ async def _post_register_success(client, conn, job, *, slug_override: Optional[s
             target_kind=sub["target_kind"], target_id=sub["target_id"],
             notify_empty=bool(sub.get("notify_empty", False)),
         )
+        # 발송 시각 설정 행 보장 (ADR 0006) — due 쿼리 인덱스 스캔용. 기본 08:30.
+        db.ensure_setting(conn, target_kind=sub["target_kind"], target_id=sub["target_id"])
     n = baseline_count(slug)
     warn = body_warning(slug)
     if sub:

@@ -38,6 +38,8 @@ class PollSection:
     max_new_articles: int = 10
     breakage_threshold: int = 2
     seen_cap: int = 5000
+    # posts 캐시 TTL GC 보존 일수 (ADR 0006). 발송 지연(~1d) ≫ 보다 충분히 커야 미수신 글 안 날림.
+    posts_keep_days: int = 7
 
 
 @dataclass

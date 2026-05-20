@@ -397,6 +397,28 @@ async def _run_inner(args) -> int:
             print(line)
         rows.append(row)
 
+    # ADR 0006 — 이번 폴링이 발견한 새 글을 posts 캐시에 raw 박음 (summary=NULL, LLM 0).
+    # 발송창(봇 1분 tick)이 나중에 lazy 요약·필터·발송. collected/ 파일을 그대로 읽어 upsert
+    # (gather 후 단일 connection 순차 — async task 내 DB write 회피). INSERT OR IGNORE 라
+    # 재폴링이 같은 글을 덮어쓰지 않음.
+    posts_conn = bot_db.connect()
+    try:
+        n_cached = 0
+        for f in run_dir.glob("*.new.json"):
+            slug = f.name[: -len(".new.json")]
+            try:
+                items = json.loads(f.read_text(encoding="utf-8"))
+            except Exception as e:  # noqa: BLE001
+                print(f"  ⚠ posts 캐시 skip {f.name}: {e!r}", file=sys.stderr)
+                continue
+            for post in items:
+                bot_db.upsert_post(posts_conn, slug, post)
+                n_cached += 1
+        if n_cached:
+            print(f"[poll] posts 캐시 {n_cached}건 박음")
+    finally:
+        posts_conn.close()
+
     # 요약 (사람용 summary.txt + 기계용 poll_result.json — notify.py 의 heartbeat 가 읽음)
     lines = [f"[poll {ts}]", ""]
     for slug, status, npos, nnew, note in rows:
