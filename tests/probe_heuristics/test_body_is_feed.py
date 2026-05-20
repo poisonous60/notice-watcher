@@ -63,6 +63,25 @@ def run() -> list[tuple[str, bool, str]]:
     cases.append(("phoronix_url_shape_miss", _looks_like_feed_url("https://www.phoronix.com/rss.php") is False,
                   "phoronix /rss.php path 는 _looks_like_feed_url 가 못 잡음"))
 
+    # 10~13. _has_verified_feed — HTML BLOCKED 라도 fetch-검증 피드면 등록 진행 (register.py).
+    from scripts.register import _has_verified_feed
+    cases.append(("verified_well_known_xml",
+                  _has_verified_feed({"feed_candidates": [
+                      {"source": "well-known-path", "status": 200, "content_type": "application/xml"}]}) is True,
+                  "well-known 200 xml = 검증됨"))
+    cases.append(("verified_input_url_fetch",
+                  _has_verified_feed({"feed_candidates": [{"source": "input-url-feed-fetch", "url": "x"}]}) is True,
+                  "input-url-feed-fetch = 검증됨"))
+    cases.append(("unverified_path_only",
+                  _has_verified_feed({"feed_candidates": [{"source": "input-url-feed-path", "url": "x"}]}) is False,
+                  "path 모양만 = 미검증"))
+    cases.append(("unverified_well_known_non200",
+                  _has_verified_feed({"feed_candidates": [
+                      {"source": "well-known-path", "status": 403, "content_type": "application/xml"}]}) is False,
+                  "well-known 403 = 미검증"))
+    cases.append(("verified_empty",
+                  _has_verified_feed({"feed_candidates": []}) is False, "후보 없음 = 미검증"))
+
     return cases
 
 

@@ -112,6 +112,28 @@ def _policy_reject_is_host_wide(verdict: str) -> bool:
     return "target_not_found" not in v
 
 
+def _has_verified_feed(digest: dict) -> bool:
+    """digest 의 feed_candidates 에 *fetch-검증된* RSS/Atom 피드가 있나.
+
+    검증 = (a) well-known-path 후보가 status 200 + content-type xml, 또는 (b) 입력 URL 직접 fetch
+    로 확인된 source `input-url-feed-fetch` (probe/discover._url_serves_feed). path 모양만으로
+    추측한 `input-url-feed-path` 는 미검증 (제외).
+
+    Cloudflare 가 HTML 페이지만 챌린지하고 RSS 는 열어두는 사이트 (smashingmagazine 류) — HTML
+    BLOCKED 라도 피드가 실재 200 이면 피드로 등록 가능 (차단 우회 X — 공개 피드 그대로 수집).
+    """
+    for c in (digest.get("feed_candidates") or []):
+        if not isinstance(c, dict):
+            continue
+        src = c.get("source")
+        if src == "input-url-feed-fetch":
+            return True
+        if src == "well-known-path" and c.get("status") == 200 \
+                and "xml" in (c.get("content_type") or "").lower():
+            return True
+    return False
+
+
 def _policy_check(digest: dict, url: str) -> tuple[bool, list[str]]:
     """(등록 가능?, 메시지들). 차단/로그인이면 False. robots Disallow 면 경고만(True 유지)."""
     msgs: list[str] = []
@@ -120,6 +142,11 @@ def _policy_check(digest: dict, url: str) -> tuple[bool, list[str]]:
         return False, [f"로그인 필요 사이트 (verdict={digest.get('verdict')!r}) — 자동 등록 미지원. "
                        "로그인은 사용자가 한 번 수동으로(Playwright headful) 해야 하며 이번 단계 범위 밖."]
     if not _entry_matrix_has_ok_list(digest):
+        # HTML 진입은 다 막혔지만(BLOCKED 등) fetch-검증된 공개 RSS 피드가 있으면 피드로 등록 진행.
+        # cert_or_dns_broken/target_not_found 는 피드도 못 받았을 것 (검증 통과 못 함) → 자연 제외.
+        if _has_verified_feed(digest):
+            return True, [f"HTML 목록 진입은 막힘(verdict={digest.get('verdict')!r})이나 fetch-검증된 "
+                          "공개 RSS/Atom 피드 존재 — 피드로 등록 진행 (차단 우회 X, 공개 피드 수집)."]
         if "cert_or_dns_broken" in verdict:
             return False, [f"목록 페이지 접근 단계 이전에 SSL 인증서/DNS 가 깨짐 (verdict={digest.get('verdict')!r}). "
                            "사이트가 사라졌거나 운영 오설정 — 등록 거부."]
