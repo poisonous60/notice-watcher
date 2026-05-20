@@ -1,95 +1,158 @@
-"""subprocess·async 액션 — Snapshot fresh 보장, fetch_sim.
+"""subprocess·async 액션 — page-scoped snapshot pull + fetch_sim.
 
-ensure_fresh_snapshot 가 핵심: dashboard 의 HTTP middleware (`app.py::_preflight_pull`) 가
-페이지 GET 요청 전에 호출. 룰:
-  - in-flight pull 있으면 같은 task 를 await — 중복 SSH 회피 + freshness 이벤트 유실 없음
-  - 마지막 pull 완료 후 TTL (기본 60초) 이내면 skip
-  - 아니면 새 pull task 시작 후 await
+핵심: 각 페이지가 필요로 하는 source 만 게이트로 통과시킴 — 전체 8s pull 안 함.
 
-기존 "task 진행 중 = 요청 버림" 정책은 navigation 흐름에서 사용자가 stale 데이터를 보는
-원인이었음 (Codex 분석 결과). 이번에 "task 진행 중 = 완료 관찰" 로 바꿈.
+source = 5개 (bot_db / poll_state / configs / usage_db / learned). 매 page GET 직전
+middleware 가 그 페이지의 needed sources 만 골라 `ensure_sources_fresh(needed)` 호출.
 
-fetch_sim 은 inspector.fetch_sim 을 직접 await — adapter 가 비동기라 같은 event loop 안전.
+freshness 판단: N100 의 마커 (파일 mtime/sha1) vs 로컬 캐시된 마커. 다른 source 만 pull.
+- 모든 source 안 변경 → ssh marker 1번 (~0.5s) 만 발생
+- 일부 source 변경 → 그 source 만 pull
+- 캐시 hit + 다른 in-flight 요청 → asyncio.shield 로 task 공유 (중복 ssh 회피)
+
+기존 `ensure_fresh_snapshot` 은 shim 으로 남김 — startup lifespan 등이 그대로 호출.
 """
 from __future__ import annotations
 
 import asyncio
 import sys
 import time
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 
 from bot import inspector
 from dashboard.shell import async_run
 from dashboard.state import snapshot_paths, ROOT
 
+# inspect_subs 모듈에서 SOURCE_NAMES / PULLERS / fetch_markers 재사용.
+sys.path.insert(0, str(ROOT))
+from scripts import inspect_subs as _isubs  # noqa: E402
 
-_pull_task: Optional[asyncio.Task[dict[str, Any]]] = None
-# 마지막으로 완료된 pull 의 result 와 완료 시각. TTL skip 경로에서 그대로 반환 — 직전 pull 이
-# 실패였으면 TTL 만료 전엔 계속 실패 결과 노출 (stale snapshot 을 fresh 처럼 보이는 사고 방지).
-# 초기값 ok=False — TTL 조건이 비정상적으로 충족돼서 첫 pull 전에 반환되는 경우에도
-# 사용자가 fresh 라고 오인하지 않도록.
-_last_pull_result: dict[str, Any] = {"ok": False, "skipped": True, "reason": "no_pull_yet"}
-_last_pull_completed_at: float = 0.0
-_PULL_TTL_SEC = 60.0
+ALL_SOURCES: tuple[str, ...] = _isubs.SOURCE_NAMES  # ("bot_db","poll_state","configs","usage_db","learned")
 
 
-async def _pull_inner() -> dict[str, Any]:
-    cmd = [sys.executable, str(ROOT / "scripts" / "inspect_subs.py"), "pull"]
-    return await async_run(cmd)
+# --------------------------------------------------------------------------- #
+# 상태
+# --------------------------------------------------------------------------- #
+# source 별 마지막으로 성공적으로 pull 된 시점의 N100 마커. cache hit 판정용.
+_last_markers: dict[str, str] = {}
+
+# source 별 in-flight pull task. 동시 nav 가 같은 source 를 두 번 안 당기게.
+_pull_tasks: dict[str, asyncio.Task[bool]] = {}
+
+# 마지막 마커 fetch 결과 + 시점. 매우 짧은 TTL 로 동시 nav 들이 ssh marker 도 한 번만 보게.
+_MARKER_TTL_SEC = 2.0
+_last_marker_fetch_at: float = 0.0
+_last_marker_result: dict[str, str] = {}
+_marker_lock = asyncio.Lock()
 
 
-def _on_pull_done(task: asyncio.Task[dict[str, Any]]) -> None:
-    """task 완료(또는 cancel/exception) 시 한 번 발사 — caller fate 와 무관하게 state 갱신.
+async def _fetch_markers_cached() -> dict[str, str]:
+    """N100 5-source 마커 fetch. 2초 micro-cache 로 burst 보호.
 
-    caller A·B 가 모두 cancel 돼도 task 자체는 `asyncio.shield` 로 살아남아 정상 완료.
-    이 callback 이 그 결과를 _last_pull_result 에 캐시 → 후속 TTL skip 이 stale 안 됨.
+    빈 dict 반환 = ssh 실패. 호출자는 보수적으로 (cache hit 유지) 처리.
     """
-    global _last_pull_result, _last_pull_completed_at
+    global _last_marker_fetch_at, _last_marker_result
+    async with _marker_lock:
+        now = time.monotonic()
+        if now - _last_marker_fetch_at < _MARKER_TTL_SEC and _last_marker_result:
+            return _last_marker_result
+        # to_thread 로 sync fetch_markers 호출 — 내부에서 ssh subprocess.
+        m = await asyncio.to_thread(_isubs.fetch_markers)
+        if m:
+            _last_marker_result = m
+            _last_marker_fetch_at = now
+        return m
+
+
+async def _pull_one(source: str) -> bool:
+    """단일 source pull. asyncio.to_thread 로 sync puller 호출.
+
+    동시 caller 가 같은 source 요청하면 in-flight task 공유 (shield).
+    완료 후 task 제거 — 다음 호출은 새 task.
+    """
+    existing = _pull_tasks.get(source)
+    if existing is not None and not existing.done():
+        return await asyncio.shield(existing)
+
+    puller = _isubs.PULLERS.get(source)
+    if puller is None:
+        return False
+
+    async def _run() -> bool:
+        return await asyncio.to_thread(puller)
+
+    task = asyncio.create_task(_run())
+    _pull_tasks[source] = task
     try:
-        _last_pull_result = task.result()
-    except BaseException as e:  # noqa: BLE001
-        _last_pull_result = {
-            "ok": False, "error": f"{type(e).__name__}: {e}", "output": str(e),
-        }
-    _last_pull_completed_at = time.monotonic()
+        return await asyncio.shield(task)
+    finally:
+        # task 끝났으면 dict 에서 정리. 다른 caller 가 shielded await 중이면 task 결과는 받음.
+        if task.done():
+            _pull_tasks.pop(source, None)
 
 
-async def ensure_fresh_snapshot(*, ttl: float = _PULL_TTL_SEC,
-                                 force: bool = False) -> dict[str, Any]:
-    """Snapshot fresh 보장 후 반환.
+async def ensure_sources_fresh(sources: Iterable[str]) -> dict[str, Any]:
+    """필요 source 들 fresh 보장 후 결과 dict 반환.
 
-    반환 dict 키:
-      ok (bool)        — pull 또는 skip 성공 여부
-      skipped (bool)   — TTL 내라 실제 pull 안 한 경우 True
-      reason (str)     — "within_ttl" / "no_pull_yet" / 없음
-      rc, output       — 실제 pull 한 경우 subprocess 결과
-      trace_id         — async_run 이 trace 활성화 시 부여
+    반환 dict:
+      ok: bool — 전부 ok (또는 skip) 여부
+      pulled: list[str] — 실제로 pull 한 source 이름
+      skipped: list[str] — 마커 일치로 skip 한 source 이름
+      failed: list[str] — pull 시도했지만 실패한 source 이름
+      marker_ok: bool — ssh marker fetch 성공 여부 (False 면 보수적으로 cache hit 유지)
 
-    force=True 면 TTL 무시.
-
-    race 처리:
-      - in-flight 검사 ~ task 할당까지 await 없음 → asyncio single-threaded 에서 atomic
-      - caller cancellation 안전: state 갱신은 task done callback 으로 caller 와 분리
-      - pull 실패도 _last_pull_result 에 저장 → TTL skip 시 stale 로 오인 X
+    sources 빈 시퀀스 → ssh marker 호출조차 안 함. {ok:True, ...} 즉시 반환.
     """
-    global _pull_task
+    needed = tuple(s for s in sources if s in ALL_SOURCES)
+    if not needed:
+        return {"ok": True, "pulled": [], "skipped": [], "failed": [], "marker_ok": True}
 
-    # in-flight 가 있으면 같은 task 결과를 공유 — 중복 SSH 회피, freshness 유실 없음.
-    if _pull_task is not None and not _pull_task.done():
-        return await asyncio.shield(_pull_task)
+    markers = await _fetch_markers_cached()
+    marker_ok = bool(markers)
 
-    if not force and time.monotonic() - _last_pull_completed_at < ttl:
-        # 직전 결과를 그대로 — ok=True/skipped 든 ok=False/error 든 캐시된 진실 그대로 노출.
-        # skipped 표시는 cache hit 임을 알리는 용도 (badge 는 ok 값으로 판단).
-        cached = dict(_last_pull_result)
-        cached["skipped"] = True
-        cached.setdefault("reason", "within_ttl")
-        return cached
+    pulled: list[str] = []
+    skipped: list[str] = []
+    failed: list[str] = []
 
-    task = asyncio.create_task(_pull_inner())
-    task.add_done_callback(_on_pull_done)
-    _pull_task = task
-    return await asyncio.shield(task)
+    # marker fetch 실패 → 어느 source 가 변경됐는지 모름. 보수적으로: cache 있으면 skip, 없으면 pull.
+    # (서버 재시작 후 첫 nav 가 marker fetch 실패하면 일시적으로 stale 보이지만 다음 nav 에 자동 복구.)
+    for src in needed:
+        cur = markers.get(src) if marker_ok else None
+        seen = _last_markers.get(src)
+        # 마커 fetch 됐고 이전 값과 일치 → 변경 없음, skip. (마커는 실값 또는 "(none)" — 절대 빈 문자열 X.)
+        if marker_ok and cur is not None and cur == seen:
+            skipped.append(src)
+            continue
+        # 마커 fetch 실패 + 이전 캐시 존재 → 보수적 skip (stale 가능)
+        if not marker_ok and seen is not None:
+            skipped.append(src)
+            continue
+        # 그 외 → pull
+        ok = await _pull_one(src)
+        if ok:
+            pulled.append(src)
+            if marker_ok and cur is not None:
+                _last_markers[src] = cur
+        else:
+            failed.append(src)
+
+    return {
+        "ok": not failed,
+        "pulled": pulled,
+        "skipped": skipped,
+        "failed": failed,
+        "marker_ok": marker_ok,
+    }
+
+
+async def ensure_fresh_snapshot(*, force: bool = False) -> dict[str, Any]:
+    """전체 source 새로고침 shim. force=True 면 _last_markers 비워서 강제 재pull.
+
+    startup lifespan 이 cold cache 채울 때 또는 사용자가 명시적 refresh 누를 때.
+    """
+    if force:
+        _last_markers.clear()
+    return await ensure_sources_fresh(ALL_SOURCES)
 
 
 async def run_fetch(slug: str, n: int = 5) -> dict[str, Any]:

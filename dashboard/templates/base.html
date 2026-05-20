@@ -60,10 +60,18 @@
           <span class="muted">snapshot:</span> <code>{{ snapshot_ts }}</code>
           {% if pull_result %}
             {% if pull_result.ok %}
-              <span class="badge ok" title="Preflight pull 완료 — TTL 내 재방문은 즉시">✓ 최신</span>
+              {% set n_pulled = (pull_result.pulled or [])|length %}
+              {% set n_skipped = (pull_result.skipped or [])|length %}
+              {% if n_pulled == 0 and n_skipped == 0 %}
+                <span class="badge ok" title="이 페이지는 snapshot 미사용">✓ 최신</span>
+              {% elif n_pulled == 0 %}
+                <span class="badge ok" title="마커 일치 — pull 안 함 (skipped: {{ pull_result.skipped|join(', ') }})">✓ 캐시 hit</span>
+              {% else %}
+                <span class="badge ok" title="pulled: {{ pull_result.pulled|join(', ') }}{% if n_skipped %} / skipped: {{ pull_result.skipped|join(', ') }}{% endif %}">✓ 갱신됨</span>
+              {% endif %}
             {% else %}
               <span class="badge error"
-                    title="{{ pull_result.error or pull_result.output or 'pull 실패' }}">
+                    title="{{ pull_result.error or 'failed: ' + (pull_result.failed or [])|join(', ') }}">
                 ⚠ Pull 실패 — stale 데이터
               </span>
             {% endif %}

@@ -6,6 +6,7 @@ Owner 1인용·localhost 한정·인증 0. 페이지 네비게이션은 일반 �
 from __future__ import annotations
 
 import json
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Optional
 
@@ -61,39 +62,106 @@ templates.env.globals["fail_filter_options"] = _fail_filter_options
 templates.env.globals["severity_for_kind"] = _severity_for_kind
 templates.env.globals["label_for_kind"] = _label_for_kind
 
-app = FastAPI(title="notice-watcher dashboard", docs_url=None, redoc_url=None)
+# --------------------------------------------------------------------------- #
+# Page → required snapshot sources 매핑 (2026-05-20 page-scoped pull).
+# 키 = URL path prefix. 값 = pull 해야 하는 source 이름 tuple.
+# 빈 tuple = snapshot 미사용 페이지 (pull X — ssh 호출조차 안 함).
+#
+# 매핑 룰:
+#   - 행동 기록 (job/report/feedback/delivery) 는 bot.sqlite3 에만 있음 → bot_db.
+#   - 일부 페이지는 poll_state 부수 메타 사용 (broken counter, FAILED payload, seen_post_ids).
+#   - /usage 만 usage_db. /learned 만 learned. configs 는 cfg_path.exists() 검사용 — bot_db 동반 페이지에 묶음.
+#
+# prefix 매칭은 *긴 prefix 우선* (e.g. /triage/failed 가 /triage 보다 먼저 매칭돼야 함).
+# 아래 선언 순서와 무관하게 _sources_for_path 가 길이 desc 로 정렬해서 매칭 — 순서 footgun 제거.
+# --------------------------------------------------------------------------- #
+PAGE_SOURCES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    # 0-source (snapshot 미사용)
+    ("/control",     ()),
+    ("/settings",    ()),
+    ("/history",     ()),
+    ("/timings",     ()),
+    ("/cases",       ()),
+    ("/candidates",  ()),
+    ("/bugs",        ()),
+    ("/vocab",       ()),
+    ("/learned",     ("learned",)),
+    # 단일 source
+    ("/usage",        ("usage_db",)),
+    ("/triage/failed", ("poll_state",)),  # *.FAILED.json 만 봄
+    # bot_db 위주 + 일부 부수
+    ("/jobs",        ("bot_db",)),
+    ("/reports",     ("bot_db",)),
+    ("/feedback",    ("bot_db",)),
+    ("/subs",        ("bot_db", "poll_state", "configs")),
+    ("/users",       ("bot_db", "poll_state")),
+    ("/triage",      ("bot_db", "poll_state")),
+    # 루트 (홈 트리아지)
+    ("/",            ("bot_db", "poll_state")),
+)
+
+
+# 길이 desc 정렬 — 긴 prefix 가 먼저 매칭 (/triage/failed > /triage). 선언 순서 무관.
+_PAGE_SOURCES_SORTED = tuple(sorted(PAGE_SOURCES, key=lambda kv: len(kv[0]), reverse=True))
+
+
+def _sources_for_path(path: str) -> tuple[str, ...]:
+    """path → 필요 source tuple. 가장 긴 매칭 prefix 적용. 매칭 없으면 ()."""
+    for prefix, srcs in _PAGE_SOURCES_SORTED:
+        if prefix == "/":
+            if path == "/":
+                return srcs
+            continue
+        if path == prefix or path.startswith(prefix + "/"):
+            return srcs
+    return ()
+
+
+@asynccontextmanager
+async def _lifespan(app):
+    """Startup: cold cache 채우기 — 전체 source 1회 pull. 실패해도 dashboard 는 뜸 (snapshot 없는 안내 페이지)."""
+    try:
+        await act.ensure_fresh_snapshot(force=True)
+    except Exception:  # noqa: BLE001
+        pass
+    yield
+
+
+app = FastAPI(title="notice-watcher dashboard", docs_url=None, redoc_url=None,
+              lifespan=_lifespan)
 app.mount("/static", StaticFiles(directory=str(HERE / "static")), name="static")
 
 
 # --------------------------------------------------------------------------- #
-# Preflight pull middleware — 페이지 GET 전에 N100 snapshot 을 TTL 기반으로 갱신.
-# Codex 분석(2026-05-19): 기존 "render → async pull → reload" 흐름이 navigation 중에
-# stale 데이터를 보이고 "skipped" 메시지만 띄우는 근본 원인. middleware 가 pull 을 await
-# 한 뒤 라우트가 실행되도록 흐름을 뒤집음.
+# Preflight pull middleware — 페이지별 needed source 만 fresh 보장.
+# 2026-05-20: 페이지 전체 pull → page-scoped per-source pull 로 변경. 무한 로딩 제거.
+# - 대부분 nav: ssh marker fetch 1회 (~0.5s), source 변경 X → pull 안 함
+# - source 변경됐을 때만 그 source 만 pull
+# - source 0 페이지 (/control 등): ssh 호출조차 안 함
 # --------------------------------------------------------------------------- #
 @app.middleware("http")
 async def _preflight_pull(request: Request, call_next):
-    """페이지 렌더 전에 snapshot fresh 보장.
+    """페이지 렌더 전에 필요한 source 만 fresh 보장.
 
-    범위: 일반 페이지 GET 만. /static, /actions, /healthz 와 HTMX sub-request 는 skip.
-    HTMX sub-request 는 `HX-Request: true` 헤더로 식별 — 이미 부모 페이지에서 preflight 끝났음.
-
-    실패 시 stale snapshot 으로 fallback + 토픽바에 경고 표시 (`pull_result.ok=False`).
+    범위: 일반 페이지 GET. /static, /actions, /healthz, /favicon.ico 와 HTMX sub-request 는 skip.
+    실패 시 stale snapshot 으로 fallback + 토픽바에 경고 (`pull_result.ok=False`).
     """
     path = request.url.path
-    skip_prefix = ("/static", "/actions", "/healthz")
+    skip_prefix = ("/static", "/actions", "/healthz", "/favicon")
     is_page = (
         request.method == "GET"
         and not path.startswith(skip_prefix)
         and request.headers.get("hx-request") != "true"
     )
     if is_page:
+        needed = _sources_for_path(path)
         try:
-            request.state.pull_result = await act.ensure_fresh_snapshot()
+            request.state.pull_result = await act.ensure_sources_fresh(needed)
         except Exception as e:  # noqa: BLE001
             request.state.pull_result = {
                 "ok": False,
                 "error": f"{type(e).__name__}: {e}",
+                "pulled": [], "skipped": [], "failed": list(needed), "marker_ok": False,
             }
     return await call_next(request)
 
