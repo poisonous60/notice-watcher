@@ -36,7 +36,10 @@ description: >-
 
 1. **bug (rc=-1/-2/-3/-5/-99, `.BUG.json`)** — **무조건 fix**. 최우선. traceback 분석 → bot/scripts/engine 코드 수정 → 테스트 → commit+push+N100 pull+restart → `.BUG.json` clear. hand-config 와 별 카테고리 (bug-fix workflow, CONTEXT.md). batch 의 `register.py 실행 시간 초과(300s)` 류 timeout 도 여기 — 왜 느린지 root-cause.
 
-2. **gate_reject (rc=3, `.REJECTED.json`)** — board_shape / nav_only / single-article 게이트가 **게시판형태 글을 오탐 거부**하는 게 현재 약점 (단일게시판·글없음 vs 게시판형태 구분 부정확). 대부분 진짜 게시판인데 거부됨 → 게이트 휴리스틱 고쳐야 함. **단 사용자가 case 확인 후 알려줌** — 임의로 "의도된 거부"라 신뢰 X, 사용자 신호 대기. 받으면 probe 휴리스틱(2c/2d) 개선으로 false-positive 차단.
+2. **gate_reject (rc=3, `.REJECTED.json`)** — board_shape / nav_only / single-article 게이트가 거부 + **LLM index/content 분류기(veto)도 `content` 판정**(또는 분류기 unavailable). 게시판/비게시판 false-reject 봉합은 이제 **분류기 layer 의 일** (ADR 0007, `generate/classify.py`, `prompts/classify.system.txt`). **단 사용자가 case 확인 후 알려줌** — 임의로 "의도된 거부"라 신뢰 X, 사용자 신호 대기. 받으면 **fix 순서**:
+   - **(1순위) 분류기 프롬프트/모델** — `prompts/classify.system.txt` 의 index/content 정의·지침 보강, 또는 `output/llm_routing.json` 의 `classify_index_content` 모델 상향(기본 `_default`). 같은 false-reject 패턴이 분류기 입력(URL+title+body+struct 신호)으로 갈리는지 본다. **게이트에 사이트별 escape 휴리스틱 추가 X** ([[project-llm-veto-reject-gates]], CLAUDE.md §8a).
+   - **(SPA)** `digest["list_html"]["source"]` 정적 HTML 에 글 목록이 없어 분류기도 약하면(struct 신호 "SPA") → render(playwright) 트랙. 분류기/게이트 휴리스틱 문제 아님.
+   - probe 휴리스틱(2c/2d) 은 *구조 신호 추출* 이 빠진 경우만 — board/비board *판정* 자체를 휴리스틱으로 박지 말 것(그게 분류기로 옮긴 이유).
 
 3. **capability_blocked (rc=5, `.FAILED.json`)** — captcha/anti-bot/cloudflare 차단 = **능력 부족(정책 아님)**. `register.py` 가 자동으로 rc=5+FAILED 박음 (2026-05-21 policy_reject 에서 split). stealth/anti-detection 어댑터로 재도전 (§2e + docs/크롤링 지침.md §6 stealth 허용). `policy_reject`(rc=2 LOGIN_REQUIRED)·`url_dead`(rc=4 죽은 URL)와 **구분** — 이 둘은 의도된 거부, 작업 X.
 
@@ -148,6 +151,8 @@ LLM 이 raw HTML/HAR 보고 4회 retry 후 fail — 신호가 `diagnosis.json`/`
 - preflight 거부 가능한 영구 차단
 
 셋 다 아니면 휴리스틱 X (LLM raw 로 직접 봐도 충분).
+
+**게시판/비게시판 *판정* 은 휴리스틱 후보 아님** — 그건 LLM veto layer (`generate/classify.py`, ADR 0007) 의 일. 여기 휴리스틱은 *구조 신호 추출*(반복 행·feed·SPA flag 등) 까지만. "이 페이지가 게시판이냐" 같은 분류 판단을 새 게이트 휴리스틱으로 박지 말고 `prompts/classify.system.txt` 보강 ([[project-llm-veto-reject-gates]]).
 
 처리:
 1. `probe/extract.py` 등에 새 `@heuristic` 함수 — 입력 = 기존 artifact, *추가 fetch 금지* (순수). 출력 = `diagnosis.json`/`list_candidates.json` 명시 키.

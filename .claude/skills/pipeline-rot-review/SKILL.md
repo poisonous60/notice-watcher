@@ -1,7 +1,7 @@
 ---
 name: pipeline-rot-review
 description: >-
-  prompts/config_writer.* + retry + user + schema + few-shot + probe heuristics + cases 7 영역의 누적 rot 진단 — 죽은 룰,
+  prompts/config_writer.* + retry + user + schema + few-shot + probe heuristics + classify 프롬프트 + cases 8 영역의 누적 rot 진단 — 죽은 룰,
   중복, 모순, 과spec, 휴리스틱-prompt cross-ref, case 어휘 drift 6종 검출. 사용자가 "rot 점검", "프롬프트 누더기 점검",
   "/pipeline-rot-review" 라고 할 때. read-only — Claude 가 발견 보고 후 사용자 승인 받고 적용. 자동 수정 X.
   ambiguous 항목은 사용자에게 list 로 위임 (debate 강제 X — 단일 reviewer 충분).
@@ -23,7 +23,7 @@ description: >-
 
 > **트리거 미달 상태에서도 작동**. clean 이면 `rot 없음 ✅` + audit trail (점검 항목 카운트) 출력. 첫 run = baseline.
 
-## 점검 대상 (7 영역)
+## 점검 대상 (8 영역)
 
 | 영역 | 파일 | 의미 |
 |---|---|---|
@@ -33,6 +33,7 @@ description: >-
 | **schema** | `engine/config_schema.py` | config 스키마의 strict 룰 |
 | **few-shot** | `generate/prompt.py` 의 `_EXAMPLE_CONFIG_FILES` | LLM 에 보여주는 예시 config |
 | **probe 휴리스틱** | `probe/extract.py` + `probe/_heuristic.py` + `probe/_contract.py` 의 `OUTPUT_SCHEMA` | digest 키 산출 휴리스틱 (cross-ref 의무 — prompt 가 인용한 키와 일치해야) |
+| **classify 프롬프트** | `prompts/classify.system.txt` + `prompts/classify.user_skeleton.txt` (ADR 0007) | index/content veto 분류 프롬프트. index/content 정의가 cases 의 board/비board 판정과 drift 안 났나 + user_skeleton 의 struct 신호 키(`html_repeating_patterns`/`feed_candidates`)가 `generate/classify.py:_struct_hint` 산출과 일치하나(cross-ref) |
 | **cases** | `docs/cases/*.md` (현재 9건) | 누적 hand-config 케이스 — 룰의 *실제 효과* 검증 baseline |
 
 ## 검출 6종
