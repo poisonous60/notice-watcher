@@ -39,7 +39,29 @@
 - **매 hand-config 를 Claude 로 재검토** — 품질↑이나 quota 절약 목표와 정면 충돌.
 - **AGENTS.md 에 전체 절차 복제** — 독립적이나 SKILL.md 와 drift 원천.
 
+## 위임 하네스 (2026-05-21 구현)
+
+검증 세션에서 ad-hoc 으로 하던 codex 위임을 재사용 가능한 도구로 박았다 (dev-box 전용, N100 런타임 무관).
+
+- `scripts/codex_run.ps1` — codex exec 를 *보이는* PowerShell 창에서 실행. 창 = codex 콘솔 직접(live view, native 색). `-o` 결과파일(UTF-8 최종응답). rc=0 시 자동 닫힘(3초 후), 실패 시 창 유지.
+- `scripts/codex_watch.py` — 결과파일 polling 완료 감지 (visible-window 는 harness 추적 X 라 별도 신호 필요). `--loop` 으로 DONE/TIMEOUT.
+- `scripts/codex_handoff.py` — HARD-STOP(commit/push/배포 금지, STOP for review) 박은 위임 프롬프트 빌더. `handconfig`/`bugfix`/`generic` + `--launch`.
+- `scripts/codex_batch.py` — FAILED 큐를 *겹침 없는* 플랫폼/host 청크로 분할(slug별 X — 같은 플랫폼 recognizer/engine fix 충돌 회피) → 청크별 codex 병렬. 공유 인덱스(INDEX.md·cases.sqlite3·git)는 Claude 직렬.
+
+**프로토콜 (entry=Claude, middle=codex, exit=Claude)**:
+1. 진입 = 평소대로 (dashboard/triage 복사 프롬프트 → Claude). Claude 가 §0b preflight·entry.
+2. 중간 orchestration(probe 읽기·진단·fix·probe_smoke) = codex, 보이는 창. **Claude 토큰 0**.
+3. codex 는 commit 전 STOP (HARD-STOP 강제). Claude 가 git diff 검토 → commit/push/N100 배포.
+4. batch = Claude 가 청크 분할(codex_batch) → N codex 병렬(각 느림, 독립, 토큰 0 이라 throughput 은 병렬로) → 결과 수집 → 직렬 commit·배포.
+
+**학습된 함정 (하네스가 봉합)**:
+- PowerShell `Tee-Object` 는 파이프 종료까지 버퍼링 + UTF-16 → live 파일 모니터 불가. → Tee 안 씀, 창=codex 콘솔 직접, 완료는 `-o` 결과파일로.
+- `2>&1` 머지 = PowerShell 이 native stderr 를 ErrorRecord 로 감싸 전부 빨강. → 안 함 (stderr 는 창에 native).
+- codex 는 명시 제약도 위반 경향(commit·over-edit·내 "하지마" 무시 사례 2026-05-21) → HARD-STOP 프롬프트 + **Claude diff 검토 게이트 필수** (codex 결과 맹신 X).
+- visible-window codex 는 hang 시 *사용자가 창으로* 본다 (창 안 자람 = 멈춤). 완료/타임아웃만 codex_watch.
+
 ## 미해결 (후속 검증)
 
 - N100 에 `codex login` 됐는지 — 안 되면 batch config-gen 이 routing=codex 라도 FallbackClient 로 gemini 행 (`generate/routing.py:128`). batch 도 OpenAI 로 굳히려면 확인.
-- 실패 사이트 1개를 실제 codex CLI/TUI 로 end-to-end (§0b→§5) 돌려 native subagent 점화 + push/N100 배포 검증.
+- ✅ end-to-end 검증 완료 (2026-05-21): `community.cloudflare.com`(Discourse, gen_fail) 을 codex CLI 직접으로 end-to-end 처리 → commit 4479f22 배포. 190k 토큰 전부 OpenAI(Claude orch 0). 위임 하네스(↑)로 codify.
+- batch 청크 동시 실행 cap(`codex_batch.py --max`)은 현재 안내용 — 실제 cap(작업 큐) 미구현. 고볼륨 시 OpenAI throttle 관측 후 결정.

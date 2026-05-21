@@ -159,6 +159,12 @@ SKILL.md 를 verbatim 따르되 reviewer 호출만 교체:
 
 `docs/자가개선 인프라 계획.md` 전체 설계 (rev 3). 본 driver 결정 = `docs/adr/0008-handconfig-orchestration-on-codex.md`.
 
+**위임 하네스** (ADR 0008 §위임 하네스) — Claude 가 codex 에 중간 orchestration 을 넘길 때:
+- `scripts/codex_handoff.py {handconfig|bugfix|generic} … --launch` — HARD-STOP 박은 프롬프트 + 보이는 창 실행.
+- `scripts/codex_batch.py {plan|emit|launch}` — FAILED 큐를 플랫폼/host 비중첩 청크로 병렬 위임.
+- `scripts/codex_watch.py <result> --loop` — 완료 감지. `scripts/codex_run.ps1` — 보이는 창 런처(rc=0 자동닫힘).
+- 진입·diff 검토·commit/push/배포는 **Claude** (codex 는 commit 전 STOP). codex 결과 맹신 X — 항상 diff 검토.
+
 ## 7. 안전 동작
 
 ### 7a. 절대 금지
