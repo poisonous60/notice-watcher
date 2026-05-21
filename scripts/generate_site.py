@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import math
 import os
 import sqlite3
 import sys
@@ -86,6 +87,16 @@ def marker_kind(path: Path) -> str:
     return "other"
 
 
+def slug_from_marker_path(path: Path) -> str:
+    name = path.name
+    for suffix in POLL_SUFFIXES:
+        if name.endswith(suffix):
+            return name[: -len(suffix)]
+    if name.endswith(".json"):
+        return name[:-5]
+    return path.stem
+
+
 def rc_label(value: object) -> str:
     if value is None:
         return "unknown"
@@ -139,18 +150,42 @@ def read_configs() -> dict:
 def read_poll_state() -> dict:
     state_dir = ROOT / "output" / "poll_state"
     markers = Counter()
+    sites = []
 
     if not state_dir.exists():
-        return {"markers": markers, "total": 0}
+        return {"markers": markers, "total": 0, "sites": sites}
 
     total = 0
-    for path in state_dir.glob("*.json"):
+    for path in sorted(state_dir.glob("*.json")):
         if not path.is_file():
             continue
         total += 1
-        markers[marker_kind(path)] += 1
+        kind = marker_kind(path)
+        markers[kind] += 1
+        data = load_json(path)
+        slug = str(data.get("slug") or slug_from_marker_path(path))
+        url = str(data.get("url") or data.get("source_url") or data.get("_source_url") or "")
+        host = hostname_from_url(url)
+        sites.append(
+            {
+                "slug": slug,
+                "platform": platform_from_slug(slug),
+                "host": host or "unknown host",
+                "registered_at": data.get("registered_at"),
+                "last_poll_at": data.get("last_poll_at"),
+                "last_status": data.get("last_status") or kind,
+                "consecutive_breakage": data.get("consecutive_breakage", 0),
+                "n_baseline": data.get("n_baseline", 0),
+                "seen_post_ids": data.get("seen_post_ids") if isinstance(data.get("seen_post_ids"), list) else [],
+                "body_empty_at_baseline": bool(data.get("body_empty_at_baseline")),
+            }
+        )
 
-    return {"markers": markers, "total": total}
+    return {"markers": markers, "total": total, "sites": sites}
+
+
+def read_sites(poll: dict) -> list[dict]:
+    return list(poll.get("sites") or [])
 
 
 def read_jobs(limit: int = 20) -> dict:
@@ -202,63 +237,179 @@ def top_items(counter: Counter, limit: int = 8) -> list[tuple[str, int]]:
     return [(str(k), int(v)) for k, v in counter.most_common(limit)]
 
 
-def pct(part: int, total: int) -> int:
-    if total <= 0:
-        return 0
-    return round(part * 100 / total)
+def _parse_age_days(value: object, now: datetime) -> float:
+    if not isinstance(value, str) or not value.strip():
+        return 0.0
+    text = value.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        return 0.0
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=KST)
+    return max((now - dt.astimezone(KST)).days, 0)
 
 
-def svg_bar_chart(items: list[tuple[str, int]], title: str) -> str:
-    width = 760
-    row_h = 34
-    top = 34
-    height = max(150, top + len(items) * row_h + 22)
-    max_value = max([v for _, v in items], default=1)
-    rows = []
-    for i, (label, value) in enumerate(items):
-        y = top + i * row_h
-        bar_w = int((width - 250) * value / max_value) if max_value else 0
-        rows.append(
-            f'<text x="0" y="{y + 18}" class="svg-label">{esc(label)}</text>'
-            f'<rect x="190" y="{y}" width="{bar_w}" height="20" rx="2" class="bar"></rect>'
-            f'<text x="{205 + bar_w}" y="{y + 16}" class="svg-value">{value}</text>'
+def _as_float(value: object) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _normalize(vector: list[float]) -> list[float]:
+    norm = math.sqrt(sum(v * v for v in vector))
+    if norm == 0:
+        return [0.0 for _ in vector]
+    return [v / norm for v in vector]
+
+
+def _mat_vec(matrix: list[list[float]], vector: list[float]) -> list[float]:
+    return [sum(row[i] * vector[i] for i in range(len(vector))) for row in matrix]
+
+
+def _power_iteration(matrix: list[list[float]], start_index: int) -> tuple[list[float], float]:
+    n = len(matrix)
+    if n == 0:
+        return [], 0.0
+    vector = [0.0] * n
+    vector[min(start_index, n - 1)] = 1.0
+    for _ in range(200):
+        next_vector = _normalize(_mat_vec(matrix, vector))
+        if not any(next_vector):
+            return [0.0] * n, 0.0
+        vector = next_vector
+    eigenvalue = sum(vector[i] * _mat_vec(matrix, vector)[i] for i in range(n))
+    return vector, eigenvalue
+
+
+def _project_sites(sites: list[dict], now: datetime) -> tuple[list[dict], bool]:
+    platforms = sorted({str(site["platform"]) for site in sites})
+    features = []
+    for site in sites:
+        row = [1.0 if site["platform"] == platform else 0.0 for platform in platforms]
+        row.extend(
+            [
+                math.log1p(len(site.get("seen_post_ids") or [])),
+                _parse_age_days(site.get("registered_at"), now),
+                _as_float(site.get("consecutive_breakage")),
+                _as_float(site.get("n_baseline")),
+                1.0 if site.get("body_empty_at_baseline") else 0.0,
+            ]
         )
-    return (
-        f'<svg viewBox="0 0 {width} {height}" role="img" aria-label="{esc(title)}">'
-        f'<text x="0" y="18" class="svg-title">{esc(title)}</text>'
-        + "".join(rows)
-        + "</svg>"
-    )
+        features.append(row)
+
+    if len(features) < 3 or len(features[0]) < 2:
+        return _fallback_grid_projection(sites), False
+
+    columns = list(zip(*features))
+    means = [sum(col) / len(col) for col in columns]
+    stds = []
+    for col, mean in zip(columns, means):
+        variance = sum((value - mean) ** 2 for value in col) / len(col)
+        stds.append(math.sqrt(variance))
+
+    x = []
+    for row in features:
+        x.append([(value - means[i]) / stds[i] if stds[i] else 0.0 for i, value in enumerate(row)])
+
+    if not any(any(value for value in row) for row in x):
+        return _fallback_grid_projection(sites), False
+
+    n_features = len(x[0])
+    covariance = []
+    for i in range(n_features):
+        cov_row = []
+        for j in range(n_features):
+            cov_row.append(sum(row[i] * row[j] for row in x) / (len(x) - 1))
+        covariance.append(cov_row)
+
+    v1, lambda1 = _power_iteration(covariance, 0)
+    if not any(v1):
+        return _fallback_grid_projection(sites), False
+    deflated = []
+    for i in range(n_features):
+        deflated.append([covariance[i][j] - lambda1 * v1[i] * v1[j] for j in range(n_features)])
+    v2, _ = _power_iteration(deflated, 1 if n_features > 1 else 0)
+
+    points = []
+    for site, row in zip(sites, x):
+        points.append({**site, "x": sum(row[i] * v1[i] for i in range(n_features)), "y": sum(row[i] * v2[i] for i in range(n_features))})
+    return points, any(v2)
 
 
-def svg_donut(items: list[tuple[str, int]], title: str) -> str:
-    total = sum(v for _, v in items)
+def _fallback_grid_projection(sites: list[dict]) -> list[dict]:
+    if not sites:
+        return []
+    cols = max(1, math.ceil(math.sqrt(len(sites))))
+    points = []
+    for i, site in enumerate(sites):
+        points.append({**site, "x": float(i % cols), "y": float(i // cols)})
+    return points
+
+
+def svg_pca_scatter(sites: list[dict], now: datetime) -> str:
     width = 760
-    height = 230
-    colors = ["#52616b", "#8a6f4d", "#3d737f", "#9b6b6b", "#6f7f52", "#6d647c"]
-    if total <= 0:
+    height = 460
+    pad = 48
+    colors = ["#52616b", "#8a6f4d", "#3d737f", "#9b6b6b", "#6f7f52", "#6d647c", "#4f6f8f", "#7b5c8c"]
+
+    if not sites:
         return (
-            f'<svg viewBox="0 0 {width} {height}" role="img" aria-label="{esc(title)}">'
-            f'<text x="0" y="24" class="svg-title">{esc(title)}</text>'
-            '<text x="0" y="76" class="svg-label">No data yet</text></svg>'
+            f'<svg viewBox="0 0 {width} {height}" role="img" aria-label="Watched site projection scatter">'
+            '<rect x="0" y="0" width="760" height="460" class="scatter-bg"></rect>'
+            '<text x="380" y="230" text-anchor="middle" class="svg-label">No watched sites yet</text>'
+            "</svg>"
         )
 
-    x = 0
-    parts = []
-    legend = []
-    for i, (label, value) in enumerate(items):
-        w = int((width - 230) * value / total)
-        color = colors[i % len(colors)]
-        parts.append(f'<rect x="{x}" y="50" width="{w}" height="32" fill="{color}"></rect>')
-        legend.append(
-            f'<rect x="0" y="{112 + i * 24}" width="12" height="12" fill="{color}"></rect>'
-            f'<text x="22" y="{123 + i * 24}" class="svg-label">{esc(label)} · {value} · {pct(value, total)}%</text>'
+    points, pca_ready = _project_sites(sites, now)
+    platforms = sorted({str(point["platform"]) for point in points})
+    color_for = {platform: colors[i % len(colors)] for i, platform in enumerate(platforms)}
+    xs = [point["x"] for point in points]
+    ys = [point["y"] for point in points]
+    min_x, max_x = min(xs), max(xs)
+    min_y, max_y = min(ys), max(ys)
+    span_x = max(max_x - min_x, 1.0)
+    span_y = max(max_y - min_y, 1.0)
+    max_posts = max([len(point.get("seen_post_ids") or []) for point in points], default=0)
+
+    def sx(value: float) -> float:
+        return pad + (value - min_x) * (width - 2 * pad) / span_x
+
+    def sy(value: float) -> float:
+        return height - pad - (value - min_y) * (height - 2 * pad) / span_y
+
+    circles = []
+    for point in points:
+        posts = len(point.get("seen_post_ids") or [])
+        radius = 4 + (8 * posts / max_posts if max_posts else 0)
+        title = f"{point['host']} · {point['platform']} · {point.get('last_status') or 'unknown'}"
+        circles.append(
+            f'<circle cx="{sx(point["x"]):.1f}" cy="{sy(point["y"]):.1f}" r="{radius:.1f}" '
+            f'fill="{color_for[point["platform"]]}" opacity="0.84">'
+            f"<title>{esc(title)}</title></circle>"
         )
-        x += w
+
+    legend = []
+    for i, platform in enumerate(platforms[:10]):
+        y = 24 + i * 22
+        legend.append(
+            f'<rect x="{width - 185}" y="{y - 11}" width="10" height="10" fill="{color_for[platform]}"></rect>'
+            f'<text x="{width - 168}" y="{y - 2}" class="svg-label">{esc(platform)}</text>'
+        )
+
+    note = "" if pca_ready else '<text x="48" y="64" class="svg-label">Fallback layout: not enough varied data for PCA</text>'
     return (
-        f'<svg viewBox="0 0 {width} {height}" role="img" aria-label="{esc(title)}">'
-        f'<text x="0" y="24" class="svg-title">{esc(title)}</text>'
-        + "".join(parts)
+        f'<svg viewBox="0 0 {width} {height}" role="img" aria-label="Watched site projection scatter">'
+        '<rect x="0" y="0" width="760" height="460" class="scatter-bg"></rect>'
+        f'<line x1="{pad}" y1="{height - pad}" x2="{width - pad}" y2="{height - pad}" class="axis"></line>'
+        f'<line x1="{pad}" y1="{pad}" x2="{pad}" y2="{height - pad}" class="axis"></line>'
+        f'<text x="{width / 2:.0f}" y="{height - 10}" text-anchor="middle" class="svg-label">principal component 1 score</text>'
+        f'<text x="16" y="{height / 2:.0f}" transform="rotate(-90 16 {height / 2:.0f})" text-anchor="middle" class="svg-label">principal component 2 score</text>'
+        f"{note}"
+        + "".join(circles)
         + "".join(legend)
         + "</svg>"
     )
@@ -275,23 +426,7 @@ def render_html(configs: dict, poll: dict, jobs: dict, generated_at: datetime) -
     failed_count = poll["markers"].get("failed", 0)
     rejected_count = poll["markers"].get("rejected", 0)
     bug_count = poll["markers"].get("bug", 0)
-    hand_count = configs["strategies"].get("handwritten", 0)
-    other_strategy_count = max(config_count - hand_count, 0)
-
-    platform_chart = svg_bar_chart(top_items(configs["platforms"], 8), "Figure 1. Registered sources by platform")
-    marker_chart = svg_donut(
-        [
-            ("polling", polling_count),
-            ("failed", failed_count),
-            ("rejected", rejected_count),
-            ("bug", bug_count),
-        ],
-        "Figure 2. Runtime marker mix",
-    )
-    strategy_chart = svg_donut(
-        [("handwritten strategy", hand_count), ("other strategy", other_strategy_count)],
-        "Figure 3. Configuration strategy mix",
-    )
+    scatter_chart = svg_pca_scatter(read_sites(poll), generated_at)
 
     recent_rows = []
     for item in jobs["recent"]:
@@ -306,9 +441,7 @@ def render_html(configs: dict, poll: dict, jobs: dict, generated_at: datetime) -
     if not recent_rows:
         recent_rows.append('<tr><td colspan="4">No completed registration jobs on this machine yet.</td></tr>')
 
-    top_hosts = "".join(
-        f"<li><span>{esc(host)}</span><b>{count}</b></li>" for host, count in top_items(configs["hosts"], 10)
-    )
+    top_hosts = "".join(f"<li><span>{esc(host)}</span><b>{count}</b></li>" for host, count in top_items(configs["hosts"], 10))
     if not top_hosts:
         top_hosts = "<li><span>No public host summary yet</span><b>0</b></li>"
 
@@ -440,12 +573,8 @@ def render_html(configs: dict, poll: dict, jobs: dict, generated_at: datetime) -
       font: 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }}
     .svg-value {{ fill: var(--ink); font-weight: 700; }}
-    .bar {{ fill: var(--accent); }}
-    .split {{
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 26px;
-    }}
+    .scatter-bg {{ fill: var(--panel); }}
+    .axis {{ stroke: var(--line); stroke-width: 1; }}
     ol, ul {{ padding-left: 22px; }}
     .host-list {{
       list-style: none;
@@ -490,11 +619,11 @@ def render_html(configs: dict, poll: dict, jobs: dict, generated_at: datetime) -
     @media (max-width: 720px) {{
       main {{ padding-top: 34px; }}
       h1 {{ font-size: 2.1rem; }}
-      .metrics, .split {{ grid-template-columns: 1fr 1fr; }}
+      .metrics {{ grid-template-columns: 1fr 1fr; }}
       th:nth-child(1), td:nth-child(1) {{ display: none; }}
     }}
     @media (max-width: 480px) {{
-      .metrics, .split {{ grid-template-columns: 1fr; }}
+      .metrics {{ grid-template-columns: 1fr; }}
     }}
   </style>
 </head>
@@ -503,7 +632,6 @@ def render_html(configs: dict, poll: dict, jobs: dict, generated_at: datetime) -
   <header>
     <div class="kicker">Public status site</div>
     <h1>Notice Watcher</h1>
-    <p class="lead">A static, anonymized summary of the notice-watcher project running on N100. It shows aggregate progress, public source domains, and recent registration outcomes without exposing Discord identifiers, raw addresses, extraction details, opaque internal names, or configuration internals.</p>
     <p class="meta">Generated {esc(generated_at.strftime("%Y-%m-%d %H:%M:%S %Z"))}</p>
   </header>
 
@@ -511,7 +639,7 @@ def render_html(configs: dict, poll: dict, jobs: dict, generated_at: datetime) -
     <h2 id="overview">Overview</h2>
     <div class="metrics">
       {metric("registered configs", config_count, "tracked source definitions")}
-      {metric("polling markers", polling_count, "active runtime states")}
+      {metric("watched sites", polling_count, "active runtime states")}
       {metric("needs review", failed_count + bug_count, "failed or bug markers")}
       {metric("total jobs", sum(jobs["status"].values()), job_status)}
     </div>
@@ -520,31 +648,15 @@ def render_html(configs: dict, poll: dict, jobs: dict, generated_at: datetime) -
   <section aria-labelledby="figures">
     <h2 id="figures">Figures</h2>
     <figure>
-      {platform_chart}
-      <figcaption>Figure 1. Platform is derived from recognized platform metadata or from the public filename prefix class, not from hidden extraction data or raw addresses.</figcaption>
-    </figure>
-    <figure>
-      {marker_chart}
-      <figcaption>Figure 2. Marker counts summarize active polling, registration failures, permanent rejections, and system bug markers.</figcaption>
-    </figure>
-    <figure>
-      {strategy_chart}
-      <figcaption>Figure 3. Strategy counts distinguish adapter-backed handwritten strategy configs from other config strategies.</figcaption>
+      {scatter_chart}
+      <figcaption>Figure 1. Each point is one watched site, projected from a multi-feature space onto two principal components. Proximity reflects similarity in platform, activity, and age; color encodes platform. Axes carry no intrinsic unit.</figcaption>
     </figure>
   </section>
 
   <section aria-labelledby="sources">
     <h2 id="sources">Public Source Domains</h2>
-    <div class="split">
-      <div>
-        <h3>Most Represented Hosts</h3>
-        <ul class="host-list">{top_hosts}</ul>
-      </div>
-      <div>
-        <h3>Safety Boundary</h3>
-        <p>This page intentionally reports only aggregate counts, config site names, public hostnames, status labels, and timestamps. It omits private Discord metadata, raw addresses, route details, extraction rules, opaque internal names, request bodies, and config internals.</p>
-      </div>
-    </div>
+    <h3>Most Represented Hosts</h3>
+    <ul class="host-list">{top_hosts}</ul>
   </section>
 
   <section aria-labelledby="activity">
