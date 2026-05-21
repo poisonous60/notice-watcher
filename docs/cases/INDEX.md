@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 119 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 120 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -23,6 +23,7 @@
 | [`host_indiehackers-co_root_e4490db0`](host_indiehackers-co_root_e4490db0.md) | 🔧 손 config 추가 — 정적 Ember HTML의 story 카드에서 홈 피드 30건 baseline | 2026-05-21 | none | posts_nonempty, first_article_url_missing, static_variant_rows_not_promoted | https://www.indiehackers.com/ |
 | [`host_fedia-io_root_1f0bc0d6`](host_fedia-io_root_1f0bc0d6.md) | ⛔ capability_blocked — root/combined가 login으로 redirect, mbin API는 현재 401; rc=5 Mbin rescue path 추가 | 2026-05-21 | F | capability_blocked, login_redirect, mbin_api_unauthorized, fediverse_api_rescue | https://fedia.io/ |
 | [`host_feddit-de_root_584f7d0f`](host_feddit-de_root_584f7d0f.md) | rc=5 capability_blocked — Lemmy root; dev box API 404, 미등록 (rescue 인프라 일반화) | 2026-05-21 | F | capability_blocked, fediverse_api_rescue, lemmy_api_rescue | https://feddit.de/ |
+| [`host_docs-anthropic-_en_571d0ac4`](host_docs-anthropic-_en_571d0ac4.md) | ✅ 해결 (Anthropic docs release notes handwritten adapter + slug-stable recognizer) | 2026-05-21 | F | meta_diverging_false_positive, post_id_unique, static_docs_changelog | https://docs.anthropic.com/en/release-notes/overview |
 | [`host_diode-zone_root_531d9bcb`](host_diode-zone_root_531d9bcb.md) | ✅ 자동 등록 가능 (PeerTube recognizer + PeerTubeAdapter 신규 — API v1 직접 호출) | 2026-05-21 | F | posts_nonempty, article_body_len | https://diode.zone/ |
 | [`host_df-nexon-com_community_cae73546`](host_df-nexon-com_community_cae73546.md) | ✅ 수동 config (작동중, baseline 21, httpx_html) | 2026-05-21 | none | posts_nonempty | https://df.nexon.com/community/news/notice/list |
 | [`host_community-cloud_root_e65f04ea`](host_community-cloud_root_e65f04ea.md) | ✅ 수동 config (Playwright /latest 목록, 본문은 challenge-gated라 제목·URL 알림) | 2026-05-21 | none | article_body_len, fetch_list_403, discourse_json_challenge | https://community.cloudflare.com/ |
@@ -140,7 +141,7 @@
 | C+F+A | 1 |
 | E | 4 |
 | E+A+C+D | 1 |
-| F | 50 |
+| F | 51 |
 | F+A | 1 |
 | F+C | 3 |
 | none | 20 |
@@ -150,7 +151,7 @@
 | strategy | count |
 |---|---|
 | (미기재) | 31 |
-| handwritten | 18 |
+| handwritten | 19 |
 | httpx_html | 21 |
 | httpx_json | 13 |
 | mixed | 1 |
@@ -160,5 +161,5 @@
 
 ### 최근 90일 (≥ 2026-02-20)
 
-케이스 119 건.
+케이스 120 건.
 

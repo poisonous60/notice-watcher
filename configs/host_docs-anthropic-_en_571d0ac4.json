@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "site": "docs.anthropic.com",
+  "board": "en/release-notes/overview",
+  "strategy": "handwritten",
+  "adapter": "AnthropicDocsReleaseNotesAdapter",
+  "kwargs": {
+    "board": "en/release-notes/overview",
+    "url": "https://docs.anthropic.com/en/release-notes/overview",
+    "timeout": 15
+  },
+  "polite_sleep": {
+    "min": 3,
+    "max": 6
+  },
+  "_slug_board": "en",
+  "_source_url": "https://docs.anthropic.com/en/release-notes/overview",
+  "_note": "Anthropic docs release notes overview — h3 date headings followed by ul/li release-note rows. Handwritten parser carries each h3 date into subsequent li rows and hashes date+url+text for stable IDs.",
+  "_recognized_platform": "host_docs-anthropic-"
+}
