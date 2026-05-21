@@ -416,29 +416,29 @@ def _board_shape_check(digest: dict, url: str) -> tuple[bool, str]:
 # 게이트가 거부하려 할 때 LLM index/content 분류기를 호출. 'index'(게시판) 면 거부 취소.
 # PoC: board recall 0.905 / article precision 1.000 (docs/plans/llm-index-content-classifier.md).
 # - --gate-only: veto skip (LLM 0콜 보장).
-# - 호출당 1회 memoize (digest 에 캐시 — root_marketing 이 board_shape 내부 호출 + override 후
-#   later 게이트 재진입에도 단일 콜). 게이트 *전부* 같은 verdict 공유 → drift 불가.
+# - 호출당 1회 memoize (프로세스 로컬 캐시 — root_marketing 이 board_shape 내부 호출 + override 후
+#   later 게이트 재진입에도 단일 콜). digest 는 생성 프롬프트에서 JSON 직렬화되므로 오염시키지 않는다.
 # - 분류 실패/HTML 부재 → class='?' → override 안 함 = 현 동작(거부) 유지 (fail-safe, regression 0).
 # --------------------------------------------------------------------------- #
 _CLASSIFY_OVERRIDE_MIN_CONF = 0.5
 # accept-path content-reject 임계 — override(rescue)보다 보수적. recall 우선 유지하되 *확신 있는*
 # 비-게시판만 거부 (article precision 1.000 → 진짜 게시판 오거부 ~0, 단 ?/저신뢰는 수락 유지).
 _CLASSIFY_REJECT_MIN_CONF = 0.7
+_CLASSIFY_VETO_CACHE: dict[tuple[int, str, str], dict] = {}
 
 
 def _classify_veto(digest: dict, url: str, slug: str, gate_only: bool) -> Optional[dict]:
     """LLM 분류 결과 dict 반환 (memoized). gate_only 면 None (분류 skip)."""
     if gate_only:
         return None
-    cache = digest.setdefault("_classify_veto_cache", {})
-    key = (slug, url)
-    if key not in cache:
+    key = (id(digest), slug, url)
+    if key not in _CLASSIFY_VETO_CACHE:
         try:
             from generate.classify import classify_index_content
-            cache[key] = classify_index_content(url=url, digest=digest, slug=slug)
+            _CLASSIFY_VETO_CACHE[key] = classify_index_content(url=url, digest=digest, slug=slug)
         except Exception as e:  # noqa: BLE001 — 분류기 import/호출 실패가 등록을 막으면 안 됨
-            cache[key] = {"class": "?", "confidence": 0.0, "reason": f"veto_error: {e}"}
-    return cache[key]
+            _CLASSIFY_VETO_CACHE[key] = {"class": "?", "confidence": 0.0, "reason": f"veto_error: {e}"}
+    return _CLASSIFY_VETO_CACHE[key]
 
 
 def _veto_override(res: Optional[dict]) -> bool:
