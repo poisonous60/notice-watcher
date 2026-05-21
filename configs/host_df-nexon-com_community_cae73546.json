@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "site": "df.nexon.com",
+  "board": "notice",
+  "strategy": "httpx_html",
+  "_source_url": "https://df.nexon.com/community/news/notice/list",
+  "_note": "던파 공지사항. 실패 당시 probe artifact 는 점검페이지 HTML 로 오염되어 목록 0건이었지만, live 목록은 정적 HTML 에 article.board_list.news_list > ul 행으로 제공된다.",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9",
+    "Referer": "https://df.nexon.com/community/news/notice/list"
+  },
+  "timeout": 15.0,
+  "polite_sleep": { "min": 5, "max": 5 },
+  "list": {
+    "url_template": "https://df.nexon.com/community/news/notice/list",
+    "pagination": { "kind": "query_param", "page_param": "page" },
+    "row_selector": "article.board_list.news_list > ul",
+    "row_required_selector": "li.title[data-no]",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        { "from": "attr", "selector": "li.title", "attr": "data-no", "transform": [["strip"]] }
+      ],
+      "title": [
+        { "from": "css", "selector": "li.title a", "text": true, "transform": [["collapse_ws"], ["strip"]] }
+      ],
+      "url": [
+        { "from": "attr", "selector": "li.title a", "attr": "href", "transform": [["strip"], ["urljoin", "https://df.nexon.com"]] }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "li.date",
+          "text": true,
+          "match": "^\\d{4}\\.\\d{2}\\.\\d{2}$",
+          "transform": [["iso8601", ["%Y.%m.%d"], "+09:00"]]
+        }
+      ],
+      "category": [
+        { "from": "css", "selector": "li.category", "text": true, "transform": [["collapse_ws"], ["strip"]] }
+      ]
+    }
+  },
+  "article": {
+    "url_template": "https://df.nexon.com/community/news/notice/{post_id}",
+    "fetch_kind": "html",
+    "content": [
+      { "from": "css", "selector": "div.board_view.news_view div.bd_viewcont div.operation_guide", "html": true },
+      { "from": "css", "selector": "div.board_view.news_view div.bd_viewcont", "html": true }
+    ],
+    "enrich": {
+      "title": [
+        { "from": "css", "selector": "div.board_view.news_view dl dd > p:first-child", "text": true, "transform": [["collapse_ws"], ["strip"]] }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "div.board_view.news_view .sinfo .date",
+          "text": true,
+          "transform": [["iso8601", ["%Y.%m.%d %H:%M"], "+09:00"]]
+        }
+      ]
+    }
+  }
+}
