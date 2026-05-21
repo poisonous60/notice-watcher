@@ -60,8 +60,30 @@
 - codex 는 명시 제약도 위반 경향(commit·over-edit·내 "하지마" 무시 사례 2026-05-21) → HARD-STOP 프롬프트 + **Claude diff 검토 게이트 필수** (codex 결과 맹신 X).
 - visible-window codex 는 hang 시 *사용자가 창으로* 본다 (창 안 자람 = 멈춤). 완료/타임아웃만 codex_watch.
 
+## 병렬 위임 — disjoint 파일 소유 + diff-review 게이트 (2026-05-21-fedi 검증)
+
+`2026-05-21-fedi` batch(100 URL, 6 codex 청크)에서 병렬 위임을 검증했다. **여러 codex 세션을 동시에 띄워 throughput 을 올린다** — 단 안전은 다음 규율로 확보.
+
+**현실 (codex_run.ps1 `Set-Location $repo`)**: 모든 codex 세션이 **같은 working tree 공유**(격리 X). 따라서 두 세션이 *같은 파일* 을 동시 편집하면 디스크 레이스(마지막-쓰기-승, 유실). 이걸 막는 게 핵심.
+
+**규율 (Claude 가 entry 에서 강제)**:
+1. **disjoint 파일 소유 사전 배정** — Claude 가 청크별로 *편집할 파일 집합* 을 미리 정하고, 각 codex 프롬프트에 **ALLOW-LIST 제약**("이 파일만 편집, 나머지 금지")을 박는다. `output/codex_file_claims.json` 에 기록(추적·감사용).
+2. **충돌 표면 = 공유 파일 2개** — `scripts/register.py`(detect dispatch if-chain) + `probe/extract.py`(detect_* 함수). 새 플랫폼 detect-build 는 둘 다 건드림. **path-match recognizer**(예: StackExchange `/questions`, reddit `/r/`)는 PATTERNS 만 = 공유 파일 0 = **병렬 안전**. **probe-detect 플랫폼**(lemmy/peertube/mbin 등 root-URL)은 두 공유 파일 편집 = **한 청크만 소유 → 나머지 직렬**.
+3. **diff-review = 진짜 게이트** — ALLOW-LIST 는 *prompt 제약(soft)*, 파일시스템 강제 아님. codex 가 위반(명시 제약 무시 전례)하거나 예측이 틀리면 **Claude 가 commit 전 `git diff` 로 파일셋 검증** + 청크별 코히어런스 확인. 이게 실질 enforcement(사후지만 git 으로 회수 가능).
+4. **escape hatch** — codex 가 ALLOW-LIST 밖 파일이 *필요하다* 판단하면 **STOP + result 에 보고**(몰래 편집·데드락 대기 X). Claude 가 중재(직접 wiring / 소유 청크 commit 후 재배정).
+5. **auto-discovery semantic 충돌** — disjoint *파일* 이어도 새 recognizer 파일이 `recognize()` 전역 레지스트리에 영향 → 다른 플랫폼 URL 가로채 기존 테스트 깰 수 있음(fedi 에서 mbin PATTERN 이 XenForo `/threads` 가로챔). PATTERNS 를 **보수적**(고유 경로만)으로 + `probe_smoke --stage 5` 로 검출.
+6. **공유 인덱스는 Claude 직렬** — INDEX.md·cases.sqlite3·git commit/push/배포는 병렬 codex 가 건드리면 레이스 → Claude 가 청크 수집 후 직렬 처리(`git add` 는 청크 파일만 명시, `-A` 금지).
+
+**진행 모델**: 첫 batch 는 *관측-우선*(1-2 청크 띄워 codex 품질 확인) → 신뢰되면 *file-isolated 청크 다발 병렬*. fedi 검증 후 다음 batch 부터 **병렬이 기본**(SKILL §0c).
+
+**무제한 병렬의 정답 = worktree 격리** — 공유 파일 직렬화(register/extract)를 없애려면 codex 세션마다 git worktree(codex_run.ps1 per-worktree cd) → 후 merge. 또는 detect-dispatch 를 auto-discovery 로 refactor(각 플랫폼=새 파일 1개, 공유 파일 0). 둘 다 *미구현* — 현재는 disjoint-allow-list + 직렬화로 충분. 고볼륨에서 직렬화가 병목되면 박는다.
+
+**속도 노브** (commit 66806cf): `codex_handoff.py --profile light`(gpt-5.4-mini+low) / `--reasoning low|minimal`. **default = gpt-5.5 medium 유지** — hand-config/batch 위임은 품질 위해 gpt-5.5 medium 그대로(2026-05-21 사용자 결정). 속도 노브는 *순수 기계적 청크*(템플릿 복제)에만 opt-in.
+
 ## 미해결 (후속 검증)
 
 - N100 에 `codex login` 됐는지 — 안 되면 batch config-gen 이 routing=codex 라도 FallbackClient 로 gemini 행 (`generate/routing.py:128`). batch 도 OpenAI 로 굳히려면 확인.
 - ✅ end-to-end 검증 완료 (2026-05-21): `community.cloudflare.com`(Discourse, gen_fail) 을 codex CLI 직접으로 end-to-end 처리 → commit 4479f22 배포. 190k 토큰 전부 OpenAI(Claude orch 0). 위임 하네스(↑)로 codify.
+- ✅ 병렬 위임 검증 완료 (2026-05-21-fedi): 6 청크 병렬/직렬, same-file race 0(disjoint 배정), diff-review 게이트로 enforcement. ↑ "병렬 위임" 절로 codify.
 - batch 청크 동시 실행 cap(`codex_batch.py --max`)은 현재 안내용 — 실제 cap(작업 큐) 미구현. 고볼륨 시 OpenAI throttle 관측 후 결정.
+- worktree 격리 / detect-dispatch auto-discovery refactor — 무제한 병렬용. 직렬화가 병목될 때 구현.
