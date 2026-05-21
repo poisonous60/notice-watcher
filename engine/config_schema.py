@@ -166,6 +166,28 @@ def _check_transform_chain(chain: Any, where: str, errs: list[str]) -> None:
                 errs.append(f"{where}[{i}]: regex_extract 패턴 컴파일 실패: {ex}")
 
 
+def _check_css_selector(sel: Any, where: str, errs: list[str]) -> None:
+    """CSS 선택자가 엔진의 매처(bs4 `.select` = soupsieve)로 컴파일되는지 검증.
+    런타임 `soupsieve.SelectorSyntaxError`(예: LLM 이 Tailwind 클래스 `space-y-1.5` 의 점을
+    미escape → `.5` 가 잘못된 클래스) 가 fetch_list 도중 크래시(rc=1)나는 걸 config 검증 시점에
+    선반영 — register.py retry feedback 로 회수. soupsieve 미설치 시 skip (jsonschema 와 동일)."""
+    if not isinstance(sel, str):
+        return
+    s = sel.strip()
+    if not s or s == ":self":  # 생략/:self → 행 요소 자체 (선택자 아님)
+        return
+    try:
+        import soupsieve  # type: ignore
+    except ImportError:
+        return
+    try:
+        soupsieve.compile(s)
+    except soupsieve.SelectorSyntaxError as ex:
+        first = str(ex).splitlines()[0] if str(ex) else ex.__class__.__name__
+        errs.append(f"{where}: CSS 선택자 컴파일 실패 — {first}. "
+                    f"Tailwind 숫자 클래스(`space-y-1.5`)의 점은 `\\.` escape 필요 (예: `space-y-1\\.5`). 선택자={s!r}")
+
+
 _ALWAYS_CONTEXT = {"site", "board"}  # extract_row 가 항상 context 에 넣는 키
 
 
@@ -187,6 +209,8 @@ def _check_source(src: Any, where: str, errs: list[str], available_fields: Optio
         sel = src.get("selector")
         if sel is not None and not isinstance(sel, str):
             errs.append(f"{where}: selector 는 문자열이거나 생략(=행 자체)이어야 함")
+        else:
+            _check_css_selector(sel, f"{where}.selector", errs)
         if kind == "attr" and not src.get("attr"):
             errs.append(f"{where}: attr source 는 'attr' 필요")
         if src.get("pick") == "first_matching" and not src.get("match"):
@@ -262,6 +286,9 @@ def validate_config(cfg: dict) -> None:
                 _check_fields(fields, "list.fields", errs)
             if strategy in ("httpx_html", "playwright_html") and not lst.get("row_selector"):
                 errs.append("httpx_html/playwright_html 은 list.row_selector 필요")
+            # top-level list 선택자 컴파일 검증 (field source 아닌 selector — _check_source 미경유).
+            for _sk in ("row_selector", "row_required_selector", "exclude_selector", "wait_selector"):
+                _check_css_selector(lst.get(_sk), f"list.{_sk}", errs)
             if strategy == "httpx_json" and not isinstance(lst.get("list_path"), list):
                 errs.append("httpx_json 은 list.list_path(리스트) 필요")
             pag = lst.get("pagination")
