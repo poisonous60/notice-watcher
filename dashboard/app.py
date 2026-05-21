@@ -27,6 +27,7 @@ from dashboard import learned_view
 from dashboard import vocab_deferred_view
 from dashboard import clustering
 from dashboard import prompts, state, triage_later
+from dashboard import cluster_dismiss
 from dashboard import usage_view
 from dashboard import user_view
 from dashboard import control_actions as ctrl
@@ -303,11 +304,36 @@ async def clusters_page(request: Request):
     각 cluster 마다 recognizer-extension 스킬 트리거 프롬프트 첨부 (복사 → 붙여넣기).
     """
     paths = state.snapshot_paths()
-    res = clustering.compute_clusters(paths.configs_dir, paths.state_dir)
+    res = clustering.compute_clusters(paths.configs_dir, paths.state_dir,
+                                      dismissed=cluster_dismiss.load_keys())
     for c in res["same_host"] + res["cross_host"]:
         c["prompt"] = prompts.recognizer_extension_cluster(
             host_or_template=c["key"], members=c["member_pairs"])
-    return _render("clusters.html", request, res=res, active="clusters")
+    return _render("clusters.html", request, res=res, active="clusters",
+                   dismissed=cluster_dismiss.load_entries())
+
+
+@app.post("/clusters/dismiss")
+async def clusters_dismiss(request: Request):
+    """cluster 를 '승급 불가' 로 닫음/되살림 (dev box 판단, git 추적).
+
+    Form fields:
+      - action: "add" (닫기) | "remove" (되살리기)
+      - kind  : "same_host" | "cross_host"
+      - key   : cluster key
+      - reason : (add 시) 사유 메모
+    """
+    form = await request.form()
+    action = (form.get("action") or "").strip()
+    kind = (form.get("kind") or "").strip()
+    key = (form.get("key") or "").strip()
+    if action not in ("add", "remove") or kind not in cluster_dismiss.KINDS or not key:
+        raise HTTPException(status_code=400, detail="invalid dismiss request")
+    if action == "add":
+        cluster_dismiss.add(kind, key, (form.get("reason") or "").strip())
+    else:
+        cluster_dismiss.remove(kind, key)
+    return RedirectResponse(url="/clusters", status_code=303)
 
 
 # --------------------------------------------------------------------------- #

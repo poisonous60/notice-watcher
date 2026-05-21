@@ -89,11 +89,15 @@ def load_members(configs_dir: Path, poll_state_dir: Path) -> list[dict]:
     return members
 
 
-def compute_clusters(configs_dir: Path, poll_state_dir: Path) -> dict:
+def compute_clusters(configs_dir: Path, poll_state_dir: Path,
+                     dismissed: set[tuple[str, str]] | None = None) -> dict:
     """승급 후보 cluster 계산 → {totals, same_host:[...], cross_host:[...]}.
 
     각 cluster: {key, members:[member...], strategy_uniform:bool, member_pairs:[(slug,url)]}.
     member_pairs 는 prompt 빌더용. prompt 텍스트는 호출측이 dashboard.prompts 로 생성.
+
+    dismissed: {(kind, key)} — 손으로 '승급 불가' 닫은 cluster (cluster_dismiss 모듈). 후보에서 제외.
+    호출측이 로드해 넘김 (이 함수는 순수 유지). None → 필터 안 함.
     """
     members = load_members(configs_dir, poll_state_dir)
     cand = [m for m in members if not m["recognized"]]
@@ -136,10 +140,18 @@ def compute_clusters(configs_dir: Path, poll_state_dir: Path) -> dict:
         })
     cross_host.sort(key=lambda c: -len({m["host"] for m in c["members"]}))
 
+    dismissed_count = 0
+    if dismissed:
+        before = len(same_host) + len(cross_host)
+        same_host = [c for c in same_host if ("same_host", c["key"]) not in dismissed]
+        cross_host = [c for c in cross_host if ("cross_host", c["key"]) not in dismissed]
+        dismissed_count = before - len(same_host) - len(cross_host)
+
     return {
         "total": len(members),
         "recognized": sum(1 for m in members if m["recognized"]),
         "candidates": len(cand),
         "same_host": same_host,
         "cross_host": cross_host,
+        "dismissed_count": dismissed_count,
     }

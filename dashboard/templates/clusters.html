@@ -8,6 +8,7 @@
   recognizer 로 승급하면 이후 같은 사이트 등록이 <b>토큰 0</b> (probe/LLM 생략).
   처리: 각 cluster 의 <b>📋 복사</b> → 붙여넣기 → <code>recognizer-extension</code> 스킬.
   이미 recognize() 되는 건 자동 제외(봉합) — recognizer 박고 pull 하면 여기서 사라짐.
+  승급 불가(이종 cross-host 등)는 <b>🚫 안 됨</b> 으로 닫으면 목록에서 빠짐 (아래 닫힌 목록에서 되살리기).
 </p>
 <p class="muted">
   config {{ res.total }}개 · recognized {{ res.recognized }} (봉합) · unrecognized {{ res.candidates }} (후보 풀)
@@ -25,7 +26,17 @@
       {% if c.strategy_uniform %}<span class="muted">· ✅ strategy 동일</span>
       {% else %}<span style="color:#c80;">· ⚠️ strategy 혼재 (같은 platform 아닐 수 있음)</span>{% endif %}
     </span>
-    <button class="secondary" data-copy-target="#qp-cl-a-{{ loop.index }}">📋 복사</button>
+    <span style="display:inline-flex;gap:0.4rem;">
+      <button class="secondary" data-copy-target="#qp-cl-a-{{ loop.index }}">📋 복사</button>
+      <form method="post" action="/clusters/dismiss" style="display:inline"
+            onsubmit="this.reason.value=prompt('안 됨 사유 (선택):','')||''">
+        <input type="hidden" name="action" value="add">
+        <input type="hidden" name="kind" value="same_host">
+        <input type="hidden" name="key" value="{{ c.key }}">
+        <input type="hidden" name="reason" value="">
+        <button class="secondary outline" title="승급 불가 — 목록에서 숨김">🚫 안 됨</button>
+      </form>
+    </span>
   </div>
   <table class="compact striped">
     <thead><tr><th>path</th><th>strategy</th><th>slug ← url</th></tr></thead>
@@ -58,7 +69,17 @@
 <div class="prompt-card">
   <div class="row">
     <span class="label">🧩 <b class="mono">{{ c.key }}</b> — {{ c.members | length }}개 / 여러 host</span>
-    <button class="secondary" data-copy-target="#qp-cl-b-{{ loop.index }}">📋 복사</button>
+    <span style="display:inline-flex;gap:0.4rem;">
+      <button class="secondary" data-copy-target="#qp-cl-b-{{ loop.index }}">📋 복사</button>
+      <form method="post" action="/clusters/dismiss" style="display:inline"
+            onsubmit="this.reason.value=prompt('안 됨 사유 (선택):','')||''">
+        <input type="hidden" name="action" value="add">
+        <input type="hidden" name="kind" value="cross_host">
+        <input type="hidden" name="key" value="{{ c.key }}">
+        <input type="hidden" name="reason" value="">
+        <button class="secondary outline" title="승급 불가 — 목록에서 숨김">🚫 안 됨</button>
+      </form>
+    </span>
   </div>
   <table class="compact striped">
     <thead><tr><th>host</th><th>strategy</th><th>slug ← url</th></tr></thead>
@@ -81,5 +102,32 @@
   </details>
 </div>
 {% endfor %}
+
+<h3 style="margin-top:1.5em;">🚫 닫은 cluster — 승급 불가 ({{ dismissed | length }})</h3>
+{% if not dismissed %}
+<p class="muted">없음. cluster 카드의 <b>🚫 안 됨</b> 으로 닫으면 여기 모임 (후보에서 빠짐).</p>
+{% else %}
+<table class="compact striped">
+  <thead><tr><th>kind</th><th>key</th><th>사유</th><th>닫은 날</th><th></th></tr></thead>
+  <tbody>
+    {% for e in dismissed %}
+    <tr>
+      <td>{{ "[A] same-host" if e.kind == "same_host" else "[B] cross-host" }}</td>
+      <td class="mono">{{ e.key }}</td>
+      <td class="muted">{{ e.reason or "—" }}</td>
+      <td class="muted">{{ e.at }}</td>
+      <td>
+        <form method="post" action="/clusters/dismiss" style="display:inline">
+          <input type="hidden" name="action" value="remove">
+          <input type="hidden" name="kind" value="{{ e.kind }}">
+          <input type="hidden" name="key" value="{{ e.key }}">
+          <button class="secondary outline" title="후보로 되살리기">↩ 되살리기</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
 
 {% endblock %}

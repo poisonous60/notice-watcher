@@ -24,8 +24,10 @@ if str(ROOT) not in sys.path[:1]:
 def main() -> None:
     from dashboard.clustering import compute_clusters
     from dashboard.prompts import recognizer_extension_cluster
+    from dashboard import cluster_dismiss
 
-    res = compute_clusters(ROOT / "configs", ROOT / "output" / "poll_state")
+    res = compute_clusters(ROOT / "configs", ROOT / "output" / "poll_state",
+                           dismissed=cluster_dismiss.load_keys())
     print(f"config {res['total']}개 | url 있음 → recognized {res['recognized']} (이미 봉합) / "
           f"unrecognized {res['candidates']} (승급 후보 풀)\n")
 

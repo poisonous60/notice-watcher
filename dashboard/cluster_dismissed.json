@@ -1,0 +1,22 @@
+{
+  "dismissed": [
+    {
+      "kind": "cross_host",
+      "key": "/blog",
+      "reason": "이종 cross-host (path-word 그룹핑, 같은 CMS 아님) — recognizer round-trip 불가",
+      "at": "2026-05-21"
+    },
+    {
+      "kind": "cross_host",
+      "key": "/changelog",
+      "reason": "이종 cross-host (path-word 그룹핑, 같은 CMS 아님) — recognizer round-trip 불가",
+      "at": "2026-05-21"
+    },
+    {
+      "kind": "cross_host",
+      "key": "/feed",
+      "reason": "이종 cross-host (path-word 그룹핑, 같은 CMS 아님) — recognizer round-trip 불가",
+      "at": "2026-05-21"
+    }
+  ]
+}
