@@ -189,3 +189,4 @@ bash scripts/setup-hooks.sh   # 또는 pwsh scripts/setup-hooks.ps1
 - `docs/크롤링 지침.md` — 정책 (polite_sleep, robots, 우회 금지)
 - `docs/대시보드 가이드.md` — dev 박스 로컬 대시보드
 - `docs/디스코드 메시지 톤 가이드.md` — 봇 사용자 향 메시지 톤·문체·포맷 룰 (해요체·이모지 어휘·체크리스트)
+- `docs/codex 위임 가이드.md` — 일반 작업을 Codex CLI 로 위임하는 기준·절차 (언제 YES/NO·entry/middle/exit·diff 게이트). batch/hand-config 외 작업용. ADR 0008 의 운영 가이드.

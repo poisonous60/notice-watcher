@@ -83,6 +83,10 @@ _Avoid_: "batch register" (`/preview` 와 같은 단어라 헷갈림), "bulk pre
 **SQL skip (= claim-time slug skip)**:
 `claim_next_pending` 의 SELECT 가 `slug NOT IN (SELECT slug FROM jobs WHERE status='running')` 으로 같은 slug 가 이미 running 인 pending 잡을 *건너뛴다*. job1 끝나야 job2 claim 가능. pool_size>1 에서 같은 slug 의 동시 subprocess 차단.
 
+**잡 우선순위** (job priority, `jobs.priority` 컬럼):
+`jobs` 큐(=`status='pending'` 행)가 FIFO 가 아니라 **우선순위 큐 (priority queue)**. enqueue(producer 3종: user `/watch`·`/preview`, reprobe `poll.py`, batch `register_batch.py`) → dequeue(worker `claim_next_pending`, 이 repo 가 "claim" 이라 부름) 시 `ORDER BY priority ASC, id ASC` — 작은 priority 가 먼저 나감. 3 tier: user(`via∈{watch,preview}`)=0 > reprobe(`kind='reprobe'`)=1 > batch(`via='batch'`)=2. `priority` 는 `enqueue_job` 이 via/kind 에서 *도출해 박는* materialized 컬럼 — via 가 입력 SoT, priority 는 출력 (호출자 직접 안 넘김 → via·priority 모순 불가). **dequeue 순서만** 바꿈 — running 잡 preempt X (subprocess+chromium_lock 못 죽임, worker.py 명시). user worst-case = in-flight batch 1개 끝날 때까지. 엄격 우선순위 스케줄링 (aging X) — user 는 rate-limit bounded 라 batch starvation 실질 불가. `queue_position` 도 같은 정렬 기준으로 카운트 (priority 낮거나, 같고 id≤ 인 pending 수) — 안 그러면 ack "N번째" 가 거짓.
+_Avoid_: "claim 우선순위" (claim 은 dequeue 의 repo 내부 동사 — *언제*만 말하고 *무엇*(잡 priority 속성) 안 드러냄), "weighted queue" (가중 round-robin 아님 — strict tier), "fair scheduling" (의도적 non-fair — batch 양보).
+
 **slug-level 마커** (output/poll_state/&lt;slug&gt;.*.json):
 - `.json` (no suffix) — 등록 성공 state (polling 대상)
 - `.FAILED.json` — 자동 등록 실패 (LLM gen 실패 등), hand-config 풀리면 제거
