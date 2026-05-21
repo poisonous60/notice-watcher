@@ -74,7 +74,8 @@ failed_at=$(python -c "import json; print(json.load(open(r'output/poll_state/<sl
 
 # 그 이후 영향 영역 commit 있나
 git log --since="$failed_at" --oneline -- prompts/ engine/ probe/ generate/ engine/recognizers/
-# uncommitted 변경도 jurisdiction (현 dev 세션의 작업)
+# uncommitted 변경도 회복 신호로 본다 — 단 ⚠ 동시 세션 주의:
+# 이 uncommitted 가 *다른 세션* 작업일 수 있음 (CLAUDE.md §9b). 회복 판단 source 로 *읽기*만 — git add/commit 으로 잡아채지 X. 내가 만든 것만 stage.
 git status --short -- prompts/ engine/ probe/ generate/ engine/recognizers/
 ```
 

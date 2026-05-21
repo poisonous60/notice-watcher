@@ -178,7 +178,28 @@ bash scripts/setup-hooks.sh   # 또는 pwsh scripts/setup-hooks.ps1
 
 이 룰 자체가 2026-05-19 사용자 feedback 으로 박힘 — 이전 다수 turn 에서 같은 패턴 반복 관찰.
 
-## 9. 관련 문서
+## 9. 동시 dev 세션 — 병렬 git etiquette
+
+여러 Claude/codex 세션이 *같은 dev box·같은 로컬 repo·같은 main* 에서 동시 작업 가능 (별도 clone 아님). 흔함 — 한 세션이 batch A, 다른 세션이 batch B. 핵심: **git 상태가 내 것만이 아님**. 2026-05-21 동시 batch 중 오진·혼란으로 박힘.
+
+### 9a. main 이 내 밑에서 advance 한다 (정상)
+- 다른 세션이 main 에 커밋 → `git log`/HEAD 가 내가 모르는 커밋 보임. **정상이지 손상 아님**. 내 커밋은 공유 main 에 안전히 누적.
+- worktree review diff: `git diff main...branch` (**three-dot** = merge-base 기준 = 내 변경만). ⚠ **two-dot `main..branch` 금지** — 다른 세션이 advance 시킨 커밋을 *내 branch 가 삭제한 것처럼* 가짜 표시 (codex 가 무관 파일 지운 줄 오해). 상세 `docs/codex 위임 가이드.md` §7.
+- **merge 는 3-way 안전** — disjoint 변경이면 다른 세션 커밋 보존(삭제 0). 충돌은 공유 파일(INDEX.md 등 양쪽 regen)뿐 → `cases_index.py --backfill-db` 로 해결. 사전 확인 `git merge-tree $(git merge-base main branch) main branch | grep -i conflict`.
+
+### 9b. 내 파일만 stage — 남의 uncommitted 건드리지 X
+- `git status` 의 uncommitted/staged 변경이 **다른 세션 것일 수 있음**. `git add -A` / `git add .` / `git commit -am` **금지** — 남의 작업 잡아챈다.
+- 항상 **내가 만든·고친 파일만 명시** `git add <path1> <path2>`.
+- 남의 uncommitted·staged·worktree 파일 = revert·overwrite·삭제 X. 내 작업과 무관하면 *그대로 둔다* (§7a 의 "내가 안 만든 것 건드리기 전 멈춤" 정신).
+- 단일 세션 확실할 때만 `add -A` 편의 허용.
+
+### 9c. push 는 fast-forward, N100 은 마지막 pull 이 다 받음
+- 같은 로컬 main → `git push` = origin ff. 다른 세션도 같은 main push (idempotent). N100 pull-only → 어느 세션이 마지막에 pull 하든 양쪽 작업 다 받음.
+- git index lock 이 merge/commit 직렬화 — 레이스 시 transient `.git/index.lock` 뜨면 재시도.
+
+> 안 지키면: 다른 세션 작업 유실 / 가짜 삭제 오진 / push 충돌. **worktree 격리(edit) + 내-파일-only staging + three-dot review** 3개면 동시 작업 안전. codex 위임 동시 batch 의 전체 규율 = `docs/codex 위임 가이드.md` §7 + `.claude/skills/hand-config/SKILL.md` §0c.
+
+## 10. 관련 문서
 
 - `docs/운영 메모.md` — N100 SSH·systemd·배포 사이클 §1~9
 - `docs/공개 현황 사이트.md` — N100 Tailscale Funnel 공개 정적 사이트 접속·재부팅 복구·끄기 (ADR 0010)
