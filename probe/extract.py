@@ -12,7 +12,7 @@ import json
 import re
 from pathlib import Path
 from typing import Any, Optional
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 from bs4 import BeautifulSoup, Tag
 
@@ -75,10 +75,14 @@ def html_repeating_patterns(html: str, base_url: str, *, min_children: int = 5) 
                 continue
             # 자식 안의 a 태그 href — javascript:/#/빈값은 따로 분류(글 링크가 href 가 아니라 data-* / 인라인 JS 에 있음)
             hrefs: list[str] = []
+            base_host = urlsplit(base_url or "").netloc
             for child in group:
-                a = child if child.name == "a" else child.find("a", href=True)
-                if a and a.has_attr("href"):
-                    hrefs.append(a["href"])
+                if child.name == "a" and child.has_attr("href"):
+                    anchors = [child]
+                else:
+                    anchors = list(child.find_all("a", href=True))
+                if anchors:
+                    hrefs.append(_best_row_href(anchors, base_url, base_host))
             real_hrefs = [h for h in hrefs if not _is_js_href(h)]
             href_is_js = bool(hrefs) and not real_hrefs   # 모든 href 가 javascript:/#/빈값
             common_prefix = _common_url_prefix(real_hrefs) if real_hrefs else None
@@ -122,6 +126,19 @@ def _css_selector(tag: Tag) -> str:
         return f"#{tag['id']}"
     classes = ".".join(tag.get("class") or [])
     return f"{tag.name}.{classes}" if classes else tag.name
+
+
+def _best_row_href(anchors: list[Tag], base_url: str, base_host: str) -> str:
+    """반복 row 안 링크가 여럿이면 카테고리/태그보다 글 URL 같은 href 를 고른다."""
+    best = anchors[0].get("href") or ""
+    best_score = _article_url_score(urljoin(base_url, best), base_host) if not _is_js_href(best) else -1
+    for a in anchors[1:]:
+        href = a.get("href") or ""
+        score = _article_url_score(urljoin(base_url, href), base_host) if not _is_js_href(href) else -1
+        if score > best_score:
+            best = href
+            best_score = score
+    return best
 
 
 _NUM_RE = re.compile(r"\d+")
@@ -478,8 +495,8 @@ def _article_url_score(u: Optional[str], base_host: str) -> int:
     from urllib.parse import urlsplit
     sp = urlsplit(u)
     s = 0
-    if base_host and sp.netloc == base_host:
-        s += 4                                    # 같은 호스트 (목록과 다른 호스트면 거의 글이 아님)
+    if base_host and _registrable(sp.netloc) == _registrable(base_host):
+        s += 4                                    # 같은 사이트 (www/non-www 차이는 같은 사이트로 봄)
     if sp.path and sp.path not in ("", "/"):
         s += 1
     if re.search(r"\d{3,}", (sp.path or "") + "?" + (sp.query or "")):

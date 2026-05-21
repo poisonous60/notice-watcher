@@ -40,12 +40,29 @@ def run() -> list[tuple[str, bool, str]]:
                       "data-id" in (out[0]["row_data_attrs"] or {}),
                       f"got {out[0]['row_data_attrs']!r}"))
 
-    # 3. min_children 미달 — 4개만
+    # 3. row 안 카테고리 링크가 글 링크보다 먼저 나와도 sample_url 은 글 링크를 고른다.
+    html = '<ul class="list">' + ''.join(
+        f'''<li class="item">
+              <div><a href="/news/category/other">category</a></div>
+              <a href="https://x.com/news/20260{i:03d}/"></a>
+            </li>'''
+        for i in range(1, 7)
+    ) + '</ul>'
+    out = html_repeating_patterns(html, "https://x.com/news/")
+    cases.append(("prefers_article_href_over_category",
+                  len(out) >= 1 and out[0]["sample_url"] == "https://x.com/news/20260001/",
+                  f"got {out[0].get('sample_url') if out else None!r}"))
+    if out:
+        cases.append(("article_href_pattern",
+                      out[0]["href_pattern_guess"] == "https://x.com/news/{n}/",
+                      f"got {out[0].get('href_pattern_guess')!r}"))
+
+    # 4. min_children 미달 — 4개만
     html = '<ul>' + ''.join(f'<li class="x"><a href="/v/{i}">t</a></li>' for i in range(4)) + '</ul>'
     out = html_repeating_patterns(html, "https://x.com")
     cases.append(("too_few_children", len(out) == 0, f"got {len(out)} candidates"))
 
-    # 4. 빈 HTML
+    # 5. 빈 HTML
     cases.append(("empty_html", html_repeating_patterns("", "https://x.com") == [], ""))
 
     return cases

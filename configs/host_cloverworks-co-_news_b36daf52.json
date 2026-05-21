@@ -1,0 +1,130 @@
+{
+  "version": 1,
+  "site": "cloverworks.co.jp",
+  "board": "news",
+  "strategy": "httpx_html",
+  "_source_url": "https://www.cloverworks.co.jp/news/",
+  "_note": "손작성: 자동 probe 가 row 안 첫 카테고리 링크를 글 URL 로 오인해 posts_nonempty=0. 실제 글 링크는 row 끝의 빈 overlay anchor.",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ja,en;q=0.8",
+    "Referer": "https://www.cloverworks.co.jp/news/"
+  },
+  "timeout": 15,
+  "list": {
+    "url_template": "https://www.cloverworks.co.jp/news/",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "ul.thumblist > li.list__item",
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a[href^='https://cloverworks.co.jp/news/']",
+          "attr": "href",
+          "transform": [
+            [
+              "regex_extract",
+              "/news/([^/]+)/"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": ".item__title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a[href^='https://cloverworks.co.jp/news/']",
+          "attr": "href"
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": ".item__date",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "iso8601",
+              [
+                "%Y.%m.%d"
+              ],
+              "+09:00"
+            ]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "css",
+          "selector": ".item__category a",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": ".news__detail .detail__text",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": ".detail__head .head__title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": ".detail__head .head__date",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "iso8601",
+              [
+                "%Y.%m.%d"
+              ],
+              "+09:00"
+            ]
+          ]
+        }
+      ]
+    }
+  }
+}
