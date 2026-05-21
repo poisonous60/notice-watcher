@@ -1,0 +1,95 @@
+{
+  "version": 1,
+  "site": "dblp.org",
+  "board": "new-issues-volumes",
+  "strategy": "httpx_html",
+  "_source_url": "https://dblp.org/db/conf/",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/rss+xml,application/xml,text/xml;q=0.9,text/html;q=0.8,*/*;q=0.7",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+    "Referer": "https://dblp.org/db/conf/"
+  },
+  "timeout": 20,
+  "list": {
+    "url_template": "https://dblp.org/feed/new.rss",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "channel > item",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "css",
+          "selector": "guid",
+          "text": true,
+          "transform": [
+            ["regex_extract", "https://dblp\\.org/db/(.+)$"],
+            ["replace", "/", "_"]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "title",
+          "text": true,
+          "transform": [
+            ["collapse_ws"]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "css",
+          "selector": "link",
+          "text": true,
+          "transform": [
+            ["collapse_ws"],
+            ["strip"]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "pubDate",
+          "text": true,
+          "transform": [
+            ["collapse_ws"],
+            ["iso8601", ["%a, %d %b %Y %H:%M:%S %z"]]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "description",
+          "text": true,
+          "transform": [
+            ["html_unescape"],
+            ["collapse_ws"]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "#main",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "body",
+        "html": true
+      }
+    ],
+    "body_empty_acceptable": true
+  },
+  "_note": "DBLP /db/conf/ is an index page; DBLP exposes a stable RSS feed for new issues and volumes at /feed/new.rss. The feed is used as the polling source and item guid/link/pubDate provide stable IDs and dates."
+}

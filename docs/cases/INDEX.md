@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 156 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 161 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -15,6 +15,7 @@
 | [`infra_antibot_challenge_classify_2026-05-21`](infra_antibot_challenge_classify_2026-05-21.md) | ✅ probe 분류 게이트 — JS-챌린지 인터스티셜(Anubis PoW / Cloudflare)을 BLOCKED_BOT 으로 인식 → gate_reject(rc=3) 오분류를 capability_blocked(rc=5)로 교정 | 2026-05-21 | C | board_shape_check, gate_reject | https://forums.debian.net/ |
 | [`host_watchuseek-com_root_7f9f4699`](host_watchuseek-com_root_7f9f4699.md) | ⛔ capability_blocked — dev box 에서 root/RSS 모두 timeout, XenForo RSS 경량 경로도 edge/IP 차단 | 2026-05-21 | none | baseline_blocked, capability_blocked, page_goto_timeout, rss_timeout, xenforo_rss, subprocess_signal, sigbus, headless_dom_pressure | https://www.watchuseek.com/ |
 | [`host_vox-com_root_09734e9c`](host_vox-com_root_09734e9c.md) | ✅ 수동 config 등록 (httpx_html, baseline 7건) | 2026-05-21 | F | posts_nonempty | https://www.vox.com/ |
+| [`host_vldb-org_root_30ff6489`](host_vldb-org_root_30ff6489.md) | 🧩 수동 config — root landing 대신 Latest News 정적 목록 사용 | 2026-05-21 | none | posts_nonempty, root_landing_page, row_selector_wrong | https://vldb.org/ |
 | [`host_venturebeat-com_root_b5f7c603`](host_venturebeat-com_root_b5f7c603.md) | ✅ preflight b-hit 회복 + config 등록 (baseline 8건, httpx_html) | 2026-05-21 | F | post_id_unique | https://venturebeat.com/ |
 | [`host_velog-io_teo_0a627fc6`](host_velog-io_teo_0a627fc6.md) | ✅ 수동 config 등록 (Velog RSS, baseline 20건) | 2026-05-21 | F | register_subprocess_timeout, posts_nonempty | https://velog.io/@teo |
 | [`host_techradar-com_root_8baaf5b7`](host_techradar-com_root_8baaf5b7.md) | ✅ 수동 config 등록 (static WDN list cards, baseline 30건) | 2026-05-21 | F | register_subprocess_timeout, posts_nonempty | https://www.techradar.com/ |
@@ -26,13 +27,16 @@
 | [`host_status-deno-com_root_5aa73944`](host_status-deno-com_root_5aa73944.md) | ✅ 등록 (Statuspage.io Atom history feed 사용) | 2026-05-21 | F | posts_nonempty, rss_feed_available, statuspage_history_atom | https://status.deno.com/ |
 | [`host_stackoverflow-c_questions_71c08aad`](host_stackoverflow-c_questions_71c08aad.md) | ✅ 자동 등록 경로 추가 (StackExchange /questions → official API) | 2026-05-21 | F | fetch_list_403, posts_nonempty, capability_blocked | https://stackoverflow.com/questions |
 | [`host_squareup-com_us_28cd8df0`](host_squareup-com_us_28cd8df0.md) | ✅ 수동 config 등록 (static press cards, baseline 30건) | 2026-05-21 | none | posts_nonempty | https://squareup.com/us/en/press |
+| [`host_sosp-org_root_06d54eed`](host_sosp-org_root_06d54eed.md) | 🧩 수동 config — 정적 proceedings index selector 지정 | 2026-05-21 | none | posts_nonempty, row_selector_wrong | https://sosp.org/ |
 | [`host_slashdot-org_root_778af9dd`](host_slashdot-org_root_778af9dd.md) | ✅ 등록 (Slashdot RSS 사용) | 2026-05-21 | none | posts_nonempty, rss_feed_available | https://slashdot.org/ |
+| [`host_sigmod-org_root_486a8db8`](host_sigmod-org_root_486a8db8.md) | 🧩 수동 config — WordPress RSS feed 로 baseline 가능 | 2026-05-21 | none | posts_nonempty, rss_feed_available | https://sigmod.org/ |
 | [`host_shopify-enginee_root_25b7d4e3`](host_shopify-enginee_root_25b7d4e3.md) | ✅ 수동 config 등록 (static article cards, baseline 16건) | 2026-05-21 | F | register_subprocess_timeout, posts_nonempty | https://shopify.engineering/ |
 | [`host_salesforce-com_releases_bf785b04`](host_salesforce-com_releases_bf785b04.md) | ✅ 등록 (Salesforce release resources card list) | 2026-05-21 | none | capability_blocked, fetch_list_403, salesforce_releases | https://www.salesforce.com/releases/ |
 | [`host_producthunt-com_feed_51ccf15a`](host_producthunt-com_feed_51ccf15a.md) | ✅ 등록 (Product Hunt Atom feed 사용, 본문은 list-only) | 2026-05-21 | none | posts_nonempty, rss_feed_available, atom_feed, body_empty_acceptable | https://www.producthunt.com/feed |
 | [`host_posthog-com_changelog_7d58ef58`](host_posthog-com_changelog_7d58ef58.md) | 🧩 손어댑터 — Gatsby page-data JSON 을 최신순으로 뒤집어 changelog baseline 30건 등록 | 2026-05-21 | F | title_nonempty, wrong_first_article_url, gatsby_page_data_oldest_first | https://www.posthog.com/changelog |
 | [`host_popl26-sigplan-_root_cc2798a1`](sigplan-conf.md) | ✅ 해결 (SIGPLAN/researchr Conf recognizer 추가) | 2026-05-21 | F | post_id_unique | https://popl26.sigplan.org/ |
 | [`host_politico-com_root_0e7b5678`](host_politico-com_root_0e7b5678.md) | 🔧 손 config 등록 (baseline 25건, playwright_html; article body may be empty behind Cloudflare) | 2026-05-21 | F | article_body_len, fetch_list | https://www.politico.com/ |
+| [`host_plos-org_news_e544a78a`](host_plos-org_news_e544a78a.md) | 🧩 수동 config — 빈 plos.org feed 대신 공식 PLOS Blog RSS 사용 | 2026-05-21 | none | posts_nonempty, rss_feed_stub, source_url_404 | https://www.plos.org/news |
 | [`host_platform-openai_docs_c642ce68`](host_platform-openai_docs_c642ce68.md) | 🔧 손 config (httpx_html) — OpenAI docs changelog row selector/post_id 수동 고정 | 2026-05-21 | none | post_id_unique, static_docs_changelog, cloudflare_challenge_static_header_replay, body_empty_acceptable | https://platform.openai.com/docs/changelog |
 | [`host_paulgraham-com_articles.html_7910744b`](host_paulgraham-com_articles.html_7910744b.md) | ✅ 수동 config 등록 (httpx_html, baseline 30건) | 2026-05-21 | F | posts_nonempty | https://paulgraham.com/articles.html |
 | [`host_namu-wiki_RecentChanges_2370318a`](host_namu-wiki_RecentChanges_2370318a.md) | ✅ 기존 손 config 동작 확인 — RecentChanges 목록 30건 baseline, 본문은 body_empty_acceptable | 2026-05-21 | none | post_id_stable_shape, matches_probe_first_article | https://namu.wiki/RecentChanges |
@@ -53,6 +57,7 @@
 | [`host_docs-anthropic-_en_571d0ac4`](host_docs-anthropic-_en_571d0ac4.md) | ✅ 해결 (Anthropic docs release notes handwritten adapter + slug-stable recognizer) | 2026-05-21 | F | meta_diverging_false_positive, post_id_unique, static_docs_changelog | https://docs.anthropic.com/en/release-notes/overview |
 | [`host_diode-zone_root_531d9bcb`](host_diode-zone_root_531d9bcb.md) | ✅ 자동 등록 가능 (PeerTube recognizer + PeerTubeAdapter 신규 — API v1 직접 호출) | 2026-05-21 | F | posts_nonempty, article_body_len | https://diode.zone/ |
 | [`host_df-nexon-com_community_cae73546`](host_df-nexon-com_community_cae73546.md) | ✅ 수동 config (작동중, baseline 21, httpx_html) | 2026-05-21 | none | posts_nonempty | https://df.nexon.com/community/news/notice/list |
+| [`host_dblp-org_db_e427dd1d`](host_dblp-org_db_e427dd1d.md) | 🧩 수동 config — DBLP new issues/volumes RSS 사용 | 2026-05-21 | none | posts_nonempty, rss_feed_available | https://dblp.org/db/conf/ |
 | [`host_datadoghq-com_blog_447ffb34`](host_datadoghq-com_blog_447ffb34.md) | ✅ 수동 config 등록 (httpx_html, baseline 6건) | 2026-05-21 | F | posts_nonempty | https://www.datadoghq.com/blog/ |
 | [`host_community-cloud_root_e65f04ea`](host_community-cloud_root_e65f04ea.md) | ✅ 수동 config (Playwright /latest 목록, 본문은 challenge-gated라 제목·URL 알림) | 2026-05-21 | none | article_body_len, fetch_list_403, discourse_json_challenge | https://community.cloudflare.com/ |
 | [`host_cloud-google-co_release-notes_68689125`](host_cloud-google-co_release-notes_68689125.md) | ✅ 해결 (Google Cloud release notes 공식 Atom feed recognizer + adapter) | 2026-05-21 | F | probe_timeout, static_docs_changelog, official_feed_available | https://cloud.google.com/release-notes |
@@ -180,7 +185,7 @@
 | F | 72 |
 | F+A | 1 |
 | F+C | 3 |
-| none | 30 |
+| none | 35 |
 
 ### config_strategy 분포
 
@@ -188,7 +193,7 @@
 |---|---|
 | (미기재) | 32 |
 | handwritten | 22 |
-| httpx_html | 48 |
+| httpx_html | 53 |
 | httpx_json | 15 |
 | mixed | 1 |
 | none | 27 |
@@ -197,5 +202,5 @@
 
 ### 최근 90일 (≥ 2026-02-20)
 
-케이스 156 건.
+케이스 161 건.
 

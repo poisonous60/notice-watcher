@@ -1,0 +1,107 @@
+{
+  "version": 1,
+  "site": "plos.org",
+  "board": "theplosblog-feed",
+  "strategy": "httpx_html",
+  "_source_url": "https://www.plos.org/news",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/rss+xml,application/xml,text/xml;q=0.9,text/html;q=0.8,*/*;q=0.7",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+    "Referer": "https://plos.org/"
+  },
+  "timeout": 15,
+  "list": {
+    "url_template": "https://theplosblog.plos.org/feed/",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "channel > item",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "css",
+          "selector": "guid",
+          "text": true,
+          "transform": [
+            ["regex_extract", "[?&]p=(\\d+)"]
+          ]
+        },
+        {
+          "from": "css",
+          "selector": "link",
+          "text": true,
+          "transform": [
+            ["regex_extract", "https://theplosblog\\.plos\\.org/\\d{4}/\\d{2}/([^/]+)/?$"]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "title",
+          "text": true,
+          "transform": [
+            ["collapse_ws"]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "css",
+          "selector": "link",
+          "text": true,
+          "transform": [
+            ["collapse_ws"],
+            ["strip"]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "pubDate",
+          "text": true,
+          "transform": [
+            ["collapse_ws"],
+            ["iso8601", ["%a, %d %b %Y %H:%M:%S %z"]]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "description",
+          "text": true,
+          "transform": [
+            ["html_unescape"],
+            ["collapse_ws"]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "article",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "main",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "body",
+        "html": true
+      }
+    ],
+    "body_empty_acceptable": true
+  },
+  "_note": "The requested /news URL currently resolves to a PLOS 404 page and https://plos.org/feed/ is an empty 815-byte WordPress feed. The official PLOS Blog feed has current announcement/news items, so this config tracks that feed while preserving the original source URL."
+}
