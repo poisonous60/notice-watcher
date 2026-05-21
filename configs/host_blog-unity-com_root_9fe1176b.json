@@ -1,0 +1,88 @@
+{
+  "version": 1,
+  "site": "unity.com",
+  "board": "blog-rss",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/rss+xml,application/xml,text/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9"
+  },
+  "timeout": 20,
+  "_source_url": "https://blog.unity.com/",
+  "_note": "handcrafted: blog.unity.com root exposes stable RSS at /rss -> unity.com/blog/rss; article pages are client-rendered, so body is intentionally optional",
+  "list": {
+    "url_template": "https://blog.unity.com/rss",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "item",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "css",
+          "selector": "guid",
+          "text": true,
+          "transform": [
+            [
+              "regex_extract",
+              "/blog/([^/?#]+)$"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "css",
+          "selector": "link",
+          "text": true
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "pubDate",
+          "text": true,
+          "transform": [
+            [
+              "iso8601",
+              [
+                "%a, %d %b %Y %H:%M:%S %Z"
+              ]
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "description",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "body_empty_acceptable": true,
+    "content": []
+  }
+}

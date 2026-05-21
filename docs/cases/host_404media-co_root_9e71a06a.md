@@ -56,7 +56,7 @@ Claude 가 **fresh full probe** 로 재등록 (stale digest 자연 폐기):
 |---|---|
 | `host_404media-co_root_9e71a06a` | ✅ rc=0 등록 (httpx_html, baseline 12건) |
 | `host_wordpress-org_news_6a775d83` | ✅ rc=0 등록 (httpx_html, baseline 10건 — "WordPress 7.0 Armstrong" 등 실제 글) |
-| `host_tailscale-com_blog_07031656` | ⚠ rc=1 `[FAIL] probe_timeout` — fresh probe 120s 초과 (heavy Next.js hydration hang). 같은 batch 의 register 300s timeout fix(34e74f2)가 잡아 clean fail. mastodon 오탐 아님 — httpx_html 손-config 별 작업 (GEN). |
+| `host_tailscale-com_blog_07031656` | ⚠ rc=1 `[FAIL] probe_timeout` — fresh probe 120s 초과 (heavy Next.js hydration hang). 같은 batch 의 register 300s timeout fix(34e74f2)가 잡아 clean fail. mastodon 오탐 아님 — httpx_html 수동 config 별 작업 (GEN). |
 
 결론: mastodon 오탐 root-cause 봉합 + 2/3 사이트 fresh 재등록. tailscale 은 detect 오탐 아닌
 probe hang (별 트랙).

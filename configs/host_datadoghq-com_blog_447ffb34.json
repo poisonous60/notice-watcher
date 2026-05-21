@@ -1,0 +1,110 @@
+{
+  "version": 1,
+  "site": "datadoghq.com",
+  "board": "blog",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9"
+  },
+  "timeout": 15,
+  "_source_url": "https://www.datadoghq.com/blog/",
+  "_note": "handcrafted: generated config followed product/nav links; blog cards are article nodes with non-search /blog/ links",
+  "list": {
+    "url_template": "https://www.datadoghq.com/blog/",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "article:has(a[href^='/blog/']:not([href='/blog/']):not([href^='/blog/search/']))",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a[href^='/blog/']",
+          "attr": "href",
+          "pick": "first_matching",
+          "match": "^/blog/(?!search/|$)([^/?#]+)/?",
+          "transform": [
+            [
+              "regex_extract",
+              "^/blog/([^/?#]+)/?"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "h2.card-header, h2, h3",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a[href^='/blog/']",
+          "attr": "href",
+          "pick": "first_matching",
+          "match": "^/blog/(?!search/|$)",
+          "transform": [
+            [
+              "urljoin",
+              "https://www.datadoghq.com"
+            ],
+            [
+              "strip_query_fragment"
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "p.card-subheader, p",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "section.article-content",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "main",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "h1",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  }
+}

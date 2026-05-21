@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "site": "paulgraham.com",
+  "board": "articles",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9"
+  },
+  "timeout": 15,
+  "_source_url": "https://paulgraham.com/articles.html",
+  "_note": "handcrafted: old table/font article index; each article link is the row",
+  "list": {
+    "url_template": "https://paulgraham.com/articles.html",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "font a[href$='.html']",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": ":self",
+          "attr": "href",
+          "transform": [
+            [
+              "regex_extract",
+              "^([^/?#]+)\\.html$"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": ":self",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": ":self",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://paulgraham.com/"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "body",
+        "html": true
+      }
+    ]
+  }
+}
