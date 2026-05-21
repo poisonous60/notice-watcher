@@ -563,6 +563,27 @@ def _shell_quote(s: str) -> str:
     return "'" + s.replace("'", "'\\''") + "'"
 
 
+def cmd_prune_orphans(execute: bool = False) -> int:
+    """recognizer slug 변경으로 생긴 orphan 마커(이미 다른 slug 로 등록된 사이트의 stale
+    FAILED/REJECTED + triage_queue)를 dev box·N100 양쪽에서 정리. scripts/prune_orphans.py 실행
+    (N100 은 git pull 로 같은 스크립트 보유)."""
+    flag = " --execute" if execute else ""
+    print("=== dev box ===")
+    rc_local, out_local = _run([sys.executable, str(ROOT / "scripts" / "prune_orphans.py")]
+                               + (["--execute"] if execute else []))
+    print(out_local)
+    print(f"\n=== N100 ({DEPLOY_HOST}) ===")
+    rc_n100, out_n100 = _run(["ssh", DEPLOY_HOST,
+                              f"cd {DEPLOY_PATH} && .venv/bin/python scripts/prune_orphans.py{flag}"])
+    if rc_n100 != 0 and not out_n100.strip():
+        print(f"[prune-orphans] N100 ssh 실패 (rc={rc_n100}). Tailscale 확인.", file=sys.stderr)
+        return 2
+    print(out_n100)
+    if not execute:
+        print("\n  실제 정리: python scripts/triage.py prune-orphans --execute")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     if not argv or argv[0] in ("-h", "--help", "help"):
         print(__doc__)
@@ -588,7 +609,9 @@ def main(argv: list[str]) -> int:
             if a.startswith("--host="):
                 host = a.split("=", 1)[1]
         return cmd_post_fix_cleanup(execute=execute, host=host)
-    print(f"알 수 없는 명령: {cmd!r}  (pull | list | show <slug> | post-fix-cleanup [--execute] [--host=<host>])  [--skip-later]")
+    if cmd == "prune-orphans":
+        return cmd_prune_orphans(execute="--execute" in rest)
+    print(f"알 수 없는 명령: {cmd!r}  (pull | list | show <slug> | post-fix-cleanup [--execute] [--host=<host>] | prune-orphans [--execute])  [--skip-later]")
     return 2
 
 
