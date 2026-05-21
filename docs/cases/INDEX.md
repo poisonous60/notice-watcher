@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 155 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 156 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -31,6 +31,7 @@
 | [`host_salesforce-com_releases_bf785b04`](host_salesforce-com_releases_bf785b04.md) | ✅ 등록 (Salesforce release resources card list) | 2026-05-21 | none | capability_blocked, fetch_list_403, salesforce_releases | https://www.salesforce.com/releases/ |
 | [`host_producthunt-com_feed_51ccf15a`](host_producthunt-com_feed_51ccf15a.md) | ✅ 등록 (Product Hunt Atom feed 사용, 본문은 list-only) | 2026-05-21 | none | posts_nonempty, rss_feed_available, atom_feed, body_empty_acceptable | https://www.producthunt.com/feed |
 | [`host_posthog-com_changelog_7d58ef58`](host_posthog-com_changelog_7d58ef58.md) | 🧩 손어댑터 — Gatsby page-data JSON 을 최신순으로 뒤집어 changelog baseline 30건 등록 | 2026-05-21 | F | title_nonempty, wrong_first_article_url, gatsby_page_data_oldest_first | https://www.posthog.com/changelog |
+| [`host_popl26-sigplan-_root_cc2798a1`](sigplan-conf.md) | ✅ 해결 (SIGPLAN/researchr Conf recognizer 추가) | 2026-05-21 | F | post_id_unique | https://popl26.sigplan.org/ |
 | [`host_politico-com_root_0e7b5678`](host_politico-com_root_0e7b5678.md) | 🔧 손 config 등록 (baseline 25건, playwright_html; article body may be empty behind Cloudflare) | 2026-05-21 | F | article_body_len, fetch_list | https://www.politico.com/ |
 | [`host_platform-openai_docs_c642ce68`](host_platform-openai_docs_c642ce68.md) | 🔧 손 config (httpx_html) — OpenAI docs changelog row selector/post_id 수동 고정 | 2026-05-21 | none | post_id_unique, static_docs_changelog, cloudflare_challenge_static_header_replay, body_empty_acceptable | https://platform.openai.com/docs/changelog |
 | [`host_paulgraham-com_articles.html_7910744b`](host_paulgraham-com_articles.html_7910744b.md) | ✅ 수동 config 등록 (httpx_html, baseline 30건) | 2026-05-21 | F | posts_nonempty | https://paulgraham.com/articles.html |
@@ -176,7 +177,7 @@
 | C+F+A | 1 |
 | E | 4 |
 | E+A+C+D | 1 |
-| F | 71 |
+| F | 72 |
 | F+A | 1 |
 | F+C | 3 |
 | none | 30 |
@@ -187,7 +188,7 @@
 |---|---|
 | (미기재) | 32 |
 | handwritten | 22 |
-| httpx_html | 47 |
+| httpx_html | 48 |
 | httpx_json | 15 |
 | mixed | 1 |
 | none | 27 |
@@ -196,5 +197,5 @@
 
 ### 최근 90일 (≥ 2026-02-20)
 
-케이스 155 건.
+케이스 156 건.
 
