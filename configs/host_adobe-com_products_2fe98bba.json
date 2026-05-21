@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "site": "Adobe",
+  "board": "products",
+  "strategy": "handwritten",
+  "adapter": "AdobeCreativeCloudFeaturesAdapter",
+  "kwargs": {
+    "board": "products",
+    "url": "https://www.adobe.com/creativecloud/features.html",
+    "timeout": 30.0
+  },
+  "_source_url": "https://www.adobe.com/products/new-creative-cloud-features.html",
+  "_note": "Adobe Creative Cloud features page: original /products URL now returns Adobe 404 here, and httpx/basic Playwright are blocked by Adobe/Akamai. Use curl_cffi Chrome impersonation against the current public features page and AEM feature-card fragments."
+}
