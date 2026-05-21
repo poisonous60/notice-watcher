@@ -81,7 +81,7 @@ configs/host_platform-openai_docs_c642ce68.json
 
 ## 트랙 B 검토
 
-- **2a (인식기)**: X. OpenAI docs changelog 단일 URL 전용 config라 플랫폼 recognizer 가치가 낮다.
+- **2a (인식기)**: X. OpenAI docs changelog 단일 URL 수동 config라 플랫폼 recognizer 가치가 낮다.
 - **2b (`--article-url`)**: X. 첫 링크는 관련 docs 링크이고 changelog entry permalink가 아니라 article-url 교정으로 해결되지 않는다.
 - **2c/2d (probe 개선)**: X. probe는 이미 올바른 반복 row 후보와 `S1.Hcap` 전략을 노출했다. 실패는 LLM이 `post_id` 조합을 잘못 고른 문제다.
 - **A/B (prompt/few-shot)**: 보류. `post_id_unique` 누적은 있으나 원인이 carousel/news root/docs changelog 등으로 섞여 있다. 이번 케이스는 config만으로 해결했고, prompt에는 이미 `post_id` 안정성 및 carousel 중복 주의가 있다.

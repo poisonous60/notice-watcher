@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 161 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 171 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -13,6 +13,8 @@
 | [`infra_root_marketing_loosen_2026-05-21`](infra_root_marketing_loosen_2026-05-21.md) | ✅ 게이트 완화 — root_marketing 이 same-host self-article 있는 board 를 오거부하던 것 차단 | 2026-05-21 | C | gate_reject_root_marketing | https://community.nodebb.org/ |
 | [`infra_discourse_root_form_2026-05-21`](infra_discourse_root_form_2026-05-21.md) | ✅ 자동 등록 (probe generator-meta 신호 → DiscourseAdapter dispatch — root-form 봉합) | 2026-05-21 | C | posts_nonempty, article_body_len | https://forum.openwrt.org/ |
 | [`infra_antibot_challenge_classify_2026-05-21`](infra_antibot_challenge_classify_2026-05-21.md) | ✅ probe 분류 게이트 — JS-챌린지 인터스티셜(Anubis PoW / Cloudflare)을 BLOCKED_BOT 으로 인식 → gate_reject(rc=3) 오분류를 capability_blocked(rc=5)로 교정 | 2026-05-21 | C | board_shape_check, gate_reject | https://forums.debian.net/ |
+| [`host_zenodo-org_communities_530e9968`](host_zenodo-org_communities_530e9968.md) | no_change (capability_blocked) | 2026-05-21 |  | capability_blocked, unusual_traffic_403 | https://zenodo.org/communities/ |
+| [`host_wikicfp-com_cfp_4cc94e7b`](host_wikicfp-com_cfp_4cc94e7b.md) | solved (HTTP allcfp config) | 2026-05-21 | E | https_timeout, static_html_available | https://www.wikicfp.com/cfp/ |
 | [`host_watchuseek-com_root_7f9f4699`](host_watchuseek-com_root_7f9f4699.md) | ⛔ capability_blocked — dev box 에서 root/RSS 모두 timeout, XenForo RSS 경량 경로도 edge/IP 차단 | 2026-05-21 | none | baseline_blocked, capability_blocked, page_goto_timeout, rss_timeout, xenforo_rss, subprocess_signal, sigbus, headless_dom_pressure | https://www.watchuseek.com/ |
 | [`host_vox-com_root_09734e9c`](host_vox-com_root_09734e9c.md) | ✅ 수동 config 등록 (httpx_html, baseline 7건) | 2026-05-21 | F | posts_nonempty | https://www.vox.com/ |
 | [`host_vldb-org_root_30ff6489`](host_vldb-org_root_30ff6489.md) | 🧩 수동 config — root landing 대신 Latest News 정적 목록 사용 | 2026-05-21 | none | posts_nonempty, root_landing_page, row_selector_wrong | https://vldb.org/ |
@@ -39,12 +41,16 @@
 | [`host_plos-org_news_e544a78a`](host_plos-org_news_e544a78a.md) | 🧩 수동 config — 빈 plos.org feed 대신 공식 PLOS Blog RSS 사용 | 2026-05-21 | none | posts_nonempty, rss_feed_stub, source_url_404 | https://www.plos.org/news |
 | [`host_platform-openai_docs_c642ce68`](host_platform-openai_docs_c642ce68.md) | 🔧 손 config (httpx_html) — OpenAI docs changelog row selector/post_id 수동 고정 | 2026-05-21 | none | post_id_unique, static_docs_changelog, cloudflare_challenge_static_header_replay, body_empty_acceptable | https://platform.openai.com/docs/changelog |
 | [`host_paulgraham-com_articles.html_7910744b`](host_paulgraham-com_articles.html_7910744b.md) | ✅ 수동 config 등록 (httpx_html, baseline 30건) | 2026-05-21 | F | posts_nonempty | https://paulgraham.com/articles.html |
+| [`host_papers-ssrn-com_sol3_77a5e762`](host_papers-ssrn-com_sol3_77a5e762.md) | no_change (capability_blocked) | 2026-05-21 |  | capability_blocked, cloudflare_challenge | https://papers.ssrn.com/sol3/DisplayAbstractSearch.cfm |
+| [`host_nowpublishers-c_Foundations-and-Trends_b2b19237`](host_nowpublishers-c_Foundations-and-Trends_b2b19237.md) | no_change (capability_blocked) | 2026-05-21 |  | capability_blocked, cloudflare_challenge, redirected_host | https://www.nowpublishers.com/Foundations-and-Trends |
 | [`host_namu-wiki_RecentChanges_2370318a`](host_namu-wiki_RecentChanges_2370318a.md) | ✅ 기존 손 config 동작 확인 — RecentChanges 목록 30건 baseline, 본문은 body_empty_acceptable | 2026-05-21 | none | post_id_stable_shape, matches_probe_first_article | https://namu.wiki/RecentChanges |
 | [`host_microsoft-com_en-us_000c6d5a`](host_microsoft-com_en-us_000c6d5a.md) | 🔧 손 config (작동중, baseline 30, httpx_json) | 2026-05-21 |  | published_at_iso, article_body_len, nav_only_same_host | https://www.microsoft.com/en-us/microsoft-365/roadmap |
 | [`host_medium-com_feed_19419ab9`](host_medium-com_feed_19419ab9.md) | ✅ 등록 완료 (Medium tag RSS — httpx_html XML config + Medium recognizer) | 2026-05-21 | F | posts_nonempty, feed_candidates | https://medium.com/feed/tag/programming |
 | [`host_medium-com_airbnb-engineering_2931b5a3`](host_medium-com_airbnb-engineering_2931b5a3.md) | ✅ 등록 완료 (Medium publication → RSS config + recognizer) | 2026-05-21 | F | posts_nonempty, feed_candidates | https://medium.com/airbnb-engineering |
+| [`host_mdpi-com_journal_df52afcc`](host_mdpi-com_journal_df52afcc.md) | solved (global RSS fallback) | 2026-05-21 | E | capability_blocked, rss_fallback | https://www.mdpi.com/journal/rss |
 | [`host_lemmy-ml_root_9bc876aa`](host_lemmy-ml_root_9bc876aa.md) | ✅ 자동 등록 가능 (Lemmy recognizer + LemmyAdapter 신규 — API v3 직접 호출) | 2026-05-21 | F | posts_nonempty, article_body_len | https://lemmy.ml/ |
 | [`host_indiehackers-co_root_e4490db0`](host_indiehackers-co_root_e4490db0.md) | 🔧 손 config 추가 — 정적 Ember HTML의 story 카드에서 홈 피드 30건 baseline | 2026-05-21 | none | posts_nonempty, first_article_url_missing, static_variant_rows_not_promoted | https://www.indiehackers.com/ |
+| [`host_icse2026-github_root_cd78a66a`](host_icse2026-github_root_cd78a66a.md) | no_change (url_dead) | 2026-05-21 |  | url_dead, github_pages_404 | https://icse2026.github.io/ |
 | [`host_hubspot-com_product-updates_33c05b99`](host_hubspot-com_product-updates_33c05b99.md) | 🔧 수동 config — HubSpot Releases and Updates JSON API 로 baseline 30건 등록 | 2026-05-21 | none | posts_nonempty, khoros_resources_api | https://www.hubspot.com/product-updates |
 | [`host_grafana-com_blog_d681aff2`](host_grafana-com_blog_d681aff2.md) | ✅ 수동 config 등록 (httpx_html, baseline 30건) | 2026-05-21 | F | posts_nonempty | https://grafana.com/blog/ |
 | [`host_france24-com_en_a8047c17`](host_france24-com_en_a8047c17.md) | 🚫 보류 (anti-bot 403 capability_blocked; stealth 우회 구현 안 함) | 2026-05-21 | none | capability_blocked, fetch_list | https://www.france24.com/en/ |
@@ -52,19 +58,23 @@
 | [`host_fedia-io_root_1f0bc0d6`](host_fedia-io_root_1f0bc0d6.md) | ⛔ capability_blocked — root/combined가 login으로 redirect, mbin API는 현재 401; rc=5 Mbin rescue path 추가 | 2026-05-21 | F | capability_blocked, login_redirect, mbin_api_unauthorized, fediverse_api_rescue | https://fedia.io/ |
 | [`host_feddit-de_root_584f7d0f`](host_feddit-de_root_584f7d0f.md) | rc=5 capability_blocked — Lemmy root; dev box API 404, 미등록 (rescue 인프라 일반화) | 2026-05-21 | F | capability_blocked, fediverse_api_rescue, lemmy_api_rescue | https://feddit.de/ |
 | [`host_eurocrypt-iacr-_2026_baea2078`](iacr-conf.md) | ✅ 인식기 추가 — IACR conference important-dates 페이지 자동 등록 | 2026-05-21 | F | post_id_stable_shape | https://eurocrypt.iacr.org/2026/ |
+| [`host_emerald-com_insight_87b0fd86`](host_emerald-com_insight_87b0fd86.md) | no_change (capability_blocked) | 2026-05-21 |  | capability_blocked, cloudflare_challenge | https://www.emerald.com/insight/ |
 | [`host_drupal-org_project_ecbb957e`](host_drupal-org_project_ecbb957e.md) | ✅ known-platform recognizer 등록 (baseline 30건, Drupal release-history XML) | 2026-05-21 | F | posts_nonempty, fastly_client_challenge, release_history_xml | https://drupal.org/project/drupal/releases |
 | [`host_docs-snowflake-_en_67510c90`](host_docs-snowflake-_en_67510c90.md) | ✅ 등록 완료 (Snowflake docs release notes static HTML config) | 2026-05-21 | none | posts_nonempty, static_docs_release_notes | https://docs.snowflake.com/en/release-notes |
 | [`host_docs-anthropic-_en_571d0ac4`](host_docs-anthropic-_en_571d0ac4.md) | ✅ 해결 (Anthropic docs release notes handwritten adapter + slug-stable recognizer) | 2026-05-21 | F | meta_diverging_false_positive, post_id_unique, static_docs_changelog | https://docs.anthropic.com/en/release-notes/overview |
+| [`host_dl-acm-org_action_18500797`](host_dl-acm-org_action_18500797.md) | no_change (not_board) | 2026-05-21 |  | not_a_board, publication_directory | https://dl.acm.org/action/showPublications |
 | [`host_diode-zone_root_531d9bcb`](host_diode-zone_root_531d9bcb.md) | ✅ 자동 등록 가능 (PeerTube recognizer + PeerTubeAdapter 신규 — API v1 직접 호출) | 2026-05-21 | F | posts_nonempty, article_body_len | https://diode.zone/ |
 | [`host_df-nexon-com_community_cae73546`](host_df-nexon-com_community_cae73546.md) | ✅ 수동 config (작동중, baseline 21, httpx_html) | 2026-05-21 | none | posts_nonempty | https://df.nexon.com/community/news/notice/list |
 | [`host_dblp-org_db_e427dd1d`](host_dblp-org_db_e427dd1d.md) | 🧩 수동 config — DBLP new issues/volumes RSS 사용 | 2026-05-21 | none | posts_nonempty, rss_feed_available | https://dblp.org/db/conf/ |
 | [`host_datadoghq-com_blog_447ffb34`](host_datadoghq-com_blog_447ffb34.md) | ✅ 수동 config 등록 (httpx_html, baseline 6건) | 2026-05-21 | F | posts_nonempty | https://www.datadoghq.com/blog/ |
+| [`host_conference-serv_conferences_a5105744`](host_conference-serv_conferences_a5105744.md) | no_change (capability_blocked) | 2026-05-21 |  | capability_blocked, http_403 | https://conference-service.com/conferences/ |
 | [`host_community-cloud_root_e65f04ea`](host_community-cloud_root_e65f04ea.md) | ✅ 수동 config (Playwright /latest 목록, 본문은 challenge-gated라 제목·URL 알림) | 2026-05-21 | none | article_body_len, fetch_list_403, discourse_json_challenge | https://community.cloudflare.com/ |
 | [`host_cloud-google-co_release-notes_68689125`](host_cloud-google-co_release-notes_68689125.md) | ✅ 해결 (Google Cloud release notes 공식 Atom feed recognizer + adapter) | 2026-05-21 | F | probe_timeout, static_docs_changelog, official_feed_available | https://cloud.google.com/release-notes |
 | [`host_circleci-com_changelog_5a868561`](host_circleci-com_changelog_5a868561.md) | 🧩 수동 config — CircleCI changelog RSS feed 로 baseline 30건 등록 | 2026-05-21 | none | posts_nonempty, row_selector_too_narrow, rss_feed_available | https://circleci.com/changelog/ |
 | [`host_brunch-co-kr_springboot_58aa9ddd`](host_brunch-co-kr_springboot_58aa9ddd.md) | ✅ 수동 config 등록 (Brunch RSS, baseline 20건) | 2026-05-21 | F | register_subprocess_timeout, posts_nonempty | https://brunch.co.kr/@springboot |
 | [`host_blog-unity-com_root_9fe1176b`](host_blog-unity-com_root_9fe1176b.md) | ✅ 수동 config 등록 (RSS 목록, baseline 30건; 본문 비움 허용) | 2026-05-21 | F | posts_nonempty | https://blog.unity.com/ |
 | [`host_aussie-zone_root_a8115780`](host_aussie-zone_root_a8115780.md) | rc=5 capability_blocked — Lemmy root HTML anti-bot; dev box API CF-403, 미등록 (rescue 인프라 일반화) | 2026-05-21 | F | capability_blocked, fediverse_api_rescue, lemmy_api_rescue | https://aussie.zone/ |
+| [`host_asanet-org_annual-meeting_b1101614`](host_asanet-org_annual-meeting_b1101614.md) | no_change (capability_blocked) | 2026-05-21 |  | capability_blocked, cloudflare_challenge | https://www.asanet.org/annual-meeting/ |
 | [`host_apnews-com_root_5ee5ebc1`](host_apnews-com_root_5ee5ebc1.md) | 🔧 손 config 등록 (baseline 30건, httpx_html) | 2026-05-21 | F | title_nonempty, posts_nonempty, article_body_len | https://apnews.com/ |
 | [`host_aljazeera-com_root_2ac8d25a`](host_aljazeera-com_root_2ac8d25a.md) | ✅ preflight b-hit 회복 + config 등록 (baseline 25건, httpx_html RSS) | 2026-05-21 | F | posts_nonempty, title_nonempty, post_id_unique | https://www.aljazeera.com/ |
 | [`host_airtable-com_whatsnew_6412a843`](host_airtable-com_whatsnew_6412a843.md) | 🧩 손어댑터 — /whatsnew 빈 마케팅 셸 대신 Newsroom page-data 를 최신순으로 읽어 baseline 30건 등록 | 2026-05-21 | F | posts_nonempty, wrong_first_article_url, marketing_shell_no_rows, next_page_data_reordered | https://www.airtable.com/whatsnew |
@@ -174,13 +184,13 @@
 
 | layer | count |
 |---|---|
-| (미기재) | 26 |
+| (미기재) | 34 |
 | C | 13 |
 | C+A | 1 |
 | C+D | 2 |
 | C+F | 2 |
 | C+F+A | 1 |
-| E | 4 |
+| E | 6 |
 | E+A+C+D | 1 |
 | F | 72 |
 | F+A | 1 |
@@ -191,9 +201,9 @@
 
 | strategy | count |
 |---|---|
-| (미기재) | 32 |
+| (미기재) | 40 |
 | handwritten | 22 |
-| httpx_html | 53 |
+| httpx_html | 55 |
 | httpx_json | 15 |
 | mixed | 1 |
 | none | 27 |
@@ -202,5 +212,5 @@
 
 ### 최근 90일 (≥ 2026-02-20)
 
-케이스 161 건.
+케이스 171 건.
 

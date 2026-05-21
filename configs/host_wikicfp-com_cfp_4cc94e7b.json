@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "site": "wikicfp.com",
+  "board": "allcfp",
+  "strategy": "httpx_html",
+  "_source_url": "https://www.wikicfp.com/cfp/",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "http://www.wikicfp.com/cfp/"
+  },
+  "timeout": 30,
+  "polite_sleep": {
+    "min": 5,
+    "max": 6
+  },
+  "list": {
+    "url_template": "http://www.wikicfp.com/cfp/allcfp",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "a[href*='event.showcfp']",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": ":self",
+          "attr": "href",
+          "transform": [
+            ["regex_extract", "[?&]eventid=(\\d+)"]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": ":self",
+          "text": true,
+          "transform": [
+            ["collapse_ws"]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": ":self",
+          "attr": "href",
+          "transform": [
+            ["urljoin", "http://www.wikicfp.com"]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "div.contsec",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "body",
+        "html": true
+      }
+    ]
+  },
+  "_note": "HTTPS to wikicfp timed out from this environment, while the canonical HTTP CFP pages returned stable HTML. /cfp/allcfp is used instead of the mixed root page so rows are only CFP event links."
+}
