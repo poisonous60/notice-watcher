@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 161 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 162 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -69,6 +69,7 @@
 | [`host_aljazeera-com_root_2ac8d25a`](host_aljazeera-com_root_2ac8d25a.md) | ✅ preflight b-hit 회복 + config 등록 (baseline 25건, httpx_html RSS) | 2026-05-21 | F | posts_nonempty, title_nonempty, post_id_unique | https://www.aljazeera.com/ |
 | [`host_airtable-com_whatsnew_6412a843`](host_airtable-com_whatsnew_6412a843.md) | 🧩 손어댑터 — /whatsnew 빈 마케팅 셸 대신 Newsroom page-data 를 최신순으로 읽어 baseline 30건 등록 | 2026-05-21 | F | posts_nonempty, wrong_first_article_url, marketing_shell_no_rows, next_page_data_reordered | https://www.airtable.com/whatsnew |
 | [`host_404media-co_root_9e71a06a`](host_404media-co_root_9e71a06a.md) | Mastodon false-positive detector narrowed; 404media/WordPress/Tailscale social-link pages no longer match fresh detection | 2026-05-21 | C | mastodon_platform_false_positive, social_link_mastodon, stale_probe_artifact | https://www.404media.co/ |
+| [`highwire-recognizer`](highwire-recognizer.md) | ✅ recognizer 승급 (HighWire Press bioRxiv + medRxiv 2건 → engine/recognizers/highwire.py) | 2026-05-21 | B |  | https://www.biorxiv.org/content/early/recent |
 | [`clien-recognizer`](clien-recognizer.md) | ✅ recognizer 승급 (cluster 4건 → engine/recognizers/clien.py) | 2026-05-21 |  |  | https://www.clien.net/service/board/lecture |
 | [`batch_forums_genfail_boardurl_2026-05-21`](batch_forums_genfail_boardurl_2026-05-21.md) | ✅ 4 사이트 hand-config (포털/board-root → 실제 board URL) + engine encoding 옵션 | 2026-05-21 | F | posts_nonempty, matches_probe_first_article | https://www.humoruniv.com/ |
 | [`batch_forums_antibot_playwright_2026-05-21`](batch_forums_antibot_playwright_2026-05-21.md) | ✅ anti-bot 4 사이트 playwright_html 통과 등록 (Anubis PoW·CF) + simplemachines terminal | 2026-05-21 | F | board_shape_check, gate_reject, capability_blocked | https://www.techpowerup.com/forums/ |
@@ -175,6 +176,7 @@
 | layer | count |
 |---|---|
 | (미기재) | 26 |
+| B | 1 |
 | C | 13 |
 | C+A | 1 |
 | C+D | 2 |
@@ -193,7 +195,7 @@
 |---|---|
 | (미기재) | 32 |
 | handwritten | 22 |
-| httpx_html | 53 |
+| httpx_html | 54 |
 | httpx_json | 15 |
 | mixed | 1 |
 | none | 27 |
@@ -202,5 +204,5 @@
 
 ### 최근 90일 (≥ 2026-02-20)
 
-케이스 161 건.
+케이스 162 건.
 
