@@ -4,8 +4,13 @@ rev6 변경: catalog yaml 의 위치 `configs/candidates/` → `output/candidate
 dev box 의 dashboard 가 직접 편집, N100 동기는 `scripts/remote.py batch-register` 의 atomic scp.
 
 `output/candidates/<name>.yaml` (schema 2: name + url) multi-file 을 읽어 각 entry url
-마다 N100 의 bot.sqlite3 jobs 테이블에 `kind='register', via='batch'` 잡을 enqueue.
+마다 N100 의 bot.sqlite3 jobs 테이블에 `kind='register'` 잡을 enqueue.
 실행은 N100 만 — bot worker 가 `/preview` 와 동일한 path 로 처리.
+
+via (우선순위 큐 ADR 0009 — db._derive_priority 가 via 로 priority 도출):
+    via='batch'        신규 catalog bulk (default untried 모드) — 가장 낮은 우선순위(3).
+    via='batch-retry'  재시도/테스트 (--failed/--rc/--force 모드 또는 --url entry) — bulk(3)보다 먼저 dequeue(2).
+한 batch 끝내고 그 실패분을 retry 돌리는 중 다른 catalog bulk 를 동시 enqueue 해도, retry 가 새 bulk 보다 먼저 처리됨.
 
 설계: `docs/사이트 카탈로그 자동 등록 파이프라인 계획.md` rev5 §6.
 
@@ -240,6 +245,10 @@ def main(argv: list[str]) -> int:
         print("[batch] entry 없음 — catalog 비어있거나 --url 0개", file=sys.stderr)
         return 4
 
+    # 우선순위 큐 (ADR 0009): 재시도/테스트 모드면 batch-retry(우선순위 2), 신규 bulk 면 batch(3).
+    # run 단위 retry = --force/--failed/--rc. entry 단위 = --url 로 들어온 명시 타깃 (remote.py 가 "retry" 로 안내).
+    run_is_retry = bool(args.force or args.failed or args.rc)
+
     conn = db.connect()
     try:
         enqueued = 0
@@ -282,9 +291,10 @@ def main(argv: list[str]) -> int:
                 print(f"  [DRY  ] {name[:40]:<40} {url[:80]}")
                 continue
 
+            via = "batch-retry" if (run_is_retry or e.get("_catalog") == "<--url>") else "batch"
             job_id, inserted = db.enqueue_job(
                 conn, kind="register", url=url, slug=slug,
-                via="batch", requested_by=None,
+                via=via, requested_by=None,
                 ack_channel_id=None, ack_message_id=None,
                 sub_payload=None, dedupe=True,
             )

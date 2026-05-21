@@ -20,7 +20,7 @@ DB 파일: output/bot.sqlite3 (이미 .gitignore 됨).
       register/re-probe 잡 큐 = 우선순위 큐 (priority queue). bot/worker.py 가 pool_size 개로 처리.
       claim(dequeue) 순서 = ORDER BY priority ASC, id ASC (작은 priority 먼저). ADR 0009.
       kind = 'register' (사용자 /watch·/preview) | 'reprobe' (poll.py 의 깨짐 감지)
-      priority = enqueue_job 이 via/kind 에서 도출: user(watch/preview)=0 > reprobe=1 > batch=2.
+      priority = enqueue_job 이 via/kind 에서 도출: user(watch/preview)=0 > reprobe=1 > batch-retry(테스트/재시도)=2 > batch(신규 bulk)=3.
       status = 'pending' → 'running' → 'done' | 'failed'
   reports(id, user_id, username, slug, issue, created_at, status, resolved_at, resolved_note)
       사용자 `/report` 가 쌓는 신고. open → resolved. bot/inspector.py 의 진단 + admin 명령에서 사용.
@@ -248,7 +248,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
             if "duplicate column" not in str(e).lower():
                 raise
     # 우선순위 큐 (ADR 0009) — 옛 DB 에 priority 컬럼 추가 + 기존 행 backfill.
-    # backfill 규칙 = enqueue_job 의 _derive_priority 와 동일 (via='batch'=2 > reprobe=1 > user=0).
+    # backfill 규칙 = enqueue_job 의 _derive_priority 와 동일 (batch=3 > batch-retry=2 > reprobe=1 > user=0).
     # 컬럼 신규일 때만 backfill — 기존 priority 값(이미 도출됨)을 덮지 않음.
     if "priority" not in jobs_cols:
         try:
@@ -258,7 +258,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
                 raise
         conn.execute(
             "UPDATE jobs SET priority = CASE "
-            "WHEN via='batch' THEN 2 WHEN kind='reprobe' THEN 1 ELSE 0 END"
+            "WHEN via='batch' THEN 3 WHEN via='batch-retry' THEN 2 WHEN kind='reprobe' THEN 1 ELSE 0 END"
         )
     # ADR 0006 — 발송 시각 설정 seed. 기존 구독자(DM·채널)에 기본 deliver_at 행을 박아
     # due 쿼리가 인덱스 스캔만으로 동작하게 (행 없음 = default 처리 분기 회피).
@@ -637,9 +637,14 @@ def mark_digest_sent(conn: sqlite3.Connection, target_id: str, schedule: str, ks
 # --------------------------------------------------------------------------- #
 def _derive_priority(kind: str, via: Optional[str]) -> int:
     """잡 우선순위 (작을수록 먼저 dequeue). 우선순위 큐의 값 SoT — via/kind 에서만 도출 (ADR 0009).
-    user(via=watch/preview)=0 > reprobe(kind=reprobe)=1 > batch(via=batch)=2.
-    batch 만 deprioritize — 그 외 register 는 전부 interactive 라 최우선(0)."""
+    user(via=watch/preview)=0 > reprobe(kind=reprobe)=1 > batch-retry(via=batch-retry)=2 > batch(via=batch)=3.
+    batch 계열만 deprioritize — 그 외 register 는 전부 interactive 라 최우선(0).
+    batch 안에서 2단: 신규 catalog bulk(via=batch)=3 < 재시도/테스트(via=batch-retry)=2.
+    한 batch 끝내고 그 실패분을 retry/테스트(register_batch.py --failed/--rc/--force/--url) 돌리는 중에
+    다른 catalog bulk 를 동시 enqueue 하면, retry 가 새 bulk backlog 보다 먼저 dequeue 된다."""
     if via == "batch":
+        return 3
+    if via == "batch-retry":
         return 2
     if kind == "reprobe":
         return 1

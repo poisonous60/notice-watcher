@@ -28,3 +28,12 @@ claim 순서만 손대는 게 최소 변경이면서 실제 통증(사용자가 
 - **batch aging (오래 대기 시 승급)** — starvation 완전 차단. **기각**: rate-limit 으로 starvation 실질 불가라 ORDER BY 에 created_at 계산 추가가 over-engineering.
 - **worker 슬롯 1개를 user/reprobe 전용 예약** — batch 둘 다 점유 못 하게. **기각**: claim 로직 복잡 + batch throughput 절반. worst-case "in-flight 1개 대기" 가 이미 수용 가능.
 - **reprobe 를 batch 아래(최하위)로** — 깨진 사이트 재-probe 는 다음 폴링 주기에 또 옴. **기각**: 기존 구독 서비스 복구가 무인 backfill 보다 가치 높음 → reprobe 를 batch 위, user 아래 중간.
+
+## Amendment (2026-05-21) — batch 2단 분리 + 동시 처리 5
+
+batch 단일 tier(2) 를 **2단**으로 쪼갬: 한 batch 의 untried bulk 를 돌리는 중에 *이전 batch 의 실패분을 재시도/테스트* 하면 그 retry 가 새 bulk backlog 뒤에 묶이는 통증이 ADR 0009 의 원래 문제(사용자가 batch 뒤에 묶임)와 같은 모양으로 batch 내부에서 재현됐다.
+
+- **새 tier**: user=0 > reprobe=1 > **batch-retry=2** > **batch=3**. (기존 batch=2 → batch=3 으로 강등, 그 사이에 batch-retry=2 삽입.)
+- **batch-retry 도출**: `register_batch.py` 가 retry 모드(`--failed`/`--rc`/`--force`) 또는 `--url` 명시 타깃이면 `via='batch-retry'`, 순수 catalog untried sweep 이면 `via='batch'`. via 가 여전히 입력 SoT — `_derive_priority` 가 batch-retry→2, batch→3 도출.
+- **마이그 갱신**: backfill CASE 에 `WHEN via='batch' THEN 3 WHEN via='batch-retry' THEN 2 ...`. 컬럼 신규일 때만 1회 실행이라 기존 N100 DB(이미 backfill 됨)는 영향 없음 — 신규 enqueue 만 새 값. 옛 pending batch(=2) 는 큐 drain 되며 자연 소멸.
+- **동시 처리 3→5**: N100 `config.local.toml` 의 `worker.pool_size`·`chromium_lock.slots` 둘 다 5 (git-untracked per-machine override). RAM 12Gi·available ~7.6Gi·swap 0 → chromium context 5개(~1–2Gi) 안전 마진. CPU(8코어 loadavg ~1.6) 는 제약 아님. preempt 불가 전제(running 잡 안 죽임)는 그대로 — worst-case 는 "in-flight 잡 끝날 때까지" 인데 pool 5 라 retry 가 새 bulk 보다 먼저 *claim* 되므로 backlog 깊이와 무관히 다음 빈 슬롯을 가져감.
