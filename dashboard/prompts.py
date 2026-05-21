@@ -65,7 +65,7 @@ def hand_config_triage_queue(*, failed_slugs: list[str]) -> str:
         "",
         "1. `python scripts/triage.py pull --skip-later`  (FAILED + probe 받기)",
         "2. `python scripts/codex_batch.py plan`  (플랫폼/host 비중첩 청크 확인 — slug별 X)",
-        "3. `python scripts/codex_batch.py launch`  (청크별 codex 보이는 창)",
+        "3. `python scripts/codex_batch.py launch`  (기본 1청크=관측-우선; 검토·commit 후 재호출=다음 청크)",
         "4. 청크별 `python scripts/codex_watch.py <result_file> --loop`  (완료 대기)",
         "5. **각 청크 git diff + result 검토 게이트** — codex HARD-STOP 지켰나/진단 타당한가/"
         "over-edit 없나. codex 결과 맹신 X. 문제면 revert·재위임.",

@@ -115,22 +115,50 @@ def cmd_emit(slugs: list[str]) -> int:
     return 0
 
 
+def _pending_chunks(groups: "OrderedDict[str, list[dict]]") -> list[tuple[str, list[dict]]]:
+    """아직 result 파일 없는(= 미처리) 청크만. 재호출 시 이미 한 청크 skip → 관측-우선 loop."""
+    pending = []
+    for key, members in groups.items():
+        prompt_path = codex_handoff.OUT / f"codex_handconfig_batch_{codex_handoff._slugify(key.replace(':', '-'))}_prompt.txt"
+        result_path = prompt_path.with_suffix(".result.md")
+        if not (result_path.exists() and result_path.stat().st_size > 0):
+            pending.append((key, members))
+    return pending
+
+
 def cmd_launch(slugs: list[str], max_parallel: int) -> int:
+    """이번 호출에 *최대 max_parallel 개* 청크만 띄움 (실제 cap — spray 방지).
+
+    default 1 = 관측-우선: 한 청크 띄우고 STOP → Claude 가 codex_watch 완료 대기 →
+    diff 검토 → commit → 다음 wave 위해 launch 재호출 (이미 result 있는 청크는 skip).
+    --max N 으로 신뢰 후 병렬 확대.
+    """
     groups = partition(slugs)
-    items = list(groups.items())
-    print(f"[codex_batch] {len(items)} 청크 launch (동시 최대 {max_parallel}).")
-    print("각 창은 codex 세션. 완료 감지 = result 파일 polling.\n")
+    if not groups:
+        print("[codex_batch] FAILED 큐 비었음.")
+        return 0
+    pending = _pending_chunks(groups)
+    total = len(groups)
+    if not pending:
+        print(f"[codex_batch] 모든 청크({total}) 이미 result 있음 — launch 할 것 없음. diff 검토·commit 단계로.")
+        return 0
+
+    wave = pending[:max_parallel]
+    print(f"[codex_batch] 전체 {total} 청크 중 미처리 {len(pending)}, 이번 wave {len(wave)} 띄움 (cap={max_parallel}).")
+    if max_parallel == 1:
+        print("(관측-우선: 한 청크 띄움. 완료·검토·commit 후 launch 재호출하면 다음 청크.)\n")
     launched: list[tuple[str, Path]] = []
-    for key, members in items:
+    for key, members in wave:
         path = _chunk_prompt(key, members)
         result = codex_handoff.launch(path, f"batch: {key}")
         launched.append((key, result))
-        print(f"  launched {key}: result={result}")
+        print(f"  launched {key} ({len(members)} slug): result={result}")
     print("\n완료 감지 (각각):")
     for key, result in launched:
         print(f"  python scripts/codex_watch.py {result} --loop   # {key}")
-    print("\n주의: 동시 실행 cap(--max)은 현재 안내용 — 모든 청크를 즉시 띄움.")
-    print("실제 cap 이 필요하면 청크를 나눠 호출하거나 후속 개선(작업 큐).")
+    remaining = len(pending) - len(wave)
+    if remaining:
+        print(f"\n남은 {remaining} 청크: 이번 wave 검토·commit 후 `codex_batch.py launch` 재호출.")
     return 0
 
 
@@ -141,7 +169,7 @@ def main(argv: list[str] | None = None) -> int:
         p = sub.add_parser(name)
         p.add_argument("--slugs", help="쉼표구분 slug 목록 (기본: FAILED 큐 전체)")
         if name == "launch":
-            p.add_argument("--max", type=int, default=3, help="동시 창 cap (현재 안내용)")
+            p.add_argument("--max", type=int, default=1, help="이번 wave 에 띄울 청크 수 cap (기본 1=관측-우선; 신뢰 후 ↑)")
     args = ap.parse_args(argv)
 
     slugs = args.slugs.split(",") if getattr(args, "slugs", None) else _failed_slugs()

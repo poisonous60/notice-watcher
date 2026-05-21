@@ -99,7 +99,7 @@ dashboard `/triage` 의 "FAILED 큐 codex 위임 처리" 프롬프트를 붙여�
 **절차**:
 1. `python scripts/triage.py pull --skip-later` — N100 → 로컬 (FAILED + probe).
 2. `python scripts/codex_batch.py plan` — 큐를 **플랫폼/host 비중첩 청크**로 분할 확인 (slug별 X — 같은 플랫폼 recognizer/engine fix 가 병렬 충돌). 각 청크 = codex 세션 1개.
-3. `python scripts/codex_batch.py launch [--max N]` — 청크별 codex 보이는 창 (진행 view). 또는 단건은 `python scripts/codex_handoff.py handconfig --slug <s> --url <u> --launch`.
+3. `python scripts/codex_batch.py launch` — **기본 1청크만 띄움 (관측-우선)**. multi-slug 청크·병렬 codex 동작은 아직 관측 적음 → 한 청크 띄우고 (4)(5) 완료·검토·commit 후 launch 재호출 = 다음 청크 (이미 result 있는 건 자동 skip). 신뢰되면 `--max N` 으로 병렬 확대. 단건은 `python scripts/codex_handoff.py handconfig --slug <s> --url <u> --launch`.
 4. 청크별 `python scripts/codex_watch.py <result_file> --loop` — 완료/타임아웃 감지 (창은 사용자 view, result 파일은 Claude 완료신호).
 5. **각 청크 검토 게이트**: `git diff` + result 파일 읽기. codex 가 (a) HARD-STOP 지켰나(commit 안 함), (b) 진단/fix 가 SKILL §2 분기 타당한가, (c) over-edit/제약위반 없나. 문제면 revert/재위임.
 6. **공유 인덱스·배포는 Claude 직렬** (병렬 codex 가 건드리면 레이스): `python scripts/cases_index.py --backfill-db output/cases.sqlite3` → §5 검증(probe_smoke) → commit(청크별 또는 묶음) → push → N100 배포.
