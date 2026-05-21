@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 114 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 115 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -12,6 +12,7 @@
 | [`infra_discourse_root_form_2026-05-21`](infra_discourse_root_form_2026-05-21.md) | ✅ 자동 등록 (probe generator-meta 신호 → DiscourseAdapter dispatch — root-form 봉합) | 2026-05-21 | C | posts_nonempty, article_body_len | https://forum.openwrt.org/ |
 | [`infra_antibot_challenge_classify_2026-05-21`](infra_antibot_challenge_classify_2026-05-21.md) | ✅ probe 분류 게이트 — JS-챌린지 인터스티셜(Anubis PoW / Cloudflare)을 BLOCKED_BOT 으로 인식 → gate_reject(rc=3) 오분류를 capability_blocked(rc=5)로 교정 | 2026-05-21 | C | board_shape_check, gate_reject | https://forums.debian.net/ |
 | [`host_watchuseek-com_root_7f9f4699`](host_watchuseek-com_root_7f9f4699.md) | 🐛 BUG 방어 — SIGBUS subprocess death 를 gen_fail 로 오분류하지 않고 BUG 경로로 보냄 | 2026-05-21 | F | subprocess_signal, sigbus, headless_dom_pressure, xenforo_rss | https://www.watchuseek.com/ |
+| [`host_techhub-social_about_fbf89ae2`](host_techhub-social_about_fbf89ae2.md) | social platform detect-reject | 2026-05-21 | C | posts_nonempty, article_body_len | https://techhub.social/about |
 | [`host_t-me_s_ce7a5d31`](host_t-me_s_ce7a5d31.md) | ✅ 등록 (Telegram public channel list-only) | 2026-05-21 | none | article_body_len, body_empty_acceptable, list_only | https://t.me/s/durov |
 | [`host_status-deno-com_root_5aa73944`](host_status-deno-com_root_5aa73944.md) | ✅ 등록 (Statuspage.io Atom history feed 사용) | 2026-05-21 | F | posts_nonempty, rss_feed_available, statuspage_history_atom | https://status.deno.com/ |
 | [`host_stackoverflow-c_questions_71c08aad`](host_stackoverflow-c_questions_71c08aad.md) | ✅ 자동 등록 경로 추가 (StackExchange /questions → official API) | 2026-05-21 | F | fetch_list_403, posts_nonempty, capability_blocked | https://stackoverflow.com/questions |
@@ -128,7 +129,7 @@
 | layer | count |
 |---|---|
 | (미기재) | 21 |
-| C | 11 |
+| C | 12 |
 | C+A | 1 |
 | C+D | 2 |
 | C+F | 2 |
@@ -151,8 +152,9 @@
 | mixed | 1 |
 | none | 23 |
 | playwright_html | 9 |
+| rejected | 1 |
 
 ### 최근 90일 (≥ 2026-02-20)
 
-케이스 114 건.
+케이스 115 건.
 

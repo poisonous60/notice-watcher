@@ -173,6 +173,56 @@ def _policy_check(digest: dict, url: str) -> tuple[bool, list[str]]:
     return True, msgs
 
 
+def _try_lemmy_api_rescue(url: str, slug: str, *, out: Optional[str], force: bool) -> Optional[int]:
+    """HTML anti-bot rc=5 직전 Lemmy public API 로 마지막 등록 시도."""
+    parts = urlsplit(url)
+    host = (parts.netloc or "").strip().lower()
+    if not host or "." not in host:
+        return None
+    base = f"{parts.scheme or 'https'}://{host}"
+    try:
+        import httpx
+        r = httpx.get(f"{base}/api/v3/site", timeout=8.0,
+                      headers={"accept": "application/json", "user-agent": "notice-watcher/1.0"})
+        if r.status_code != 200:
+            return None
+        data = r.json()
+    except Exception as e:  # noqa: BLE001
+        print(f"[register] Lemmy API rescue skip — /api/v3/site 확인 실패: {type(e).__name__}: {e}")
+        return None
+    if not isinstance(data, dict) or not (data.get("site_view") or data.get("version")):
+        return None
+    from engine.recognizers.lemmy import build_config as _lemmy_build
+    cfg = _lemmy_build(base)
+    if cfg is None:
+        return None
+    cfg["_recognized_platform"] = "lemmy (rc=5 anti-bot HTML -> public API v3 rescue)"
+    print("[PHASE] lemmy_api_rescue", flush=True)
+    print(f"[register] 🔎 HTML 진입은 차단됐지만 Lemmy /api/v3/site 확인 — LemmyAdapter 등록 시도 (base={base})")
+    return _register_built_config(cfg, slug, url, out=out, force=force)
+
+
+def _social_platform_reject(digest: dict, url: str, slug: str) -> Optional[int]:
+    """Mastodon/Misskey/Pixelfed root/about 는 notice board 가 아니므로 영구 거부."""
+    for key, plat in (
+        ("mastodon_platform", "Mastodon"),
+        ("misskey_platform", "Misskey"),
+        ("pixelfed_platform", "Pixelfed"),
+    ):
+        sig = ((digest.get("list_candidates") or {}).get(key) or {})
+        if sig.get(f"is_{plat.lower()}") and sig.get("base_url"):
+            print(f"[register] ❌ 등록 거부 — {plat} social instance 는 notice board 가 아닙니다.")
+            _save_rejected(
+                slug,
+                url,
+                reason=f"{plat} social instance 는 notice board 가 아님",
+                note=f"platform detect reject: {key}",
+                learn=False,
+            )
+            return 3
+    return None
+
+
 # anti-bot/captcha 챌린지로 리다이렉트된 URL — board 신호로 잡으면 안 됨.
 # 같은 호스트라도 사실상 "차단됐다" 는 negative 증거. 예: google.com/sorry/index 는
 # Google 검색 클릭 시 abuse-detection 챌린지로 가는 자리 — clicked_same=True 로 위장됨.
@@ -1521,6 +1571,10 @@ def _main_inner(argv) -> int:
         else:
             rc_out = 5  # anti-bot/captcha/blocked = 능력 부족 (정책 아님)
         if rc_out == 5:
+            if not args.gate_only:
+                rc = _try_lemmy_api_rescue(url, slug, out=args.out, force=args.force)
+                if rc is not None:
+                    return rc
             try:
                 _save_failed(slug, url,
                              reason=f"capability_blocked (anti-bot/captcha): {'; '.join(msgs)[:200]}",
@@ -1625,6 +1679,13 @@ def _main_inner(argv) -> int:
                 if rc is not None:
                     return rc
                 print("[register] Mbin API 폴백 (API 빈/차단) — 일반 파이프라인 계속.")
+
+    # Mastodon/Misskey/Pixelfed social instance 는 notice board 가 아니라 timeline/client shell 이다.
+    # known-platform config 로 등록하지 않고 LLM 호출 전 REJECTED 마커로 종료한다.
+    if not args.gate_only:
+        rc = _social_platform_reject(digest, url, slug)
+        if rc is not None:
+            return rc
 
     # single-article nav-only 게이트 — board_shape 가 nav 안 사이드바 메뉴를 same-host 신호로 false-positive
     # 통과시키는 걸 차단. holocaustexplained 같은 *unknown host* 단일 article 페이지가 여기서 잡힌다.

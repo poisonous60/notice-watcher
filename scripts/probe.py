@@ -33,6 +33,9 @@ from probe.extract import (
     detect_discourse_platform,
     detect_xenforo_platform,
     detect_lemmy_platform,
+    detect_mastodon_platform,
+    detect_misskey_platform,
+    detect_pixelfed_platform,
     detect_peertube_platform,
     detect_mbin_platform,
 )
@@ -401,6 +404,9 @@ def _run(args: argparse.Namespace, url: str, slug: str) -> int:
             discourse_platform = detect_discourse_platform(html=page_html or "", base_url=url)
             xenforo_platform = detect_xenforo_platform(html=page_html or "", base_url=url)
             lemmy_platform = detect_lemmy_platform(html=page_html or "", base_url=url)
+            mastodon_platform = detect_mastodon_platform(html=page_html or "", base_url=url)
+            misskey_platform = detect_misskey_platform(html=page_html or "", base_url=url)
+            pixelfed_platform = detect_pixelfed_platform(html=page_html or "", base_url=url)
             peertube_platform = detect_peertube_platform(html=page_html or "", base_url=url)
             mbin_platform = detect_mbin_platform(html=page_html or "", base_url=url)
             write_list_candidates(
@@ -419,6 +425,9 @@ def _run(args: argparse.Namespace, url: str, slug: str) -> int:
                 discourse_platform=discourse_platform,
                 xenforo_platform=xenforo_platform,
                 lemmy_platform=lemmy_platform,
+                mastodon_platform=mastodon_platform,
+                misskey_platform=misskey_platform,
+                pixelfed_platform=pixelfed_platform,
                 peertube_platform=peertube_platform,
                 mbin_platform=mbin_platform,
             )

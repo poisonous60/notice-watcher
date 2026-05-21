@@ -187,6 +187,18 @@ _ARTIFACTS: dict[str, ArtifactContract] = {
                                 "detect_lemmy_platform 산출. None=Lemmy 아님. dict={is_lemmy, base_url, community_name?}. "
                                 "scripts/register.py 가 is_lemmy=true 면 LLM 호출 *전* `engine/recognizers/lemmy.build_config` 로 "
                                 "LemmyAdapter config 를 만들어 `/api/v3/post/list?sort=New&type_=Local` 공개 JSON API 등록을 시도."),
+            _ContractField("mastodon_platform", type_hint="dict|null", required=False,
+                           note="Mastodon app-shell marker(`<div id=mastodon>`, initial-state streaming_api, generator meta 등) 로 social instance 판정 — "
+                                "detect_mastodon_platform 산출. None=Mastodon 아님. dict={is_mastodon, base_url}. "
+                                "Mastodon root/about 는 notice board 가 아니라 social firehose/client shell 이므로 scripts/register.py 가 LLM 호출 전 REJECTED 처리한다."),
+            _ContractField("misskey_platform", type_hint="dict|null", required=False,
+                           note="Misskey app-shell marker(`_misskey_`, `window.__misskey`, og/title Misskey 등) 로 social instance 판정 — "
+                                "detect_misskey_platform 산출. None=Misskey 아님. dict={is_misskey, base_url}. "
+                                "notice board 가 아니라 social timeline/client shell 이므로 scripts/register.py 가 LLM 호출 전 REJECTED 처리한다."),
+            _ContractField("pixelfed_platform", type_hint="dict|null", required=False,
+                           note="Pixelfed app-shell marker(Pixelfed meta/generator, window.App.config 등) 로 social instance 판정 — "
+                                "detect_pixelfed_platform 산출. None=Pixelfed 아님. dict={is_pixelfed, base_url}. "
+                                "notice board 가 아니라 social media client shell 이므로 scripts/register.py 가 LLM 호출 전 REJECTED 처리한다."),
             _ContractField("peertube_platform", type_hint="dict|null", required=False,
                            note="PeerTube app-shell marker(`og:platform=PeerTube`, `window.PeerTubeServerConfig`, `/api/v1/config`) 로 PeerTube instance 판정 — "
                                 "detect_peertube_platform 산출. None=PeerTube 아님. dict={is_peertube, base_url}. "

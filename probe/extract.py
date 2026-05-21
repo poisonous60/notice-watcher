@@ -981,6 +981,91 @@ def detect_lemmy_platform(html: str, base_url: str) -> Optional[dict]:
     return out
 
 
+@heuristic
+def detect_mastodon_platform(html: str, base_url: str) -> Optional[dict]:
+    """Mastodon app-shell marker 로 social instance 판정.
+
+    Mastodon root/about 는 firehose 성격의 social client shell 이지 notice board 가 아니다.
+    register.py 가 이 신호를 보면 LLM 호출 전 REJECTED 로 종료한다.
+    """
+    from urllib.parse import urlsplit
+    if not html or not base_url:
+        return None
+    try:
+        parts = urlsplit(base_url)
+        host = (parts.netloc or "").strip().lower()
+        scheme = parts.scheme or "https"
+    except (ValueError, AttributeError):
+        return None
+    if not host or "." not in host:
+        return None
+
+    low = html.lower()
+    marker_hit = any((
+        re.search(r'<div[^>]+\bid=["\']mastodon["\']', html, re.I) is not None,
+        re.search(r'"meta"\s*:\s*\{[^{}]*"streaming_api"', html, re.I | re.S) is not None,
+        re.search(r'<link[^>]+href=["\'][^"\']*/api/v1/streaming\b', html, re.I) is not None,
+        "<noscript" in low and "mastodon" in low,
+        re.search(r'<meta[^>]+name=["\']generator["\'][^>]+content=["\'][^"\']*mastodon', html, re.I) is not None,
+    ))
+    if not marker_hit:
+        return None
+    return {"is_mastodon": True, "base_url": f"{scheme}://{host}"}
+
+
+@heuristic
+def detect_misskey_platform(html: str, base_url: str) -> Optional[dict]:
+    """Misskey app-shell marker 로 social instance 판정."""
+    from urllib.parse import urlsplit
+    if not html or not base_url:
+        return None
+    try:
+        parts = urlsplit(base_url)
+        host = (parts.netloc or "").strip().lower()
+        scheme = parts.scheme or "https"
+    except (ValueError, AttributeError):
+        return None
+    if not host or "." not in host:
+        return None
+
+    marker_hit = any((
+        re.search(r'<meta[^>]+property=["\']og:[^"\']*["\'][^>]+content=["\'][^"\']*misskey', html, re.I) is not None,
+        "_misskey_" in html.lower(),
+        "window.__misskey" in html,
+        re.search(r"<title[^>]*>[^<]*misskey[^<]*</title>", html, re.I) is not None,
+    ))
+    if not marker_hit:
+        return None
+    return {"is_misskey": True, "base_url": f"{scheme}://{host}"}
+
+
+@heuristic
+def detect_pixelfed_platform(html: str, base_url: str) -> Optional[dict]:
+    """Pixelfed app-shell marker 로 social instance 판정."""
+    from urllib.parse import urlsplit
+    if not html or not base_url:
+        return None
+    try:
+        parts = urlsplit(base_url)
+        host = (parts.netloc or "").strip().lower()
+        scheme = parts.scheme or "https"
+    except (ValueError, AttributeError):
+        return None
+    if not host or "." not in host:
+        return None
+
+    low = html.lower()
+    marker_hit = any((
+        re.search(r'<meta[^>]+(?:name|property)=["\'][^"\']*["\'][^>]+content=["\'][^"\']*pixelfed', html, re.I) is not None,
+        "<noscript" in low and "pixelfed" in low,
+        "window.app.config" in low and "pixelfed" in low,
+        re.search(r'<meta[^>]+name=["\']generator["\'][^>]+content=["\'][^"\']*pixelfed', html, re.I) is not None,
+    ))
+    if not marker_hit:
+        return None
+    return {"is_pixelfed": True, "base_url": f"{scheme}://{host}"}
+
+
 _PEERTUBE_MARKERS = (
     'property="og:platform" content="PeerTube"',
     "window.PeerTubeServerConfig",
@@ -1383,6 +1468,9 @@ def write_list_candidates(
     discourse_platform: Optional[dict] = None,
     xenforo_platform: Optional[dict] = None,
     lemmy_platform: Optional[dict] = None,
+    mastodon_platform: Optional[dict] = None,
+    misskey_platform: Optional[dict] = None,
+    pixelfed_platform: Optional[dict] = None,
     peertube_platform: Optional[dict] = None,
     mbin_platform: Optional[dict] = None,
 ) -> None:
@@ -1442,6 +1530,9 @@ def write_list_candidates(
         "discourse_platform": discourse_platform,
         "xenforo_platform": xenforo_platform,
         "lemmy_platform": lemmy_platform,
+        "mastodon_platform": mastodon_platform,
+        "misskey_platform": misskey_platform,
+        "pixelfed_platform": pixelfed_platform,
         "peertube_platform": peertube_platform,
         "mbin_platform": mbin_platform,
     }
