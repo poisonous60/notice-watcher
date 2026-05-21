@@ -1,0 +1,102 @@
+{
+  "version": 1,
+  "site": "cdjapan.co.jp",
+  "board": "feature",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.cdjapan.co.jp/feature/"
+  },
+  "timeout": 15,
+  "polite_sleep": {
+    "min": 10,
+    "max": 10
+  },
+  "list": {
+    "url_template": "https://www.cdjapan.co.jp/feature/?all=1",
+    "pagination": {
+      "kind": "query_param",
+      "page_param": "page",
+      "extra_params_when_paged": {
+        "all": "1"
+      }
+    },
+    "row_selector": "#content > div.row.sdw > ul.list-thumb > li",
+    "row_required_selector": "a[href^='https://www.cdjapan.co.jp/feature/']",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a",
+          "attr": "href",
+          "transform": [
+            ["regex_extract", "/feature/([^/?#]+)"],
+            ["strip", "/"]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "a > div",
+          "text": true,
+          "transform": [
+            ["collapse_ws"],
+            ["regex_extract", "^\\d{4}-\\d{2}-\\d{2}\\s+\\d{2}:\\d{2}:\\d{2}\\s+(.+)$"],
+            ["strip"]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a",
+          "attr": "href",
+          "transform": [
+            ["urljoin", "https://www.cdjapan.co.jp"]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "span.date",
+          "text": true,
+          "transform": [
+            ["collapse_ws"],
+            ["iso8601", ["%Y-%m-%d %H:%M:%S"], "+09:00"]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "url_template": "https://www.cdjapan.co.jp/feature/{post_id}",
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "#search-result article.article .article-body",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "#search-result article.article",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "#search-result h1.hl",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ]
+    }
+  }
+}
