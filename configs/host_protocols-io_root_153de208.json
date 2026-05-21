@@ -1,0 +1,64 @@
+{
+  "version": 1,
+  "site": "protocols.io",
+  "board": "root",
+  "strategy": "playwright_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept-Language": "en-US,en;q=0.9"
+  },
+  "timeout": 30,
+  "nav_timeout_ms": 40000,
+  "idle_timeout_ms": 12000,
+  "quiet_ms": 800,
+  "list": {
+    "url_template": "https://www.protocols.io/search",
+    "pagination": {"kind": "none"},
+    "wait_selector": "article._1cqv171 a[href*=\"/view/\"]",
+    "row_selector": "article._1cqv171",
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a[href*=\"/view/\"]",
+          "attr": "href",
+          "transform": [["regex_extract", "/view/([^/?#]+)"], ["collapse_ws"]]
+        }
+      ],
+      "title": [
+        {"from": "css", "selector": "h3 a span", "text": true, "transform": [["collapse_ws"]]}
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "h3 a[href*=\"/view/\"]",
+          "attr": "href",
+          "transform": [["urljoin", "https://www.protocols.io"]]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "div._y6ap5f",
+          "text": true,
+          "transform": [["iso8601", ["%b %d, %Y"], "Z"]]
+        }
+      ],
+      "author": [
+        {"from": "css", "selector": "div._msceq span", "text": true, "transform": [["collapse_ws"]]}
+      ],
+      "category": [
+        {"from": "css", "selector": "div._1v9zrna", "text": true, "transform": [["collapse_ws"]]}
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "wait_selector": "body",
+    "content": [
+      {"from": "css", "selector": "main, article, body", "html": true}
+    ]
+  },
+  "_source_url": "https://www.protocols.io/",
+  "_note": "Root page is marketing-heavy and its featured-protocol carousel duplicates cards. Use the public search/list route as the stable board view for the same portal; rows are rendered by JS, so playwright_html waits for protocol result articles."
+}

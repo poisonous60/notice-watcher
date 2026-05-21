@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "site": "jstage.jst.go.jp",
+  "board": "browse",
+  "strategy": "playwright_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept-Language": "en-US,en;q=0.9"
+  },
+  "timeout": 30,
+  "nav_timeout_ms": 40000,
+  "idle_timeout_ms": 12000,
+  "quiet_ms": 800,
+  "list": {
+    "url_template": "https://www.jstage.jst.go.jp/browse/-char/en",
+    "pagination": {"kind": "none"},
+    "wait_selector": "a.customTooltip[href*=\"/_contents/-char/en\"]",
+    "row_selector": "a.customTooltip[href*=\"/_contents/-char/en\"]",
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": ":self",
+          "attr": "href",
+          "transform": [["regex_extract", "/browse/(.+)/_contents/-char/en$"]]
+        }
+      ],
+      "title": [
+        {"from": "attr", "selector": ":self", "attr": "title", "transform": [["collapse_ws"]]},
+        {
+          "from": "css",
+          "selector": ":self",
+          "text": true,
+          "transform": [["regex_extract", "^(.+?)\\s+[A-Z][a-z]+ \\d{1,2}, \\d{4}"], ["collapse_ws"]]
+        }
+      ],
+      "url": [
+        {"from": "attr", "selector": ":self", "attr": "href"}
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "p.grey-txt-color span",
+          "text": true,
+          "transform": [["regex_extract", "([A-Z][a-z]+ \\d{1,2}, \\d{4})"], ["iso8601", ["%B %d, %Y"], "Z"]]
+        }
+      ],
+      "summary": [
+        {"from": "css", "selector": "p.grey-txt-color span", "text": true, "transform": [["collapse_ws"]]}
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "wait_selector": "body",
+    "content": [
+      {"from": "css", "selector": "body", "html": true}
+    ]
+  },
+  "_source_url": "https://www.jstage.jst.go.jp/browse/-char/en",
+  "_note": "J-STAGE browse home exposes a rendered latest-issue list. Rows are issue links ending in _contents/-char/en, with date/volume/issue metadata in the row body."
+}
