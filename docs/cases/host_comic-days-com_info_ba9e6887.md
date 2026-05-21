@@ -2,11 +2,11 @@
 slug: host_comic-days-com_info_ba9e6887
 url: https://comic-days.com/info
 status: ✅ preflight b-hit 회복 + config 등록 (baseline 5건, httpx_html)
-outcome: handcrafted
+outcome: improved
 date: 2026-05-21
 requested_by: batch
 failure_keys: [article_body_len, matches_probe_first_article]
-fix_layer: none
+fix_layer: C
 config_strategy: httpx_html
 adapters_changed: []
 engine_files_touched: []

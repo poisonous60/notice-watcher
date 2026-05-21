@@ -2,9 +2,9 @@
 slug: host_anime-japan-jp_news_90aa37b1
 url: https://www.anime-japan.jp/news/
 status: ✅ config 등록 (baseline 30, playwright_html)
-outcome: handcrafted
+outcome: improved
 date: 2026-05-21
-fix_layer: none
+fix_layer: C
 failure_keys: [posts_nonempty, matches_probe_first_article]
 config_strategy: playwright_html
 adapters_changed: []

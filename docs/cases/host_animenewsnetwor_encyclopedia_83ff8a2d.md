@@ -2,11 +2,11 @@
 slug: host_animenewsnetwor_encyclopedia_83ff8a2d
 url: https://www.animenewsnetwork.com/encyclopedia/releases.php
 status: ✅ preflight 회복 + config 등록 (작동중, baseline 30, httpx_html)
-outcome: handcrafted
+outcome: improved
 date: 2026-05-21
 requested_by: batch
 failure_keys: [fetch_list, posts_nonempty]
-fix_layer: none
+fix_layer: C
 config_strategy: httpx_html
 adapters_changed: []
 engine_files_touched: []
