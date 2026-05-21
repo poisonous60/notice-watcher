@@ -1594,6 +1594,38 @@ def _main_inner(argv) -> int:
                     return rc
                 print("[register] LemmyAdapter 폴백 (API 빈/차단) — 일반 파이프라인 계속.")
 
+    # PeerTube 포지티브 검출 — probe 가 app-shell marker(og:platform/window.PeerTubeServerConfig)로 판정.
+    # root URL 은 URL 만으론 false-positive 가 커서 probe 신호로만 봉합한다.
+    if not args.gate_only:
+        pt = ((digest.get("list_candidates") or {}).get("peertube_platform") or {})
+        if pt.get("is_peertube") and pt.get("base_url"):
+            from engine.recognizers.peertube import build_config as _peertube_build
+            pcfg = _peertube_build(pt["base_url"])
+            if pcfg is not None:
+                pcfg["_recognized_platform"] = "peertube (probe app-shell marker -> API v1)"
+                print("[PHASE] peertube_detect", flush=True)
+                print(f"[register] 🔎 PeerTube 마커 검출 — PeerTubeAdapter 등록 시도 (base={pt['base_url']})")
+                rc = _register_built_config(pcfg, slug, url, out=args.out, force=args.force)
+                if rc is not None:
+                    return rc
+                print("[register] PeerTubeAdapter 폴백 (API 빈/차단) — 일반 파이프라인 계속.")
+
+    # Mbin/kbin 포지티브 검출 — probe 가 data-controller/meta marker 로 판정.
+    # instance API 가 401/anti-bot 이면 known-platform 검증 실패 후 일반 파이프라인으로 폴백한다.
+    if not args.gate_only:
+        mb = ((digest.get("list_candidates") or {}).get("mbin_platform") or {})
+        if mb.get("is_mbin") and mb.get("base_url"):
+            from engine.recognizers.mbin import build_config as _mbin_build
+            mcfg = _mbin_build(mb["base_url"])
+            if mcfg is not None:
+                mcfg["_recognized_platform"] = "mbin (probe mbin marker -> entries API)"
+                print("[PHASE] mbin_detect", flush=True)
+                print(f"[register] 🔎 Mbin 마커 검출 — entries API config 등록 시도 (base={mb['base_url']})")
+                rc = _register_built_config(mcfg, slug, url, out=args.out, force=args.force)
+                if rc is not None:
+                    return rc
+                print("[register] Mbin API 폴백 (API 빈/차단) — 일반 파이프라인 계속.")
+
     # single-article nav-only 게이트 — board_shape 가 nav 안 사이드바 메뉴를 same-host 신호로 false-positive
     # 통과시키는 걸 차단. holocaustexplained 같은 *unknown host* 단일 article 페이지가 여기서 잡힌다.
     # 인식기 PATTERNS_REJECT 가 *호스트 명시* fast-path 라면 이건 구조 기반 fallback.

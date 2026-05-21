@@ -187,6 +187,16 @@ _ARTIFACTS: dict[str, ArtifactContract] = {
                                 "detect_lemmy_platform 산출. None=Lemmy 아님. dict={is_lemmy, base_url, community_name?}. "
                                 "scripts/register.py 가 is_lemmy=true 면 LLM 호출 *전* `engine/recognizers/lemmy.build_config` 로 "
                                 "LemmyAdapter config 를 만들어 `/api/v3/post/list?sort=New&type_=Local` 공개 JSON API 등록을 시도."),
+            _ContractField("peertube_platform", type_hint="dict|null", required=False,
+                           note="PeerTube app-shell marker(`og:platform=PeerTube`, `window.PeerTubeServerConfig`, `/api/v1/config`) 로 PeerTube instance 판정 — "
+                                "detect_peertube_platform 산출. None=PeerTube 아님. dict={is_peertube, base_url}. "
+                                "scripts/register.py 가 is_peertube=true 면 LLM 호출 *전* `engine/recognizers/peertube.build_config` 로 "
+                                "PeerTubeAdapter config 를 만들어 `/api/v1/videos?sort=-publishedAt` 공개 JSON API 등록을 시도."),
+            _ContractField("mbin_platform", type_hint="dict|null", required=False,
+                           note="Mbin/kbin marker(`data-controller=mbin`, mbin/kbin+fediverse meta, threads/microblog/magazines nav) 로 aggregator instance 판정 — "
+                                "detect_mbin_platform 산출. None=Mbin 아님. dict={is_mbin, base_url, magazine_name?}. "
+                                "scripts/register.py 가 is_mbin=true 면 LLM 호출 *전* `engine/recognizers/mbin.build_config` 로 "
+                                "`/api/entries?sort=newest` httpx_json config 등록을 시도한다. API 401/anti-bot instance 는 폴백."),
         ),
     ),
 

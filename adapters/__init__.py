@@ -10,6 +10,7 @@ from .tistory import TistoryRssAdapter
 from .reddit import RedditAdapter
 from .discourse import DiscourseAdapter
 from .lemmy import LemmyAdapter
+from .peertube import PeerTubeAdapter
 from .google_news_rss import GoogleNewsRssAdapter
 
 __all__ = [
@@ -26,5 +27,6 @@ __all__ = [
     "RedditAdapter",
     "DiscourseAdapter",
     "LemmyAdapter",
+    "PeerTubeAdapter",
     "GoogleNewsRssAdapter",
 ]

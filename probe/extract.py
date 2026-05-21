@@ -981,6 +981,67 @@ def detect_lemmy_platform(html: str, base_url: str) -> Optional[dict]:
     return out
 
 
+_PEERTUBE_MARKERS = (
+    'property="og:platform" content="PeerTube"',
+    "window.PeerTubeServerConfig",
+    "/api/v1/config",
+    "joinpeertube",
+)
+
+
+@heuristic
+def detect_peertube_platform(html: str, base_url: str) -> Optional[dict]:
+    """PeerTube app-shell marker 로 PeerTube instance 판정."""
+    from urllib.parse import urlsplit
+    if not html or not base_url:
+        return None
+    try:
+        parts = urlsplit(base_url)
+        host = (parts.netloc or "").strip().lower()
+        scheme = parts.scheme or "https"
+    except (ValueError, AttributeError):
+        return None
+    if not host or "." not in host:
+        return None
+    low = html.lower()
+    strong = (
+        re.search(r'<meta[^>]+property=["\']og:platform["\'][^>]+content=["\']peertube["\']', html, re.I)
+        is not None
+    )
+    weak_hits = sum(1 for marker in _PEERTUBE_MARKERS if marker.lower() in low)
+    title_hit = bool(re.search(r"<title[^>]*>[^<]*peertube[^<]*</title>", html, re.I))
+    if not (strong or weak_hits >= 2 or title_hit):
+        return None
+    return {"is_peertube": True, "base_url": f"{scheme}://{host}"}
+
+
+@heuristic
+def detect_mbin_platform(html: str, base_url: str) -> Optional[dict]:
+    """Mbin/kbin marker 로 threadiverse aggregator instance 판정."""
+    from urllib.parse import urlsplit
+    if not html or not base_url:
+        return None
+    try:
+        parts = urlsplit(base_url)
+        host = (parts.netloc or "").strip().lower()
+        scheme = parts.scheme or "https"
+    except (ValueError, AttributeError):
+        return None
+    if not host or "." not in host:
+        return None
+    low = html.lower()
+    data_controller = bool(re.search(r'\bdata-controller=["\'][^"\']*\b(?:mbin|kbin)\b', html, re.I))
+    meta_hit = ("mbin" in low or "kbin" in low) and ("fediverse" in low or "content aggregator" in low)
+    route_hit = all(token in low for token in ("/threads", "/microblog", "/magazines"))
+    if not (data_controller or (meta_hit and route_hit)):
+        return None
+    out = {"is_mbin": True, "base_url": f"{scheme}://{host}"}
+    m = re.match(r"^/m/([^/?#]+)", parts.path or "", re.I)
+    if m is not None:
+        out["magazine_name"] = m.group(1)
+    return out
+
+
 @heuristic
 def root_marketing_homepage(
     *,
@@ -1322,6 +1383,8 @@ def write_list_candidates(
     discourse_platform: Optional[dict] = None,
     xenforo_platform: Optional[dict] = None,
     lemmy_platform: Optional[dict] = None,
+    peertube_platform: Optional[dict] = None,
+    mbin_platform: Optional[dict] = None,
 ) -> None:
     # body_empty_likely summary — 본문이 본질적으로 없는 사이트 신호.
     # row_external_host (검색결과/aggregator) OR row_interactive_action (게임/투표/SPA) 중 하나라도 true 면 박힘.
@@ -1379,6 +1442,8 @@ def write_list_candidates(
         "discourse_platform": discourse_platform,
         "xenforo_platform": xenforo_platform,
         "lemmy_platform": lemmy_platform,
+        "peertube_platform": peertube_platform,
+        "mbin_platform": mbin_platform,
     }
     validate_payload("list_candidates.json", payload, allow_extra=False)
     (out_dir / "list_candidates.json").write_text(
