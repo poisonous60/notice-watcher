@@ -30,14 +30,16 @@
       <tr>
         <th>call_site</th>
         <th>모델</th>
+        <th>reasoning effort<br><span class="muted" style="font-weight:normal;font-size:0.76rem;">codex 전용</span></th>
       </tr>
     </thead>
     <tbody>
       {% for key, label in ctrl.routing.call_sites %}
       {% set current = ctrl.routing.current.get(key, '') %}
       {% set effective = ctrl.routing.effective.get(key, '') %}
-      {% set selected = current if current else effective %}
       {% set is_override = current != '' %}
+      {% set sel_model = ctrl.routing.current_model.get(key) if is_override else ctrl.routing.effective_model.get(key) %}
+      {% set sel_effort = ctrl.routing.current_effort.get(key) if is_override else ctrl.routing.effective_effort.get(key) %}
       <tr>
         <td class="mono">
           {{ key }}<br>
@@ -50,12 +52,20 @@
           <select name="{{ key }}" style="width:100%;margin:0;">
             <option value="">— (매핑 제거 → default 사용)</option>
             {% for m in ctrl.routing.models %}
-            <option value="{{ m }}" {{ 'selected' if selected==m else '' }}>{{ m }}</option>
+            <option value="{{ m }}" {{ 'selected' if sel_model==m else '' }}>{{ m }}</option>
             {% endfor %}
           </select>
           {% if not is_override and effective %}
           <span class="muted" style="font-size:0.78rem;">실제 적용: <code>{{ effective }}</code> (fallback)</span>
           {% endif %}
+        </td>
+        <td>
+          <select name="{{ key }}__effort" style="width:100%;margin:0;">
+            <option value="">자동 (모델명 기반)</option>
+            {% for e in ctrl.routing.efforts %}
+            <option value="{{ e }}" {{ 'selected' if sel_effort==e else '' }}>{{ e }}</option>
+            {% endfor %}
+          </select>
         </td>
       </tr>
       {% endfor %}

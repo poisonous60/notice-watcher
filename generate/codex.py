@@ -70,6 +70,9 @@ def _codex_bin() -> str:
     return found
 
 
+_VALID_EFFORTS = ("low", "medium", "high")
+
+
 def _reasoning_effort_for(model: str) -> str:
     m = model.lower()
     if "-mini" in m or "-nano" in m:
@@ -129,17 +132,21 @@ def _classify_error(stderr: str, stdout: str, returncode: int) -> LLMError:
 class CodexClient(LLMClient):
     provider = "codex"
 
-    def __init__(self, *, model: str = "gpt-5.4-mini", timeout: float = _DEFAULT_TIMEOUT,
+    def __init__(self, *, model: str = "gpt-5.4-mini",
+                 reasoning_effort: Optional[str] = None, timeout: float = _DEFAULT_TIMEOUT,
                  recorder=None, cost_fn=None) -> None:
         super().__init__(model=model, recorder=recorder, cost_fn=cost_fn)
         self.timeout = timeout
+        # 명시 effort 가 valid 면 모델명 기반 자동 추론(_reasoning_effort_for)을 override.
+        eff = (reasoning_effort or "").strip().lower()
+        self.reasoning_effort = eff if eff in _VALID_EFFORTS else None
 
     def _do_request(self, *, system_instruction: str, user_text: str,
                     temperature: float, json_mode: bool) -> LLMResponse:
         # temperature 는 codex 가 직접 받지 않음 (model_reasoning_effort 로 대체). 무시.
         # json_mode: 호출 측 prompt 가 "JSON 만 출력" 명시한다는 전제로 별도 schema 강제 X.
         bin_path = _codex_bin()
-        reasoning = _reasoning_effort_for(self.model)
+        reasoning = self.reasoning_effort or _reasoning_effort_for(self.model)
         prompt = f"{system_instruction}\n\n---\n\n{user_text}"
 
         with tempfile.TemporaryDirectory(prefix="codex_workdir_") as workdir:

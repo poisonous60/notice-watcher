@@ -8,7 +8,8 @@
       "notify_filter":    "openrouter:google/gemini-flash-1.5-8b",
       "_default":         "gemini:gemini-2.5-flash"
     }
-- 값 형식: `<provider>:<model>`. provider 생략 시 gemini 로 가정.
+- 값 형식: `<provider>:<model>` 또는 `<provider>:<model>#<effort>`. provider 생략 시 gemini 로 가정.
+  `#<effort>` (low|medium|high) 는 codex 전용 reasoning effort override — 없으면 모델명 기반 자동 추론.
 - 파일 없거나 키 없으면 `_default` → 그것도 없으면 `GEMINI_MODEL` env 또는 gemini-2.5-flash.
 - mtime 캐시 — 파일 바뀌면 다음 호출에서 자동 재로드. (대시보드가 파일 쓰면 즉시 반영.)
 - 동일 (provider, model) 에 대해 클라이언트 인스턴스 캐싱 — httpx 는 호출마다 새로 열지만 클라이언트 객체
@@ -38,19 +39,36 @@ _DEFAULT_ROUTING = _REPO_ROOT / "output" / "llm_routing.json"
 class _Route:
     provider: str
     model: str
+    effort: Optional[str] = None  # codex reasoning effort override (low|medium|high)
+
+
+_VALID_EFFORTS = ("low", "medium", "high")
 
 
 def _parse_target(s: str) -> _Route:
     s = s.strip()
+    effort: Optional[str] = None
+    # 끝의 `#<low|medium|high>` 만 effort 로 인식. 그 외 '#' 는 모델명 일부로 보존(backward-compat —
+    # 모델 id 에 '#' 가 들어와도 잘리지 않음).
+    if "#" in s:
+        base, _, suffix = s.rpartition("#")
+        if suffix.strip().lower() in _VALID_EFFORTS:
+            s = base.strip()
+            effort = suffix.strip().lower()
     if ":" not in s:
-        return _Route("gemini", s)
-    p, m = s.split(":", 1)
-    return _Route(p.strip(), m.strip())
+        provider, model = "gemini", s
+    else:
+        p, m = s.split(":", 1)
+        provider, model = p.strip(), m.strip()
+    # effort 는 codex 만 의미 있음 — 그 외 provider 면 버려서 cache key 오염/오설정 은닉 방지.
+    if provider != "codex":
+        effort = None
+    return _Route(provider, model, effort)
 
 
 _cache_mtime: float = -1.0
 _cache_table: dict[str, _Route] = {}
-_client_cache: dict[tuple[str, str], LLMClient] = {}
+_client_cache: dict[tuple[str, str, Optional[str]], LLMClient] = {}
 _process_override: Optional[str] = None
 
 
@@ -115,7 +133,7 @@ def client_for(call_site: str, *, override: Optional[str] = None,
     `override` (이 호출 한정) > `set_process_override` > routing.json > _default > GEMINI_MODEL env.
     """
     route = resolve(call_site, override=override)
-    key = (route.provider, route.model)
+    key = (route.provider, route.model, route.effort)
     cli = _client_cache.get(key)
     if cli is None:
         rec = recorder if recorder is not None else get_default_recorder()
@@ -124,7 +142,8 @@ def client_for(call_site: str, *, override: Optional[str] = None,
         elif route.provider == "openrouter":
             cli = OpenRouterClient(model=route.model, recorder=rec, cost_fn=compute_cost)
         elif route.provider == "codex":
-            primary = CodexClient(model=route.model, recorder=rec, cost_fn=compute_cost)
+            primary = CodexClient(model=route.model, reasoning_effort=route.effort,
+                                  recorder=rec, cost_fn=compute_cost)
             fallback = GeminiClient(model=gemini_default_model(), recorder=rec, cost_fn=compute_cost)
             cli = FallbackClient(primary, fallback)
         else:

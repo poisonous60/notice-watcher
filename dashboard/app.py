@@ -925,14 +925,7 @@ async def control_page(request: Request, load_remote: int = Query(0)):
 @app.post("/control/save/routing", response_class=HTMLResponse)
 async def control_save_routing(request: Request):
     form = await request.form()
-    routing = {
-        "config_generate":       form.get("config_generate", ""),
-        "config_retry":          form.get("config_retry", ""),
-        "classify_index_content": form.get("classify_index_content", ""),
-        "notify_summarize":      form.get("notify_summarize", ""),
-        "notify_filter":         form.get("notify_filter", ""),
-        "_default":              form.get("_default", ""),
-    }
+    routing = ctrl.build_routing_form(dict(form))
     res = await ctrl.save_routing(routing)
     return _partial("_control_result.html", request, res=res, title="routing")
 

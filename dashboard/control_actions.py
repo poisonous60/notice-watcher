@@ -207,6 +207,19 @@ def interpret_systemctl_status(output: str) -> str:
 _VALID_CALL_SITES = {"config_generate", "config_retry", "classify_index_content",
                      "notify_summarize", "notify_filter", "_default"}
 
+# codex 전용 reasoning effort 옵션 (UI 드롭다운 + 검증). 빈 값 = 모델명 기반 자동 추론.
+REASONING_EFFORTS = ["low", "medium", "high"]
+
+
+def split_routing_value(v: str) -> tuple[str, str]:
+    """'provider:model#effort' → ('provider:model', 'effort'). effort 없으면 ('provider:model', '')."""
+    if not isinstance(v, str):
+        return "", ""
+    if "#" in v:
+        model, eff = v.split("#", 1)
+        return model.strip(), eff.strip().lower()
+    return v.strip(), ""
+
 
 def load_routing_local() -> dict:
     if not ROUTING_PATH.exists():
@@ -247,12 +260,40 @@ def validate_routing(data: dict) -> Optional[str]:
             continue  # _comment 같은 키 허용
         if k not in _VALID_CALL_SITES:
             return f"알 수 없는 call_site: {k!r}. 허용: {sorted(_VALID_CALL_SITES)}"
-        if not isinstance(v, str) or ":" not in v:
+        if not isinstance(v, str):
             return f"{k}: 값 형식이 'provider:model' 가 아님 → {v!r}"
-        provider = v.split(":", 1)[0].strip()
+        model_part, effort = split_routing_value(v)
+        if ":" not in model_part:
+            return f"{k}: 값 형식이 'provider:model' 가 아님 → {v!r}"
+        provider = model_part.split(":", 1)[0].strip()
         if provider not in ("gemini", "openrouter", "codex"):
             return f"{k}: 알 수 없는 provider {provider!r}"
+        if effort:
+            if effort not in REASONING_EFFORTS:
+                return f"{k}: 알 수 없는 reasoning effort {effort!r} (low|medium|high)"
+            if provider != "codex":
+                return f"{k}: reasoning effort 는 codex provider 만 지원 → {v!r}"
     return None
+
+
+def build_routing_form(form: dict) -> dict:
+    """form_data → {call_site: 'provider:model' 또는 'provider:model#effort'}.
+
+    각 call_site 의 모델 select(name=call_site) + effort select(name=f'{call_site}__effort').
+    effort 는 codex 모델에만 붙임 (그 외 무시). 빈 모델은 '' → save_routing 이 매핑 제거.
+    """
+    out: dict[str, str] = {}
+    for cs in _VALID_CALL_SITES:
+        model = (form.get(cs) or "").strip()
+        if not model:
+            out[cs] = ""
+            continue
+        effort = (form.get(f"{cs}__effort") or "").strip().lower()
+        if effort in REASONING_EFFORTS and model.split(":", 1)[0].strip() == "codex":
+            out[cs] = f"{model}#{effort}"
+        else:
+            out[cs] = model
+    return out
 
 
 async def save_routing(routing: dict) -> dict:
@@ -577,13 +618,28 @@ async def gather_state(*, load_remote: bool = False) -> dict:
             r = _routing.resolve("__nonexistent_for_default__")  # _default 또는 fallback
         else:
             r = _routing.resolve(cs)
-        effective[cs] = f"{r.provider}:{r.model}"
+        effective[cs] = f"{r.provider}:{r.model}" + (f"#{r.effort}" if r.effort else "")
+    # 모델/effort 를 분리해 둠 — 템플릿이 model select 와 effort select 를 각각 채우게.
+    current_model: dict[str, str] = {}
+    current_effort: dict[str, str] = {}
+    effective_model: dict[str, str] = {}
+    effective_effort: dict[str, str] = {}
+    for cs, _ in CALL_SITES:
+        cm, ce = split_routing_value(routing_map.get(cs, ""))
+        current_model[cs], current_effort[cs] = cm, ce
+        em, ee = split_routing_value(effective.get(cs, ""))
+        effective_model[cs], effective_effort[cs] = em, ee
     state = {
         "routing": {
             "local_present": ROUTING_PATH.exists(),
-            "current": routing_map,                # {call_site: 'provider:model'} — 명시 override 만
-            "effective": effective,                # {call_site: 'provider:model'} — 실제 적용 (override 없으면 fallback)
-            "models":  known_models(),             # dropdown 옵션
+            "current": routing_map,                # {call_site: 'provider:model[#effort]'} — 명시 override 만
+            "effective": effective,                # {call_site: 'provider:model[#effort]'} — 실제 적용 (override 없으면 fallback)
+            "current_model": current_model,        # override 의 모델 부분만
+            "current_effort": current_effort,      # override 의 effort 부분만 ('' = 미지정)
+            "effective_model": effective_model,
+            "effective_effort": effective_effort,
+            "models":  known_models(),             # model dropdown 옵션
+            "efforts": REASONING_EFFORTS,          # effort dropdown 옵션 (codex 전용)
             "call_sites": CALL_SITES,
         },
         "runtime": {
