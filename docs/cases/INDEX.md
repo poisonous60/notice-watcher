@@ -2,10 +2,11 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 231 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 233 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
+| [`infra_headless_browser_profile_2026-05-22`](infra_headless_browser_profile_2026-05-22.md) | ✅ probe generic 개선 — real Chrome 우선 + CF interstitial 대기 + fingerprint 통일로 anti-bot 오분류 줄이고 target 404/entry blocked 정확히 분류 (S4-first reorder 는 review 에서 revert) | 2026-05-22 | C | capability_blocked, baseline_blocked, entry_blocked, target_not_found | https://www.livechart.me/news |
 | [`host_toranoana-jp_news_84973d13`](host_toranoana-jp_news_84973d13.md) | ✅ 수동 config (입력 URL은 404, 공식 news.toranoana.jp로 remap) | 2026-05-22 | none | target_not_found, posts_nonempty, url_remap | https://www.toranoana.jp/news/ |
 | [`host_tappytoon-com_en_3c39ed9e`](host_tappytoon-com_en_3c39ed9e.md) | ✅ remap 후 손 config 등록 (Freshdesk Notices & News, baseline 10건) | 2026-05-22 | none | probe_timeout, target_not_found, url_remap | https://www.tappytoon.com/en/notice |
 | [`host_support-google-_a_f31fe093`](host_support-google-_a_f31fe093.md) | 🚫 거부 (legacy Google Support table URL 이 단일 도움말 article 로 remap — 게시판 아님) | 2026-05-22 | none | posts_nonempty, not_a_board, nav_only_same_host, legacy_table_remap, content_as_list | https://support.google.com/a/table/7539891 |
@@ -20,6 +21,7 @@
 | [`host_goodsmileracing_news_f0c534c5`](host_goodsmileracing_news_f0c534c5.md) | ✅ preflight b-hit 회복 + config 등록 (baseline 10건, httpx_html RSS) | 2026-05-22 | F | posts_nonempty, blocked_bot | https://www.goodsmileracing.com/news/ |
 | [`host_funimation-com_blog_65f137c9`](host_funimation-com_blog_65f137c9.md) | 🔧 손 config (httpx_json) — Funimation blog remap to Crunchyroll News API | 2026-05-22 | none | posts_nonempty | https://www.funimation.com/blog/ |
 | [`host_france24-com_en_a8047c17`](host_france24-com_en_a8047c17.md) | ✅ 등록 완료 (preflight b-hit; reuse-probe 자동 생성 playwright_html config) | 2026-05-22 | none | fetch_list, post_id_unique | https://www.france24.com/en/ |
+| [`host_fantia-jp_posts_fd55ceac`](host_fantia-jp_posts_fd55ceac.md) | 🚫 거부 (Fantia posts는 로그인 페이지로 리다이렉트 — 자동 등록 미지원) | 2026-05-22 | none | probe_timeout, login_required, policy_reject | https://fantia.jp/posts |
 | [`host_crunchyroll-com_news_02fd4569`](host_crunchyroll-com_news_02fd4569.md) | 🔧 손 config (httpx_json) — Crunchyroll News 공개 JSON API 사용 | 2026-05-22 | none | posts_nonempty | https://www.crunchyroll.com/news |
 | [`host_call-for-papers_root_90032f22`](host_call-for-papers_root_90032f22.md) | 🧩 수동 config — root landing 을 all recent posts 목록으로 remap | 2026-05-22 | none | posts_nonempty, wrong_first_article, nav_only_candidates, empty_rss | https://call-for-papers.sas.upenn.edu/ |
 | [`host_booth-pm_announcements_b96f82ef`](host_booth-pm_announcements_b96f82ef.md) | ✅ 손 config 등록 (baseline 20건, httpx_html) | 2026-05-22 | none | probe_timeout | https://booth.pm/announcements |
@@ -246,7 +248,7 @@
 |---|---|
 | (미기재) | 36 |
 | B | 1 |
-| C | 16 |
+| C | 17 |
 | C+A | 1 |
 | C+D | 2 |
 | C+F | 2 |
@@ -259,7 +261,7 @@
 | F+C | 3 |
 | adapter | 1 |
 | config | 2 |
-| none | 75 |
+| none | 76 |
 
 ### config_strategy 분포
 
@@ -271,11 +273,11 @@
 | httpx_json | 21 |
 | httpx_json (미적용 — 콘텐츠 0) | 1 |
 | mixed | 1 |
-| none | 33 |
+| none | 35 |
 | playwright_html | 25 |
 | rejected | 1 |
 
 ### 최근 90일 (≥ 2026-02-20)
 
-케이스 231 건.
+케이스 233 건.
 

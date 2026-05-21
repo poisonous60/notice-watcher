@@ -2,12 +2,25 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 from typing import Optional
 
 from .signals import classify
 from .types import Classification, Result
+
+_DEFAULT_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/148.0.0.0 Safari/537.36"
+)
+_FINGERPRINT_INIT_SCRIPT = """
+Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+Object.defineProperty(navigator, 'languages', { get: () => ['ko-KR', 'ko', 'en-US', 'en'] });
+Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+window.chrome = window.chrome || { runtime: {} };
+"""
 
 
 def is_available() -> bool:
@@ -16,6 +29,19 @@ def is_available() -> bool:
         return True
     except ImportError:
         return False
+
+
+def _launch_browser(p):
+    channel_pref = os.environ.get("PROBE_BROWSER_CHANNEL", "chrome,msedge,bundled")
+    channels = [x.strip().lower() for x in channel_pref.split(",") if x.strip()]
+    for channel in channels:
+        try:
+            if channel in ("bundled", "chromium", "playwright"):
+                return p.chromium.launch(headless=False)
+            return p.chromium.launch(channel=channel, headless=False)
+        except Exception:
+            pass
+    return p.chromium.launch(headless=False)
 
 
 def ensure_login_and_fetch(
@@ -46,15 +72,25 @@ def ensure_login_and_fetch(
 
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=False)
+            browser = _launch_browser(p)
             ctx_kwargs = {
-                "viewport": {"width": 1280, "height": 800},
+                "viewport": {"width": 1365, "height": 768},
+                "screen": {"width": 1365, "height": 768},
                 "locale": "ko-KR",
+                "timezone_id": "Asia/Seoul",
+                "user_agent": _DEFAULT_UA,
+                "extra_http_headers": {
+                    "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+                },
                 "service_workers": "block",  # SW assertion crash 차단 — fetch_headless.py 참조.
             }
             if state_path.exists():
                 ctx_kwargs["storage_state"] = str(state_path)
             context = browser.new_context(**ctx_kwargs)
+            try:
+                context.add_init_script(_FINGERPRINT_INIT_SCRIPT)
+            except Exception:
+                pass
             page = context.new_page()
 
             page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)

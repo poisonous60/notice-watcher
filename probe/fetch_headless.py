@@ -72,6 +72,89 @@ _LAUNCH_ARGS = [
 # stylesheet 차단은 visual 렌더만 영향, JS engine 실행과 XHR 발사는 무관 (대부분 SPA 에서 안전).
 _BLOCKED_RESOURCE_TYPES = {"image", "media", "font", "stylesheet"}
 
+_DEFAULT_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/148.0.0.0 Safari/537.36"
+)
+
+_FINGERPRINT_INIT_SCRIPT = """
+Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+Object.defineProperty(navigator, 'languages', { get: () => ['ko-KR', 'ko', 'en-US', 'en'] });
+Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+window.chrome = window.chrome || { runtime: {} };
+"""
+
+_CF_INTERSTITIAL_RE = re.compile(
+    r"just a moment|checking your browser|cdn-cgi/challenge-platform|__cf_chl|cf-chl-opt",
+    re.IGNORECASE,
+)
+_TURNSTILE_RE = re.compile(r"turnstile|cf-turnstile|challenges.cloudflare.com", re.IGNORECASE)
+
+
+def _context_kwargs(*, storage_state_path: Optional[Path], record_har_path: Optional[Path] = None) -> dict:
+    kwargs: dict = {
+        "viewport": {"width": 1365, "height": 768},
+        "screen": {"width": 1365, "height": 768},
+        "device_scale_factor": 1,
+        "locale": "ko-KR",
+        "timezone_id": "Asia/Seoul",
+        "service_workers": "block",
+        "user_agent": _DEFAULT_UA,
+        "extra_http_headers": {
+            "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+        },
+    }
+    if record_har_path is not None:
+        kwargs["record_har_path"] = str(record_har_path)
+        kwargs["record_har_content"] = "attach"
+    if storage_state_path and storage_state_path.exists():
+        kwargs["storage_state"] = str(storage_state_path)
+    return kwargs
+
+
+def _install_fingerprint_patch(context) -> None:
+    try:
+        context.add_init_script(_FINGERPRINT_INIT_SCRIPT)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _is_cloudflare_interstitial(page) -> tuple[bool, bool]:
+    try:
+        title = page.title() or ""
+    except Exception:  # noqa: BLE001
+        title = ""
+    try:
+        html = page.content()[:120_000]
+    except Exception:  # noqa: BLE001
+        html = ""
+    hay = f"{title}\n{page.url}\n{html}"
+    return bool(_CF_INTERSTITIAL_RE.search(hay)), bool(_TURNSTILE_RE.search(hay))
+
+
+def _wait_through_cloudflare_interstitial(page, *, timeout_ms: int = 8000) -> str | None:
+    """Cloudflare JS interstitial can clear itself; Turnstile/captcha should not be bypassed."""
+    challenge, turnstile = _is_cloudflare_interstitial(page)
+    if not challenge or turnstile:
+        return "turnstile_present" if turnstile else None
+    deadline = time.perf_counter() + (timeout_ms / 1000.0)
+    while time.perf_counter() < deadline:
+        try:
+            page.wait_for_timeout(500)
+        except Exception:  # noqa: BLE001
+            break
+        challenge, turnstile = _is_cloudflare_interstitial(page)
+        if turnstile:
+            return "turnstile_present"
+        if not challenge:
+            try:
+                page.wait_for_load_state("domcontentloaded", timeout=1500)
+            except Exception:  # noqa: BLE001
+                pass
+            return "cloudflare_interstitial_cleared"
+    return "cloudflare_interstitial_timeout"
+
 
 def _install_resource_block(context) -> None:
     def _route(route):
@@ -157,6 +240,19 @@ def _capture_page_content(page) -> tuple[str, bool]:
 _DAEMON_ENDPOINT_FILE = Path(__file__).resolve().parent.parent / "output" / "playwright_daemon" / "endpoint"
 
 
+def _launch_browser(p, *, headless: bool):
+    channel_pref = os.environ.get("PROBE_BROWSER_CHANNEL", "chrome,msedge,bundled")
+    channels = [x.strip().lower() for x in channel_pref.split(",") if x.strip()]
+    for channel in channels:
+        try:
+            if channel in ("bundled", "chromium", "playwright"):
+                return p.chromium.launch(headless=headless, args=_LAUNCH_ARGS)
+            return p.chromium.launch(channel=channel, headless=headless, args=_LAUNCH_ARGS)
+        except Exception as e:  # noqa: BLE001
+            log.debug("browser launch failed for channel=%s: %r", channel, e)
+    return p.chromium.launch(headless=headless, args=_LAUNCH_ARGS)
+
+
 def _connect_or_launch(p, *, headless: bool):
     """daemon endpoint 파일 있으면 connect_over_cdp 시도, 실패 또는 없으면 fresh launch.
 
@@ -185,7 +281,7 @@ def _connect_or_launch(p, *, headless: bool):
                     return p.chromium.connect_over_cdp(ws, timeout=3000)
         except Exception:  # noqa: BLE001 — daemon 죽었거나 endpoint 깨짐 → fallback
             pass
-    return p.chromium.launch(headless=headless, args=_LAUNCH_ARGS)
+    return _launch_browser(p, headless=headless)
 
 
 def fetch_with_capture(
@@ -258,27 +354,9 @@ def fetch_with_capture(
             context = None
             try:
                 browser = _connect_or_launch(p, headless=headless)
-                context_kwargs = {
-                    "record_har_path": str(har_path),
-                    "record_har_content": "attach",
-                    "viewport": {"width": 1280, "height": 800},
-                    "locale": "ko-KR",
-                    # SW 차단 — daemon chromium 의 shared chromium 안에 다른 사이트(예: hoyolab.com)
-                    # 가 등록한 service_worker 가 attach 시점 race 로 CRBrowser assertion crash
-                    # (microsoft/playwright Service Worker target type 미처리). Node driver 죽고
-                    # subprocess pipe block → 600s timeout. SW 없으면 probe 영향 없음 — RSS/HTML/
-                    # JSON list 다 메인 페이지 응답 확보가 목적.
-                    "service_workers": "block",
-                    "user_agent": (
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                        "AppleWebKit/537.36 (KHTML, like Gecko) "
-                        "Chrome/124.0.0.0 Safari/537.36"
-                    ),
-                }
-                if storage_state_path and storage_state_path.exists():
-                    context_kwargs["storage_state"] = str(storage_state_path)
-
+                context_kwargs = _context_kwargs(storage_state_path=storage_state_path, record_har_path=har_path)
                 context = browser.new_context(**context_kwargs)
+                _install_fingerprint_patch(context)
                 _install_resource_block(context)
                 if _has_stealth:
                     try:
@@ -315,6 +393,7 @@ def fetch_with_capture(
                         status = response.status
                         response_headers = dict(response.headers)
                         final_url = response.url
+                    wait_note = _wait_through_cloudflare_interstitial(page)
                     # 데이터 XHR/fetch 응답 끝날 때까지 대기 — networkidle 보다 빠름 (광고 image 무시)
                     _wait_xhr_quiet(page, quiet_ms=300, hard_timeout_ms=idle_timeout_ms)
 
@@ -356,6 +435,8 @@ def fetch_with_capture(
         baseline_blocked=baseline_blocked,
     )
     notable.append(f"har: {har_path.name}")
+    if "wait_note" in locals() and wait_note:
+        notable.append(wait_note)
     if html_truncated:
         notable.append(f"html_truncated: {len(body or '')}/{_MAX_CAPTURED_HTML_CHARS} chars")
     if captured_nav_headers:
@@ -510,18 +591,9 @@ def fetch_article_by_click(
             context = None
             try:
                 browser = _connect_or_launch(p, headless=headless)
-                ckw: dict = {
-                    "record_har_path": str(har_path),
-                    "record_har_content": "attach",
-                    "viewport": {"width": 1280, "height": 800},
-                    "locale": "ko-KR",
-                    "service_workers": "block",  # SW assertion crash 차단 — fetch_with_capture 코멘트 참조.
-                    "user_agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                                   "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"),
-                }
-                if storage_state_path and storage_state_path.exists():
-                    ckw["storage_state"] = str(storage_state_path)
+                ckw = _context_kwargs(storage_state_path=storage_state_path, record_har_path=har_path)
                 context = browser.new_context(**ckw)
+                _install_fingerprint_patch(context)
                 # Phase 9b 는 stylesheet 차단 X — 클릭 visibility 검출에 영향 가능. image/font/media 만 차단.
                 def _route_click(route):
                     try:
@@ -543,6 +615,7 @@ def fetch_article_by_click(
                 page = context.new_page()
                 try:
                     page.goto(list_url, wait_until="domcontentloaded", timeout=timeout_ms)
+                    wait_note = _wait_through_cloudflare_interstitial(page)
                     _wait_xhr_quiet(page, quiet_ms=300, hard_timeout_ms=idle_timeout_ms)
                     links = page.evaluate(_LINK_JS) or []
                     ranked = sorted(((_score_click_link(l, page_host=page_host), l) for l in links),
@@ -628,6 +701,8 @@ def fetch_article_by_click(
         notable.append(f"clicked → {final_url[:80]}")
     if html_truncated:
         notable.append(f"html_truncated: {len(body or '')}/{_MAX_CAPTURED_HTML_CHARS} chars")
+    if "wait_note" in locals() and wait_note:
+        notable.append(wait_note)
     notable.append(f"har: {har_path.name}")
     if meta.get("note"):
         notable.append(meta["note"][:80])

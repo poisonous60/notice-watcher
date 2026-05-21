@@ -219,15 +219,29 @@ def diagnose(
         target_results: list[Result] = list(static_results)
         if headless is not None:
             target_results.append(headless)
+        primary_target_results = list(target_results)
         if captured_retry is not None:
             target_results.append(captured_retry)
         if s1l is not None:
             target_results.append(s1l)
-        if target_results and all(r.classification == Classification.NOT_FOUND for r in target_results):
+        primary_all_not_found = (
+            bool(primary_target_results)
+            and all(r.classification == Classification.NOT_FOUND for r in primary_target_results)
+        )
+        all_not_found = bool(target_results) and all(
+            r.classification == Classification.NOT_FOUND for r in target_results
+        )
+        if all_not_found or primary_all_not_found:
             verdict_parts.append("TARGET_NOT_FOUND")
             notes.append(
                 "baseline(도메인 루트) 은 OK 인데 입력 URL 의 모든 진입 시도가 404 — "
                 "사이트 차단이 아니라 그 URL 의 글이 존재하지 않음 (잘못된 URL 또는 삭제됨)."
+            )
+        elif target_results and all(r.classification == Classification.BLOCKED_BOT for r in target_results):
+            verdict_parts.append("ENTRY_BLOCKED")
+            notes.append(
+                "baseline(도메인 루트) 은 OK 이지만 입력 URL 의 모든 진입 시도가 봇 보호로 차단됨 — "
+                "사이트 전체 차단보다 특정 경로/엔트리 보호에 가까움."
             )
 
     verdict = " / ".join(verdict_parts) if verdict_parts else "분류 보류"

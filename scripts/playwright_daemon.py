@@ -32,6 +32,7 @@ from __future__ import annotations
 import argparse
 import os
 import signal
+import shutil
 import socket
 import sys
 import time
@@ -67,6 +68,46 @@ _LAUNCH_ARGS = [
     "--disable-features=TranslateUI,ServiceWorker",
     "--disable-translate",
 ]
+
+
+def _chrome_executable_path(playwright_chromium_path: str) -> tuple[str, str]:
+    """Prefer installed Chrome/Edge for anti-bot parity, fall back to Playwright Chromium."""
+    pref = os.environ.get("PROBE_BROWSER_CHANNEL", "chrome,msedge,bundled")
+    channels = [x.strip().lower() for x in pref.split(",") if x.strip()]
+
+    env_path = os.environ.get("PROBE_CHROME_EXECUTABLE")
+    if env_path and Path(env_path).exists():
+        return env_path, "env"
+
+    win_roots = [
+        os.environ.get("ProgramFiles"),
+        os.environ.get("ProgramFiles(x86)"),
+        os.environ.get("LOCALAPPDATA"),
+    ]
+    channel_paths = {
+        "chrome": [
+            shutil.which("google-chrome-stable"),
+            shutil.which("google-chrome"),
+            shutil.which("chrome"),
+            *(str(Path(root) / "Google" / "Chrome" / "Application" / "chrome.exe")
+              for root in win_roots if root),
+        ],
+        "msedge": [
+            shutil.which("microsoft-edge-stable"),
+            shutil.which("microsoft-edge"),
+            shutil.which("msedge"),
+            *(str(Path(root) / "Microsoft" / "Edge" / "Application" / "msedge.exe")
+              for root in win_roots if root),
+        ],
+        "bundled": [playwright_chromium_path],
+        "chromium": [playwright_chromium_path],
+        "playwright": [playwright_chromium_path],
+    }
+    for channel in channels:
+        for candidate in channel_paths.get(channel, []):
+            if candidate and Path(candidate).exists():
+                return candidate, channel
+    return playwright_chromium_path, "bundled"
 
 
 def _log(msg: str) -> None:
@@ -248,7 +289,7 @@ def cmd_start(no_idle: bool = False) -> int:
     # 외부 connect_over_cdp 불가. 그래서 chromium binary path 만 받아서 직접 subprocess.Popen 으로 띄움.
     import subprocess as _sp
     with sync_playwright() as _p_tmp:
-        chrome_path = _p_tmp.chromium.executable_path
+        chrome_path, browser_kind = _chrome_executable_path(_p_tmp.chromium.executable_path)
     if not chrome_path or not Path(chrome_path).exists():
         _log(f"chromium binary not found: {chrome_path!r}")
         PID_FILE.unlink(missing_ok=True)
@@ -289,7 +330,7 @@ def cmd_start(no_idle: bool = False) -> int:
             # Windows 일부 환경에서 핸들 못 잡을 수 있음 — 무시
             pass
 
-    _log(f"spawning chromium: {chrome_path} (port={port})")
+    _log(f"spawning chromium: {chrome_path} browser={browser_kind} (port={port})")
     # start_new_session (POSIX) — chromium 을 별도 process group 으로 → SIGKILL escalation 시
     # os.killpg 로 renderer/GPU child 까지 함께 정리. Windows 는 무시됨.
     _popen_kwargs = dict(

@@ -114,5 +114,18 @@ def run() -> list[tuple[str, bool, str]]:
     )
     cases.append(("baseline_ok_target_blocked_not_target_not_found",
                   "TARGET_NOT_FOUND" not in d5.verdict, d5.verdict))
+    cases.append(("baseline_ok_target_blocked_gets_entry_blocked",
+                  "ENTRY_BLOCKED" in d5.verdict, d5.verdict))
+
+    # 6. direct target attempts are all 404, but later captured-header retry trips WAF.
+    #    The retry should not hide URL-dead evidence from the primary attempts.
+    d6 = _run_diagnose(
+        baseline_classes=[C.OK, C.OK],
+        static_classes=[C.NOT_FOUND, C.NOT_FOUND, C.NOT_FOUND],
+        headless_class=C.NOT_FOUND,
+        captured_class=C.BLOCKED_BOT,
+    )
+    cases.append(("target_404_not_hidden_by_hcap_waf",
+                  "TARGET_NOT_FOUND" in d6.verdict, d6.verdict))
 
     return cases
