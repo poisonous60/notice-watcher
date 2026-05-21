@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "site": "cloud.google.com",
+  "board": "release-notes",
+  "strategy": "handwritten",
+  "adapter": "GoogleCloudReleaseNotesAdapter",
+  "kwargs": {
+    "board": "release-notes",
+    "feed_url": "https://cloud.google.com/feeds/gcp-release-notes.xml",
+    "timeout": 15.0
+  },
+  "polite_sleep": {
+    "min": 3,
+    "max": 6
+  },
+  "_slug_board": "release-notes",
+  "_source_url": "https://cloud.google.com/release-notes",
+  "_note": "Google Cloud release notes — official Atom feed. The HTML page is large and probe can timeout; the feed is the documented subscription channel. Adapter splits each date entry into product/kind release-note posts with stable hashes.",
+  "_recognized_platform": "host_cloud-google-co"
+}
