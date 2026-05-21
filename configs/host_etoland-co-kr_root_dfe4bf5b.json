@@ -1,7 +1,7 @@
 {
   "version": 1,
   "site": "www.etoland.co.kr",
-  "board": "etohumor07",
+  "board": "star02",
   "strategy": "playwright_html",
   "nav_timeout_ms": 30000,
   "idle_timeout_ms": 14000,
@@ -9,7 +9,7 @@
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
   },
   "list": {
-    "url_template": "https://www.etoland.co.kr/b/etohumor07",
+    "url_template": "https://www.etoland.co.kr/b/star02",
     "pagination": {"kind": "none"},
     "wait_selector": "li.flex.items-start.gap-1\\.5 a[href*='/view/']",
     "row_selector": "li.flex.items-start.gap-1\\.5",
@@ -31,5 +31,5 @@
   },
   "article": {"fetch_kind": "html", "content": [], "body_empty_acceptable": true},
   "_source_url": "https://www.etoland.co.kr/",
-  "_note": "이토랜드 유머 게시판(/b/etohumor07) — root www.etoland.co.kr 은 React app-router SPA 홈페이지(위젯 혼합, 정적 anchor 없음). 보드 페이지도 client-render(정적 0 anchor, __NEXT_DATA__/RSS/API 없음) → playwright_html 렌더 필요. row=li.flex.items-start.gap-1\\.5 (Tailwind 클래스 escape), post_id=/view/ slug 끝 번호."
+  "_note": "이토랜드 연예 게시판(/b/star02 — 봇 사용자가 /watch 한 보드). root www.etoland.co.kr 은 React app-router SPA 홈페이지(위젯 혼합, 정적 anchor 없음). 보드 페이지도 client-render(정적 0 anchor, __NEXT_DATA__/RSS/API 없음) → playwright_html 렌더 필요. row=li.flex.items-start.gap-1\\.5 (Tailwind 클래스 escape), post_id=/view/ slug 끝 번호. (N100 봇이 httpx_html 로 자동등록했으나 SSR 1행만 잡혀 깨짐 → playwright 로 교체.)"
 }
