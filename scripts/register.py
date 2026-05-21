@@ -421,6 +421,9 @@ def _board_shape_check(digest: dict, url: str) -> tuple[bool, str]:
 # - 분류 실패/HTML 부재 → class='?' → override 안 함 = 현 동작(거부) 유지 (fail-safe, regression 0).
 # --------------------------------------------------------------------------- #
 _CLASSIFY_OVERRIDE_MIN_CONF = 0.5
+# accept-path content-reject 임계 — override(rescue)보다 보수적. recall 우선 유지하되 *확신 있는*
+# 비-게시판만 거부 (article precision 1.000 → 진짜 게시판 오거부 ~0, 단 ?/저신뢰는 수락 유지).
+_CLASSIFY_REJECT_MIN_CONF = 0.7
 
 
 def _classify_veto(digest: dict, url: str, slug: str, gate_only: bool) -> Optional[dict]:
@@ -458,6 +461,31 @@ def _gate_reject_or_veto(digest: dict, url: str, slug: str, gate_only: bool, *,
         cnote = " [classifier skip (--gate-only)]"
     try:
         _save_rejected(slug, url, reason + cnote, note=note, learn=learn)
+    except Exception as e:  # noqa: BLE001
+        print(f"[register] ⚠ REJECTED 마커 저장 실패 (rc=3): {e}", file=sys.stderr)
+    return 3
+
+
+def _accept_path_content_reject(digest: dict, url: str, slug: str, gate_only: bool) -> Optional[int]:
+    """모든 구조 게이트 *통과* 후 마지막 분류기 체크 — 분류기가 'content'(단일 글/비-게시판) 를
+    conf≥_CLASSIFY_REJECT_MIN_CONF 로 판단하면 거부(rc=3). 게이트가 놓친 false-accept(비-게시판이
+    게이트 다 뚫고 등록되어 폴링 junk/generation 헛돔) 차단. ADR 0007 의 reject-veto 와 대칭 —
+    같은 분류기를 수락 경로에도 적용 (등록당 1콜 memoize 공유).
+
+    'index'/'?'/저신뢰 → None(계속, 수락) = recall 우선 유지. gate_only → _classify_veto 가 None
+    (LLM skip) → 항상 None (cheap 모드 보존). 알려진 플랫폼(discourse/xenforo)은 이 함수 도달 전
+    early-return 이라 영향 없음."""
+    res = _classify_veto(digest, url, slug, gate_only)
+    if not (res and res.get("class") == "content"
+            and res.get("confidence", 0.0) >= _CLASSIFY_REJECT_MIN_CONF):
+        return None
+    cnote = f" [classifier=content conf={res.get('confidence')}: {res.get('reason', '')[:80]}]"
+    print(f"[register] 🔴 모든 게이트 통과했으나 LLM 분류기가 content(비-게시판)로 판단 — 등록 거부 "
+          f"(conf={res.get('confidence')}, {res.get('reason', '')[:80]})")
+    try:
+        # learn=False — page-specific (같은 host 의 다른 path 는 진짜 게시판 가능). board_shape 와 동일.
+        _save_rejected(slug, url, "accept_path content 거부 (게이트 통과 + 분류기 content)" + cnote,
+                       note="classifier: accept_path_content", learn=False)
     except Exception as e:  # noqa: BLE001
         print(f"[register] ⚠ REJECTED 마커 저장 실패 (rc=3): {e}", file=sys.stderr)
     return 3
@@ -1617,6 +1645,13 @@ def _main_inner(argv) -> int:
         if rc is not None:
             print("[register] ❌ 등록 거부 — 게시판 형식 아님.")
             return rc
+
+    # accept-path 분류기 체크 (ADR 0007 대칭) — 구조 게이트 전부 통과해도 LLM 분류기가 'content'
+    # (비-게시판) 고신뢰면 거부. 게이트가 놓친 false-accept 차단 (비-게시판 등록 → 폴링 junk 영구).
+    # 거부 veto 와 같은 memoized 분류 1콜 공유. gate_only 면 skip(None).
+    rc = _accept_path_content_reject(digest, url, slug, args.gate_only)
+    if rc is not None:
+        return rc
 
     # --gate-only: 모든 게이트 통과. preflight (네트워크 re-probe) + LLM 호출 *직전* 종료.
     # 비용 0 보장 — post-fix-cleanup 의 "수동 작업 필요" 신호.

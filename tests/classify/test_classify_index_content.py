@@ -167,6 +167,27 @@ def run() -> list[tuple[str, bool, str]]:
         saved.clear()
         out3 = reg._gate_reject_or_veto({}, "u3", "s3", True, reason="rsn", note="gate: x", learn=False)
         cases.append(("gate_only_rejects", out3 == 3 and len(saved) == 1, f"out={out3} saved={len(saved)}"))
+
+        # 12. accept-path content-reject (ADR 0007 대칭) — 게이트 통과 후 분류기 content 고신뢰 → 거부
+        saved.clear()
+        classify_mod.classify_index_content = lambda *, url, digest, slug=None: {"class": "content", "confidence": 0.9, "reason": "단일글"}
+        out_a = reg._accept_path_content_reject({}, "ua", "sa", False)
+        cases.append(("accept_reject_content_high", out_a == 3 and len(saved) == 1 and saved[0][1].get("learn") is False,
+                      f"out={out_a} saved={len(saved)}"))
+        # content 저신뢰(< 0.7) → 수락 유지 (None, 마커 X)
+        saved.clear()
+        classify_mod.classify_index_content = lambda *, url, digest, slug=None: {"class": "content", "confidence": 0.6, "reason": "약함"}
+        out_b = reg._accept_path_content_reject({}, "ub", "sb", False)
+        cases.append(("accept_keep_content_low", out_b is None and len(saved) == 0, f"out={out_b}"))
+        # index → 수락 (None)
+        classify_mod.classify_index_content = lambda *, url, digest, slug=None: {"class": "index", "confidence": 0.95, "reason": "board"}
+        cases.append(("accept_keep_index", reg._accept_path_content_reject({}, "uc", "sc", False) is None, ""))
+        # '?' → 수락 (fail-safe, recall 우선)
+        classify_mod.classify_index_content = lambda *, url, digest, slug=None: {"class": "?", "confidence": 0.0, "reason": "x"}
+        cases.append(("accept_keep_unknown", reg._accept_path_content_reject({}, "ud", "sd", False) is None, ""))
+        # gate_only → classify skip → 수락 (None, cheap 모드 보존)
+        saved.clear()
+        cases.append(("accept_gate_only_skip", reg._accept_path_content_reject({}, "ue", "se", True) is None and len(saved) == 0, ""))
     finally:
         reg._save_rejected = orig_save
         classify_mod.classify_index_content = orig

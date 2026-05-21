@@ -20,6 +20,15 @@
 
 **veto 유지(거부 취소 안 함)**: `recognize_reject`(host 명시 known-article PATTERNS) + capability_blocked(rc=5 captcha) — 고정밀·false-reject 원인 아님.
 
+### 대칭 확장 (2026-05-21) — accept-path content-reject
+
+분류기는 `index`/`content` 대칭 출력인데 위 Decision 은 *거부 경로*(게이트 reject → index 면 구출)에만 썼다. 같은 분류기를 **수락 경로**에도 적용: 구조 게이트 *전부 통과* 후 `_accept_path_content_reject` 가 분류기 `content`(conf≥**0.7**) 면 거부(rc=3, `note="classifier: accept_path_content"`, learn=False). 게이트가 놓친 false-accept(비-게시판이 게이트 다 뚫고 등록 → 폴링 junk 영구/generation 헛돔)를 차단.
+
+- 같은 register 호출의 memoized 분류 1콜 공유 — 게이트 reject 없이 통과한 등록은 여기서 첫 1콜(이전 0콜). 등록은 사이트당 1회라 비용 bounded(폴링 무관).
+- **비대칭 임계**: 구출(override) conf≥0.5 / 거부(reject) conf≥0.7 — recall 우선 *유지*하되 *확신 있는* 비-게시판만 거부. article precision 1.000 → 진짜 게시판 오거부 ~0.
+- `?`/저신뢰 → 수락 유지(fail-safe). `--gate-only` → skip. 알려진 플랫폼(discourse/xenforo recognize fast-path)은 board_shape 도달 전 early-return → 영향 없음.
+- **철학 전환**: 원안의 "false-accept 허용(recall 우선)" tradeoff 를 *부분* 되돌림 — 사용자 결정(2026-05-21): "비-게시판 등록되어 triage/폴링 오염되는 게 더 큰 손해". 단 보수적 임계로 recall 손실 최소.
+
 ## Consequences
 
 - **득**: false-reject 핵심(SPA·marketing-root·nav-only 오발화) 회복. wired 검증 6/6(보드 4 구출, article 2 거부유지). 게이트별 사이트 escape 주석 누적 압력↓.
