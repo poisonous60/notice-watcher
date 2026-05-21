@@ -355,6 +355,7 @@ probe/prompt/schema/코드 손대기 전 다음 여섯 질문에 답해보면 �
      | `improved` | 추론 개선 — AUTO 의 *generic* 추론(probe 추출·LLM 생성·검증·거부 *분류*)이 **미지 *유형*** 을 dedicated adapter 없이 더 풂 (fix_layer C/E/A/D·거부 필터(recognize_reject)·register 거부 게이트) |
      | `handcrafted` | 수동 config — 자동이 못 푼 패치(진보 X). 단일 config·플랫폼 config(발급 recognizer)·손-adapter. fix_layer 무관(F 여도, **C 여도** handcrafted) |
      | ↑ **C-휴리스틱 함정** | fix_layer C(probe 휴리스틱)라고 자동 improved 아님. 휴리스틱이 *알려진 플랫폼 검출→기존 adapter dispatch* 목적이면 (예: `detect_discourse_platform` → DiscourseAdapter) = 커버리지 확장 = **handcrafted**. improved 는 generic 추론이 *미지 유형*을 새 adapter 없이 풀 때만 (CONTEXT.md 19/21/32줄). 판정 test: "자동 솔버가 *처음 보는 구조 유형*을 더 푸나(improved)? 아니면 *알려진 플랫폼*을 더 많은 URL 형태에서 인식만 하나(handcrafted)?" |
+     | ↑ **re-probe 회복 함정** | preflight b-hit / `register.py --reuse-probe` 로 **자동 재생성**된 config (probe·prompt 개선 commit 이후 옛 artifact 로 LLM 이 다시 풀어낸 경우) = **`improved`** (handcrafted X). config 파일이 *생겨도* 손으로 selector 안 짰음 — generic 추론이 푼 것. 판정: "이 config 의 selector/path 를 *내가 손으로 골랐나*(handcrafted) 아니면 *`--reuse-probe`/AUTO 가 생성*했나(improved)?". 회복시킨 fix 의 layer 를 fix_layer 에 (예: probe 휴리스틱이면 C). 2026-05-21-anime: ANN·comic-days·anime-japan 이 cloverworks C fix 로 b-hit 회복 — 처음 handcrafted 로 잘못 박았다 정정. |
      | `rejected` | 정책 거부 마커 |
      | `rejected_with_policy` | no-change + 영구 기록 가치 정책 결정 |
      | `no_change` | 시도했으나 효과 X (case .md narrative 가치 있을 때만) |
