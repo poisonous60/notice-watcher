@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 103 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 104 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -11,6 +11,7 @@
 | [`infra_root_marketing_loosen_2026-05-21`](infra_root_marketing_loosen_2026-05-21.md) | ✅ 게이트 완화 — root_marketing 이 same-host self-article 있는 board 를 오거부하던 것 차단 | 2026-05-21 | C | gate_reject_root_marketing | https://community.nodebb.org/ |
 | [`infra_discourse_root_form_2026-05-21`](infra_discourse_root_form_2026-05-21.md) | ✅ 자동 등록 (probe generator-meta 신호 → DiscourseAdapter dispatch — root-form 봉합) | 2026-05-21 | C | posts_nonempty, article_body_len | https://forum.openwrt.org/ |
 | [`infra_antibot_challenge_classify_2026-05-21`](infra_antibot_challenge_classify_2026-05-21.md) | ✅ probe 분류 게이트 — JS-챌린지 인터스티셜(Anubis PoW / Cloudflare)을 BLOCKED_BOT 으로 인식 → gate_reject(rc=3) 오분류를 capability_blocked(rc=5)로 교정 | 2026-05-21 | C | board_shape_check, gate_reject | https://forums.debian.net/ |
+| [`host_community-cloud_root_e65f04ea`](host_community-cloud_root_e65f04ea.md) | ✅ 손-config (Playwright /latest 목록, 본문은 challenge-gated라 제목·URL 알림) | 2026-05-21 | none | article_body_len, fetch_list_403, discourse_json_challenge | https://community.cloudflare.com/ |
 | [`batch_forums_genfail_boardurl_2026-05-21`](batch_forums_genfail_boardurl_2026-05-21.md) | ✅ 4 사이트 hand-config (포털/board-root → 실제 board URL) + engine encoding 옵션 | 2026-05-21 | F | posts_nonempty, matches_probe_first_article | https://www.humoruniv.com/ |
 | [`batch_forums_antibot_playwright_2026-05-21`](batch_forums_antibot_playwright_2026-05-21.md) | ✅ anti-bot 4 사이트 playwright_html 통과 등록 (Anubis PoW·CF) + simplemachines terminal | 2026-05-21 | F | board_shape_check, gate_reject, capability_blocked | https://www.techpowerup.com/forums/ |
 | [`steam-news-recognizer`](steam-news-recognizer.md) | ✅ recognizer 승급 (cluster 10건 → engine/recognizers/steam_news.py) | 2026-05-20 |  |  | https://store.steampowered.com/feeds/news/app/730/ |
@@ -127,7 +128,7 @@
 | F | 44 |
 | F+A | 1 |
 | F+C | 3 |
-| none | 12 |
+| none | 13 |
 
 ### config_strategy 분포
 
@@ -139,9 +140,9 @@
 | httpx_json | 12 |
 | mixed | 1 |
 | none | 21 |
-| playwright_html | 8 |
+| playwright_html | 9 |
 
 ### 최근 90일 (≥ 2026-02-20)
 
-케이스 103 건.
+케이스 104 건.
 
