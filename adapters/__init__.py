@@ -19,7 +19,7 @@ from .airtable_newsroom import AirtableNewsroomAdapter
 from .adobe_creative_cloud import AdobeCreativeCloudFeaturesAdapter
 from .canva_whats_new import CanvaWhatsNewAdapter
 from .salesforce_docs import SalesforceDocsReleaseNotesAdapter
-from .anilist import AniListMediaAdapter
+from .anilist import AniListAiringAdapter, AniListMediaAdapter
 
 __all__ = [
     "BaseAdapter",
@@ -44,5 +44,6 @@ __all__ = [
     "AdobeCreativeCloudFeaturesAdapter",
     "CanvaWhatsNewAdapter",
     "SalesforceDocsReleaseNotesAdapter",
+    "AniListAiringAdapter",
     "AniListMediaAdapter",
 ]

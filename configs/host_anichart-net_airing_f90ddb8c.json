@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "site": "anichart.net",
+  "board": "airing",
+  "strategy": "handwritten",
+  "adapter": "AniListAiringAdapter",
+  "kwargs": {
+    "board": "airing",
+    "timeout": 15
+  },
+  "_source_url": "https://anichart.net/airing",
+  "_note": "AniChart is a Vue shell backed by AniList GraphQL POST; use the existing AniList GraphQL adapter surface for airing schedules."
+}
