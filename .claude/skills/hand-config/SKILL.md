@@ -88,6 +88,26 @@ git status --short -- prompts/ engine/ probe/ generate/ engine/recognizers/
 
 ---
 
+## 0c. codex 위임 모드 (batch/triage 대량 처리 — dashboard 프롬프트 진입)
+
+dashboard `/triage` 의 "FAILED 큐 codex 위임 처리" 프롬프트를 붙여넣어 들어온 경우 (또는 큐가 여러 건이라 Claude quota 절약이 필요할 때). ADR 0008 결정: *중간 orchestration* (probe 읽기·§1~§2 진단·fix 작성·probe_smoke) 은 **codex CLI 에 위임**, Claude 토큰 0. **진입·diff 검토·commit·배포는 Claude** (이 절차).
+
+**역할 분담 — entry=Claude / middle=codex / exit=Claude**:
+- Claude: 큐 pull → 청크 분할 → codex 위임(보이는 창) → **각 청크 diff 검토** → 공유 인덱스·commit·push·N100 배포.
+- codex: 청크 안의 진단·fix·case 작성. **commit 전 STOP** (HARD-STOP 프롬프트). codex 결과 *맹신 X* — Claude 가 git diff 로 검토 (codex 는 명시 제약도 위반·over-edit 한 전례).
+
+**절차**:
+1. `python scripts/triage.py pull --skip-later` — N100 → 로컬 (FAILED + probe).
+2. `python scripts/codex_batch.py plan` — 큐를 **플랫폼/host 비중첩 청크**로 분할 확인 (slug별 X — 같은 플랫폼 recognizer/engine fix 가 병렬 충돌). 각 청크 = codex 세션 1개.
+3. `python scripts/codex_batch.py launch [--max N]` — 청크별 codex 보이는 창 (진행 view). 또는 단건은 `python scripts/codex_handoff.py handconfig --slug <s> --url <u> --launch`.
+4. 청크별 `python scripts/codex_watch.py <result_file> --loop` — 완료/타임아웃 감지 (창은 사용자 view, result 파일은 Claude 완료신호).
+5. **각 청크 검토 게이트**: `git diff` + result 파일 읽기. codex 가 (a) HARD-STOP 지켰나(commit 안 함), (b) 진단/fix 가 SKILL §2 분기 타당한가, (c) over-edit/제약위반 없나. 문제면 revert/재위임.
+6. **공유 인덱스·배포는 Claude 직렬** (병렬 codex 가 건드리면 레이스): `python scripts/cases_index.py --backfill-db output/cases.sqlite3` → §5 검증(probe_smoke) → commit(청크별 또는 묶음) → push → N100 배포.
+
+단건이거나 codex 위임이 과한 경우 (단순 selector 한 줄)엔 Claude 가 직접 §1~§5 해도 됨 — 위임은 *큐가 크거나 quota 절약 필요할 때* 의 도구. 하네스 상세 = ADR 0008 §위임 하네스, AGENTS.md §6.
+
+---
+
 ## 1. 가져오기 + 진단
 
 ```

@@ -51,25 +51,34 @@ def hand_config_redo_slug(*, slug: str, url: Optional[str] = None) -> str:
 
 
 def hand_config_triage_queue(*, failed_slugs: list[str]) -> str:
+    """codex 위임 모드 kickoff (ADR 0008). 붙여넣으면 Claude 가 entry→codex 위임→리뷰→배포.
+
+    절차 상세는 SKILL.md §0c — 여기선 트리거 + 청크 흐름 요약 + slug 데이터만.
+    """
     n = len(failed_slugs)
-    lines = [f"FAILED 큐 일괄 처리해줘 (skill: hand-config — triage). 총 {n}건.", ""]
-    lines.append("대상 slug:")
+    lines = [
+        f"FAILED 큐 codex 위임 처리해줘 (skill: hand-config — triage, codex 위임 모드). 총 {n}건.",
+        "",
+        "ADR 0008 위임 하네스로 — 진입·diff 검토·commit·배포는 너(Claude), "
+        "중간 orchestration(진단·fix·probe_smoke)은 codex 보이는 창 (Claude 토큰 0). "
+        "전체 절차 = SKILL.md \"§0c codex 위임 모드\". 요약:",
+        "",
+        "1. `python scripts/triage.py pull --skip-later`  (FAILED + probe 받기)",
+        "2. `python scripts/codex_batch.py plan`  (플랫폼/host 비중첩 청크 확인 — slug별 X)",
+        "3. `python scripts/codex_batch.py launch`  (청크별 codex 보이는 창)",
+        "4. 청크별 `python scripts/codex_watch.py <result_file> --loop`  (완료 대기)",
+        "5. **각 청크 git diff + result 검토 게이트** — codex HARD-STOP 지켰나/진단 타당한가/"
+        "over-edit 없나. codex 결과 맹신 X. 문제면 revert·재위임.",
+        "6. 공유 인덱스(`cases_index --backfill-db`) 직렬 → probe_smoke → commit → push → N100 배포.",
+        "",
+        "대상 slug:",
+    ]
     for s in failed_slugs:
         lines.append(f"- {s}  (output/snapshot/poll_state/{s}.FAILED.json)")
     lines.append("")
-    lines.append("각 항목 두 트랙 *동시* 진행 (한쪽 막는 게이트 X):")
-    lines.append("  - 트랙 A (사용자 향 — 사이트 즉시 작동): 수동 config / 손어댑터 작성 → configs/ → N100 배포.")
-    lines.append("  - 트랙 B (미래 향 — 같은 패턴 자동 처리): 진단 중 2a (인식기 확장) / 2b (--article-url) / "
-                 "2c (probe 휴리스틱 + retry feedback hint) / 2d (probe artifact 수정) 후보 한 줄씩 enumerate. "
-                 "매칭 있으면 같은 PR 에 박음. 0 이면 case 파일에 이유.")
-    lines.append("우선순위 정렬 → 각 항목 처리 → 배포.")
-    lines.append("")
-    lines.append("각 slug §2 분기 *전*: `triage.py show <slug>` 출력 받은 다음 메시지에서 4개 강제 인용 "
-                 "(last_feedback `[FAIL]` 줄 / diagnosis verdict / 매칭 §번호 / 분기 후보+이유). "
-                 "— SKILL.md \"§2 진입 전 강제 인용\" 박스.")
-    lines.append("")
-    lines.append("REJECT된 사이트라도 구조를 분석하여 probe를 개선, 이후 수동 config 의존도를 줄여야 함.")
-    lines.append("특수한 경우나 tradeoff가 명확한 경우에 한해 probe 개선을 스킵하고 case log에 이유를 명확히 남김.")
+    lines.append("각 slug 두 트랙 *동시* (codex 프롬프트에 박힘): A(사이트 즉시 작동) + "
+                 "B(추론 개선 — probe 휴리스틱/schema/prompt 로 미지 유형 자동화, 수동 config 의존도 ↓).")
+    lines.append("REJECT 사이트라도 구조 분석해 probe 개선이 1순위. 특수/tradeoff 명확할 때만 스킵 + case log 에 이유.")
     return "\n".join(lines)
 
 
