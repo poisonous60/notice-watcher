@@ -1,4 +1,4 @@
----
+﻿---
 slug: infra_learned_blacklist_2026-05-16
 url: (인프라 case — 특정 사이트 X. 트리거 = host_google-com_search_9440e9f9 의 후속 후속)
 status: 🏗 인프라 (거부 패턴 자동 학습 시스템 — 한 사용자 거부 → 모두에게 적용, 등록 성공 = 자동 회수)
@@ -88,7 +88,7 @@ monkey-patch 로 LEARNED_PATH 를 `tempfile.TemporaryDirectory` 로 redirect →
   → 봇 응답: "이전 시도에서 거부된 패턴이에요 — 사유: board_shape_check 게이트 거부. 같은 패턴은 다른 사용자가 시도해도 거부됩니다 (운영자가 /admin unlearn b10b233a0c32 으로 풀기 전까지)"
 ```
 
-### 시나리오 2: dev 박스에서 손-config 으로 작동시킴 (false positive 회수)
+### 시나리오 2: dev 박스에서 수동 config 으로 작동시킴 (false positive 회수)
 ```
 dev 박스: register.py --config "configs/somesite.json"  # 작동 확인
   → _save_state → _unlearn_pattern_if_match(url) → 매칭 패턴 자동 제거
@@ -111,7 +111,7 @@ mtime cache 가 핵심 — 봇 재시작 불필요. atomic write 가 partial-rea
 
 - **사용자 체감**: 검색어만 바꾼 같은 SERP URL 도 즉시 거부. probe 비용 (~10s) 절약. 거부 메시지가 "이전에 거부됨" 톤 ("운영자가 unlearn 으로 풀기 전까지").
 - **운영자**: `/admin learned` 로 누적 거부 패턴 확인. false positive 발견 시 `/admin unlearn <id>` 로 즉시 회수.
-- **자동 회수**: dev 박스에서 손-config 작성해 등록 성공 시 학습 패턴 자동 제거 — 사용자가 별 명령 안 해도 OK.
+- **자동 회수**: dev 박스에서 수동 config 작성해 등록 성공 시 학습 패턴 자동 제거 — 사용자가 별 명령 안 해도 OK.
 - **CLAUDE.md 룰 정합**:
   - `output/learned_blacklist.json` 은 `output/` 통째 .gitignore → git 추적 X (룰 B).
   - dev box / N100 두 자리 학습 *독립* — N100 운영 봇의 학습이 dev box 와 안 섞이는 게 의도된 동작. N100 학습은 N100 운영 패턴, dev box 학습은 dev 운영자 테스트 패턴.

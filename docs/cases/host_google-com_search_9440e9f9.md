@@ -1,4 +1,4 @@
----
+﻿---
 slug: host_google-com_search_9440e9f9
 url: https://www.google.com/search?sa=X&sca_esv=d27b705f235d78cd&sxsrf=ANbL-n5nYxvvoLZQf_qvbJovw6dbr9D4Hw:1778909863391&udm=2&fbs=ADc_l-bD_nyrjATWBKup7flJ4rea5XFXsPHwMjGsTekJ1HCohBAQ3Hh19DqzlO7wr7YUgTdO4_C3uXoTo1-SRivc_Swap6of3IufrklCc-R1r_cYZiN4MoktmDvuiC1PeD4nH8f3b94UIye9mkD9gJ2OhVe3exK-hbmw6eC71bKU8Iww7ZBWxXDSN4anKuWYzQn_6P9msObToyspvu095YuigmETY6lXxzyOSC7CqTlAUcF0IYHKDC4&q=%EB%8C%80%EB%82%98%EB%AC%B4&ved=2ahUKEwjMufrTi72UAxWpia8BHQuuKc4QtKgLegQIERAB&biw=1707&bih=791&dpr=1.5
 status: 🚫 거부 (board_shape_check anti-bot 구멍 보강 + REJECTED 마커 — 비-게시판 영구 거부)
@@ -141,7 +141,7 @@ board 신호 0/7 인데 마지막 항목의 netloc(`www.google.com`) 이 원본 
 
 ### 트랙 A — REJECTED 마커 (사용자 향)
 
-비-게시판 + anti-bot 챌린지 URL = 영구 거부 대상. 손-config 작성 의미 없음. N100 에서 `_save_rejected` 호출 → `output/poll_state/host_google-com_search_9440e9f9.REJECTED.json` 작성, `.FAILED.json` + `triage_queue.jsonl` 항목 함께 제거. 같은 slug 재시도 시 봇 `is_rejected(slug)` 가 먼저 잡혀 "이전에 거부됨" 응답.
+비-게시판 + anti-bot 챌린지 URL = 영구 거부 대상. 수동 config 작성 의미 없음. N100 에서 `_save_rejected` 호출 → `output/poll_state/host_google-com_search_9440e9f9.REJECTED.json` 작성, `.FAILED.json` + `triage_queue.jsonl` 항목 함께 제거. 같은 slug 재시도 시 봇 `is_rejected(slug)` 가 먼저 잡혀 "이전에 거부됨" 응답.
 
 ### 트랙 B enumerate (2a/2b/2c/2d) — 매칭 1, 미매칭 3
 

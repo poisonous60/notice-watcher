@@ -1,6 +1,6 @@
----
+﻿---
 slug: infra_catalog_batch_rev4_2026-05-19
-url: (infra — catalog batch rev4 첫 실행 + 14 사이트 fix)
+url: (infra — catalog batch run rev4 첫 실행 + 14 사이트 fix)
 status: ✅ 42/42 등록 완료 (rev4 plan 끝)
 outcome: improved
 date: 2026-05-19
@@ -15,7 +15,7 @@ requested_by: poisonous60
 
 ## 무엇이 일어났나
 
-`docs/사이트 카탈로그 자동 등록 파이프라인 계획.md` rev4 plan 의 §3~10 실행. catalog 42 사이트 N100 bot worker 가 일괄 enqueue → drain 첫 실행 시 28 registered / 8 gate_reject / 6 gen_fail. 이후 5 round 의 root-cause fix + 손-config 박아 42/42 등록 (100%).
+`docs/사이트 카탈로그 자동 등록 파이프라인 계획.md` rev4 plan 의 §3~10 실행. catalog 42 사이트 N100 bot worker 가 일괄 enqueue → drain 첫 실행 시 28 registered / 8 gate_reject / 6 gen_fail. 이후 5 round 의 root-cause fix + 수동 config 박아 42/42 등록 (100%).
 
 ### 초기 분포 (rev4 첫 batch run 결과)
 

@@ -1,4 +1,4 @@
----
+﻿---
 slug: host_vimeo-com_root_c6a102cf
 url: https://vimeo.com/
 status: 🚫 거부 (Vimeo root 도메인 마케팅 랜딩 — board 아님. 비디오 플랫폼 user landing) — root_marketing_homepage 게이트 (C+F+A)
@@ -72,7 +72,7 @@ shell → 0건. 즉 *attempt 2 가 정답 selector + playwright_html 이 정답 
 위 룰 박으면 Vimeo 회복 시나리오:
 - `playwright_html` + `ul.card-set-grid > li` (stable class 만) + `wait_selector: "ul.card-set-grid li"`
 
-### 손-config (대체)
+### 수동 config (대체)
 
 위 selector 직접 박으면 작동 가능. 단 prompt 개선이 일반화 가치 높음.
 
@@ -90,7 +90,7 @@ shell → 0건. 즉 *attempt 2 가 정답 selector + playwright_html 이 정답 
 
 prompt §8a 룰 (tailwind 가드) *적용 후* selector 길이 자체는 짧아짐 (`ul.flex.gap-5 > li.rounded-video` 같은 형태) — malformed 사라짐. 단 *정적 응답이 빈 shell* 이라 strategy=playwright_html + wait_selector 시도 안 했음. probe digest 의 `feed_candidates=2건` (RSS) 후보 활용 안 함.
 
-→ **§2 진입 대상**. 다음 batch 손-config — 옵션:
+→ **§2 진입 대상**. 다음 batch 수동 config — 옵션:
 1. RSS feed URL 확인 후 `httpx_json` (또는 RSS adapter) 시도
 2. `playwright_html` + `wait_selector: ul.card-set-grid li` (전 turn case body 의 권장)
 3. recognizer 신규 — `vimeo.com/<user>` 패턴 (사용자별 feed)

@@ -1,4 +1,4 @@
----
+﻿---
 slug: infra_selector_compile_validate_2026-05-21
 url: https://www.etoland.co.kr/
 status: ✅ E-게이트 — 미escape CSS 선택자(Tailwind `.1.5`)를 validate 시점에 거부 → 런타임 SelectorSyntaxError 크래시(rc=1) 봉합, retry feedback 회수
@@ -73,7 +73,7 @@ layer = improved (CONTEXT.md outcome 표). etoland 단일 사이트를 푼 게 �
 etoland.co.kr `/` 는 **홈페이지 위젯 혼합** — `ul.space-y-1.5` 가 hotdeal/hit/sidebar 등 이질
 위젯에 재사용되는 Tailwind utility 클래스라 root 에서 깨끗한 보드 목록이 안 나옴 (humoruniv·bobaedream
 와 같은 *board URL 필요* 부류, [[project-forums-batch-2026-05-21]]). 보드 전용 URL(`/hit/list` 등)로
-재시도하거나 손-config 가 답 — 선택자 *크래시* 문제와 무관해 본 E-게이트 scope 밖. **의도적으로 분리.**
+재시도하거나 수동 config 가 답 — 선택자 *크래시* 문제와 무관해 본 E-게이트 scope 밖. **의도적으로 분리.**
 
 ## 트랙 B 검토
 

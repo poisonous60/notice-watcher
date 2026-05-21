@@ -1,4 +1,4 @@
----
+﻿---
 slug: host_openai-com_index_47fc1c1b
 url: https://openai.com/index/attacking-machine-learning-with-adversarial-examples/
 status: ❌ 거부 (OpenAI 단일 글페이지 — 게시판 아님; 보드 `/news/` Cloudflare 차단)
@@ -51,4 +51,4 @@ requested_by: poi23619 (bot /preview)
 
 사용자가 OpenAI blog 폴링 정말 원하면:
 - `docs/사이트 어댑터 추가 가이드.md` 의 `playwright_html` + stealth + `storage_state_path` 자리. arca.live 어댑터 참고.
-- `https://openai.com/news/` URL 자체는 `_extract_url_pattern` 가 path_prefix=`/news` 추출 — 위 learned_blacklist 의 `/index` 와 별개 → 자동 차단 안 됨. 손-config 작성 후 `register.py --config` 호출하면 등록 가능.
+- `https://openai.com/news/` URL 자체는 `_extract_url_pattern` 가 path_prefix=`/news` 추출 — 위 learned_blacklist 의 `/index` 와 별개 → 자동 차단 안 됨. 수동 config 작성 후 `register.py --config` 호출하면 등록 가능.

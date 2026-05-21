@@ -1,7 +1,7 @@
----
+﻿---
 slug: host_leagueoflegends_en-us_74f516a8
 url: https://www.leagueoflegends.com/en-us/news/
-status: ✅ 손-config (httpx_json + script_root __NEXT_DATA__, 30건 baseline)
+status: ✅ 수동 config (httpx_json + script_root __NEXT_DATA__, 30건 baseline)
 outcome: improved
 date: 2026-05-19
 fix_layer: E
@@ -15,7 +15,7 @@ requested_by: poisonous60
 
 ## 무엇이 일어났나
 
-catalog batch 2026-05-19 에서 gen_fail (subkind 분류 미스). probe 가 정적 HTML 1.18MB 받지만 article 카드가 Next.js hydration 으로 렌더. HAR XHR 캡처에서 외부 article API 호출 X — 모든 데이터가 `<script id="__NEXT_DATA__">` inline JSON 안.
+catalog batch run 2026-05-19 에서 gen_fail (subkind 분류 미스). probe 가 정적 HTML 1.18MB 받지만 article 카드가 Next.js hydration 으로 렌더. HAR XHR 캡처에서 외부 article API 호출 X — 모든 데이터가 `<script id="__NEXT_DATA__">` inline JSON 안.
 
 ## 발견
 
@@ -29,7 +29,7 @@ props.pageProps.page.blades[2].items
 
 ## 픽스 (engine 확장 — fix_layer E)
 
-이 패턴 (Next.js/Nuxt/Sapper SSR + inline JSON island) 은 SPA 손-config 공통 영역. 손-adapter 박는 대신 engine 확장:
+이 패턴 (Next.js/Nuxt/Sapper SSR + inline JSON island) 은 SPA 수동 config 공통 영역. 손-adapter 박는 대신 engine 확장:
 
 `engine/strategies/httpx_json` + `engine/config_schema`:
 

@@ -1,4 +1,4 @@
----
+﻿---
 slug: host_quibli-dustyroo_root_216cc634
 url: https://quibli.dustyroom.com/
 status: "🔧 손 config (httpx_html) + (F+A) transforms: _strip(value, chars=None) + prompt 한 줄 — LLM 의 [\"strip\",\"/\"] 아릴리티 fix"
@@ -27,7 +27,7 @@ LLM 은 Python 의 `str.strip("/")` 관용구를 그대로 박았는데, transfo
 
 `prompts/config_writer.system.txt` 의 transform 용법 목록에 `["strip"] / ["strip","/"]` 한 줄 추가 — 명시화.
 
-### 손-config
+### 수동 config
 - strategy: httpx_html (probe 가 playwright_html 권고했지만 정적 fetch 가 nav 다 잡음 — 충분)
 - row_selector: 위 그대로
 - post_id transform: `[["remove_prefix","/"],["regex_extract","^([^/]+)"]]` (slash 떼고 첫 path segment) — 픽스 후엔 `["strip","/"]` 도 동등하나 명시적 chain 이 의도 명확

@@ -1,4 +1,4 @@
----
+﻿---
 slug: host_d4m0n-tistory-c_10_dd865fee
 url: https://d4m0n.tistory.com/10
 status: ✅ 일반화 완료 (probe verdict TARGET_NOT_FOUND 분리 — 같은 패턴 미래 자동 처리)
@@ -99,7 +99,7 @@ if not _entry_matrix_has_ok_list(digest):
 
 ## 트랙 B 매칭 (자가 점검 §6.7)
 
-이 케이스는 트랙 A (사용자 향) 와 트랙 B (일반화) 가 **동일** — 트랙 A 가 "사용자 입력 URL 이 404 이라 등록 불가" 메시지 정확화이고, 그 자체가 probe verdict 일반화. 사용자 사이트 별 손-config X (해당 글이 존재 X, 만들 게 없음). slug `host_d4m0n-tistory-c_10_dd865fee` 도 fix 배포 후 같은 URL 로 다시 들어오면 자동으로 새 메시지로 거부 — `.REJECTED.json` 마커 X (사용자가 글 다시 올릴 수 있으므로 영구 차단 X).
+이 케이스는 트랙 A (사용자 향) 와 트랙 B (일반화) 가 **동일** — 트랙 A 가 "사용자 입력 URL 이 404 이라 등록 불가" 메시지 정확화이고, 그 자체가 probe verdict 일반화. 사용자 사이트 별 수동 config X (해당 글이 존재 X, 만들 게 없음). slug `host_d4m0n-tistory-c_10_dd865fee` 도 fix 배포 후 같은 URL 로 다시 들어오면 자동으로 새 메시지로 거부 — `.REJECTED.json` 마커 X (사용자가 글 다시 올릴 수 있으므로 영구 차단 X).
 
 ## 남은 정리
 

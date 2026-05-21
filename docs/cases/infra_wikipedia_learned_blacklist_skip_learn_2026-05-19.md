@@ -1,4 +1,4 @@
----
+﻿---
 slug: infra_wikipedia_learned_blacklist_skip_learn_2026-05-19
 url: https://en.wikipedia.org/wiki/Special:RecentChanges?hidebots=1&hidecategorization=1&hideWikibase=1&limit=50&days=1&urlversion=2
 status: ✅ 일반화 (recognize_reject wikipedia 패턴 skip_learn=True)
@@ -46,7 +46,7 @@ requested_by: 초카구야공주재밌어요
 - **2b (--article-url) — X.** first article 교정 문제 아님.
 - **2c (probe heuristic) — X.** probe 안 옴 (url_gate 차단).
 - **2d (probe artifact) — X.**
-- **2e (손-config) — X.**
+- **2e (수동 config) — X.**
 
 추가 일반화 후보 (별 PR):
 - `_extract_url_pattern` 가 *항상* 첫 segment 만 봄 — 일부 호스트는 더 좁은 prefix 가 정확 (예: `/wiki/Special` 한 단계 더). 그러나 두 segment 가 article-vs-board 경계인 경우는 드물고, 더 위험 (좁아도 보드 차단 가능). 현 `skip_learn` 명시 annotation 이 더 안전.

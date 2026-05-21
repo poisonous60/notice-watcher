@@ -3,8 +3,8 @@ name: hand-config
 description: >-
   notice-watcher 의 자동 등록 실패 사이트(triage 큐)를 진단·해결·N100 배포하는 워크플로우.
   사용자가 "FAILED 큐 처리", "triage", "이 사이트 등록", "손 config 작성", "config 만들어줘" 라고 할 때.
-  진단 분기에서 **가능하면 자동 파이프라인 자체(probe 휴리스틱·인식기·schema) 개선**으로 같은 패턴이
-  다시 안 들어오게 하는 게 1순위, 손-config/손어댑터는 그게 불가능할 때만.
+  진단 분기에서 **가능하면 추론 개선(probe 휴리스틱·schema·prompt)** 으로 미지 유형을 더 풀게 하는 게
+  1순위, 수동 config(단일/플랫폼)·손어댑터는 그게 불가능할 때만.
   이 프로젝트 (`poisonous60/notice-watcher` 의 dev박스 clone) 전용.
 ---
 
@@ -16,7 +16,7 @@ description: >-
 - `docs/config 자동생성 실패 케이스.md` — `[FAIL] <체크>` 분류. **진단의 기준**.
 - `docs/사이트 어댑터 추가 가이드.md` — 손어댑터 절차.
 - `docs/운영 메모.md` §1~3, §8 — N100 SSH/IP/venv/systemctl, 배포 사이클.
-- `engine/recognizers/` — 알려진 플랫폼 URL 인식기. register.py 가 probe 전에 `recognize(url)` 먼저. 매칭 시 즉시 config 만들어 등록 (probe/Gemini 생략). 각 플랫폼은 `<plat>.py` 한 파일 — `NAME` + `PATTERNS=[(re.Pattern, builder), ...]` export, auto-discovery. 현재 목록: `ls engine/recognizers/`.
+- `engine/recognizers/` — 플랫폼 config 발급 코드. register.py 가 probe 전에 `recognize(url)` 먼저. 매칭 시 즉시 config 만들어 등록 (probe/LLM 생략). 각 플랫폼은 `<plat>.py` 한 파일 — `NAME` + `PATTERNS=[(re.Pattern, builder), ...]` export, auto-discovery. 현재 목록: `ls engine/recognizers/`.
 - 손어댑터 목록: `adapters/__init__.py`.
 - 레퍼런스 config: `ls configs/*.json` (strategy 별 1-2개 골라 베끼기).
 
@@ -43,13 +43,13 @@ description: >-
 
 3. **capability_blocked (rc=5, `.FAILED.json`)** — captcha/anti-bot/cloudflare 차단 = **능력 부족(정책 아님)**. `register.py` 가 자동으로 rc=5+FAILED 박음 (2026-05-21 policy_reject 에서 split). stealth/anti-detection 어댑터로 재도전 (§2e + docs/크롤링 지침.md §6 stealth 허용). `policy_reject`(rc=2 LOGIN_REQUIRED)·`url_dead`(rc=4 죽은 URL)와 **구분** — 이 둘은 의도된 거부, 작업 X.
 
-4. **gen_fail (rc=1, `.FAILED.json`)** — 기존 hand-config §1~§5 그대로 (진단 → 손-config 또는 probe/prompt 개선).
+4. **gen_fail (rc=1, `.FAILED.json`)** — 기존 hand-config §1~§5 그대로 (진단 → 수동 config 또는 probe/prompt 개선).
 
 `policy_reject`(rc=2)·`url_dead`(rc=4) = 작업 대상 아님 (정상 거부). 분포 확인은 `python scripts/triage.py list` + dashboard.
 
 ## 0b. preflight — 이미 고쳐졌나 / 옆 작업이 큐를 stale 화했나
 
-§1 진단 진입 *전*, 각 큐 slug 에 대해 두 검사 강제. 본 검사 = 자가개선 인프라 (CLAUDE.md §6 + ADR 0003) 의 부산물 — prompt / engine / probe / recognizer 옆 작업이 큐 진입 후에 일어났으면 큐가 *옛 상태* 일 가능성. SKILL 이 그 가능성 인지 안 하면 *이미 회복 가능한 사이트에 손-config 작업 박는 낭비* 발생 (CLAUDE.md §8a 의 영구 게이트 정신).
+§1 진단 진입 *전*, 각 큐 slug 에 대해 두 검사 강제. 본 검사 = 자가개선 인프라 (CLAUDE.md §6 + ADR 0003) 의 부산물 — prompt / engine / probe / recognizer 옆 작업이 큐 진입 후에 일어났으면 큐가 *옛 상태* 일 가능성. SKILL 이 그 가능성 인지 안 하면 *이미 회복 가능한 사이트에 수동 config 작업 박는 낭비* 발생 (CLAUDE.md §8a 의 영구 게이트 정신).
 
 ### (a) stale 큐 검사 — configs/<slug>.json 또는 손-adapter 이미 존재?
 
@@ -103,16 +103,16 @@ python scripts/triage.py show <slug>         # 그 slug 의 .FAILED.json + 요�
 `show` 출력의 `last_feedback`(=`[FAIL] <체크>`), `last_config`(자동 생성된 마지막 시도 — selector/path 한두 개만 고치면 될 때도 많음), `output/probe/<slug>/` 의 `summary.txt`·`list_candidates.json`·`article_candidates.json`·`traffic.har`·`diagnosis.json` 을 본다. `docs/config 자동생성 실패 케이스.md` 의 §번호에 매칭해 원인 분류.
 
 **진단 직후 — 두 트랙 동시** (한쪽이 다른 쪽 막는 게이트 X):
-- **트랙 A** (사용자 향 — 사이트 즉시 작동): 2a~2d 중 매칭 있으면 그게 해결 수단, 없으면 2e (손-config/손어댑터). 항상 결과물 있음 (작동 또는 거부 마커).
-- **트랙 B** (미래 향 — 같은 패턴 재발 차단): 손-config 으로 끝낸 케이스도 의무 검토. 후보 — 2a (인식기 PATTERNS 한 줄 추가 = 플랫폼 config, handcrafted), 2b (`first_article_url` 잘못 잡힘 → `--article-url` 재시도, 추론 개선), 2c (probe artifact 에 신호 있는데 휴리스틱화 안 됨, 추론 개선), 2d (probe 자체 오작동, 추론 개선).
+- **트랙 A** (사용자 향 — 사이트 즉시 작동): 2a~2d 중 매칭 있으면 그게 해결 수단, 없으면 2e (수동 config/손어댑터). 항상 결과물 있음 (작동 또는 거부 마커).
+- **트랙 B** (미래 향 — 같은 패턴 재발 차단): 수동 config 으로 끝낸 케이스도 의무 검토. 후보 — 2a (`engine/recognizers/` PATTERNS 한 줄 추가 = 플랫폼 config, handcrafted), 2b (`first_article_url` 잘못 잡힘 → `--article-url` 재시도, 추론 개선), 2c (probe artifact 에 신호 있는데 휴리스틱화 안 됨, 추론 개선), 2d (probe 자체 오작동, 추론 개선).
 
 각 후보 한 줄 점검 (`X — 이유` 또는 `O — 자리`). 매칭 시 같은 PR. 0건이면 case body 에 이유 1줄.
 
-예시: `host_scholar-google-_scholar_706d9c49` (commit `0b130b2`) — 트랙 A 손-config + 트랙 B (C) `probe/extract.py:list_row_external_host` + (D) `generate/validate.py:_external_host_hint`. 동시.
+예시: `host_scholar-google-_scholar_706d9c49` (commit `0b130b2`) — 트랙 A 수동 config + 트랙 B (C) `probe/extract.py:list_row_external_host` + (D) `generate/validate.py:_external_host_hint`. 동시.
 
 ### §2 진입 전 — 강제 인용 (skim 방지)
 
-`triage.py show <slug>` 출력 받은 *바로 다음 assistant 메시지* 에서, **§2 분기에 해당하는 코드 변경 (Edit/Write — 인식기·probe·prompt·config 손대기 또는 손-config 작성) 보내기 전에**, 같은 메시지 안에 다음 4개 명시 출력해야 함. 인용 없이 §2 진입 X — 가설 헛디딤(β) 의 직접 차단. (인용과 그 다음 Edit/Write 사이에 추가 Read/Bash 보강은 OK — 단, *4개 인용은 첫 메시지에서 끝* 내고 그 뒤에 보강.)
+`triage.py show <slug>` 출력 받은 *바로 다음 assistant 메시지* 에서, **§2 분기에 해당하는 코드 변경 (Edit/Write — 인식기·probe·prompt·config 손대기 또는 수동 config 작성) 보내기 전에**, 같은 메시지 안에 다음 4개 명시 출력해야 함. 인용 없이 §2 진입 X — 가설 헛디딤(β) 의 직접 차단. (인용과 그 다음 Edit/Write 사이에 추가 Read/Bash 보강은 OK — 단, *4개 인용은 첫 메시지에서 끝* 내고 그 뒤에 보강.)
 
 1. **`last_feedback` 첫 `[FAIL]` 줄** (`triage.py show` 출력에서 verbatim)
 2. **`diagnosis.json` 의 `verdict`** (digest 에 표면화됨)
@@ -127,11 +127,11 @@ artifact 없는 §0 신규 진입 (link 만 받은 첫 시도) 케이스는 예�
 
 ## 2. 분기 — 위에서부터 차례로 따져 첫 매칭 (2a~2d 가 2e 보다 우선)
 
-### 2a. 이미 알려진 플랫폼 / 또는 인식기만 넓히면 됨
+### 2a. 이미 알려진 플랫폼 / 또는 플랫폼 config 만 넓히면 됨
 
 `python -c "from engine.recognizers import recognize; print(recognize('<URL>'))"`.
-- 매칭되면 → 그냥 `python scripts/register.py "<URL>"` (이 실패는 인식기 추가되기 전 거였거나 봇이 옛 코드일 때 난 것).
-- 매칭은 안 되지만 같은 플랫폼의 다른 게시판이 이미 손어댑터/손config 로 있으면(예: 다음카페 다른 게시판인데 인식기가 그 URL 형태를 아직 안 받음) → `engine/recognizers/<해당-플랫폼>.py` 의 `PATTERNS` 에 그 URL 형태를 받는 패턴 추가/확장 → `register.py "<URL>"`. (그 플랫폼 전체가 자동으로 풀린다.)
+- 매칭되면 → 그냥 `python scripts/register.py "<URL>"` (이 실패는 플랫폼 config 추가되기 전 거였거나 봇이 옛 코드일 때 난 것).
+- 매칭은 안 되지만 같은 플랫폼의 다른 게시판이 이미 손어댑터/수동 config 로 있으면(예: 다음카페 다른 게시판인데 플랫폼 config 가 그 URL 형태를 아직 안 받음) → `engine/recognizers/<해당-플랫폼>.py` 의 `PATTERNS` 에 그 URL 형태를 받는 패턴 추가/확장 → `register.py "<URL>"`. (그 플랫폼 클래스가 결정적으로 재사용된다. outcome 은 handcrafted.)
 
 ### 2b. probe 가 '첫 글'을 잘못 집음 — `--article-url` 재시도
 
@@ -139,7 +139,7 @@ artifact 없는 §0 신규 진입 (link 만 받은 첫 시도) 케이스는 예�
 
 → 그 게시판의 진짜 글 하나 URL 을 찾아서 `python scripts/register.py "<목록URL>" --article-url "<글URL>"` (probe 산출물 재사용하려면 `--reuse-probe` 도). first_article_url 교정 + 그 글페이지 render+HAR re-probe + 강한 hint 로 처음부터 재생성. 성공하면 손작성 없이 끝 → §5 배포.
 
-### 2c. probe 산출물에 *이미 신호 있는데* 휴리스틱화 안 됨 — 휴리스틱 추가 (손 config 보다 우선)
+### 2c. probe 산출물에 *이미 신호 있는데* 휴리스틱화 안 됨 — 휴리스틱 추가 (수동 config 보다 우선)
 
 LLM 이 raw HTML/HAR 보고 4회 retry 후 fail — 신호가 `diagnosis.json`/`list_candidates.json`/HAR 에 있는데 안 뽑아서. 미래 같은 패턴 사이트도 자동 처리됨.
 
@@ -169,13 +169,13 @@ LLM 이 raw HTML/HAR 보고 4회 retry 후 fail — 신호가 `diagnosis.json`/`
 
 휴리스틱·산출물 수정 규칙: ↓ §4.
 
-### 2e. 자동 파이프라인이 진짜 안 닿는 한계 — 손 config 또는 손어댑터
+### 2e. 자동 파이프라인이 진짜 안 닿는 한계 — 수동 config 또는 손어댑터
 
 handwritten 만 가능: 클릭/스크롤로만 글이 뜨는 SPA, 강한 anti-bot, 비공개판이지만 *사용자가 storage_state 로그인 경로 제공 의사 있음*, 본문이 클라이언트 라우트라 server-render 본문 없음, 등. probe 가 어떤 신호도 휴리스틱화할 만하지 않은 진짜 코너 케이스.
 
-`last_config` 에서 selector/path 한두 개만 바꾸면 되는 경우도 많다. 손 config 작성 절차 ↓ §3.
+`last_config` 에서 selector/path 한두 개만 바꾸면 되는 경우도 많다. 수동 config 작성 절차 ↓ §3.
 
-## 3. 손 config / 손어댑터 작성 절차 (2e 진입 시)
+## 3. 수동 config / 손어댑터 작성 절차 (2e 진입 시)
 
 1. **slug 확정** — `python -c "from probe.paths import url_to_slug; print(url_to_slug('<URL>'))"`. config 파일명·state 파일명·doc 항목 모두 이 slug.
 2. **probe** — `python scripts/probe.py "<URL>"` (느리면 `--lite`). 이미 있으면 skip.
@@ -271,7 +271,7 @@ dynamic family (`recognizer:*`, `[FAIL]:<check>`) 는 추가 필요 X — 자동
 
 8b. **post-fix-cleanup** (영구 게이트 박는 변경 *후*) — `python scripts/triage.py post-fix-cleanup --execute` 호출.
    - **언제**: engine/probe/scripts/register 의 *게이트 로직* 자리 박은 변경 (예: 새 휴리스틱 + `_<gate>_check` + register 게이트 추가). N100 의 옛 FAILED.json 큐가 새 게이트로 자동 cleanup.
-   - **언제 X**: 손-config 변경 (configs/ 만) — 게이트 영향 X.
+   - **언제 X**: 수동 config 변경 (configs/ 만) — 게이트 영향 X.
    - 동작: N100 ssh + 각 FAILED.json 의 url 에 대해 `register.py --reuse-probe --gate-only` 호출. rc=2/3 = 게이트 잡힘 → 자동 cleanup (REJECTED + FAILED.json 삭제 + triage_queue prune). rc=6 = no gate match → 수동 작업 필요. rc=7 = artifact 없음 → probe 새 실행 권장.
    - **비용 0 보장** (--gate-only 옵션): probe 새 실행 X · preflight 네트워크 re-probe X · LLM 호출 X. 게이트만 검사.
    - 먼저 `--execute` 없이 호출 = dry-run (dev 박스 snapshot artifact 시뮬레이션, write X) — 예상 결과 확인 후 `--execute`.
@@ -353,7 +353,7 @@ probe/prompt/schema/코드 손대기 전 다음 여섯 질문에 답해보면 �
 
 **현재 reviewer backend: `codex`** — 전환은 §7b.
 
-코드 변경 또는 손-config 변경 1+ 파일 **commit 직전** reviewer 호출. main thread 가 `probe_smoke`·`case_log query` 실행 결과 prompt 에 박음.
+코드 변경 또는 수동 config 변경 1+ 파일 **commit 직전** reviewer 호출. main thread 가 `probe_smoke`·`case_log query` 실행 결과 prompt 에 박음.
 
 순서: §5 step 3 cases_index `--backfill-db` 후 (= DB 에 frontmatter row 박혔음) → step 4 reviewer → step 6 commit + push → step 7 `case_log log`. **case_log log 는 commit 후** — commit_sha 정확. reviewer 가 보는 row 는 frontmatter backfill row 만 (≈ case .md frontmatter 사본 — 일치성 검사용).
 

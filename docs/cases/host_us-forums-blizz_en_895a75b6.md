@@ -1,7 +1,7 @@
----
+﻿---
 slug: host_us-forums-blizz_en_895a75b6
 url: https://us.forums.blizzard.com/en/wow/latest
-status: ✅ 손-config (Discourse `/latest.json` REST 직결, 30건 baseline)
+status: ✅ 수동 config (Discourse `/latest.json` REST 직결, 30건 baseline)
 outcome: improved
 date: 2026-05-19
 fix_layer: F
@@ -15,7 +15,7 @@ requested_by: poisonous60
 
 ## 무엇이 일어났나
 
-catalog batch 2026-05-19 첫 run 에서 gen_fail (subkind=posts_nonempty). probe 가 forum.blizzard.com 의 articles 못 추출 — Ember.js SPA, 정적 HTML 에 row 0개.
+catalog batch run 2026-05-19 첫 run 에서 gen_fail (subkind=posts_nonempty). probe 가 forum.blizzard.com 의 articles 못 추출 — Ember.js SPA, 정적 HTML 에 row 0개.
 
 ## 픽스
 

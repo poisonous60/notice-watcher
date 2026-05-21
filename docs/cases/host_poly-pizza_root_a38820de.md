@@ -1,4 +1,4 @@
----
+﻿---
 slug: host_poly-pizza_root_a38820de
 url: https://poly.pizza/
 status: "🔧 손 config (playwright_html) + (E) schema: body_empty_acceptable + content=[] 허용"
@@ -34,7 +34,7 @@ if "content" in art:
 
 `body_empty_acceptable` 없이 `content: []` 는 여전히 거부 (기존 동작 유지) — 실수로 빈 content 박는 패턴 방어.
 
-### 손-config: `configs/host_poly-pizza_root_a38820de.json`
+### 수동 config: `configs/host_poly-pizza_root_a38820de.json`
 - strategy: playwright_html — 정적 fetch 는 MUI skeleton (`<MuiSkeleton...>` placeholder) 만 받음 (raw HTML 80kb 중 `/m/` 링크 0개). headless 만 33개 `/m/<id>` 링크 (probe list.html 153kb).
 - wait_selector: `#featuredModels a[href^="/m/"]` — 카드 직접 대기
 - row_selector: `#featuredModels > div.MuiGrid-item`

@@ -1,7 +1,7 @@
----
+﻿---
 slug: host_hoyolab-com_circles_41251f69
 url: https://www.hoyolab.com/circles/2/0/official?lang=ko-kr
-status: ✅ 손-config (bbs-api-os getNewsList gids=2, 15건 baseline)
+status: ✅ 수동 config (bbs-api-os getNewsList gids=2, 15건 baseline)
 outcome: improved
 date: 2026-05-19
 fix_layer: F
@@ -15,7 +15,7 @@ requested_by: poisonous60
 
 ## 무엇이 일어났나
 
-catalog batch 2026-05-19 첫 run 에서 board_shape gate_reject. probe 가 정적 HTML 에서 `mhy-article-card-wrapper` 15건 잡지만 cards 의 `href` 가 `/accountCenter?id=...` (user profile) 만 — article 링크 X. SPA route 가 JS click 으로 처리.
+catalog batch run 2026-05-19 첫 run 에서 board_shape gate_reject. probe 가 정적 HTML 에서 `mhy-article-card-wrapper` 15건 잡지만 cards 의 `href` 가 `/accountCenter?id=...` (user profile) 만 — article 링크 X. SPA route 가 JS click 으로 처리.
 
 ## 픽스
 

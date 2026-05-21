@@ -1,7 +1,7 @@
----
+﻿---
 slug: host_community-cloud_root_e65f04ea
 url: https://community.cloudflare.com/
-status: ✅ 손-config (Playwright /latest 목록, 본문은 challenge-gated라 제목·URL 알림)
+status: ✅ 수동 config (Playwright /latest 목록, 본문은 challenge-gated라 제목·URL 알림)
 outcome: handcrafted
 date: 2026-05-21
 fix_layer: none
@@ -93,4 +93,4 @@ summary PASS
 - (2b) `--article-url`: 무관. 첫 글 URL 문제가 아니라 직접 topic/API 접근이 challenge-gated.
 - (2c) probe 휴리스틱: Discourse generator-meta 검출은 이미 `infra_discourse_root_form_2026-05-21` 에서 박힘.
 - (2d) probe 오작동: 아님. probe 는 Discourse 와 Cloudflare challenge 를 모두 드러냈다.
-- (2e) 손-config: 단일 사이트 예외로 채택. 일반화 안 되는 이유: Discourse 공개 JSON API 가 막힌 Cloudflare Community 전용 정책/보호 조합이며, 본문 클릭/직접 접근도 안정적으로 통과하지 않는다.
+- (2e) 수동 config: 단일 사이트 예외로 채택. 일반화 안 되는 이유: Discourse 공개 JSON API 가 막힌 Cloudflare Community 전용 정책/보호 조합이며, 본문 클릭/직접 접근도 안정적으로 통과하지 않는다.

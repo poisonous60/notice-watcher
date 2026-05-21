@@ -1,4 +1,4 @@
----
+﻿---
 slug: host_pearlabyss-com_ko-kr_21e98c22
 url: https://www.pearlabyss.com/ko-kr/news/notice
 status: 🟡 보류 — SPA fully shielded (API endpoint unknown without browser inspection)
@@ -29,7 +29,7 @@ verdict: 진짜 SPA, API endpoint 가 정적 HTML / HAR 어디에도 노출 X. J
 
 **아무것도 — 보류.**
 
-손-config 또는 손어댑터 가능한 길:
+수동 config 또는 손어댑터 가능한 길:
 1. 브라우저 DevTools Network 탭에서 page load 시 발생하는 XHR 검사 → JSON API endpoint 찾기 → httpx_json config 작성. (사용자 손-inspection 필요.)
 2. playwright + 충분한 wait_selector (예: `.board-list-item`) → screenshot 으로 selector 발견. Pearl Abyss 의 실제 selector 가 무엇인지 확인 필요.
 3. RSS 또는 sitemap 확인 — `pearlabyss.com/robots.txt` 검사.

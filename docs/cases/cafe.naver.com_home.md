@@ -1,4 +1,4 @@
----
+﻿---
 slug: naver-cafe_gutterlife_all_e0009e69
 url: https://cafe.naver.com/gutterlife
 status: ✅ 자동 (recognizer 확장 — cafe 홈 URL 인식, NaverCafeAdapter 가 cafe_slug→cafe_id 런타임 해소)
@@ -25,7 +25,7 @@ vocab_candidates:
 ## 무엇이 일어났나
 `https://cafe.naver.com/gutterlife` — 네이버 카페 홈 URL (특정 게시판 아님). 기존 인식기는 `/f-e/cafes/<id>/menus/<id>` 같은 게시판 URL 만 매칭 → 홈 URL 폴백 → probe + Gemini 시도. 카페 홈은 SSR HTML 에 *최신 댓글* (`#first-reply-page > li`) 만 있고 글 행 없음 → `[FAIL] posts_nonempty: 0건` 4회 retry fail.
 
-같은 패턴 ( `cafe.naver.com/<slug>` 홈 URL ) 이 미래에 또 큐에 쌓이는 걸 막으려면 손-config 하나 박는 것보다 인식기·어댑터 확장이 옳음.
+같은 패턴 ( `cafe.naver.com/<slug>` 홈 URL ) 이 미래에 또 큐에 쌓이는 걸 막으려면 수동 config 하나 박는 것보다 인식기·어댑터 확장이 옳음.
 
 ## 무엇을 바꿨나
 

@@ -1,4 +1,4 @@
----
+﻿---
 slug: host_nationalgeograp_root_2be4a852
 url: https://www.nationalgeographic.com/
 status: 🚫 거부 (NatGeo root 도메인 마케팅 랜딩 — board 아님. 카테고리/섹션 URL 권장) — root_marketing_homepage 게이트 (C+F+A)
@@ -72,7 +72,7 @@ row_selector 가 4종 모두 잡아 *type 2/3 카드의 title 빈* + *type 4 카
 `row_required_selector` 또는 fields 의 source match 추가" — 단 현 vocab 에 row-level url match 없음.
 임시로 fields.url.source 에 match regex 박고 None 이면 row skip 되는 효과 활용.
 
-### 갈래 2: 손-config
+### 갈래 2: 수동 config
 
 `row_required_selector: "a[href*='/article/']"` 추가 + `exclude_selector: ".TileStackCarousel__Card"`
 (영상/special hub) — type 1+4 만 통과. 단 type 4 의 body 0자 문제는 `body_empty_acceptable: true`
@@ -96,7 +96,7 @@ row_selector 가 4종 모두 잡아 *type 2/3 카드의 title 빈* + *type 4 카
 
 prompt §8a 룰 (row_type_mix 가드 + carousel dedup) *적용 후에도 자동 등록 X*. probe first_article_url 자체가 single article 인 photography URL → body 0자. row_selector 가 type mix 안 잡음 (`row_required_selector: a[href*='/article/']` 권고 prompt 룰 안 박혔거나 LLM 이 무시).
 
-→ **§2 진입 대상**. 다음 batch 손-config — narrow row_selector + body_empty_acceptable 또는 article.fetch_kind 변경.
+→ **§2 진입 대상**. 다음 batch 수동 config — narrow row_selector + body_empty_acceptable 또는 article.fetch_kind 변경.
 
 ## 자가 점검 (5-질문)
 

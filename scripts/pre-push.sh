@@ -7,6 +7,15 @@
 # stage 1/2 점검은 `python scripts/probe_smoke.py` 통째로 손-실행.
 #
 # `.git/hooks/pre-push` 는 git 추적 X — `scripts/setup-hooks.{sh,ps1}` 가 이 파일을 그 위치로 복사.
+echo "[pre-push] vocab_lint"
+python scripts/vocab_lint.py
+status=$?
+if [ $status -ne 0 ]; then
+  echo "[pre-push] FAIL — push 차단."
+  echo "[pre-push] CONTEXT.md canonical 어휘로 정렬 먼저."
+  exit $status
+fi
+
 echo "[pre-push] probe_smoke --stage 3 --stage 5"
 python scripts/probe_smoke.py --stage 3 --stage 5
 status=$?

@@ -131,7 +131,7 @@ bash scripts/setup-hooks.sh   # 또는 pwsh scripts/setup-hooks.ps1
 - 그 외 *코드/config/docs* 항상 dev box → push → N100 pull.
 
 ### 룰 C: configs/ 변경도 dev box
-- 새 사이트 등록 dev box 에서 `python scripts/register.py …` 또는 손-config + push.
+- 새 사이트 등록 dev box 에서 `python scripts/register.py …` 또는 수동 config + push.
 - 봇 자동 등록 (`/watch` 사용자 명령) N100 에서 동작 → *N100 configs/* dev box 보다 앞서갈 수 있음 (사용자 등록).
 - 이 경우 → 별도 작업으로 dev box sync (운영 메모 §8 의 `report-triage` 또는 `hand-config` 워크플로).
 
@@ -141,9 +141,9 @@ bash scripts/setup-hooks.sh   # 또는 pwsh scripts/setup-hooks.ps1
 - *N100 에서 migrate 돌리지 X* (룰 B 예외 같지만 — migrate 결과 git 추적 configs/ 도 건드림 → push 안 하면 비대칭).
 - 대신: dev box migrate → push → N100 pull. `migrate_slug_schema.py` idempotent → 양쪽 같은 mapping.
 
-## 6. hand-config 워크플로 — 자율 개선 시
+## 6. hand-config pipeline — 자율 개선 시
 
-자동 등록 실패 사이트 손-config 또는 probe/prompt/schema/엔진 코드 개선 시:
+자동 등록 실패 사이트 수동 config 또는 probe/prompt/schema/엔진 코드 개선 시:
 - **권위 플레이북 = `.claude/skills/hand-config/SKILL.md`** (git-tracked SoT). `.agents/skills/hand-config/` 는 그 junction (같은 파일) — codex auto-discovery 용. 둘이 어긋나면 `.claude/` 가 진본.
 - 자가 점검 가이드 (SKILL.md §6, 가이드라인, 권장)
 - `docs/cases/<slug>.md` 작성 + `python scripts/cases_index.py`

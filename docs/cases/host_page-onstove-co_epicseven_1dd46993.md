@@ -1,7 +1,7 @@
----
+﻿---
 slug: host_page-onstove-co_epicseven_1dd46993
 url: https://page.onstove.com/epicseven/kr/list/e7kr001
-status: ✅ 손-config (api.onstove.com cwms v3.0 article list, 15건 baseline)
+status: ✅ 수동 config (api.onstove.com cwms v3.0 article list, 15건 baseline)
 outcome: improved
 date: 2026-05-19
 fix_layer: F
@@ -15,7 +15,7 @@ requested_by: poisonous60
 
 ## 무엇이 일어났나
 
-catalog batch 2026-05-19 에서 gen_fail posts_nonempty. page.onstove.com 의 e7kr001 list 가 정적 HTML 1.18MB 지만 article 카드 모두 JS 로 렌더 (Nuxt 류 SPA). probe 가 `mhy-article-card-wrapper` 비슷한 selector 못 찾음.
+catalog batch run 2026-05-19 에서 gen_fail posts_nonempty. page.onstove.com 의 e7kr001 list 가 정적 HTML 1.18MB 지만 article 카드 모두 JS 로 렌더 (Nuxt 류 SPA). probe 가 `mhy-article-card-wrapper` 비슷한 selector 못 찾음.
 
 ## API 발견
 

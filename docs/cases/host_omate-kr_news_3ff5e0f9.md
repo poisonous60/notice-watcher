@@ -1,4 +1,4 @@
----
+﻿---
 slug: host_omate-kr_news_3ff5e0f9
 url: https://www.omate.kr/news/articleView.html?idxno=21030
 status: 🔧 손 config (httpx_html, baseline 20건) — 사용자가 articleView(개별 기사) URL 줌, articleList 로 변환
@@ -18,7 +18,7 @@ tags: [omate, articleView-given, articleList-handwritten, korean-local-news]
 
 자동 last_config 가 추측한 `articleList.html?view_type=sm` + `div.article-list-content > ul > li` selector — list URL 은 맞지만 selector 가 *그 사이트* 의 실제 구조와 불일치. 실측 selector = `section#section-list > ul > li`.
 
-## 무엇을 바꿨나 (fix layer: none — 단발 손-config)
+## 무엇을 바꿨나 (fix layer: none — 단발 수동 config)
 **`configs/host_omate-kr_news_3ff5e0f9.json`** — httpx_html. slug 는 원 FAILED 와 동일 유지 (`_source_url` 도 사용자가 준 articleView URL). `list.url_template` 만 articleList.html?view_type=sm 으로 박음.
 - `row_selector`: `section#section-list > ul > li`
 - `row_required_selector`: `h2.titles > a`

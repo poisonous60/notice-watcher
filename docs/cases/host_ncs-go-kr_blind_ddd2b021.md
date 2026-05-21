@@ -1,7 +1,7 @@
----
+﻿---
 slug: host_ncs-go-kr_blind_ddd2b021
 url: https://www.ncs.go.kr/blind/bl04/RecrtNotifList.do?searchNcsLclasCd=20&searchNcsMclasCd=01&searchNcsSclasCd=&searchNcsSubdCd=&searchStatus=&searchStartDt=&searchEndDt=&searchDstin=&searchType=&searchField=&searchCondition=0&searchKeyword=
-status: ✅ 해결 (probe 룰 정정 + 손-config)
+status: ✅ 해결 (probe 룰 정정 + 수동 config)
 outcome: improved
 date: 2026-05-16
 fix_layer: C
@@ -67,10 +67,10 @@ baseline_ok = not is_baseline_blocked(baseline)
 ```
 B1 또는 B2 중 *하나라도* OK 면 차단 아님 — `baseline.is_baseline_blocked()` 와 동치.
 
-### C. 손-config — `configs/host_ncs-go-kr_blind_ddd2b021.json`
+### C. 수동 config — `configs/host_ncs-go-kr_blind_ddd2b021.json`
 픽스 A/B 후 register 가 entry_matrix 게이트 통과 → gemini 호출까지 감. 그러나 NCS 의 list HTML 이 `<table class="boardtable_list">` 가 두 번 (header table + body table 분리) → LLM 의 `row_selector="table.boardtable_list tbody tr"` 가 sticky/duplicate row 까지 잡아 `post_id_unique` 3회 fail. 또 NCS 가 query param 빈 값들 명시 여부에 따라 정렬이 다른 응답을 줘서 LLM fetch 와 probe artifact 가 미스매치.
 
-손-config 의 핵심:
+수동 config 의 핵심:
 - `row_selector`: `table.boardtable_list tr:has(ul[id^="ul_"])` — `ul[id^=ul_]` 가진 tr 만 (header table 의 thead row 거름).
 - `post_id`: same row 내 `ul[id^="ul_"]` 의 `id` 속성 → `remove_prefix("ul_")`. `onclick="fn_view(...)"` 보다 안정 (header row 에는 ul 없음).
 - `url`: 사용자 원본 URL 의 풀 query string 형태로 template. NCS 디폴트 정렬을 강제하기 위해 `url_template` 도 풀 query 그대로.
@@ -86,10 +86,10 @@ B1 또는 B2 중 *하나라도* OK 면 차단 아님 — `baseline.is_baseline_b
   - 픽스 전: S4 → `LOGIN_REQUIRED`, 본문 진입 OK=False, verdict=`BASELINE_BLOCKED`, 권장 진입=`통과한 전략 없음`.
   - 픽스 후: S4 → `OK`, S4.article → `OK`, 본문 진입 OK=True, 권장 진입=`Playwright headless + stealth (S4)`. verdict 에 `BASELINE_BLOCKED` 는 여전 — NCS 의 경우 httpx 베이스라인이 SSL handshake fail (별도 트랙 — `probe/headers.py` 의 preset 과 NCS TLS 협상 불일치). register 게이트엔 영향 X.
 - `register --config configs/host_ncs-go-kr_blind_ddd2b021.json` → `✅ 등록 완료 — baseline 10건`. 추출된 ID 모두 유니크, URL 모두 다른 `recrtNo`, 본문 ~8 KB.
-- 영향 4건 case 의 *기존 등록 상태* 변동 검증: 모두 `--config` 분기로 등록된 손-config 또는 SKKU 류 어댑터 — `_entry_matrix_has_ok_list` 거부 게이트 자체를 거치지 않아 변동 없음.
+- 영향 4건 case 의 *기존 등록 상태* 변동 검증: 모두 `--config` 분기로 등록된 수동 config 또는 SKKU 류 어댑터 — `_entry_matrix_has_ok_list` 거부 게이트 자체를 거치지 않아 변동 없음.
 
 ## 단일 commit 정책
-fix_layer F (probe 룰) + 손-config + case .md + INDEX 한 commit. case_runs DB row 의 `files_changed` derive 가 `git diff HEAD~1..HEAD` 만 보므로 분할 시 첫 commit 캡쳐 누락.
+fix_layer F (probe 룰) + 수동 config + case .md + INDEX 한 commit. case_runs DB row 의 `files_changed` derive 가 `git diff HEAD~1..HEAD` 만 보므로 분할 시 첫 commit 캡쳐 누락.
 
 ## 남은 정리
 - N100 의 `output/poll_state/host_ncs-go-kr_blind_ddd2b021.FAILED.json` + `output/triage_queue.jsonl` 의 NCS 항목 → `register.py --config` 가 자동 정리.

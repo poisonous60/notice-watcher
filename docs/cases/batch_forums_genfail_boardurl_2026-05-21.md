@@ -1,4 +1,4 @@
----
+﻿---
 slug: batch_forums_genfail_boardurl_2026-05-21
 url: https://www.humoruniv.com/
 status: ✅ 4 사이트 hand-config (포털/board-root → 실제 board URL) + engine encoding 옵션
@@ -29,7 +29,7 @@ tags: [gen-fail, board-url, portal-homepage, encoding, euc-kr, smf-rss, playwrig
 1. last_feedback `[FAIL]`: `posts_nonempty: 0건` + `[warn] matches_probe_first_article`
 2. diagnosis verdict: `정적 HTTP로 충분` (probe 가 root 정적 OK 로 봤으나 board 행 없음 — 포털/위젯/SPA)
 3. §매칭: docs/config 자동생성 실패 — 홈페이지 위젯 오인(board URL 필요)
-4. 분기: 2e (손-config) — 자동이 root→board URL 추론 못 함. + F (engine encoding 신규)
+4. 분기: 2e (수동 config) — 자동이 root→board URL 추론 못 함. + F (engine encoding 신규)
 5. 누적: humoruniv·bobaedream 메모리에 "홈페이지 위젯" 기록됨
 6. preflight: miss (recognize None, board URL 은 수동 발견 필요)
 

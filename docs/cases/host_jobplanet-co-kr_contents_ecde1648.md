@@ -1,4 +1,4 @@
----
+﻿---
 slug: host_jobplanet-co-kr_contents_ecde1648
 url: https://www.jobplanet.co.kr/contents/news-616
 status: ❌ 거부 (단일 뉴스 기사 URL — 게시판 아님). 인식기 fast-path skip_learn=True.
@@ -29,7 +29,7 @@ requested_by: poi23619 (preview)
 1. **input 이 단일 article URL**: `news-616` 은 한 기사. 폴링 가치 X.
 2. **본문 SPA 전용**: `/contents/news-<N>` 페이지는 Next.js 가 client-render. static HTTP 로 본문 못 받음. playwright_html 어댑터 + Cloudflare 우회 필요.
 
-설사 보드 URL `/contents/news` 로 hand-config 작성해도 본문 fetch 가 막힘 — 본격적인 손-config 또는 손어댑터 필요. 사용자 입력이 article URL 인 것 + 본문 어려움 결합 → **REJECT** 가 적정 (사용자가 *진짜 보드 URL* 을 줘도 추가 작업 필요할 것이지만, 그건 그때 별도로).
+설사 보드 URL `/contents/news` 로 hand-config 작성해도 본문 fetch 가 막힘 — 본격적인 수동 config 또는 손어댑터 필요. 사용자 입력이 article URL 인 것 + 본문 어려움 결합 → **REJECT** 가 적정 (사용자가 *진짜 보드 URL* 을 줘도 추가 작업 필요할 것이지만, 그건 그때 별도로).
 
 ## 픽스 (fix_layer: F)
 
@@ -53,4 +53,4 @@ requested_by: poi23619 (preview)
 
 ## 사용자 후속
 
-`/watch https://www.jobplanet.co.kr/contents/news` 시도 가능 — 하지만 본문 추출이 어렵다는 것을 알림. 진짜 등록하려면 손-config (playwright_html + Cloudflare 우회) 별도 작업 필요.
+`/watch https://www.jobplanet.co.kr/contents/news` 시도 가능 — 하지만 본문 추출이 어렵다는 것을 알림. 진짜 등록하려면 수동 config (playwright_html + Cloudflare 우회) 별도 작업 필요.

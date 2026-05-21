@@ -1,4 +1,4 @@
----
+﻿---
 slug: host_edition-cnn-com_root_82356c05
 url: https://edition.cnn.com/
 status: 🚫 거부 (CNN root 도메인 마케팅 랜딩 — board 아님. 카테고리/섹션 URL 권장) — root_marketing_homepage 게이트 (C+F+A)
@@ -68,7 +68,7 @@ CNN edition 메인페이지 = 한 글이 multiple carousel 컨테이너에 노�
 2. iso8601 slash-date: `published_at 값이 YYYY/MM/DDT 형식이면 transform [["iso8601",
    ["%Y/%m/%dT%H:%M:%S%z"]]] 추가`
 
-### 손-config (대체 경로)
+### 수동 config (대체 경로)
 
 playwright_html + `section[data-zone-label="zone-1"] li.card[data-open-link]` (main zone 1만) +
 `exclude_selector` 로 cnni-fast 제외 + `iso8601` transform. 단 *prompt 개선이 다른 carousel
@@ -100,7 +100,7 @@ playwright_html + `section[data-zone-label="zone-1"] li.card[data-open-link]` (m
 
 prompt §8a 룰 추가 *후에도 자동 등록 X*. 이유 = CNN edition 메인 = 정적 fetch 시 카드 anchor 없음 (SPA 무한 carousel). playwright 시도도 wait_selector 부정확 → 0건. prompt 룰만으론 한계 — strategy 자체 또는 inline_js_data_candidates (probe digest 의 다른 후보, 4건) 활용 필요.
 
-→ **§2 진입 대상**. *손-config 작성 = 다음 batch* (본 turn scope = preflight 적용 + §0b 박기). 진단 진입 시 트랙 B 후보: 2c (probe heuristic — `inline_js_data_candidates` 자동 활용) 또는 vocab `carousel_dedup_required` 임계 도달 가속 (high=2, 1건 더 필요).
+→ **§2 진입 대상**. *수동 config 작성 = 다음 batch* (본 turn scope = preflight 적용 + §0b 박기). 진단 진입 시 트랙 B 후보: 2c (probe heuristic — `inline_js_data_candidates` 자동 활용) 또는 vocab `carousel_dedup_required` 임계 도달 가속 (high=2, 1건 더 필요).
 
 ## 자가 점검 (5-질문)
 

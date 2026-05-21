@@ -1,4 +1,4 @@
----
+﻿---
 slug: infra_post_fix_cleanup_2026-05-19
 url: (infra — triage post-fix-cleanup + register --gate-only + digest backfill)
 status: ✅ post-fix-cleanup 명령 — 영구 게이트 박은 후 N100 옛 큐 자동 정리
@@ -60,7 +60,7 @@ artifact 파일 X — digest 안에만. 미래 같은 자리 휴리스틱 추가
 ssh 실패 graceful: per-slug 'ssh_error' 표시 + N100 큐 변경 X + abort 안 함 (다른 slug 계속).
 
 ### (4) `.claude/skills/hand-config/SKILL.md` §5 step 8b 추가
-영구 게이트 박는 hand-config 변경 (engine/probe/scripts/register 의 *게이트 로직* 자리) 의 N100 deploy *후* `post-fix-cleanup --execute` 호출 안내. 손-config 변경 (configs/ 만) 은 호출 X.
+영구 게이트 박는 hand-config 변경 (engine/probe/scripts/register 의 *게이트 로직* 자리) 의 N100 deploy *후* `post-fix-cleanup --execute` 호출 안내. 수동 config 변경 (configs/ 만) 은 호출 X.
 
 ### (5) `tests/probe_heuristics/test_digest_backfill.py` 새 fixture (4 case)
 - 옛 artifact (키 없음) → 보강 후 dict 박힘

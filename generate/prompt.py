@@ -1,4 +1,4 @@
-"""Gemini 프롬프트 구성: 시스템 지침(포맷 스펙) + few-shot 예제 + digest → 프롬프트.
+"""config 작성 프롬프트 구성: 시스템 지침(포맷 스펙) + few-shot 예제 + digest → 프롬프트.
 
 프롬프트 *본문* 은 repo 루트 `prompts/config_writer.*.txt` 에 산다 — 이 모듈은 거기에
 런타임 값(transforms 목록, digest, HTML, 예제 config 등)을 채워 넣는 *조립 로직* 만 담는다.

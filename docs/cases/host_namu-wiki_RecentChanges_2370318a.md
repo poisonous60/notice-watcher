@@ -1,7 +1,7 @@
----
+﻿---
 slug: host_namu-wiki_RecentChanges_2370318a
 url: https://namu.wiki/RecentChanges
-status: ✅ 손-config (playwright_html + a[href^=/w/] row, 30건 baseline)
+status: ✅ 수동 config (playwright_html + a[href^=/w/] row, 30건 baseline)
 outcome: improved
 date: 2026-05-19
 fix_layer: F
@@ -15,7 +15,7 @@ requested_by: poisonous60
 
 ## 무엇이 일어났나
 
-catalog batch 2026-05-19 에서 gen_fail (subkind 분류 미스). namu.wiki HTML 직접 fetch 시 3608 bytes SSR shell — content 0. Vue 클라이언트 렌더로 RecentChanges 표 생성.
+catalog batch run 2026-05-19 에서 gen_fail (subkind 분류 미스). namu.wiki HTML 직접 fetch 시 3608 bytes SSR shell — content 0. Vue 클라이언트 렌더로 RecentChanges 표 생성.
 
 Playwright headless 로 렌더 후 220KB DOM. 하지만 클래스명이 의도적으로 obfuscated build-hash 형태 (`DpfUxXyh`, `qXQSihpq`, `g1g9baIZ` 등) — `tr`/`tbody`/`table[role=row]` 표준 selector 모두 매칭 X.
 

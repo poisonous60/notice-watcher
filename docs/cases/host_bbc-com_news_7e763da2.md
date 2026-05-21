@@ -1,4 +1,4 @@
----
+﻿---
 slug: host_bbc-com_news_7e763da2
 url: https://www.bbc.com/news
 status: ✅ 자동 등록 회복 (preflight b-hit, baseline 8건) — prompt §8a 룰 추가 (carousel dedup + iso slash) 후.
@@ -43,7 +43,7 @@ BBC News 메인 페이지 구조:
 
 **현재 없음** — Action C (config_writer.system.txt 의 carousel 가드) trigger 의 두 번째 evidence.
 
-손-config 가능 경로 = `data-indexcard` 카드 중 가장 *먼저* 등장한 글의 URL 만 unique 보존 후
+수동 config 가능 경로 = `data-indexcard` 카드 중 가장 *먼저* 등장한 글의 URL 만 unique 보존 후
 나머지 dedup. closed vocab 의 `unique_post_id` 룰을 schema 차원에서 enforce — selector level
 보다 post_id level dedup 이 robust. 단 이건 *vocab 확장 필요* (현 schema 는 dedup 옵션 없음).
 

@@ -1,4 +1,4 @@
----
+﻿---
 slug: host_humblebundle-co_software_4589b229
 url: https://www.humblebundle.com/software
 status: 🔧 손 config (playwright_html) — probe `pick_first_article_url` 가 `/store/search?...` 픽 + 정적 GET 응답엔 타일 anchor 없음 (JS 가 `<script id="landingPage-json-data">` JSON 에서 렌더)
@@ -22,7 +22,7 @@ tags: [humblebundle, software-bundle, bundle-aggregator, playwright, body-empty-
 3. **html_repeating_patterns 미캐치** — 렌더 DOM 에 22 타일 있어도 `min_children=5` 게이트는 단일 parent 의 sibling 만 셈. Humble Bundle 은 8 × `div.mosaic-layout.threes` × 3 tile 구조라 parent 별 3개 → 게이트 통과 X. `list_candidates.html_repeating_patterns` 상위 = `head>link/meta/script` + nav dropdown items 만.
 
 ## 픽스
-손-config `playwright_html`:
+수동 config `playwright_html`:
 - `wait_selector: "a.full-tile-view.bundle"` (JS hydration 대기)
 - `row_selector: "a.full-tile-view.bundle"` — 22 → 스모크 10건 / register baseline 22건
 - `post_id` = href regex `/software/([^/?#]+)` (stable machine-name)
@@ -42,7 +42,7 @@ tags: [humblebundle, software-bundle, bundle-aggregator, playwright, body-empty-
 일반화 안 박는 이유 한 줄: cross-parent tile aggregate / first_article_url query-heavy 페널티 둘 다 5줄 휴리스틱이지만 활용 자리 (prompts + ranking + 검증) 동시 박기 필요 → 2건째 들어와 가치 명확해질 때.
 
 ## 자가 점검 (§6)
-1. **자리**: none (손-config). 미래 2건째 → (C) cross-parent aggregate + `pick_first_article_url` query 페널티.
+1. **자리**: none (수동 config). 미래 2건째 → (C) cross-parent aggregate + `pick_first_article_url` query 페널티.
 2. **이전 케이스**: 없음. `mosaic-layout × N section × M tile` 분산 구조의 첫 케이스. (`host_itch-io_game-assets_2596d376` 와 비슷한 "body_empty_acceptable=true 의 aggregator" 패턴이지만 그쪽은 단일 grid.)
 3. **누구 깰까**: 0 (handcrafted 단건).
 4. **검증**: 스키마 PASS, 스모크 list=10 OK, register baseline=22 OK. probe_smoke 는 §5 step 1 에서 pre-push hook 으로.

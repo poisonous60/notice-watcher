@@ -1,4 +1,4 @@
----
+﻿---
 slug: host_edition-cnn-com_world_ae74b4db
 url: https://edition.cnn.com/world
 status: ✅ 자동 등록 (validation cap 64→200 완화 후 자동 통과 — playwright_html, 30건 baseline)
@@ -47,7 +47,7 @@ shape regex 자체는 그대로 (공백·제어문자 거부). 200 cap 은 관�
 
 ## 트랙 A (사용자) / 트랙 B (미래)
 
-같은 fix. cap 완화 후 `register.py --reuse-probe` → **attempt 2 PASS (30건)** → CNN `/world` 자동 등록. 손-config X.
+같은 fix. cap 완화 후 `register.py --reuse-probe` → **attempt 2 PASS (30건)** → CNN `/world` 자동 등록. 수동 config X.
 
 미래 영향: 같은 패턴의 모든 메이저 뉴스 미디어 root/section URL — NYT/WaPo/Guardian/BBC/Reuters 의 date+slug 경로 — 같은 cap 룰에 막혀온 가능성. 본 fix 가 향후 사용자 등록 비용 0.
 

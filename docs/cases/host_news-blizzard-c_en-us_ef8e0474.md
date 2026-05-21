@@ -1,7 +1,7 @@
----
+﻿---
 slug: host_news-blizzard-c_en-us_ef8e0474
 url: https://news.blizzard.com/en-us/
-status: ✅ 손-config (/api/news Contentstack feed, 24건 baseline)
+status: ✅ 수동 config (/api/news Contentstack feed, 24건 baseline)
 outcome: improved
 date: 2026-05-19
 fix_layer: F
@@ -15,7 +15,7 @@ requested_by: poisonous60
 
 ## 무엇이 일어났나
 
-catalog batch 2026-05-19 에서 board_shape gate_reject. 정적 HTML 7KB SPA shell — article 링크 0개. probe 가 `first_article_url=None`.
+catalog batch run 2026-05-19 에서 board_shape gate_reject. 정적 HTML 7KB SPA shell — article 링크 0개. probe 가 `first_article_url=None`.
 
 ## API 발견
 
