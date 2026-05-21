@@ -1,0 +1,109 @@
+{
+  "version": 1,
+  "site": "drupal.org",
+  "board": "drupal",
+  "strategy": "httpx_html",
+  "_slug_board": "project",
+  "_source_url": "https://drupal.org/project/drupal/releases",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/xml,text/xml,application/xhtml+xml,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+    "Referer": "https://www.drupal.org/"
+  },
+  "timeout": 20,
+  "polite_sleep": {
+    "min": 5,
+    "max": 7
+  },
+  "list": {
+    "url_template": "https://updates.drupal.org/release-history/drupal/current",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "project > releases > release",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "css",
+          "selector": "version",
+          "text": true,
+          "transform": [
+            [
+              "strip"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "name",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "css",
+          "selector": "release_link",
+          "text": true,
+          "transform": [
+            [
+              "strip"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "date",
+          "text": true,
+          "transform": [
+            [
+              "strip"
+            ],
+            [
+              "unixtime_to_iso",
+              "Z",
+              "s"
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "concat",
+          "parts": [
+            {
+              "const": "Download: "
+            },
+            {
+              "from": "css",
+              "selector": "download_link",
+              "text": true,
+              "transform": [
+                [
+                  "strip"
+                ]
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [],
+    "body_empty_acceptable": true
+  },
+  "_note": "Drupal.org project releases are protected by a Fastly client challenge on the HTML page. Use the official updates.drupal.org release-history XML endpoint instead.",
+  "_recognized_platform": "host_drupal-org"
+}
