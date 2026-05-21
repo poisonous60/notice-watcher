@@ -1,0 +1,149 @@
+{
+  "version": 1,
+  "site": "venturebeat.com",
+  "board": "root",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+    "Referer": "https://venturebeat.com/"
+  },
+  "timeout": 15,
+  "polite_sleep": {
+    "min": 5,
+    "max": 6
+  },
+  "list": {
+    "url_template": "https://venturebeat.com/",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "section.container-fluid.mt-50 > div.mt-32 > div > article.flex.flex-col.gap-12",
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a[href]",
+          "attr": "href",
+          "transform": [
+            [
+              "regex_extract",
+              "^/([^/?#]+/[^/?#]+)"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "h2 a",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "h2 a",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://venturebeat.com"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "time",
+          "attr": "datetime",
+          "transform": [
+            [
+              "iso8601"
+            ]
+          ]
+        }
+      ],
+      "author": [
+        {
+          "from": "css",
+          "selector": "address a[rel='author']",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": ".line-clamp-3",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "cover_image": [
+        {
+          "from": "attr",
+          "selector": "img",
+          "attr": "src",
+          "transform": [
+            [
+              "urljoin",
+              "https://venturebeat.com"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "div.article-body",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "article h1",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "article time",
+          "attr": "datetime",
+          "transform": [
+            [
+              "iso8601"
+            ]
+          ]
+        }
+      ]
+    }
+  }
+}

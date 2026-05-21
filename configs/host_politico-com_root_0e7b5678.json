@@ -1,0 +1,147 @@
+{
+  "version": 1,
+  "site": "www.politico.com",
+  "board": "root",
+  "strategy": "playwright_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+    "Referer": "https://www.politico.com/"
+  },
+  "timeout": 15,
+  "idle_timeout_ms": 10000,
+  "quiet_ms": 1000,
+  "list": {
+    "url_template": "https://www.politico.com/",
+    "pagination": {
+      "kind": "none"
+    },
+    "wait_selector": "div.container__slot > div.module.single-column-list.has-bottom-divider",
+    "row_selector": "div.container__slot > div.module.single-column-list.has-bottom-divider",
+    "row_required_selector": "a[href*='/live-updates/'], a[href*='/news/']",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a[href*='/live-updates/'], a[href*='/news/']",
+          "attr": "href",
+          "pick": "first_matching",
+          "match": "https://www\\.politico\\.com/(?:live-updates|news)/",
+          "transform": [
+            [
+              "strip_query_fragment"
+            ],
+            [
+              "regex_extract",
+              "-(\\d{8})(?:$|[/?#])"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "a[href*='/live-updates/'], a[href*='/news/']",
+          "pick": "first_matching",
+          "match": "\\S",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a[href*='/live-updates/'], a[href*='/news/']",
+          "attr": "href",
+          "pick": "first_matching",
+          "match": "https://www\\.politico\\.com/(?:live-updates|news)/",
+          "transform": [
+            [
+              "strip_query_fragment"
+            ]
+          ]
+        }
+      ],
+      "author": [
+        {
+          "from": "css",
+          "selector": "a[rel='author'], .byline a, .author a",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "body_empty_acceptable": true,
+    "wait_selector": "div.post-card__body, div.rte.rte--card, article",
+    "content": [
+      {
+        "from": "css",
+        "selector": "div.post-card__body",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "div.rte.rte--card",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "article",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "h1, h2.post-card__title, h3.post-card__title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "time[datetime]",
+          "attr": "datetime",
+          "transform": [
+            [
+              "iso8601"
+            ]
+          ]
+        }
+      ],
+      "author": [
+        {
+          "from": "css",
+          "selector": "a[rel='author'], .card-byline__author-name, .byline a",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "_source_url": "https://www.politico.com/",
+  "_note": "handcrafted: httpx root/article currently returns Cloudflare 403; Playwright can collect homepage rows, but direct article body may remain empty at poll time."
+}
