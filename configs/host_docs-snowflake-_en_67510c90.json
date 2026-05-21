@@ -1,0 +1,99 @@
+{
+  "version": 1,
+  "site": "docs.snowflake.com",
+  "board": "new-features",
+  "strategy": "httpx_html",
+  "_source_url": "https://docs.snowflake.com/en/release-notes",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8"
+  },
+  "timeout": 20,
+  "polite_sleep": {
+    "min": 5,
+    "max": 8
+  },
+  "list": {
+    "url_template": "https://docs.snowflake.com/en/release-notes",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "article[data-testid='article-content'] section[data-section='recent-feature-updates'] ul li",
+    "row_required_selector": "a[href]",
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a[href]",
+          "attr": "href",
+          "transform": [
+            [
+              "regex_extract",
+              "^/(?:en/)?release-notes/(.+)$"
+            ],
+            [
+              "strip_query_fragment"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": ":self",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a[href]",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://docs.snowflake.com"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": ":self",
+          "text": true,
+          "transform": [
+            [
+              "regex_extract",
+              "^([A-Za-z]+ \\d{1,2}, \\d{4})"
+            ],
+            [
+              "iso8601",
+              [
+                "%B %d, %Y"
+              ],
+              "Z"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "article[data-testid='article-content']",
+        "html": true
+      }
+    ]
+  },
+  "_note": "Snowflake docs release-notes page is static HTML. Probe found the real list under article[data-testid=article-content] section[data-section=recent-feature-updates] with 54 rows; broader repeated patterns also include sidebar navigation. robots.txt has no Crawl-Delay, so this config uses a conservative 5-8s polite sleep."
+}
