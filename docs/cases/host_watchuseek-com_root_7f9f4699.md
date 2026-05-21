@@ -1,17 +1,42 @@
 ---
 slug: host_watchuseek-com_root_7f9f4699
 url: https://www.watchuseek.com/
-status: 🐛 BUG 방어 — SIGBUS subprocess death 를 gen_fail 로 오분류하지 않고 BUG 경로로 보냄
-outcome: improved
+status: ⛔ capability_blocked — dev box 에서 root/RSS 모두 timeout, XenForo RSS 경량 경로도 edge/IP 차단
+outcome: no_change
 date: 2026-05-21
-fix_layer: F
-failure_keys: [subprocess_signal, sigbus, headless_dom_pressure, xenforo_rss]
+fix_layer: none
+failure_keys: [baseline_blocked, capability_blocked, page_goto_timeout, rss_timeout, xenforo_rss, subprocess_signal, sigbus, headless_dom_pressure]
 config_strategy: none
 adapters_changed: []
-engine_files_touched: [bot/site_ops.py, probe/fetch_headless.py]
-tags: [bug, sigbus, chromium, playwright, xenforo, watchuseek, batch-2026-05-21-fedi]
+engine_files_touched: []
+tags: [capability-blocked, antibot, timeout, xenforo, watchuseek, batch-2026-05-21-fedi]
 requested_by: poisonous60
 ---
+
+## 2026-05-21 재확인 — root timeout triage
+
+사용자 제보 증상은 `[FAIL] fetch_list: ... TimeoutError: Page.goto: Timeout` 이었고,
+로컬에는 기존 probe artifact 와 `.FAILED.json` 이 없었다. N100 접근은 금지 조건이라 dev box 에서
+`register.py --reuse-probe "https://www.watchuseek.com/"` 로 재현했다.
+
+결과:
+
+- baseline httpx: root 와 `robots.txt` 모두 `ReadTimeout`.
+- Playwright: `Page.goto: Timeout 15000ms exceeded`, `domcontentloaded` 도달 실패.
+- probe verdict: `BASELINE_BLOCKED`.
+- `list_candidates.json`: HTML/JSON/hydration 후보 0건, `xenforo_platform: null`.
+- RSS `https://www.watchuseek.com/forums/-/index.rss`: browser-like UA/Accept 로도 dev box 에서 `ReadTimeout`
+  (이전 기록의 `406 Not Acceptable` + `xf_is_suspected_bot=1` 과 같은 edge/IP 차단 계층으로 판단).
+- `engine.recognizers.recognize("https://www.watchuseek.com/")`: `None` (의도된 동작 — root URL 만으로 XenForo
+  판정하면 false-positive 폭발).
+
+따라서 이번 케이스는 recognizer/config 로 해결할 수 있는 실패가 아니라 dev box 네트워크에서 목록 진입 자체가
+막힌 `capability_blocked` 이다. `engine/recognizers/xenforo.py`, `probe/extract.py`, `scripts/register.py`
+수정은 하지 않았다. Watchuseek 등록 성공 여부는 N100 IP 에서 RSS/root 접근이 되는지 별도 확인해야 한다.
+
+주의: 이번 재현에서 `register.py` 는 capability_blocked 마커를 쓰고도 프로세스 exit code 가 1이었다. 또한 종료
+직후 Playwright cleanup 의 `greenlet.error` / `TargetClosedError` 잡음이 출력됐다. 이를 고치려면 allow-list 밖
+`scripts/register.py` 또는 cleanup 경로 수정이 필요하므로 이번 hand-config 작업에서는 중단했다.
 
 ## 무엇이 일어났나
 

@@ -39,6 +39,8 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlsplit
 
+import httpx
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from probe.paths import output_dir, url_to_slug  # noqa: E402
@@ -173,33 +175,60 @@ def _policy_check(digest: dict, url: str) -> tuple[bool, list[str]]:
     return True, msgs
 
 
-def _try_lemmy_api_rescue(url: str, slug: str, *, out: Optional[str], force: bool) -> Optional[int]:
-    """HTML anti-bot rc=5 직전 Lemmy public API 로 마지막 등록 시도."""
+def _api_json_available(url: str, *, validate) -> bool:
+    try:
+        r = httpx.get(url, timeout=8.0,
+                      headers={"accept": "application/json", "user-agent": "notice-watcher/1.0"})
+        if r.status_code != 200:
+            return False
+        return validate(r.json())
+    except Exception as e:  # noqa: BLE001
+        print(f"[register] fediverse API rescue probe skip — {url} 확인 실패: {type(e).__name__}: {e}")
+        return False
+
+
+def _try_fediverse_api_rescue(url: str, slug: str, *, out: Optional[str], force: bool) -> Optional[int]:
+    """HTML anti-bot rc=5 직전 fediverse public API 로 마지막 등록 시도."""
     parts = urlsplit(url)
     host = (parts.netloc or "").strip().lower()
     if not host or "." not in host:
         return None
     base = f"{parts.scheme or 'https'}://{host}"
-    try:
-        import httpx
-        r = httpx.get(f"{base}/api/v3/site", timeout=8.0,
-                      headers={"accept": "application/json", "user-agent": "notice-watcher/1.0"})
-        if r.status_code != 200:
-            return None
-        data = r.json()
-    except Exception as e:  # noqa: BLE001
-        print(f"[register] Lemmy API rescue skip — /api/v3/site 확인 실패: {type(e).__name__}: {e}")
-        return None
-    if not isinstance(data, dict) or not (data.get("site_view") or data.get("version")):
-        return None
-    from engine.recognizers.lemmy import build_config as _lemmy_build
-    cfg = _lemmy_build(base)
-    if cfg is None:
-        return None
-    cfg["_recognized_platform"] = "lemmy (rc=5 anti-bot HTML -> public API v3 rescue)"
-    print("[PHASE] lemmy_api_rescue", flush=True)
-    print(f"[register] 🔎 HTML 진입은 차단됐지만 Lemmy /api/v3/site 확인 — LemmyAdapter 등록 시도 (base={base})")
-    return _register_built_config(cfg, slug, url, out=out, force=force)
+
+    def _lemmy_site(data) -> bool:
+        return isinstance(data, dict) and bool(data.get("site_view") or data.get("version"))
+
+    if _api_json_available(f"{base}/api/v3/site", validate=_lemmy_site):
+        from engine.recognizers.lemmy import build_config as _lemmy_build
+        cfg = _lemmy_build(base)
+        if cfg is not None:
+            cfg["_recognized_platform"] = "lemmy (rc=5 anti-bot HTML -> public API v3 rescue)"
+            print("[PHASE] lemmy_api_rescue", flush=True)
+            print(f"[register] 🔎 HTML 진입은 차단됐지만 Lemmy /api/v3/site 확인 — LemmyAdapter 등록 시도 (base={base})")
+            return _register_built_config(cfg, slug, url, out=out, force=force)
+
+    def _mbin_entries(data) -> bool:
+        if isinstance(data, dict):
+            items = data.get("items")
+            if items is None:
+                items = data.get("hydra:member")
+            return isinstance(items, list)
+        return isinstance(data, list)
+
+    if _api_json_available(f"{base}/api/entries?sortBy=newest&perPage=10", validate=_mbin_entries):
+        from engine.recognizers.mbin import build_config as _mbin_build
+        cfg = _mbin_build(base)
+        if cfg is not None:
+            cfg["_recognized_platform"] = "mbin (rc=5 anti-bot HTML -> entries API rescue)"
+            print("[PHASE] mbin_api_rescue", flush=True)
+            print(f"[register] 🔎 HTML 진입은 차단됐지만 Mbin /api/entries 확인 — entries API config 등록 시도 (base={base})")
+            return _register_built_config(cfg, slug, url, out=out, force=force)
+
+    return None
+
+
+def _try_lemmy_api_rescue(url: str, slug: str, *, out: Optional[str], force: bool) -> Optional[int]:
+    return _try_fediverse_api_rescue(url, slug, out=out, force=force)
 
 
 def _social_platform_reject(digest: dict, url: str, slug: str) -> Optional[int]:
@@ -1572,7 +1601,7 @@ def _main_inner(argv) -> int:
             rc_out = 5  # anti-bot/captcha/blocked = 능력 부족 (정책 아님)
         if rc_out == 5:
             if not args.gate_only:
-                rc = _try_lemmy_api_rescue(url, slug, out=args.out, force=args.force)
+                rc = _try_fediverse_api_rescue(url, slug, out=args.out, force=args.force)
                 if rc is not None:
                     return rc
             try:
