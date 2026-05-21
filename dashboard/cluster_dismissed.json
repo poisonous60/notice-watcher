@@ -2,6 +2,18 @@
   "dismissed": [
     {
       "kind": "cross_host",
+      "key": "/about",
+      "reason": "Mastodon 인스턴스 /about — 게시판 아님, config 깨짐(row=body/og:title). social reject 대상, 승급 불가",
+      "at": "2026-05-21"
+    },
+    {
+      "kind": "cross_host",
+      "key": "/articles",
+      "reason": "이종 cross-host — host마다 다른 software, path-word 우연 일치. recognizer round-trip 불가",
+      "at": "2026-05-21"
+    },
+    {
+      "kind": "cross_host",
       "key": "/blog",
       "reason": "이종 cross-host (path-word 그룹핑, 같은 CMS 아님) — recognizer round-trip 불가",
       "at": "2026-05-21"
@@ -14,8 +26,86 @@
     },
     {
       "kind": "cross_host",
+      "key": "/community",
+      "reason": "이종 cross-host — host마다 다른 software, path-word 우연 일치. recognizer round-trip 불가",
+      "at": "2026-05-21"
+    },
+    {
+      "kind": "cross_host",
+      "key": "/en",
+      "reason": "이종 cross-host — host마다 다른 software, path-word 우연 일치. recognizer round-trip 불가",
+      "at": "2026-05-21"
+    },
+    {
+      "kind": "cross_host",
       "key": "/feed",
-      "reason": "이종 cross-host (path-word 그룹핑, 같은 CMS 아님) — recognizer round-trip 불가",
+      "reason": "generic RSS/Atom 피드 (format, 플랫폼 아님). 이미 generic httpx_html parse — recognizer URL over-match 위험, 이득 없음",
+      "at": "2026-05-21"
+    },
+    {
+      "kind": "cross_host",
+      "key": "/forum",
+      "reason": "이종 cross-host — host마다 다른 software, path-word 우연 일치. recognizer round-trip 불가",
+      "at": "2026-05-21"
+    },
+    {
+      "kind": "cross_host",
+      "key": "/forums",
+      "reason": "이종 cross-host — host마다 다른 software, path-word 우연 일치. recognizer round-trip 불가",
+      "at": "2026-05-21"
+    },
+    {
+      "kind": "cross_host",
+      "key": "/news",
+      "reason": "이종 cross-host — host마다 다른 software, path-word 우연 일치. recognizer round-trip 불가",
+      "at": "2026-05-21"
+    },
+    {
+      "kind": "cross_host",
+      "key": "/papers",
+      "reason": "이종 cross-host — host마다 다른 software, path-word 우연 일치. recognizer round-trip 불가",
+      "at": "2026-05-21"
+    },
+    {
+      "kind": "cross_host",
+      "key": "/product-updates",
+      "reason": "이종 cross-host — host마다 다른 software, path-word 우연 일치. recognizer round-trip 불가",
+      "at": "2026-05-21"
+    },
+    {
+      "kind": "cross_host",
+      "key": "/release-notes",
+      "reason": "이종 cross-host — host마다 다른 software, path-word 우연 일치. recognizer round-trip 불가",
+      "at": "2026-05-21"
+    },
+    {
+      "kind": "cross_host",
+      "key": "/releases",
+      "reason": "이종 cross-host — host마다 다른 software, path-word 우연 일치. recognizer round-trip 불가",
+      "at": "2026-05-21"
+    },
+    {
+      "kind": "cross_host",
+      "key": "/rss",
+      "reason": "generic RSS/Atom 피드 (format, 플랫폼 아님). 이미 generic httpx_html parse — recognizer URL over-match 위험, 이득 없음",
+      "at": "2026-05-21"
+    },
+    {
+      "kind": "cross_host",
+      "key": "/rss/index.xml",
+      "reason": "generic RSS/Atom 피드 (format, 플랫폼 아님). 이미 generic httpx_html parse — recognizer URL over-match 위험, 이득 없음",
+      "at": "2026-05-21"
+    },
+    {
+      "kind": "cross_host",
+      "key": "/search",
+      "reason": "이종 cross-host — host마다 다른 software, path-word 우연 일치. recognizer round-trip 불가",
+      "at": "2026-05-21"
+    },
+    {
+      "kind": "cross_host",
+      "key": "/updates",
+      "reason": "이종 cross-host — host마다 다른 software, path-word 우연 일치. recognizer round-trip 불가",
       "at": "2026-05-21"
     }
   ]
