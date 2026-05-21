@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 134 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 135 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -25,6 +25,7 @@
 | [`host_politico-com_root_0e7b5678`](host_politico-com_root_0e7b5678.md) | 🔧 손 config 등록 (baseline 25건, playwright_html; article body may be empty behind Cloudflare) | 2026-05-21 | F | article_body_len, fetch_list | https://www.politico.com/ |
 | [`host_paulgraham-com_articles.html_7910744b`](host_paulgraham-com_articles.html_7910744b.md) | ✅ 수동 config 등록 (httpx_html, baseline 30건) | 2026-05-21 | F | posts_nonempty | https://paulgraham.com/articles.html |
 | [`host_namu-wiki_RecentChanges_2370318a`](host_namu-wiki_RecentChanges_2370318a.md) | ✅ 기존 손 config 동작 확인 — RecentChanges 목록 30건 baseline, 본문은 body_empty_acceptable | 2026-05-21 | none | post_id_stable_shape, matches_probe_first_article | https://namu.wiki/RecentChanges |
+| [`host_microsoft-com_en-us_000c6d5a`](host_microsoft-com_en-us_000c6d5a.md) | 🔧 손 config (작동중, baseline 30, httpx_json) | 2026-05-21 |  | published_at_iso, article_body_len, nav_only_same_host | https://www.microsoft.com/en-us/microsoft-365/roadmap |
 | [`host_medium-com_feed_19419ab9`](host_medium-com_feed_19419ab9.md) | ✅ 등록 완료 (Medium tag RSS — httpx_html XML config + Medium recognizer) | 2026-05-21 | F | posts_nonempty, feed_candidates | https://medium.com/feed/tag/programming |
 | [`host_medium-com_airbnb-engineering_2931b5a3`](host_medium-com_airbnb-engineering_2931b5a3.md) | ✅ 등록 완료 (Medium publication → RSS config + recognizer) | 2026-05-21 | F | posts_nonempty, feed_candidates | https://medium.com/airbnb-engineering |
 | [`host_lemmy-ml_root_9bc876aa`](host_lemmy-ml_root_9bc876aa.md) | ✅ 자동 등록 가능 (Lemmy recognizer + LemmyAdapter 신규 — API v3 직접 호출) | 2026-05-21 | F | posts_nonempty, article_body_len | https://lemmy.ml/ |
@@ -147,7 +148,7 @@
 
 | layer | count |
 |---|---|
-| (미기재) | 21 |
+| (미기재) | 22 |
 | C | 13 |
 | C+A | 1 |
 | C+D | 2 |
@@ -167,7 +168,7 @@
 | (미기재) | 31 |
 | handwritten | 20 |
 | httpx_html | 32 |
-| httpx_json | 13 |
+| httpx_json | 14 |
 | mixed | 1 |
 | none | 26 |
 | playwright_html | 10 |
@@ -175,5 +176,5 @@
 
 ### 최근 90일 (≥ 2026-02-20)
 
-케이스 134 건.
+케이스 135 건.
 
