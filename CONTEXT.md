@@ -17,7 +17,7 @@ _Avoid_: hand-config pipeline (등록 실패는 사이트 인식 못 한 케이�
 _Avoid_: "거부"(REJECTED rc=2/3 = 정상 결과, 실패 아님), "버그"(rc<0 `.BUG.json` = 시스템 결함, bug-fix workflow).
 
 **추론 개선** (= 자동 솔버가 *미지* 유형을 더 풂 — 유일한 진보):
-register 의 generic 추론(probe 추출·LLM 생성·검증·거부 게이트)을 똑똑하게 만들어 *처음 보는* 유형도 자동 생성/거부되게 — triage 큐를 *근본적으로* 줄임. fix-layer C(probe 휴리스틱)·E(schema)·A(prompt)·D(retry)·거부 필터(`recognize_reject`)·register 거부 게이트·**거부 게이트의 LLM index/content veto 분류기 (`prompts/classify.*` 보강·모델 — ADR 0007)**·blacklist 학습. **시스템이 스스로 똑똑해진 유일한 경우** → case `outcome: improved`. dashboard "파이프 진보" 카운트 = 이것만. [scope→mechanism re-cut: ADR 0005] [게시판/비게시판 false-reject 는 게이트 휴리스틱 추가 X → classify 프롬프트/모델: ADR 0007]
+register 의 generic 추론(probe 추출·LLM 생성·검증·거부 게이트)을 똑똑하게 만들어 *처음 보는* 유형도 자동 생성/거부되게 — triage 큐를 *근본적으로* 줄임. fix-layer C(probe 휴리스틱)·E(schema)·A(prompt)·D(retry)·거부 필터(`recognize_reject`)·register 거부 게이트·**거부 게이트의 LLM page-type 분류기 (index/content/not_found/login — `prompts/classify.*` 보강·모델 — ADR 0007)**·blacklist 학습. **시스템이 스스로 똑똑해진 유일한 경우** → case `outcome: improved`. dashboard "파이프 진보" 카운트 = 이것만. [scope→mechanism re-cut: ADR 0005] [게시판/비게시판 false-reject·soft-404·login-마커 false-reject 는 게이트/regex 휴리스틱 추가 X → classify 프롬프트/모델: ADR 0007]
 _Avoid_: "toil 줄임" 단독 (수동 config 도 toil 줄이나 자동 솔버 안 똑똑 — 핵심은 *미지 유형* 자동화), "커버리지 늘림" (플랫폼 config 도 커버는 늘리나 진보 X).
 
 **수동 config** (= 자동이 커버 못 해 직접 박은 config — 진보 아닌 패치):
