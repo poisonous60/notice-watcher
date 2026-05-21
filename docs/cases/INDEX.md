@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 190 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 191 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -98,6 +98,7 @@
 | [`host_adobe-com_products_2fe98bba`](host_adobe-com_products_2fe98bba.md) | ✅ 등록 (Adobe Creative Cloud features AEM fragments) | 2026-05-21 | adapter | capability_blocked, baseline_blocked, adobe_akamai, curl_cffi_impersonate, aem_fragments | https://www.adobe.com/products/new-creative-cloud-features.html |
 | [`host_academic-oup-co_journals_dfaf2baf`](host_academic-oup-co_journals_dfaf2baf.md) | ⚪ no change — Cloudflare managed challenge blocks playwright_html | 2026-05-21 | none | capability_blocked, anti_bot_challenge | https://academic.oup.com/journals |
 | [`host_404media-co_root_9e71a06a`](host_404media-co_root_9e71a06a.md) | Mastodon false-positive detector narrowed; 404media/WordPress/Tailscale social-link pages no longer match fresh detection | 2026-05-21 | C | mastodon_platform_false_positive, social_link_mastodon, stale_probe_artifact | https://www.404media.co/ |
+| [`highwire-recognizer`](highwire-recognizer.md) | ✅ recognizer 승급 (HighWire Press bioRxiv + medRxiv 2건 → engine/recognizers/highwire.py) | 2026-05-21 | B |  | https://www.biorxiv.org/content/early/recent |
 | [`clien-recognizer`](clien-recognizer.md) | ✅ recognizer 승급 (cluster 4건 → engine/recognizers/clien.py) | 2026-05-21 |  |  | https://www.clien.net/service/board/lecture |
 | [`batch_forums_genfail_boardurl_2026-05-21`](batch_forums_genfail_boardurl_2026-05-21.md) | ✅ 4 사이트 hand-config (포털/board-root → 실제 board URL) + engine encoding 옵션 | 2026-05-21 | F | posts_nonempty, matches_probe_first_article | https://www.humoruniv.com/ |
 | [`batch_forums_antibot_playwright_2026-05-21`](batch_forums_antibot_playwright_2026-05-21.md) | ✅ anti-bot 4 사이트 playwright_html 통과 등록 (Anubis PoW·CF) + simplemachines terminal | 2026-05-21 | F | board_shape_check, gate_reject, capability_blocked | https://www.techpowerup.com/forums/ |
@@ -204,6 +205,7 @@
 | layer | count |
 |---|---|
 | (미기재) | 35 |
+| B | 1 |
 | C | 13 |
 | C+A | 1 |
 | C+D | 2 |
@@ -223,7 +225,7 @@
 |---|---|
 | (미기재) | 43 |
 | handwritten | 25 |
-| httpx_html | 56 |
+| httpx_html | 57 |
 | httpx_json | 15 |
 | mixed | 1 |
 | none | 29 |
@@ -232,5 +234,5 @@
 
 ### 최근 90일 (≥ 2026-02-20)
 
-케이스 190 건.
+케이스 191 건.
 
