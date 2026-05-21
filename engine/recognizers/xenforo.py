@@ -32,14 +32,37 @@ _NOTE = ("XenForo 포럼 — known-platform 자동 인식. 전역 RSS `<base>/fo
          "Cloudflare/JS 라 httpx 불가지만 RSS 는 허용되는 경우가 많음.")
 
 
+# XenForo route 세그먼트 — install path 끝 표지. 글 목록·thread·RSS 가 install root 바로 밑에 옴.
+# 첫 매칭 세그먼트 *앞* 까지가 install path (서브폴더 설치 — 예: xenforo.com/community).
+_XF_ROUTE_SEGMENTS = frozenset({
+    "forums", "threads", "whats-new", "members", "posts", "find-new",
+    "watched", "search", "login", "register", "account", "conversations",
+    "help", "tags", "media", "resources", "online", "index.rss",
+})
+
+
+def _install_path(path: str) -> str:
+    """URL path → XenForo install path (서브폴더 설치 지원). 첫 알려진 route 세그먼트 앞까지.
+    `/community/forums/-/index.rss` → `/community`. `/whats-new/posts/` → ``. `/` → ``."""
+    segs = [s for s in (path or "").split("/") if s]
+    keep = []
+    for s in segs:
+        if s.lower() in _XF_ROUTE_SEGMENTS:
+            break
+        keep.append(s)
+    return ("/" + "/".join(keep)) if keep else ""
+
+
 def build_config(base_url: str) -> Optional[dict]:
-    """`https://<host>` → XenForo 전역 RSS httpx_html config. recognizer(RSS/whats-new URL)와
-    register.py 의 probe-후 detect_xenforo_platform 신호 양쪽이 공유."""
+    """`https://<host>[/<install>]` → XenForo 전역 RSS httpx_html config. recognizer(RSS/whats-new
+    URL)와 register.py 의 probe-후 detect_xenforo_platform 신호 양쪽이 공유. base_url 의 path 에서
+    install path 보존 (서브폴더 설치 — xenforo.com/community RSS at /community/forums/-/index.rss)."""
     parts = urlsplit(base_url)
     host = (parts.netloc or "").strip().lower()
     if not host or "." not in host:
         return None
-    base = f"{parts.scheme or 'https'}://{host}"
+    install = _install_path(parts.path or "")
+    base = f"{parts.scheme or 'https'}://{host}{install}"
     return {
         "version": 1,
         "site": host,
@@ -70,20 +93,21 @@ def build_config(base_url: str) -> Optional[dict]:
             },
         },
         "article": {"fetch_kind": "html", "content": [], "body_empty_acceptable": True},
-        "_slug_board": host,
+        "_slug_board": f"{host}{install}",
         "_source_url": f"{base}/forums/-/index.rss",
         "_note": _NOTE,
     }
 
 
 def _build(m: "re.Match", url: str) -> Optional[dict]:
-    parts = urlsplit(url)
-    return build_config(f"{parts.scheme or 'https'}://{(parts.netloc or '').lower()}")
+    # full url 전달 — build_config 가 path 에서 install path 보존 (서브폴더 설치).
+    return build_config(url)
 
 
 # XenForo-distinctive URL paths (root 도메인은 detect_xenforo_platform 가 봉합).
-_RSS_RE = re.compile(r"^https?://[^/?#]+/forums/-/index\.rss\b", re.I)
-_WHATSNEW_RE = re.compile(r"^https?://[^/?#]+/whats-new/posts/?(?:\?|#|$)", re.I)
+# install path prefix (`/community` 등) 허용 — `(?:/[\w-]+)*?` 가 route 세그먼트 앞 서브폴더 흡수.
+_RSS_RE = re.compile(r"^https?://[^/?#]+(?:/[\w-]+)*?/forums/-/index\.rss\b", re.I)
+_WHATSNEW_RE = re.compile(r"^https?://[^/?#]+(?:/[\w-]+)*?/whats-new/posts/?(?:\?|#|$)", re.I)
 
 PATTERNS = [
     (_RSS_RE, _build),

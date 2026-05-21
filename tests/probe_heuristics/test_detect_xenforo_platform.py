@@ -49,4 +49,10 @@ def run() -> list[tuple[str, bool, str]]:
                   out is not None and out["base_url"] == "https://www.avsforum.com",
                   f"got {out!r}"))
 
+    # 7. 서브폴더 설치 — install path 보존 (route 세그먼트 앞 prefix 유지).
+    out = detect_xenforo_platform(html=html_xf, base_url="https://xenforo.com/community/")
+    cases.append(("subpath_install_preserved",
+                  out is not None and out["base_url"] == "https://xenforo.com/community",
+                  f"got {out!r}"))
+
     return cases

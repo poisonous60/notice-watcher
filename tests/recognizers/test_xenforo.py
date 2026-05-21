@@ -42,4 +42,16 @@ def run() -> list[tuple[str, bool, str]]:
     # 5. 빈 host → None.
     cases.append(("bad_base_none", build_config("https://") is None, ""))
 
+    # 6. 서브폴더 설치 — install path 보존 (xenforo.com/community → /community/forums/-/index.rss).
+    sub = build_config("https://xenforo.com/community/")
+    ok = (sub is not None
+          and sub["list"]["url_template"] == "https://xenforo.com/community/forums/-/index.rss"
+          and sub["_slug_board"] == "xenforo.com/community")
+    cases.append(("subpath_install_preserved", ok,
+                  f"got {sub and sub.get('list',{}).get('url_template')!r}"))
+
+    # 7. 서브폴더 RSS URL → recognize 매칭 (regex install prefix 흡수).
+    cases.append(("subpath_rss_recognized",
+                  recognize("https://xenforo.com/community/forums/-/index.rss") is not None, ""))
+
     return cases

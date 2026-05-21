@@ -913,9 +913,11 @@ def detect_xenforo_platform(html: str, base_url: str) -> Optional[dict]:
     LLM 전 `engine/recognizers/xenforo.build_config` 로 RSS config 등록 시도 → fetch_list 빈
     목록(RSS 404/빈/차단)이면 일반 파이프라인 폴백(안전망).
 
-    출력: None | {is_xenforo: True, base_url: "<scheme>://<host>"}.
+    출력: None | {is_xenforo: True, base_url: "<scheme>://<host>[/<install>]"}.
+    base_url 의 path 에서 install path 보존 (서브폴더 설치 — xenforo.com/community).
     """
     from urllib.parse import urlsplit
+    from engine.recognizers.xenforo import _install_path
     if not html or not base_url:
         return None
     if _XENFORO_MARKER_RE.search(html) is None:
@@ -928,7 +930,8 @@ def detect_xenforo_platform(html: str, base_url: str) -> Optional[dict]:
         return None
     if not host or "." not in host:
         return None
-    return {"is_xenforo": True, "base_url": f"{scheme}://{host}"}
+    install = _install_path(parts.path or "")
+    return {"is_xenforo": True, "base_url": f"{scheme}://{host}{install}"}
 
 
 @heuristic

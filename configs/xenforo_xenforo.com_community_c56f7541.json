@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "site": "xenforo.com",
+  "board": "whats-new",
+  "strategy": "httpx_html",
+  "list": {
+    "url_template": "https://xenforo.com/community/forums/-/index.rss",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "channel > item",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "css",
+          "selector": "guid",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "strip"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "css",
+          "selector": "link",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "strip"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "pubDate",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "iso8601",
+              [
+                "%a, %d %b %Y %H:%M:%S %z"
+              ]
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [],
+    "body_empty_acceptable": true
+  },
+  "_slug_board": "xenforo.com/community",
+  "_source_url": "https://xenforo.com/community/forums/-/index.rss",
+  "_note": "XenForo 포럼 — known-platform 자동 인식. 전역 RSS `<base>/forums/-/index.rss` 를 httpx_html(XML) 로 수집 (guid=thread id, title, link, pubDate). 글 목록 페이지는 Cloudflare/JS 라 httpx 불가지만 RSS 는 허용되는 경우가 많음.",
+  "_recognized_platform": "xenforo"
+}
