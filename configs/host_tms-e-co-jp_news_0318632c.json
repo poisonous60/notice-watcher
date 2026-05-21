@@ -1,0 +1,133 @@
+{
+  "version": 1,
+  "site": "www.tms-e.co.jp",
+  "board": "company",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/rss+xml,application/xml,text/xml;q=0.9,text/html;q=0.8,*/*;q=0.7",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8,ja;q=0.7",
+    "Referer": "https://www.tms-e.co.jp/news/"
+  },
+  "timeout": 15,
+  "polite_sleep": {
+    "min": 5,
+    "max": 6
+  },
+  "list": {
+    "url_template": "https://www.tms-e.co.jp/rss2.xml",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "channel > item",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "css",
+          "selector": "guid",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "strip_query_fragment"
+            ],
+            [
+              "strip",
+              "/"
+            ],
+            [
+              "remove_prefix",
+              "https://www.tms-e.co.jp/"
+            ],
+            [
+              "remove_prefix",
+              "http://www.tms-e.co.jp/"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "css",
+          "selector": "link",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "strip_query_fragment"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "pubDate",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "iso8601",
+              [
+                "%a, %d %b %Y %H:%M:%S %z"
+              ]
+            ]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "css",
+          "selector": "category",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "description",
+          "text": true,
+          "transform": [
+            [
+              "html_unescape"
+            ],
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [],
+    "body_empty_acceptable": true
+  },
+  "_source_url": "https://www.tms-e.co.jp/news/",
+  "_note": "The submitted /news/ page returns a 200 Not Found shell and its repeated HTML candidates are sidebar/category links. The page advertises the official site RSS feed at /rss2.xml, which provides stable item/guid/title/link/pubDate/category fields; article bodies are allowed to be empty because feed links may point to external title pages or sparse update entries."
+}
