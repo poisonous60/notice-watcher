@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "site": "anilist.co",
+  "board": "search/anime",
+  "strategy": "handwritten",
+  "adapter": "AniListMediaAdapter",
+  "kwargs": {
+    "media_type": "ANIME",
+    "board": "search/anime",
+    "sort": "SCORE_DESC",
+    "timeout": 15.0
+  },
+  "_source_url": "https://anilist.co/search/anime",
+  "_note": "AniList search/anime — Vue 렌더 shell + POST GraphQL 목록이라 generic httpx_json(GET) schema 로 표현 불가. 공개 GraphQL endpoint(graphql.anilist.co)를 손어댑터로 호출."
+}
