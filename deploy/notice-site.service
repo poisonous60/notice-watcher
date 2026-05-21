@@ -1,0 +1,15 @@
+# 공개 현황 사이트 정적 HTML 생성기.
+# 설치: sudo cp deploy/notice-site.service deploy/notice-site.timer /etc/systemd/system/
+#       sudo systemctl daemon-reload && sudo systemctl enable --now notice-site.timer
+# 즉시 1회 실행: sudo systemctl start notice-site.service   |   로그: journalctl -u notice-site
+[Unit]
+Description=Notice public status site generator (one shot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=poiso
+WorkingDirectory=/home/<user>/notice-watcher
+EnvironmentFile=/home/<user>/notice-watcher/.env
+ExecStart=/home/<user>/notice-watcher/.venv/bin/python scripts/generate_site.py

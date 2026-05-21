@@ -1,0 +1,11 @@
+# 공개 현황 사이트를 약 10분마다 재생성.
+[Unit]
+Description=Regenerate public status site (~10 min)
+
+[Timer]
+OnCalendar=*:0/10
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

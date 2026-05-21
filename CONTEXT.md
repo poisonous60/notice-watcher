@@ -132,6 +132,10 @@ _Avoid_: "notify timer"(옛 15분 systemd — 격자 한계), "digest flush"(옛
 `posts(slug, post_id, …, body, summary, collected_at)` — 폴링이 raw 박고(LLM 0), 발송창에서 처음 필요할 때 `summary` 1회 lazy 계산·캐시(여러 발송창 재사용). TTL ~7일 GC(`prune_probe.py` 패턴). "누가 빚졌나"는 안 풂 — 그건 `deliveries` 네거티브 스페이스. 발송창 job = `posts ⨝ 구독slug − deliveries(대상)`.
 _Avoid_: "pending"(옛 per-target outbox 테이블 — 제거. fan-out 안 함), "collected 재스캔"(옛 임시 전달물 경로).
 
+**공개 현황 사이트** (= public status site):
+N100 이 Tailscale Funnel 로 *공개* 서빙하는 정적 HTML 한 장 — 프로젝트 진행 현황(집계 통계 + 최근 활동 타임라인)을 외부인에게 보여주는 쇼케이스용. `scripts/generate_site.py` 가 N100 라이브 데이터(`bot.sqlite3` jobs·`configs/`·`output/poll_state/`)를 익명화해 `output/site/index.html` 로 굽고(stdlib 만, dep 0), `deploy/notice-site.timer` 가 주기 재생성, `tailscale funnel <dir>` 가 공개 URL 발급. **dashboard 와 별개** — dashboard 는 dev박스 전용·`127.0.0.1`·외부 노출 X·N100 미배포, 이건 N100·공개·익명화. 둘 다 같은 데이터 위 웹 UI 라 혼동 주의. [ADR 0010]
+_Avoid_: "dashboard" (dev 전용 내부 도구 — 공개 사이트 아님), "공개 대시보드" (dashboard 어휘 끌고 옴 — 노출 여부·배포처 정반대라 위험), "status page" (장애 상태 페이지 statuspage.io 어감 — 이건 진행 현황 쇼케이스).
+
 ## Flagged ambiguities
 
 - "probe 개선 루프" / "hand-config 워크플로" / "자가개선 사이클" 셋이 같은 개념 가리킴 — 결정: **hand-config pipeline** 으로 통일 (2026-05-17).
