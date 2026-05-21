@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 184 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 185 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -90,6 +90,7 @@
 | [`host_apnews-com_root_5ee5ebc1`](host_apnews-com_root_5ee5ebc1.md) | 🔧 손 config 등록 (baseline 30건, httpx_html) | 2026-05-21 | F | title_nonempty, posts_nonempty, article_body_len | https://apnews.com/ |
 | [`host_aljazeera-com_root_2ac8d25a`](host_aljazeera-com_root_2ac8d25a.md) | ✅ preflight b-hit 회복 + config 등록 (baseline 25건, httpx_html RSS) | 2026-05-21 | F | posts_nonempty, title_nonempty, post_id_unique | https://www.aljazeera.com/ |
 | [`host_airtable-com_whatsnew_6412a843`](host_airtable-com_whatsnew_6412a843.md) | 🧩 손어댑터 — /whatsnew 빈 마케팅 셸 대신 Newsroom page-data 를 최신순으로 읽어 baseline 30건 등록 | 2026-05-21 | F | posts_nonempty, wrong_first_article_url, marketing_shell_no_rows, next_page_data_reordered | https://www.airtable.com/whatsnew |
+| [`host_adobe-com_products_2fe98bba`](host_adobe-com_products_2fe98bba.md) | ✅ 등록 (Adobe Creative Cloud features AEM fragments) | 2026-05-21 | adapter | capability_blocked, baseline_blocked, adobe_akamai, curl_cffi_impersonate, aem_fragments | https://www.adobe.com/products/new-creative-cloud-features.html |
 | [`host_academic-oup-co_journals_dfaf2baf`](host_academic-oup-co_journals_dfaf2baf.md) | ⚪ no change — Cloudflare managed challenge blocks playwright_html | 2026-05-21 | none | capability_blocked, anti_bot_challenge | https://academic.oup.com/journals |
 | [`host_404media-co_root_9e71a06a`](host_404media-co_root_9e71a06a.md) | Mastodon false-positive detector narrowed; 404media/WordPress/Tailscale social-link pages no longer match fresh detection | 2026-05-21 | C | mastodon_platform_false_positive, social_link_mastodon, stale_probe_artifact | https://www.404media.co/ |
 | [`clien-recognizer`](clien-recognizer.md) | ✅ recognizer 승급 (cluster 4건 → engine/recognizers/clien.py) | 2026-05-21 |  |  | https://www.clien.net/service/board/lecture |
@@ -208,6 +209,7 @@
 | F | 76 |
 | F+A | 1 |
 | F+C | 3 |
+| adapter | 1 |
 | none | 44 |
 
 ### config_strategy 분포
@@ -215,7 +217,7 @@
 | strategy | count |
 |---|---|
 | (미기재) | 43 |
-| handwritten | 22 |
+| handwritten | 23 |
 | httpx_html | 55 |
 | httpx_json | 15 |
 | mixed | 1 |
@@ -225,5 +227,5 @@
 
 ### 최근 90일 (≥ 2026-02-20)
 
-케이스 184 건.
+케이스 185 건.
 
