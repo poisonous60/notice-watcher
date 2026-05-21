@@ -69,6 +69,22 @@ def hostname_from_url(value: object) -> str:
     return ""
 
 
+# second-level labels that are really part of a multi-part public suffix
+# (e.g. .co.kr / .ac.kr / .co.jp) — the registrable label is one further left.
+_PUBLIC_SUFFIX_2ND = {"co", "ac", "or", "ne", "go", "com", "net", "org", "edu", "gov"}
+
+
+def service_from_host(host: str) -> str:
+    """Registrable service label from a domain (store.steampowered.com -> steampowered,
+    skku.ac.kr -> skku, github.com -> github)."""
+    parts = [p for p in str(host).split(".") if p]
+    if len(parts) >= 3 and parts[-2] in _PUBLIC_SUFFIX_2ND:
+        return parts[-3]
+    if len(parts) >= 2:
+        return parts[-2]
+    return host or "unknown"
+
+
 def platform_from_slug(slug: str) -> str:
     for prefix in PLATFORM_PREFIXES:
         if slug.startswith(prefix):
@@ -76,6 +92,16 @@ def platform_from_slug(slug: str) -> str:
     if slug.startswith("host_"):
         return "generic host"
     return "other"
+
+
+def platform_label(slug: str, host: str) -> str:
+    """Recognized platform if the slug matches one, else the service derived from the
+    domain so individually-registered sites (github, steam, wikipedia, …) are not all
+    lumped as one 'generic host' bucket."""
+    p = platform_from_slug(slug)
+    if p == "generic host":
+        return service_from_host(host)
+    return p
 
 
 def marker_kind(path: Path) -> str:
@@ -194,7 +220,7 @@ def read_poll_state() -> dict:
         sites.append(
             {
                 "slug": slug,
-                "platform": platform_from_slug(slug),
+                "platform": platform_label(slug, host),
                 "host": host or "unknown host",
                 "group": group,
                 "status": status,
@@ -258,12 +284,29 @@ def top_items(counter: Counter, limit: int = 8) -> list[tuple[str, int]]:
     return [(str(k), int(v)) for k, v in counter.most_common(limit)]
 
 
-PALETTE = ["#52616b", "#8a6f4d", "#3d737f", "#9b6b6b", "#6f7f52", "#6d647c", "#4f6f8f", "#7b5c8c", "#5f8a72", "#a07a4f", "#506b8a", "#8c5c6d"]
+PALETTE = [
+    "#52616b", "#8a6f4d", "#3d737f", "#9b6b6b", "#6f7f52", "#6d647c", "#4f6f8f", "#7b5c8c",
+    "#5f8a72", "#a07a4f", "#506b8a", "#8c5c6d", "#7a8c4f", "#4f8c8c", "#a06b8a", "#6b7a9b",
+]
+OTHER_PLATFORM = "other site"
+OTHER_COLOR = "#bcb3a4"
 
 
 def platform_color_map(sites: list[dict]) -> dict:
-    platforms = sorted({str(site["platform"]) for site in sites})
-    return {platform: PALETTE[i % len(PALETTE)] for i, platform in enumerate(platforms)}
+    """Give the most common platforms a distinct color; fold the long tail of one-off
+    sites into a single 'other site' bucket so the legend stays readable and the chart
+    is not one undifferentiated mass. Mutates each site's platform to the bucket label."""
+    counts = Counter(str(site["platform"]) for site in sites)
+    top = [p for p, _ in counts.most_common(len(PALETTE))]
+    topset = set(top)
+    has_other = any(str(site["platform"]) not in topset for site in sites)
+    for site in sites:
+        if str(site["platform"]) not in topset:
+            site["platform"] = OTHER_PLATFORM
+    cmap = {platform: PALETTE[i] for i, platform in enumerate(top)}
+    if has_other:
+        cmap[OTHER_PLATFORM] = OTHER_COLOR
+    return cmap
 
 
 def _hash_unit(value: str, salt: str) -> float:
