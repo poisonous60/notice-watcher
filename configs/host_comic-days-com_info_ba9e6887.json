@@ -1,0 +1,140 @@
+{
+  "version": 1,
+  "site": "comic-days.com",
+  "board": "info",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+    "Referer": "https://comic-days.com/info/"
+  },
+  "timeout": 15,
+  "list": {
+    "url_template": "https://comic-days.com/info/",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "ul.recent-entries.hatena-urllist > li.recent-entries-item",
+    "row_required_selector": "a.recent-entries-title-link",
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a.recent-entries-title-link",
+          "attr": "href",
+          "transform": [
+            [
+              "regex_extract",
+              "/info/entry/(\\d{4}/\\d{2}/\\d{2}/\\d{6})"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "a.recent-entries-title-link",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a.recent-entries-title-link",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://comic-days.com"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "time",
+          "attr": "datetime",
+          "transform": [
+            [
+              "iso8601",
+              [
+                "%Y-%m-%dT%H:%M:%SZ"
+              ],
+              "Z"
+            ]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "css",
+          "selector": ".recent-entries-item-inner .recent-entries-title-link",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "url_template": "https://comic-days.com/info/entry/{post_id}",
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "div.entry-content",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "div.entry-body",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "div.archive-entry-body",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "h1.entry-title-link, h1.entry-title a, a.entry-title-link",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "time",
+          "attr": "datetime",
+          "transform": [
+            [
+              "iso8601",
+              [
+                "%Y-%m-%dT%H:%M:%SZ"
+              ],
+              "Z"
+            ]
+          ]
+        }
+      ]
+    }
+  }
+}
