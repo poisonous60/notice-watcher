@@ -69,22 +69,6 @@ def hostname_from_url(value: object) -> str:
     return ""
 
 
-# second-level labels that are really part of a multi-part public suffix
-# (e.g. .co.kr / .ac.kr / .co.jp) — the registrable label is one further left.
-_PUBLIC_SUFFIX_2ND = {"co", "ac", "or", "ne", "go", "com", "net", "org", "edu", "gov"}
-
-
-def service_from_host(host: str) -> str:
-    """Registrable service label from a domain (store.steampowered.com -> steampowered,
-    skku.ac.kr -> skku, github.com -> github)."""
-    parts = [p for p in str(host).split(".") if p]
-    if len(parts) >= 3 and parts[-2] in _PUBLIC_SUFFIX_2ND:
-        return parts[-3]
-    if len(parts) >= 2:
-        return parts[-2]
-    return host or "unknown"
-
-
 def platform_from_slug(slug: str) -> str:
     for prefix in PLATFORM_PREFIXES:
         if slug.startswith(prefix):
@@ -94,14 +78,33 @@ def platform_from_slug(slug: str) -> str:
     return "other"
 
 
-def platform_label(slug: str, host: str) -> str:
-    """Recognized platform if the slug matches one, else the service derived from the
-    domain so individually-registered sites (github, steam, wikipedia, …) are not all
-    lumped as one 'generic host' bucket."""
-    p = platform_from_slug(slug)
-    if p == "generic host":
-        return service_from_host(host)
-    return p
+# config `strategy` (how each board is fetched) -> human label shown in the figure.
+FETCH_LABELS = {
+    "httpx_html": "static HTML",
+    "httpx_json": "JSON API",
+    "playwright_html": "headless browser",
+    "handwritten": "custom adapter",
+}
+FETCH_COLORS = {
+    "static HTML": "#3d737f",
+    "JSON API": "#6f7f52",
+    "headless browser": "#8a6f4d",
+    "custom adapter": "#7b5c8c",
+    "other method": "#9b6b6b",
+    "content page": "#bcb3a4",
+    "blocked": "#9aa0a6",
+}
+# legend / color order
+FETCH_ORDER = ["static HTML", "JSON API", "headless browser", "custom adapter", "other method", "content page", "blocked"]
+
+
+def color_key_for(site: dict, strategy_by_slug: dict) -> str:
+    group = site.get("group")
+    if group == "board":
+        return FETCH_LABELS.get(str(strategy_by_slug.get(site.get("slug"), "")), "other method")
+    if group == "content":
+        return "content page"
+    return "blocked"
 
 
 def marker_kind(path: Path) -> str:
@@ -160,6 +163,7 @@ def read_configs() -> dict:
     platforms = Counter()
     strategies = Counter()
     hosts = Counter()
+    strategy_by_slug = {}
 
     for path in sorted(config_dir.glob("*.json")):
         data = load_json(path)
@@ -172,6 +176,7 @@ def read_configs() -> dict:
         configs.append({"site": site, "platform": platform, "strategy": strategy, "host": host})
         platforms[platform] += 1
         strategies[strategy] += 1
+        strategy_by_slug[slug] = strategy
         if host and host != "unknown":
             hosts[host] += 1
 
@@ -180,6 +185,7 @@ def read_configs() -> dict:
         "platforms": platforms,
         "strategies": strategies,
         "hosts": hosts,
+        "strategy_by_slug": strategy_by_slug,
     }
 
 
@@ -220,7 +226,7 @@ def read_poll_state() -> dict:
         sites.append(
             {
                 "slug": slug,
-                "platform": platform_label(slug, host),
+                "platform": platform_from_slug(slug),
                 "host": host or "unknown host",
                 "group": group,
                 "status": status,
@@ -284,29 +290,16 @@ def top_items(counter: Counter, limit: int = 8) -> list[tuple[str, int]]:
     return [(str(k), int(v)) for k, v in counter.most_common(limit)]
 
 
-PALETTE = [
-    "#52616b", "#8a6f4d", "#3d737f", "#9b6b6b", "#6f7f52", "#6d647c", "#4f6f8f", "#7b5c8c",
-    "#5f8a72", "#a07a4f", "#506b8a", "#8c5c6d", "#7a8c4f", "#4f8c8c", "#a06b8a", "#6b7a9b",
-]
-OTHER_PLATFORM = "other site"
-OTHER_COLOR = "#bcb3a4"
-
-
-def platform_color_map(sites: list[dict]) -> dict:
-    """Give the most common platforms a distinct color; fold the long tail of one-off
-    sites into a single 'other site' bucket so the legend stays readable and the chart
-    is not one undifferentiated mass. Mutates each site's platform to the bucket label."""
-    counts = Counter(str(site["platform"]) for site in sites)
-    top = [p for p, _ in counts.most_common(len(PALETTE))]
-    topset = set(top)
-    has_other = any(str(site["platform"]) not in topset for site in sites)
+def fetch_color_map(sites: list[dict], strategy_by_slug: dict) -> dict:
+    """Assign each site a color key by *how it is fetched* (config strategy) for boards,
+    and by outcome for content/blocked. Sets site['color_key']. Returns an ordered
+    {color_key: hex} map of only the keys actually present, for fill + legend."""
+    present = set()
     for site in sites:
-        if str(site["platform"]) not in topset:
-            site["platform"] = OTHER_PLATFORM
-    cmap = {platform: PALETTE[i] for i, platform in enumerate(top)}
-    if has_other:
-        cmap[OTHER_PLATFORM] = OTHER_COLOR
-    return cmap
+        key = color_key_for(site, strategy_by_slug)
+        site["color_key"] = key
+        present.add(key)
+    return {key: FETCH_COLORS[key] for key in FETCH_ORDER if key in present}
 
 
 def _hash_unit(value: str, salt: str) -> float:
@@ -345,14 +338,14 @@ def svg_grouped_scatter(sites: list[dict], color_map: dict) -> str:
     for group, _ in groups:
         group_sites = sorted(
             [site for site in sites if site.get("group") == group],
-            key=lambda site: (str(site["platform"]), str(site["host"]), str(site["slug"])),
+            key=lambda site: (str(site.get("color_key")), str(site["host"]), str(site["slug"])),
         )
         count = len(group_sites)
         for i, site in enumerate(group_sites):
             base_y = pad + 60 if count <= 1 else pad + 60 + (plot_h - 116) * i / (count - 1)
             y = min(height - pad - 28, max(pad + 48, base_y + (_hash_unit(str(site["slug"]), "y") - 0.5) * 18))
             x = min(pad + plot_w - 24, max(pad + 24, centers[group] + (_hash_unit(str(site["slug"]), "x") - 0.5) * 104))
-            platform = str(site["platform"])
+            color_key = str(site.get("color_key") or "other method")
             posts = len(site.get("seen_post_ids") or [])
             radius = 3.5
             if group == "board":
@@ -361,8 +354,8 @@ def svg_grouped_scatter(sites: list[dict], color_map: dict) -> str:
             ring = ' stroke="var(--ink)" stroke-width="1.4"' if group == "board" and status == "ok" else ""
             circles.append(
                 f'<circle class="dot" cx="{x:.1f}" cy="{y:.1f}" r="{radius:.1f}" '
-                f'fill="{color_map.get(platform, PALETTE[0])}"{ring} '
-                f'data-pf="{esc(platform)}" data-domain="{esc(site["host"])}" '
+                f'fill="{color_map.get(color_key, FETCH_COLORS["other method"])}"{ring} '
+                f'data-pf="{esc(color_key)}" data-domain="{esc(site["host"])}" '
                 f'data-status="{esc(status)}"></circle>'
             )
 
@@ -396,12 +389,12 @@ def render_html(configs: dict, poll: dict, jobs: dict, generated_at: datetime) -
     rejected_count = poll["markers"].get("rejected", 0)
     bug_count = poll["markers"].get("bug", 0)
     sites = read_sites(poll)
-    color_map = platform_color_map(sites)
+    color_map = fetch_color_map(sites, configs.get("strategy_by_slug") or {})
     scatter_chart = svg_grouped_scatter(sites, color_map)
-    platform_counts = Counter(str(s["platform"]) for s in sites)
+    key_counts = Counter(str(s.get("color_key")) for s in sites)
     legend_html = "".join(
-        f'<li><span class="swatch" style="background:{color}"></span>{esc(platform)}<b>{platform_counts.get(platform, 0)}</b></li>'
-        for platform, color in color_map.items()
+        f'<li><span class="swatch" style="background:{color}"></span>{esc(key)}<b>{key_counts.get(key, 0)}</b></li>'
+        for key, color in color_map.items()
     ) or '<li>No watched sites yet</li>'
 
     recent_rows = []
@@ -687,10 +680,11 @@ def render_html(configs: dict, poll: dict, jobs: dict, generated_at: datetime) -
       <ul class="legend">{legend_html}</ul>
       <div id="dotTip" class="dot-tip" hidden></div>
       <figcaption>Figure 1. Every page we evaluated, sorted by what it turned out to be. Left = list/board
-        pages we actively watch (each dot is one board; dot color is its platform, see legend; a ring
-        marks fully active boards). Middle = single content pages (one article or info page, not a
-        board) that we skip. Right = pages we could not enter (anti-bot / Cloudflare). Broken or dead
-        URLs are left out. Hover a dot to highlight its platform and see the domain.</figcaption>
+        pages we actively watch — color shows how we read each one (static HTML, JSON API, headless
+        browser, or a custom adapter; see legend), and a ring marks fully active boards. Middle = single
+        content pages (one article or info page, not a board) that we skip. Right = pages we could not
+        enter (anti-bot / Cloudflare). Broken or dead URLs are left out. Hover a dot to highlight the
+        same fetch method and see the domain.</figcaption>
     </figure>
     <script>
       (function () {{
