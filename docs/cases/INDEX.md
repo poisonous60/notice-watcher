@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 153 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 154 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -43,6 +43,7 @@
 | [`host_hubspot-com_product-updates_33c05b99`](host_hubspot-com_product-updates_33c05b99.md) | 🔧 수동 config — HubSpot Releases and Updates JSON API 로 baseline 30건 등록 | 2026-05-21 | none | posts_nonempty, khoros_resources_api | https://www.hubspot.com/product-updates |
 | [`host_grafana-com_blog_d681aff2`](host_grafana-com_blog_d681aff2.md) | ✅ 수동 config 등록 (httpx_html, baseline 30건) | 2026-05-21 | F | posts_nonempty | https://grafana.com/blog/ |
 | [`host_france24-com_en_a8047c17`](host_france24-com_en_a8047c17.md) | 🚫 보류 (anti-bot 403 capability_blocked; stealth 우회 구현 안 함) | 2026-05-21 | none | capability_blocked, fetch_list | https://www.france24.com/en/ |
+| [`host_firebase-google_support_1f0ed638`](host_firebase-google_support_1f0ed638.md) | ⏸ deferred — 앵커-glob 단일페이지 (가치 낮음) | 2026-05-21 |  | meta_diverging, posts_nonempty | https://firebase.google.com/support/releases |
 | [`host_fedia-io_root_1f0bc0d6`](host_fedia-io_root_1f0bc0d6.md) | ⛔ capability_blocked — root/combined가 login으로 redirect, mbin API는 현재 401; rc=5 Mbin rescue path 추가 | 2026-05-21 | F | capability_blocked, login_redirect, mbin_api_unauthorized, fediverse_api_rescue | https://fedia.io/ |
 | [`host_feddit-de_root_584f7d0f`](host_feddit-de_root_584f7d0f.md) | rc=5 capability_blocked — Lemmy root; dev box API 404, 미등록 (rescue 인프라 일반화) | 2026-05-21 | F | capability_blocked, fediverse_api_rescue, lemmy_api_rescue | https://feddit.de/ |
 | [`host_drupal-org_project_ecbb957e`](host_drupal-org_project_ecbb957e.md) | ✅ known-platform recognizer 등록 (baseline 30건, Drupal release-history XML) | 2026-05-21 | F | posts_nonempty, fastly_client_challenge, release_history_xml | https://drupal.org/project/drupal/releases |
@@ -166,7 +167,7 @@
 
 | layer | count |
 |---|---|
-| (미기재) | 25 |
+| (미기재) | 26 |
 | C | 13 |
 | C+A | 1 |
 | C+D | 2 |
@@ -183,7 +184,7 @@
 
 | strategy | count |
 |---|---|
-| (미기재) | 31 |
+| (미기재) | 32 |
 | handwritten | 22 |
 | httpx_html | 46 |
 | httpx_json | 15 |
@@ -194,5 +195,5 @@
 
 ### 최근 90일 (≥ 2026-02-20)
 
-케이스 153 건.
+케이스 154 건.
 
