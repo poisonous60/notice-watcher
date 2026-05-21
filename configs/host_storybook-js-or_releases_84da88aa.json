@@ -1,0 +1,115 @@
+{
+  "version": 1,
+  "site": "storybook.js.org",
+  "board": "releases",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/atom+xml,application/xml;q=0.9,text/html;q=0.8,*/*;q=0.7",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+    "Referer": "https://storybook.js.org/releases/"
+  },
+  "timeout": 15,
+  "polite_sleep": {
+    "min": 3,
+    "max": 6
+  },
+  "list": {
+    "url_template": "https://github.com/storybookjs/storybook/releases.atom",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "feed > entry",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "link",
+          "attr": "href",
+          "transform": [
+            [
+              "regex_extract",
+              "/releases/tag/([^/?#]+)"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "link",
+          "attr": "href"
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "updated",
+          "text": true,
+          "transform": [
+            [
+              "iso8601",
+              [
+                "%Y-%m-%dT%H:%M:%SZ"
+              ]
+            ]
+          ]
+        }
+      ],
+      "author": [
+        {
+          "from": "css",
+          "selector": "author > name",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "content",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "div.markdown-body[data-test-selector='body-content']",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "div.markdown-body",
+        "html": true
+      }
+    ]
+  },
+  "_source_url": "https://storybook.js.org/releases/",
+  "_note": "Storybook releases page currently redirects to the latest release detail page, so the stable polling source is the upstream GitHub Releases Atom feed for storybookjs/storybook. The public source URL remains the Storybook releases URL to preserve the user-facing slug."
+}
