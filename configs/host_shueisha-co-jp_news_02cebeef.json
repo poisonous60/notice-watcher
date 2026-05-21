@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "site": "www.shueisha.co.jp",
+  "board": "news",
+  "strategy": "httpx_json",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "ja-JP,ja;q=0.9,ko;q=0.8",
+    "Referer": "https://www.shueisha.co.jp/news/"
+  },
+  "timeout": 15,
+  "list": {
+    "url_template": "https://www.shueisha.co.jp/wp-json/wp/v2/news?_embed=1",
+    "pagination": {
+      "kind": "query_param",
+      "page_param": "page",
+      "size_param": "per_page"
+    },
+    "page_size_max": 20,
+    "list_path": [],
+    "fields": {
+      "post_id": [
+        {
+          "from": "json",
+          "path": ["id"],
+          "transform": [["to_str"]]
+        }
+      ],
+      "title": [
+        {
+          "from": "json",
+          "path": ["title", "rendered"],
+          "transform": [["html_unescape"], ["collapse_ws"]]
+        }
+      ],
+      "url": [
+        {
+          "from": "json",
+          "path": ["link"],
+          "transform": [["strip_query_fragment"]]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "json",
+          "path": ["date"],
+          "transform": [["iso8601", ["%Y-%m-%dT%H:%M:%S"], "+09:00"]]
+        }
+      ],
+      "category": [
+        {
+          "from": "json",
+          "path": ["_embedded", "wp:term", 0, 0, "name"],
+          "transform": [["collapse_ws"]]
+        }
+      ],
+      "cover_image": [
+        {
+          "from": "json",
+          "path": ["_embedded", "wp:featuredmedia", 0, "source_url"],
+          "transform": [["strip_query_fragment"]]
+        }
+      ]
+    }
+  },
+  "article": {
+    "url_template": "https://www.shueisha.co.jp/wp-json/wp/v2/news/{post_id}",
+    "fetch_kind": "json",
+    "content": [
+      {
+        "from": "json",
+        "path": ["content", "rendered"]
+      }
+    ],
+    "body_empty_acceptable": true
+  },
+  "_source_url": "https://www.shueisha.co.jp/news/",
+  "_note": "Shueisha news archive exposes stable WordPress news IDs through wp-json. The HTML archive links to many external campaign sites and duplicates some URLs, so href-derived post_id is not stable/unique; use the REST list and accept list-only bodies because the public REST item omits content."
+}
