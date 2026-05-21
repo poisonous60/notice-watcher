@@ -1,0 +1,100 @@
+{
+  "version": 1,
+  "site": "lidenfilms.jp",
+  "board": "news",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/rss+xml,application/xml,text/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ja-JP,ja;q=0.9,ko;q=0.8",
+    "Referer": "https://www.lidenfilms.jp/news/"
+  },
+  "timeout": 15,
+  "list": {
+    "url_template": "https://www.lidenfilms.jp/news/feed/",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "item",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "css",
+          "selector": "guid",
+          "text": true,
+          "transform": [
+            [
+              "regex_extract",
+              "[?&]p=(\\d+)"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "css",
+          "selector": "link",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "strip_query_fragment"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "pubDate",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "iso8601",
+              [
+                "%a, %d %b %Y %H:%M:%S %z"
+              ]
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "description",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [],
+    "body_empty_acceptable": true
+  },
+  "_source_url": "https://www.lidenfilms.jp/news/",
+  "_note": "LIDENFILMS news archive exposes stable WordPress RSS item GUIDs at /news/feed/. The HTML archive links multiple announcements to the same works page, so href-derived post_id is not unique. Use RSS ?p= IDs and keep article bodies list-only."
+}
