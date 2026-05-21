@@ -35,6 +35,7 @@
 
 - **opencode 로 갈아타기** — ChatGPT 구독 OAuth first-class 지원해 quota 는 동점이나, reviewer 재포팅 + 도구 2개 운영 + 서드파티 sub-auth clamp 위험(Anthropic 이 2026-04-04 Claude 구독을 서드파티 하네스에서 차단한 선례). 통합 비용·안정성에서 Codex 가 우위. 측정된 plan B 로 보류.
 - **Codex 데스크탑 앱** — GUI 세션 #15250 으로 native subagent 접근 불가.
+- **Claude → `codex:rescue`(codex-companion 1.0.4 broker)** — Claude in-loop(토큰 0 목표 위배) + broker 가 Windows 에서 stdout-heavy PowerShell(우리 probe)에 IPC pipe deadlock → `state=running` 무한대기(codex-plugin-cc#330). 2026-05-21 df-nexon run 8분 hang 의 root-cause. 진행 가시성도 placeholder 이름(#321)으로 깨짐. **확정 경로 = codex CLI 직접**(`codex exec ... - < promptfile` + `--dangerously-bypass-approvals-and-sandbox`): Claude 토큰 0, 터미널 라이브 스트리밍, broker 우회로 #330 비해당.
 - **매 hand-config 를 Claude 로 재검토** — 품질↑이나 quota 절약 목표와 정면 충돌.
 - **AGENTS.md 에 전체 절차 복제** — 독립적이나 SKILL.md 와 drift 원천.
 
