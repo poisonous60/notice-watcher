@@ -1,0 +1,89 @@
+{
+  "version": 1,
+  "site": "mdpi.com",
+  "board": "rss",
+  "strategy": "httpx_html",
+  "_source_url": "https://www.mdpi.com/journal/rss",
+  "headers": {
+    "User-Agent": "Mozilla/5.0",
+    "Accept": "application/rss+xml,application/xml,text/xml;q=0.9,text/html;q=0.8,*/*;q=0.7",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.mdpi.com/"
+  },
+  "timeout": 20,
+  "polite_sleep": {
+    "min": 5,
+    "max": 6
+  },
+  "list": {
+    "url_template": "https://www.mdpi.com/rss",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "item",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "css",
+          "selector": "link",
+          "text": true,
+          "transform": [
+            ["collapse_ws"],
+            ["strip_query_fragment"],
+            ["regex_extract", "https://www\\.mdpi\\.com/(.+)$"],
+            ["replace", "/", "_"]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "title",
+          "text": true,
+          "transform": [
+            ["collapse_ws"]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "css",
+          "selector": "link",
+          "text": true,
+          "transform": [
+            ["collapse_ws"],
+            ["strip_query_fragment"]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "pubDate",
+          "text": true,
+          "transform": [
+            ["collapse_ws"],
+            ["date_only_to_iso", "Z"]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "description",
+          "text": true,
+          "transform": [
+            ["collapse_ws"]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "body_empty_acceptable": true,
+    "content": []
+  },
+  "_note": "Original URL /journal/rss returned Access Denied from this network, but MDPI exposes a working global RSS feed at /rss. The feed supplies stable item links, titles, dates, and abstracts; article bodies are intentionally optional because article pages may return an empty JS shell."
+}
