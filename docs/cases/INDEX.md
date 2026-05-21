@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 139 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 140 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -42,6 +42,7 @@
 | [`host_df-nexon-com_community_cae73546`](host_df-nexon-com_community_cae73546.md) | ✅ 수동 config (작동중, baseline 21, httpx_html) | 2026-05-21 | none | posts_nonempty | https://df.nexon.com/community/news/notice/list |
 | [`host_datadoghq-com_blog_447ffb34`](host_datadoghq-com_blog_447ffb34.md) | ✅ 수동 config 등록 (httpx_html, baseline 6건) | 2026-05-21 | F | posts_nonempty | https://www.datadoghq.com/blog/ |
 | [`host_community-cloud_root_e65f04ea`](host_community-cloud_root_e65f04ea.md) | ✅ 수동 config (Playwright /latest 목록, 본문은 challenge-gated라 제목·URL 알림) | 2026-05-21 | none | article_body_len, fetch_list_403, discourse_json_challenge | https://community.cloudflare.com/ |
+| [`host_circleci-com_changelog_5a868561`](host_circleci-com_changelog_5a868561.md) | 🧩 수동 config — CircleCI changelog RSS feed 로 baseline 30건 등록 | 2026-05-21 | none | posts_nonempty, row_selector_too_narrow, rss_feed_available | https://circleci.com/changelog/ |
 | [`host_brunch-co-kr_springboot_58aa9ddd`](host_brunch-co-kr_springboot_58aa9ddd.md) | ✅ 수동 config 등록 (Brunch RSS, baseline 20건) | 2026-05-21 | F | register_subprocess_timeout, posts_nonempty | https://brunch.co.kr/@springboot |
 | [`host_blog-unity-com_root_9fe1176b`](host_blog-unity-com_root_9fe1176b.md) | ✅ 수동 config 등록 (RSS 목록, baseline 30건; 본문 비움 허용) | 2026-05-21 | F | posts_nonempty | https://blog.unity.com/ |
 | [`host_aussie-zone_root_a8115780`](host_aussie-zone_root_a8115780.md) | rc=5 capability_blocked — Lemmy root HTML anti-bot; dev box API CF-403, 미등록 (rescue 인프라 일반화) | 2026-05-21 | F | capability_blocked, fediverse_api_rescue, lemmy_api_rescue | https://aussie.zone/ |
@@ -163,7 +164,7 @@
 | F | 67 |
 | F+A | 1 |
 | F+C | 3 |
-| none | 23 |
+| none | 24 |
 
 ### config_strategy 분포
 
@@ -171,7 +172,7 @@
 |---|---|
 | (미기재) | 31 |
 | handwritten | 20 |
-| httpx_html | 37 |
+| httpx_html | 38 |
 | httpx_json | 13 |
 | mixed | 1 |
 | none | 26 |
@@ -180,5 +181,5 @@
 
 ### 최근 90일 (≥ 2026-02-20)
 
-케이스 139 건.
+케이스 140 건.
 
