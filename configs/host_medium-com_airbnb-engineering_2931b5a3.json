@@ -1,0 +1,138 @@
+{
+  "version": 1,
+  "site": "medium.com",
+  "board": "airbnb-engineering",
+  "strategy": "httpx_html",
+  "_slug_board": "airbnb-engineering",
+  "_source_url": "https://medium.com/airbnb-engineering",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+    "Referer": "https://medium.com/"
+  },
+  "timeout": 15,
+  "list": {
+    "url_template": "https://medium.com/feed/{board}",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "channel > item",
+    "fields": {
+      "post_id": [
+        {
+          "from": "css",
+          "selector": "guid",
+          "text": true,
+          "transform": [
+            [
+              "regex_extract",
+              "/p/([0-9a-f]{10,})"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "css",
+          "selector": "link",
+          "text": true,
+          "transform": [
+            [
+              "strip"
+            ]
+          ]
+        },
+        {
+          "from": "template",
+          "value": "https://medium.com/p/{post_id}"
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "pubDate",
+          "text": true,
+          "transform": [
+            [
+              "iso8601",
+              [
+                "%a, %d %b %Y %H:%M:%S GMT"
+              ],
+              "Z"
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "description",
+          "text": true,
+          "transform": [
+            [
+              "html_unescape"
+            ],
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "cover_image": [
+        {
+          "from": "css",
+          "selector": "description",
+          "text": true,
+          "transform": [
+            [
+              "html_unescape"
+            ],
+            [
+              "regex_extract",
+              "<img[^>]+src=[\"']([^\"']+)"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "skip_status": [
+      403
+    ],
+    "content": [
+      {
+        "from": "css",
+        "selector": "article section",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "article",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "body",
+        "html": true
+      }
+    ],
+    "body_empty_acceptable": true
+  },
+  "_note": "Medium RSS feed/publication recognizer. Medium pages expose RSS at /feed/<publication> or /feed/tag/<tag>; the httpx_html strategy parses RSS XML through parse_html_or_xml and extracts channel > item.",
+  "_recognized_platform": "host_medium-com"
+}
