@@ -96,15 +96,26 @@ dashboard `/triage` 의 "FAILED 큐 codex 위임 처리" 프롬프트를 붙여�
 - Claude: 큐 pull → 청크 분할 → codex 위임(보이는 창) → **각 청크 diff 검토** → 공유 인덱스·commit·push·N100 배포.
 - codex: 청크 안의 진단·fix·case 작성. **commit 전 STOP** (HARD-STOP 프롬프트). codex 결과 *맹신 X* — Claude 가 git diff 로 검토 (codex 는 명시 제약도 위반·over-edit 한 전례).
 
+**병렬이 기본** (2026-05-21-fedi 검증, ADR 0008 §병렬 위임). 여러 codex 세션을 동시에 띄워 throughput 을 올린다. **단 codex 세션은 같은 working tree 공유**(codex_run.ps1 격리 X) → 두 세션이 *같은 파일* 동시 편집 = 디스크 레이스. 이걸 막는 게 핵심 규율.
+
 **절차**:
 1. `python scripts/triage.py pull --skip-later` — N100 → 로컬 (FAILED + probe).
-2. `python scripts/codex_batch.py plan` — 큐를 **플랫폼/host 비중첩 청크**로 분할 확인 (slug별 X — 같은 플랫폼 recognizer/engine fix 가 병렬 충돌). 각 청크 = codex 세션 1개.
-3. `python scripts/codex_batch.py launch` — **기본 1청크만 띄움 (관측-우선)**. multi-slug 청크·병렬 codex 동작은 아직 관측 적음 → 한 청크 띄우고 (4)(5) 완료·검토·commit 후 launch 재호출 = 다음 청크 (이미 result 있는 건 자동 skip). 신뢰되면 `--max N` 으로 병렬 확대. 단건은 `python scripts/codex_handoff.py handconfig --slug <s> --url <u> --launch`.
-4. 청크별 `python scripts/codex_watch.py <result_file> --loop` — 완료/타임아웃 감지 (창은 사용자 view, result 파일은 Claude 완료신호).
-5. **각 청크 검토 게이트**: `git diff` + result 파일 읽기. codex 가 (a) HARD-STOP 지켰나(commit 안 함), (b) 진단/fix 가 SKILL §2 분기 타당한가, (c) over-edit/제약위반 없나. 문제면 revert/재위임.
-6. **공유 인덱스·배포는 Claude 직렬** (병렬 codex 가 건드리면 레이스): `python scripts/cases_index.py --backfill-db output/cases.sqlite3` → §5 검증(probe_smoke) → commit(청크별 또는 묶음) → push → N100 배포.
+2. **청크 분할 = disjoint 파일 소유** (자동 `codex_batch.py plan` 은 플랫폼/host 기준 분할 — 단서). Claude 가 각 청크의 *편집 파일 집합* 을 정한다:
+   - **공유 충돌 파일 = `scripts/register.py`(detect dispatch) + `probe/extract.py`(detect_*)**. 새 플랫폼 detect-build 는 둘 다 건드림.
+   - **path-match recognizer**(StackExchange `/questions`, reddit `/r/` 등 = PATTERNS 만, root-detect 불요) → 공유 파일 0 → **병렬 안전**.
+   - **probe-detect 플랫폼**(lemmy/peertube/mbin 등 root-URL) → 두 공유 파일 편집 → **한 청크만 소유, 나머지 직렬**.
+   - **수동 config / RSS recognizer**(configs/*.json, 새 recognizer 파일) → 격리 → 병렬 안전.
+   - 파일 소유 기록: `output/codex_file_claims.json`(추적·감사).
+3. **codex 위임 — ALLOW-LIST 박아서 병렬 launch**: 각 codex 프롬프트(`codex_handoff.py generic --task-file <f> --launch` 또는 `handconfig`)에 **"이 파일만 편집, 나머지 금지" ALLOW-LIST 제약**을 박는다(2번의 소유 집합). file-isolated 청크(path-match·config)는 **동시 다발 launch**. 공유 파일(register/extract) 청크는 **소유자 1개만, 나머지는 그 commit 후 직렬**.
+   - 첫 batch / codex 품질 미관측이면 *관측-우선*(1-2 청크 먼저 검토) 후 다발로 확대.
+   - **모델 = gpt-5.5 medium(default) 유지** — `--profile`/`--reasoning` 속도노브는 *순수 기계적 청크*에만 opt-in (hand-config/batch 는 그대로).
+   - codex 가 ALLOW-LIST 밖 파일이 필요하면 → **STOP + 보고**(escape hatch). Claude 가 중재(직접 wiring / 재배정).
+4. 청크별 `python scripts/codex_watch.py <result_file> --loop` (백그라운드) — 완료/타임아웃 감지 (창은 사용자 view, result 파일은 Claude 완료신호).
+5. **각 청크 검토 게이트 = 진짜 enforcement** (ALLOW-LIST 는 soft prompt 제약, 파일시스템 강제 아님): `git diff <청크 파일>` + result 읽기. (a) HARD-STOP 지켰나(commit 안 함), (b) 진단/fix 가 §2 분기 타당한가, (c) **파일셋이 ALLOW-LIST 내인가**(over-edit/제약위반/타 청크 파일 침범), (d) **auto-discovery semantic 충돌**(새 recognizer PATTERNS 가 타 플랫폼 URL 가로채 기존 테스트 깸 — `probe_smoke --stage 5` 로 검출). 문제면 revert/재위임.
+6. **공유 인덱스·배포는 Claude 직렬** (병렬 codex 가 건드리면 레이스): settled 트리에서 `python scripts/probe_smoke.py --stage 3 --stage 5` exit 0 확인 → `python scripts/cases_index.py --backfill-db output/cases.sqlite3` → **청크별 commit (`git add <청크 파일만>`, `-A` 금지 — 타 청크 미완성 작업 stage 방지)** → push(hook) → N100 배포 → 청크별 `case_log log`(commit 후).
+7. **batch 후 `python scripts/triage.py prune-orphans --execute`** — recognizer 추가가 url_to_slug 를 바꿔 옛 host_ FAILED/triage_queue 마커가 orphan 으로 남음 (hash 매칭으로 prune).
 
-단건이거나 codex 위임이 과한 경우 (단순 selector 한 줄)엔 Claude 가 직접 §1~§5 해도 됨 — 위임은 *큐가 크거나 quota 절약 필요할 때* 의 도구. 하네스 상세 = ADR 0008 §위임 하네스, AGENTS.md §6.
+단건이거나 codex 위임이 과한 경우 (단순 selector 한 줄)엔 Claude 가 직접 §1~§5 해도 됨 — 위임은 *큐가 크거나 quota 절약 필요할 때* 의 도구. **무제한 병렬**(공유 파일 직렬화 제거)이 필요하면 worktree 격리 또는 detect-dispatch auto-discovery refactor — ADR 0008 §병렬 위임(미구현, 직렬화 병목 시). 하네스 상세 = ADR 0008, AGENTS.md §6.
 
 ---
 
