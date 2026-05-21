@@ -165,12 +165,21 @@ _ARTIFACTS: dict[str, ArtifactContract] = {
                                 "None=신호 0건. dict={has_og_article, schema_article_types, has_microdata_article, is_article_page, signals}. "
                                 "is_article_page=true AND first_article_url 의 path-prefix 가 input URL 과 *다르면* `_meta_article_diverging_check` 가 거부 — "
                                 "보드 페이지가 우연히 article 마크업 박은 경우(omate 등)는 first_article 이 같은 path-prefix 라 통과 (false-positive 차단)."),
+            _ContractField("soft_404", type_hint="dict|null", required=False,
+                           note="HTTP 200 이지만 title/h1 이 not-found shell 이고 nav 밖 row 후보가 0~3개인 soft-404 — "
+                                "detect_soft_404 산출. None=soft-404 아님. dict={is_soft_404, signal, row_count}. "
+                                "probe.diagnose 가 SOFT_404 verdict 로 승격하고 register.py 가 rc=4 url_dead 로 종료한다."),
             _ContractField("root_marketing_homepage", type_hint="dict|null", required=False,
                            note="root 도메인 URL 의 마케팅 랜딩/허브 페이지 검출 — board 정의 자체 X. "
                                 "None=조건 미충족. dict={is_root_marketing_homepage, marketing_hits, marketing_selectors, total_same_host, body_empty_likely}. "
                                 "트리거: path='/' AND html_repeating_patterns top7 중 nav/footer/dropdown/carousel/swiper/menu 키워드 ≥ 2 AND same-host article rows ≤ 15. "
                                 "register.py `_root_marketing_homepage_check` 가 이 신호 보고 LLM 호출 *전* REJECTED 마커 + 카테고리/섹션 URL 권장 메시지. "
                                 "learn=False — root 만 차단, 카테고리 path 는 진짜 board 가능성 있어 path_prefix 차단 X."),
+            _ContractField("wordpress_platform", type_hint="dict|null", required=False,
+                           note="WordPress REST API discovery marker(`<link rel=https://api.w.org/>`, generator meta, wp-content/wp-json asset) — "
+                                "detect_wordpress_platform 산출. None=WordPress 아님. dict={is_wordpress, api_base, posts_endpoint}. "
+                                "scripts/register.py 가 is_wordpress=true 면 LLM 호출 *전* `engine/recognizers/wordpress.build_config` 로 "
+                                "`<api_base>/wp/v2/<post_type>` httpx_json config 등록을 시도한다."),
             _ContractField("discourse_platform", type_hint="dict|null", required=False,
                            note="정적 HTML 의 `<meta name=generator content=Discourse>` 로 Discourse 포럼 판정 — detect_discourse_platform 산출. "
                                 "None=Discourse 아님. dict={is_discourse, base_url, version}. "

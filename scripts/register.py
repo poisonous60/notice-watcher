@@ -231,6 +231,12 @@ def _policy_check(digest: dict, url: str) -> tuple[bool, list[str]]:
     if "login" in verdict:
         return False, [f"로그인 필요 사이트 (verdict={digest.get('verdict')!r}) — 자동 등록 미지원. "
                        "로그인은 사용자가 한 번 수동으로(Playwright headful) 해야 하며 이번 단계 범위 밖."]
+    if "soft_404" in verdict:
+        sig = (((digest.get("list_candidates") or {}).get("soft_404") or {}).get("signal") or "")
+        detail = f" ({sig})" if sig else ""
+        return False, [f"입력 URL 이 HTTP 200 으로 응답하지만 not-found shell 로 보임{detail} "
+                       f"(verdict={digest.get('verdict')!r}). URL 이 잘못됐거나 글/목록이 삭제된 것 — "
+                       "게시판 목록 URL 또는 다른 URL 로 재시도."]
     if not _entry_matrix_has_ok_list(digest):
         # HTML 진입은 다 막혔지만(BLOCKED 등) fetch-검증된 공개 RSS 피드가 있으면 피드로 등록 진행.
         # cert_or_dns_broken/target_not_found 는 피드도 못 받았을 것 (검증 통과 못 함) → 자연 제외.
@@ -317,6 +323,43 @@ def _try_fediverse_api_rescue(url: str, slug: str, *, out: Optional[str], force:
 
 def _try_lemmy_api_rescue(url: str, slug: str, *, out: Optional[str], force: bool) -> Optional[int]:
     return _try_fediverse_api_rescue(url, slug, out=out, force=force)
+
+
+def _wordpress_post_type(api_base: str, source_url: str) -> str:
+    """WordPress REST post type 선택. `/news` 같은 board URL 은 `/wp/v2/types`의 rest_base로 확인."""
+    try:
+        path_parts = [p for p in (urlsplit(source_url).path or "").split("/") if p]
+    except Exception:  # noqa: BLE001
+        path_parts = []
+    preferred = next((p for p in path_parts if re.fullmatch(r"[A-Za-z0-9_-]+", p)), "")
+    if not preferred:
+        return "posts"
+    def _endpoint_ok(rest_base: str) -> bool:
+        try:
+            rr = httpx.get(f"{api_base.rstrip('/')}/wp/v2/{rest_base}?per_page=1", timeout=8.0,
+                           headers={"accept": "application/json", "user-agent": "notice-watcher/1.0"})
+            return rr.status_code == 200 and isinstance(rr.json(), list)
+        except Exception:  # noqa: BLE001
+            return False
+    try:
+        r = httpx.get(f"{api_base.rstrip('/')}/wp/v2/types", timeout=8.0,
+                      headers={"accept": "application/json", "user-agent": "notice-watcher/1.0"})
+        if r.status_code != 200:
+            return preferred if _endpoint_ok(preferred) else "posts"
+        data = r.json()
+    except Exception as e:  # noqa: BLE001
+        print(f"[register] WordPress types 확인 skip — {type(e).__name__}: {e}")
+        return preferred if _endpoint_ok(preferred) else "posts"
+    if not isinstance(data, dict):
+        return "posts"
+    pref_low = preferred.lower()
+    for slug_name, meta in data.items():
+        if not isinstance(meta, dict):
+            continue
+        rest_base = str(meta.get("rest_base") or slug_name or "").strip().strip("/")
+        if rest_base.lower() == pref_low:
+            return rest_base
+    return preferred if _endpoint_ok(preferred) else "posts"
 
 
 def _social_platform_reject(digest: dict, url: str, slug: str) -> Optional[int]:
@@ -1738,14 +1781,14 @@ def _main_inner(argv) -> int:
         # 거부 kind 는 verdict 로 갈림 (2026-05-21 capability_blocked split — rc=5):
         #   - rc=2 (policy_reject): LOGIN_REQUIRED — 사이트 *정책상* 미지원 (로그인 필요). REJECTED + 학습.
         #     진짜 정책 거부 = 우리가 *안* 하는 것 (능력 문제 아님).
-        #   - rc=4 (url_dead): target_not_found / cert_or_dns_broken — 카탈로그 URL 편집이 답. REJECTED.
+        #   - rc=4 (url_dead): target_not_found / cert_or_dns_broken / soft_404 — 카탈로그 URL 편집이 답. REJECTED.
         #   - rc=5 (capability_blocked): anti-bot/captcha/cloudflare 차단 — *능력 부족* (정책 아님).
         #     2026-05-21 사용자 결정: "captcha 못 들어가는 건 능력 부족이지 정책 거부 아님". FAILED.json
         #     (재시도 가능, learned_blacklist X) → batch --failed 재집음 + hand-config 가 stealth/
         #     storage_state 어댑터로 재도전. docs/크롤링 지침.md: captcha 사이트 stealth 허용으로 정책 변경.
         verdict = (digest.get("verdict") or "").lower()
         is_login = "login" in verdict
-        is_url_dead = ("target_not_found" in verdict) or ("cert_or_dns_broken" in verdict)
+        is_url_dead = ("target_not_found" in verdict) or ("cert_or_dns_broken" in verdict) or ("soft_404" in verdict)
         if is_url_dead:
             rc_out = 4
         elif is_login:
@@ -1775,6 +1818,24 @@ def _main_inner(argv) -> int:
             except Exception as e:  # noqa: BLE001
                 print(f"[register] ⚠ REJECTED 마커 저장 실패 (rc={rc_out}): {e}", file=sys.stderr)
         return rc_out
+
+    # WordPress 포지티브 검출 — probe 가 REST discovery link/generator/wp-content marker 로 판정.
+    # URL root/news 만으론 false-positive 가 커서 recognizer 가 직접 잡지 않고, 이 probe 신호로만 봉합한다.
+    # post type 은 `/wp/v2/types` 1회 GET 으로 source URL path(`/news` 등)의 rest_base 를 확인한다.
+    if not args.gate_only:
+        wp = ((digest.get("list_candidates") or {}).get("wordpress_platform") or {})
+        if wp.get("is_wordpress") and wp.get("api_base"):
+            from engine.recognizers.wordpress import build_config as _wp_build
+            ptype = _wordpress_post_type(wp["api_base"], url)
+            wcfg = _wp_build(url, api_base=wp["api_base"], post_type=ptype)
+            if wcfg is not None:
+                wcfg["_recognized_platform"] = f"wordpress (probe REST marker -> wp/v2/{ptype})"
+                print("[PHASE] wordpress_detect", flush=True)
+                print(f"[register] 🔎 WordPress REST marker 검출 — wp/v2/{ptype} config 등록 시도 (api={wp['api_base']})")
+                rc = _register_built_config(wcfg, slug, url, out=args.out, force=args.force)
+                if rc is not None:
+                    return rc
+                print("[register] WordPress REST 폴백 (API 빈/차단/검증 실패) — 일반 파이프라인 계속.")
 
     # Discourse 포지티브 검출 — probe 가 정적 HTML 의 generator meta 로 Discourse 판정 (detect_discourse_platform).
     # recognizer 는 URL `/latest` 폼만 매칭 — root 도메인(`https://forum.openwrt.org/`)은 URL 만으로 판정 불가라

@@ -157,6 +157,7 @@ def diagnose(
 
     list_summary = "n/a"
     list_lookup_failed = False
+    soft_404: Optional[dict] = None
     html_n = api_n = hyd_n = 0
     if list_candidates_path.exists():
         try:
@@ -164,6 +165,7 @@ def diagnose(
             html_n = len(payload.get("html_repeating_patterns") or [])
             api_n = len(payload.get("traffic_json_api_candidates") or [])
             hyd_n = len(payload.get("hydration_list_candidates") or [])
+            soft_404 = payload.get("soft_404") if isinstance(payload.get("soft_404"), dict) else None
             first = payload.get("first_article_url") or "(none)"
             list_summary = f"HTML {html_n}건, JSON API {api_n}건, hydration {hyd_n}건. 첫 글: {first}"
             # 글 목록 컨테이너는 잡혔는데 첫 글 URL이 None → 클라이언트 JS 라우팅 의심
@@ -191,18 +193,25 @@ def diagnose(
             recommended_headers_summary = "n/a (Playwright)"
 
     verdict_parts = []
-    if baseline_bot_only:
-        verdict_parts.append("CLOUDFLARE_PROTECTED_SITE")
-    elif baseline_cert_broken:
-        verdict_parts.append("CERT_OR_DNS_BROKEN")
-    elif not baseline_ok:
-        verdict_parts.append("BASELINE_BLOCKED")
-    if static_ok and not any("Cloudflare" in n for r in static_results for n in r.notable):
-        verdict_parts.append("정적 HTTP로 충분")
-    elif captured_ok:
-        verdict_parts.append("캡처 헤더 주입 시 정적 가능")
-    elif headless_ok:
-        verdict_parts.append("JS 실행 필요 (Cloudflare 등)")
+    if soft_404 and soft_404.get("is_soft_404"):
+        verdict_parts.append("SOFT_404")
+        notes.append(
+            "HTTP 200 이지만 not-found shell 로 보임 — "
+            f"{soft_404.get('signal')} (row_count={soft_404.get('row_count')})."
+        )
+    else:
+        if baseline_bot_only:
+            verdict_parts.append("CLOUDFLARE_PROTECTED_SITE")
+        elif baseline_cert_broken:
+            verdict_parts.append("CERT_OR_DNS_BROKEN")
+        elif not baseline_ok:
+            verdict_parts.append("BASELINE_BLOCKED")
+        if static_ok and not any("Cloudflare" in n for r in static_results for n in r.notable):
+            verdict_parts.append("정적 HTTP로 충분")
+        elif captured_ok:
+            verdict_parts.append("캡처 헤더 주입 시 정적 가능")
+        elif headless_ok:
+            verdict_parts.append("JS 실행 필요 (Cloudflare 등)")
 
     # baseline 은 OK 인데 target URL 시도가 *전부 NOT_FOUND* 면 사이트 차단이 아니라 그 URL 자체가
     # 없음 (잘못된 URL 또는 글이 삭제됨). register.py 의 BLOCKED 메시지와 구분하기 위해 별도 verdict.

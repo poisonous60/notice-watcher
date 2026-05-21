@@ -14,7 +14,7 @@
 |---|---|---|---|
 | `done` | rc=0 | 성공 | ok |
 | `gen_fail` | rc=1 | LLM 생성·검증 실패 | error |
-| `url_dead` | rc=4 (새 runs) 또는 rc=2 + tail 에 TARGET_NOT_FOUND / CERT_OR_DNS_BROKEN (옛 entries) | URL 잘못/죽음 | warn |
+| `url_dead` | rc=4 (새 runs) 또는 rc=2 + tail 에 TARGET_NOT_FOUND / CERT_OR_DNS_BROKEN / SOFT_404 (옛 entries) | URL 잘못/죽음 | warn |
 | `policy_reject` | rc=2 | 사이트 정책 거부 | error |
 | `capability_blocked` | rc=5 | 차단(능력 부족) | warn |
 | `gate_reject` | rc=3 | 휴리스틱 게이트 거부 | warn |
@@ -47,6 +47,7 @@
 |---|---|---|
 | `target_not_found` | 404 (URL 없음) | 도메인 정상이지만 입력 URL 의 글/페이지가 없음 — 카탈로그 URL 편집 필요. |
 | `cert_or_dns_broken` | SSL/DNS 깨짐 | 도메인 자체 접근 단계 이전에 cert/DNS fail — 사이트가 사라졌거나 운영 오설정. |
+| `soft_404` | soft-404 (200 not-found) | HTTP 200 이지만 not-found shell — URL 이 잘못됐거나 삭제됨. |
 
 ### policy_reject
 

@@ -30,6 +30,8 @@ from probe.extract import (
     runtime_id_candidates,
     traffic_api_candidates,
     write_list_candidates,
+    detect_soft_404,
+    detect_wordpress_platform,
     detect_discourse_platform,
     detect_xenforo_platform,
     detect_lemmy_platform,
@@ -401,6 +403,8 @@ def _run(args: argparse.Namespace, url: str, slug: str) -> int:
                 base_url=url,
             )
             meta_signals = article_meta_signals(html=page_html or "")
+            soft_404 = detect_soft_404(html=page_html or "", base_url=url)
+            wordpress_platform = detect_wordpress_platform(html=page_html or "", base_url=url)
             discourse_platform = detect_discourse_platform(html=page_html or "", base_url=url)
             xenforo_platform = detect_xenforo_platform(html=page_html or "", base_url=url)
             lemmy_platform = detect_lemmy_platform(html=page_html or "", base_url=url)
@@ -422,6 +426,8 @@ def _run(args: argparse.Namespace, url: str, slug: str) -> int:
                 row_interactive_action=row_interactive_action,
                 nav_only_same_host=nav_only_same_host,
                 article_meta_signals=meta_signals,
+                soft_404=soft_404,
+                wordpress_platform=wordpress_platform,
                 discourse_platform=discourse_platform,
                 xenforo_platform=xenforo_platform,
                 lemmy_platform=lemmy_platform,

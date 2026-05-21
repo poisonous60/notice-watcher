@@ -875,6 +875,131 @@ _DISCOURSE_GENERATOR_RE = re.compile(
     re.I,
 )
 
+_WORDPRESS_GENERATOR_RE = re.compile(
+    r'<meta[^>]+name=["\']generator["\'][^>]*content=["\']\s*WordPress\b',
+    re.I,
+)
+
+
+def _origin_from_url(url: str) -> Optional[str]:
+    try:
+        parts = urlsplit(url)
+        host = (parts.netloc or "").strip().lower()
+        scheme = parts.scheme or "https"
+    except (ValueError, AttributeError):
+        return None
+    if not host or "." not in host:
+        return None
+    return f"{scheme}://{host}"
+
+
+def _normalize_wp_api_base(api_href: Optional[str], base_url: str) -> Optional[str]:
+    origin = _origin_from_url(base_url)
+    if not origin:
+        return None
+    href = (api_href or "").strip()
+    if href:
+        try:
+            full = urljoin(base_url, href)
+            parts = urlsplit(full)
+            host = (parts.netloc or "").strip().lower()
+            if host and "." in host:
+                path = parts.path or ""
+                marker = "/wp-json"
+                idx = path.lower().find(marker)
+                if idx >= 0:
+                    return f"{parts.scheme or 'https'}://{host}{path[:idx + len(marker)].rstrip('/')}"
+        except (ValueError, AttributeError):
+            pass
+    return f"{origin}/wp-json"
+
+
+@heuristic
+def detect_wordpress_platform(html: str, base_url: str) -> Optional[dict]:
+    """HTML head/static markers 로 WordPress REST API 를 쓰는 사이트 판정.
+
+    URL root 만으로 WordPress 판정은 오탐이 크다. probe 가 받은 HTML 안의 REST API discovery
+    link, generator meta, wp-content/wp-json asset marker 를 보고 register.py 가 LLM 전
+    httpx_json config 등록을 시도한다. 이 함수는 네트워크 fetch 를 하지 않는다.
+    """
+    if not html or not base_url:
+        return None
+    if _origin_from_url(base_url) is None:
+        return None
+    soup = BeautifulSoup(html, "lxml")
+    api_href: Optional[str] = None
+    rest_link = soup.find("link", rel=lambda v: bool(v) and "https://api.w.org/" in (v if isinstance(v, str) else " ".join(v)))
+    if isinstance(rest_link, Tag):
+        api_href = str(rest_link.get("href") or "").strip() or None
+    generator = bool(_WORDPRESS_GENERATOR_RE.search(html))
+    low = html.lower()
+    marker_hits = sum(1 for marker in ("/wp-content/", "/wp-includes/", "/wp-json/") if marker in low)
+    if not (api_href or generator or marker_hits >= 2):
+        return None
+    api_base = _normalize_wp_api_base(api_href, base_url)
+    if not api_base:
+        return None
+    return {
+        "is_wordpress": True,
+        "api_base": api_base,
+        "posts_endpoint": f"{api_base}/wp/v2/posts",
+    }
+
+
+_SOFT_404_PATTERNS = (
+    re.compile(r"\b404\b", re.I),
+    re.compile(r"\bnot\s+found\b", re.I),
+    re.compile(r"\bpage\s+not\s+found\b", re.I),
+    re.compile(r"ページが見つかりません", re.I),
+    re.compile(r"お探しのページ.*見つかりません", re.I),
+    re.compile(r"存在しないページ", re.I),
+    re.compile(r"ページは存在しません", re.I),
+    re.compile(r"찾을 수 없", re.I),
+)
+
+
+@heuristic
+def detect_soft_404(html: str, base_url: str) -> Optional[dict]:
+    """HTTP 200 이지만 title/h1 이 not-found shell 인 페이지 감지.
+
+    probe.diagnose 가 HTTP status 만 보면 "정적 HTTP로 충분"이라고 볼 수 있는 케이스를
+    SOFT_404 verdict 로 바꾸기 위한 신호다. 목록 row 가 충분한 정상 board 의 "404" 문구
+    false-positive 를 피하려고 title/h1 신호와 nav 밖 row 후보 0~3개 조건을 같이 본다.
+    """
+    if not html or not base_url:
+        return None
+    soup = BeautifulSoup(html, "lxml")
+    texts: list[tuple[str, str]] = []
+    title = soup.find("title")
+    if title is not None:
+        texts.append(("title", title.get_text(" ", strip=True)))
+    for h in soup.find_all(["h1", "h2"], limit=4):
+        texts.append((h.name or "heading", h.get_text(" ", strip=True)))
+    signal = None
+    for source, text in texts:
+        if not text:
+            continue
+        for pat in _SOFT_404_PATTERNS:
+            if pat.search(text):
+                signal = f"{source}: {text[:120]}"
+                break
+        if signal:
+            break
+    if not signal:
+        return None
+    try:
+        candidates = html_repeating_patterns(html, base_url, min_children=5)
+        nav_summary = all_same_host_patterns_in_nav(html=html, html_candidates=candidates, base_url=base_url)
+        if nav_summary is not None:
+            row_count = int(nav_summary.get("outside_nav") or 0)
+        else:
+            row_count = 0
+    except Exception:  # noqa: BLE001
+        row_count = 0
+    if row_count > 3:
+        return None
+    return {"is_soft_404": True, "signal": signal, "row_count": row_count}
+
 
 @heuristic
 def detect_discourse_platform(html: str, base_url: str) -> Optional[dict]:
@@ -1480,6 +1605,8 @@ def write_list_candidates(
     row_interactive_action: Optional[dict] = None,
     nav_only_same_host: Optional[dict] = None,
     article_meta_signals: Optional[dict] = None,
+    soft_404: Optional[dict] = None,
+    wordpress_platform: Optional[dict] = None,
     discourse_platform: Optional[dict] = None,
     xenforo_platform: Optional[dict] = None,
     lemmy_platform: Optional[dict] = None,
@@ -1534,6 +1661,9 @@ def write_list_candidates(
         # register.py `_meta_article_diverging_check` 가 is_article_page=true AND first_article_url 의 path-prefix 가
         # input URL 과 *다르면* 거부 — 보드가 article 마크업 *우연히* 박은 사이트(omate 등)는 first_article 이 같은 path-prefix 라 통과.
         "article_meta_signals": article_meta_signals,
+        # HTTP 200 이지만 title/h1 이 not-found shell 이고 row 후보가 0~2개인 soft-404.
+        # probe.diagnose 가 이 신호를 SOFT_404 verdict 로 승격하고 register.py 가 rc=4 url_dead 로 종료한다.
+        "soft_404": soft_404,
         # root 도메인 마케팅 랜딩/허브 페이지 검출 — board 정의 자체 X.
         # None=조건 미충족. dict={is_root_marketing_homepage, marketing_hits, marketing_selectors, total_same_host, body_empty_likely}.
         # 트리거: path='/' AND html_repeating_patterns top7 의 nav/footer/dropdown/carousel/swiper/menu 키워드 ≥ 2 AND same-host article rows ≤ 15.
@@ -1542,6 +1672,7 @@ def write_list_candidates(
         # 정적 HTML 의 generator meta 로 Discourse 포럼 판정. None=Discourse 아님.
         # dict={is_discourse, base_url, version}. register.py 가 이 신호 보면 LLM 전 DiscourseAdapter
         # config 만들어 등록 시도 (fetch_list 빈 목록이면 일반 파이프라인 폴백).
+        "wordpress_platform": wordpress_platform,
         "discourse_platform": discourse_platform,
         "xenforo_platform": xenforo_platform,
         "lemmy_platform": lemmy_platform,

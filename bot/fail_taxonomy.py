@@ -124,6 +124,10 @@ _URL_DEAD_TOKENS_CERT = (
     "CERT_OR_DNS_BROKEN",
     "SSL 인증서/DNS 가 깨짐",
 )
+_URL_DEAD_TOKENS_SOFT_404 = (
+    "SOFT_404",
+    "not-found shell",
+)
 
 
 def _url_dead_rc_extra(_s: str, rc: Optional[int], tail: str) -> bool:
@@ -136,7 +140,7 @@ def _url_dead_rc_extra(_s: str, rc: Optional[int], tail: str) -> bool:
     if rc == 4:
         return True
     if rc == 2 and tail:
-        return any(t in tail for t in _URL_DEAD_TOKENS_TARGET + _URL_DEAD_TOKENS_CERT)
+        return any(t in tail for t in _URL_DEAD_TOKENS_TARGET + _URL_DEAD_TOKENS_CERT + _URL_DEAD_TOKENS_SOFT_404)
     return False
 
 
@@ -146,6 +150,10 @@ def _url_dead_target(_tail: str, _rc: Optional[int]) -> Optional[str]:
 
 def _url_dead_cert(_tail: str, _rc: Optional[int]) -> Optional[str]:
     return "cert_or_dns_broken" if any(t in _tail for t in _URL_DEAD_TOKENS_CERT) else None
+
+
+def _url_dead_soft_404(_tail: str, _rc: Optional[int]) -> Optional[str]:
+    return "soft_404" if any(t in _tail for t in _URL_DEAD_TOKENS_SOFT_404) else None
 
 
 # ============================================================================
@@ -203,7 +211,7 @@ FAIL_CATALOG: tuple[FailKind, ...] = (
         severity="warn",
         rc=None,
         rc_extra=_url_dead_rc_extra,
-        rc_doc="rc=4 (새 runs) 또는 rc=2 + tail 에 TARGET_NOT_FOUND / CERT_OR_DNS_BROKEN (옛 entries)",
+        rc_doc="rc=4 (새 runs) 또는 rc=2 + tail 에 TARGET_NOT_FOUND / CERT_OR_DNS_BROKEN / SOFT_404 (옛 entries)",
         subkinds=(
             Subkind("target_not_found", "404 (URL 없음)",
                     "도메인 정상이지만 입력 URL 의 글/페이지가 없음 — 카탈로그 URL 편집 필요.",
@@ -211,6 +219,9 @@ FAIL_CATALOG: tuple[FailKind, ...] = (
             Subkind("cert_or_dns_broken", "SSL/DNS 깨짐",
                     "도메인 자체 접근 단계 이전에 cert/DNS fail — 사이트가 사라졌거나 운영 오설정.",
                     _url_dead_cert),
+            Subkind("soft_404", "soft-404 (200 not-found)",
+                    "HTTP 200 이지만 not-found shell — URL 이 잘못됐거나 삭제됨.",
+                    _url_dead_soft_404),
         ),
     ),
     FailKind(
