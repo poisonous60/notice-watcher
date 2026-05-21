@@ -1,0 +1,133 @@
+{
+  "version": 1,
+  "site": "www.sunrise-inc.co.jp",
+  "board": "news",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+    "Referer": "https://www.sunrise-inc.co.jp/"
+  },
+  "timeout": 15,
+  "polite_sleep": {
+    "min": 5,
+    "max": 6
+  },
+  "list": {
+    "url_template": "https://www.sunrise-inc.co.jp/",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "#newstopics dl > dd.title",
+    "row_required_selector": "a[href*='work/news.php?id=']",
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a[href*='work/news.php?id=']",
+          "attr": "href",
+          "transform": [
+            [
+              "regex_extract",
+              "[?&]id=(\\d+)"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": ":self",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "template",
+          "value": "https://www.sunrise-inc.co.jp/work/news.php?id={post_id}"
+        }
+      ]
+    }
+  },
+  "article": {
+    "url_template": "https://www.sunrise-inc.co.jp/work/news.php?id={post_id}",
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "#news .newsbox .main .txt",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "div.newsbox .main .txt",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "div.newsbox .hd h4",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "div.newsbox .hd h5",
+          "text": true,
+          "transform": [
+            [
+              "regex_extract",
+              "(\\d{4}年\\d{2}月\\d{2}日)"
+            ],
+            [
+              "iso8601",
+              [
+                "%Y年%m月%d日",
+                "%Y-%m-%d"
+              ],
+              "+09:00"
+            ]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "css",
+          "selector": "div.newsbox .hd h5 .genre a",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "author": [
+        {
+          "from": "css",
+          "selector": "div.newsbox .hd h6 a",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  }
+}
