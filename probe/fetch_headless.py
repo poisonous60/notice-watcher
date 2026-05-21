@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import threading
 import time
@@ -18,6 +19,12 @@ from .signals import classify
 from .types import Classification, Result
 
 log = logging.getLogger("probe.fetch_headless")
+
+
+_MAX_CAPTURED_HTML_CHARS = max(
+    10_000,
+    int(os.environ.get("PROBE_HEADLESS_HTML_CHAR_LIMIT", "2000000")),
+)
 
 
 def _bounded_close(closeable, *, label: str, timeout_s: float = 10.0) -> None:
@@ -127,6 +134,33 @@ def _wait_xhr_quiet(page, *, quiet_ms: int = 500, hard_timeout_ms: int = 2000) -
             pass
 
 
+def _capture_page_content(page) -> tuple[str, bool]:
+    """DOM 전체 직렬화가 큰 SPA 에서 Python/Chromium 메모리를 같이 밀어올리지 않게 cap."""
+    js = """(limit) => {
+        const root = document.documentElement;
+        if (!root) return {html: "", truncated: false};
+        const html = root.outerHTML || "";
+        if (html.length <= limit) return {html, truncated: false};
+        return {
+            html: html.slice(0, limit) + "\\n<!-- probe.truncated_html: capture limit reached -->",
+            truncated: true
+        };
+    }"""
+    try:
+        out = page.evaluate(js, _MAX_CAPTURED_HTML_CHARS) or {}
+        html = str(out.get("html") or "")
+        return html, bool(out.get("truncated"))
+    except Exception:  # noqa: BLE001
+        html = page.content()
+        if len(html) > _MAX_CAPTURED_HTML_CHARS:
+            return (
+                html[:_MAX_CAPTURED_HTML_CHARS]
+                + "\n<!-- probe.truncated_html: capture limit reached -->",
+                True,
+            )
+        return html, False
+
+
 _DAEMON_ENDPOINT_FILE = Path(__file__).resolve().parent.parent / "output" / "playwright_daemon" / "endpoint"
 
 
@@ -223,6 +257,7 @@ def fetch_with_capture(
     captured_nav_headers: dict[str, str] = {}
     final_url: Optional[str] = None
     error: Optional[str] = None
+    html_truncated = False
 
     try:
         with sync_playwright() as p:
@@ -290,7 +325,7 @@ def fetch_with_capture(
                     # 데이터 XHR/fetch 응답 끝날 때까지 대기 — networkidle 보다 빠름 (광고 image 무시)
                     _wait_xhr_quiet(page, quiet_ms=300, hard_timeout_ms=idle_timeout_ms)
 
-                    body = page.content()
+                    body, html_truncated = _capture_page_content(page)
                     try:
                         page.screenshot(path=str(screenshot_path), full_page=False)
                     except Exception:
@@ -328,6 +363,8 @@ def fetch_with_capture(
         baseline_blocked=baseline_blocked,
     )
     notable.append(f"har: {har_path.name}")
+    if html_truncated:
+        notable.append(f"html_truncated: {len(body or '')}/{_MAX_CAPTURED_HTML_CHARS} chars")
     if captured_nav_headers:
         notable.append(f"captured_headers: {len(captured_nav_headers)} keys")
 
@@ -460,6 +497,7 @@ def fetch_article_by_click(
     body: Optional[str] = None
     final_url: Optional[str] = None
     error: Optional[str] = None
+    html_truncated = False
 
     # data-* 수집 *후* 안정 마커(data-probeclickidx)를 심는다 — page.evaluate 이후 DOM 이 바뀌어도(.nth(i) 가 어긋나도)
     # 마커는 그 요소를 따라가므로 page.locator('a[data-probeclickidx="i"]') 로 정확히 그 링크를 클릭한다.
@@ -548,7 +586,7 @@ def fetch_article_by_click(
                             page.wait_for_timeout(800)           # 클라이언트 라우팅 후 본문 렌더 짬
                             _wait_xhr_quiet(page, quiet_ms=300, hard_timeout_ms=idle_timeout_ms)
                             final_url = page.url
-                            body = page.content()
+                            body, html_truncated = _capture_page_content(page)
                             try:
                                 page.screenshot(path=str(screenshot_path), full_page=False)
                             except Exception:  # noqa: BLE001
@@ -595,6 +633,8 @@ def fetch_article_by_click(
                             baseline_blocked=baseline_blocked)
     if final_url:
         notable.append(f"clicked → {final_url[:80]}")
+    if html_truncated:
+        notable.append(f"html_truncated: {len(body or '')}/{_MAX_CAPTURED_HTML_CHARS} chars")
     notable.append(f"har: {har_path.name}")
     if meta.get("note"):
         notable.append(meta["note"][:80])

@@ -8,6 +8,7 @@ import asyncio
 import collections
 import json
 import logging
+import os
 import re
 import signal
 import subprocess
@@ -25,6 +26,27 @@ REGISTER_PY = ROOT / "scripts" / "register.py"
 PY = sys.executable
 
 log = logging.getLogger("bot.site_ops")
+
+
+def _signal_name(rc: int) -> str:
+    sig = -rc
+    try:
+        return signal.Signals(sig).name
+    except Exception:  # noqa: BLE001
+        return f"SIG{sig}"
+
+
+def _kill_process_group(proc: subprocess.Popen) -> None:
+    try:
+        if hasattr(os, "killpg"):
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        else:
+            proc.kill()
+    except (ProcessLookupError, PermissionError, OSError):
+        try:
+            proc.kill()
+        except Exception:  # noqa: BLE001
+            pass
 
 # lazy import — module-level import 하면 discord/asyncio 진입 전 무거운 chunk 가 로드되어 봇 start-up 느려짐
 from scripts._chromium_lock import chromium_lock  # noqa: E402
@@ -238,10 +260,7 @@ def blocking_register(url: str, article_url: Optional[str] = None,
             def _kill_on_timeout() -> None:
                 if proc.poll() is None:
                     timed_out.set()
-                    try:
-                        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-                    except (ProcessLookupError, PermissionError, OSError):
-                        proc.kill()
+                    _kill_process_group(proc)
 
             killer = threading.Timer(settings.chromium_lock.register_subprocess_timeout, _kill_on_timeout)
             killer.start()
@@ -258,12 +277,19 @@ def blocking_register(url: str, article_url: Optional[str] = None,
                         except Exception as ce:  # noqa: BLE001
                             log.warning("on_phase 콜백 예외 (무시): %r", ce)
                 rc = proc.wait()
+                if rc < 0 and not timed_out.is_set():
+                    sig_name = _signal_name(rc)
+                    _kill_process_group(proc)
+                    tail.append(f"register.py subprocess terminated by signal {-rc} ({sig_name})")
             finally:
                 killer.cancel()
             log.info("register.py 종료: rc=%s%s (%s)", rc,
                      " (타임아웃 kill)" if timed_out.is_set() else "", url)
         if timed_out.is_set():
             return -2, f"register.py 실행 시간 초과 ({int(settings.chromium_lock.register_subprocess_timeout)}s)"
+        if rc < 0:
+            sig_name = _signal_name(rc)
+            return -3, f"register.py subprocess terminated by signal {-rc} ({sig_name})\n" + "\n".join(tail)[-3900:]
         return rc, "\n".join(tail)[-4000:]
     except TimeoutError as e:
         return -1, f"chromium 락 대기 초과: {e}"

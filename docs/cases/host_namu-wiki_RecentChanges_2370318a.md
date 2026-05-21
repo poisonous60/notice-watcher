@@ -39,3 +39,21 @@ handwritten config:
 - 의도적 obfuscation 사이트 = 크롤링 적대적. namu rebuild 시 anchor href 패턴 변하면 깨질 위험 (하지만 `/w/<page>` 는 wiki URL convention 이라 매우 안정적).
 
 상세: `infra_catalog_batch_rev4_2026-05-19.md`.
+
+## 2026-05-21 SIGBUS 재점검
+
+`2026-05-21-fedi` batch 에서 같은 URL 이 `register.py` subprocess `rc=-7` 로 보고됐다.
+Linux `-7` 은 `SIGBUS` 이므로, 이건 namu selector/config 실패가 아니라 headless subprocess
+비정상 종료다.
+
+기존 수동 config 자체는 여전히 동작한다. dev box 에서 `configs/host_namu-wiki_RecentChanges_2370318a.json`
+을 직접 adapter 로 읽어 `fetch_list(page_size=5)` 실행 시 5건을 반환했다.
+
+이번 fix 는 config 변경이 아니라 공통 방어다.
+- `probe/fetch_headless.py`: 큰 SPA DOM 전체를 `page.content()` 로 무제한 직렬화하지 않고
+  bounded capture 를 사용한다.
+- `bot/site_ops.py`: signal death (`proc.wait() < 0`, 예: `SIGBUS`) 를 gen_fail/triage 로
+  흘리지 않고 BUG 경로로 들어가게 rc 를 `-3` 으로 정규화한다.
+
+남은 한계: namu.wiki 는 의도적 obfuscation + SPA 이므로 headless 비용이 높은 편이다. 기존
+`a[href^='/w/']` config 는 현재도 가장 안정적인 selector 로 보인다.
