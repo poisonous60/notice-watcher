@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import html
 import json
 import math
@@ -13,7 +14,6 @@ import sys
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
-from typing import NamedTuple
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
@@ -110,6 +110,15 @@ def rc_label(value: object) -> str:
     return RC_LABELS.get(rc, f"rc {rc}")
 
 
+def rejected_group(reason: object) -> tuple[str, str]:
+    text = str(reason or "").upper()
+    if any(token in text for token in ("TARGET_NOT_FOUND", "CERT_OR_DNS_BROKEN", "HTTP 404")):
+        return "exclude", "dead"
+    if any(token in text for token in ("CLOUDFLARE", "BASELINE_BLOCKED", "BLOCKED")):
+        return "blocked", "blocked"
+    return "content", "content"
+
+
 def load_json(path: Path) -> dict:
     try:
         with path.open("r", encoding="utf-8") as f:
@@ -167,18 +176,29 @@ def read_poll_state() -> dict:
         slug = str(data.get("slug") or slug_from_marker_path(path))
         url = str(data.get("url") or data.get("source_url") or data.get("_source_url") or "")
         host = hostname_from_url(url)
+        if kind == "polling":
+            group = "board"
+            status = str(data.get("last_status") or "unknown")
+        elif kind == "rejected":
+            group, status = rejected_group(data.get("reason"))
+        elif kind == "failed":
+            group, status = "blocked", "blocked"
+        elif kind == "bug":
+            group, status = "exclude", "bug"
+        else:
+            group, status = "exclude", kind
+
+        if group == "exclude":
+            continue
+
         sites.append(
             {
                 "slug": slug,
                 "platform": platform_from_slug(slug),
                 "host": host or "unknown host",
-                "registered_at": data.get("registered_at"),
-                "last_poll_at": data.get("last_poll_at"),
-                "last_status": data.get("last_status") or kind,
-                "consecutive_breakage": data.get("consecutive_breakage", 0),
-                "n_baseline": data.get("n_baseline", 0),
+                "group": group,
+                "status": status,
                 "seen_post_ids": data.get("seen_post_ids") if isinstance(data.get("seen_post_ids"), list) else [],
-                "body_empty_at_baseline": bool(data.get("body_empty_at_baseline")),
             }
         )
 
@@ -238,163 +258,6 @@ def top_items(counter: Counter, limit: int = 8) -> list[tuple[str, int]]:
     return [(str(k), int(v)) for k, v in counter.most_common(limit)]
 
 
-def _parse_age_days(value: object, now: datetime) -> float:
-    if not isinstance(value, str) or not value.strip():
-        return 0.0
-    text = value.strip()
-    if text.endswith("Z"):
-        text = text[:-1] + "+00:00"
-    try:
-        dt = datetime.fromisoformat(text)
-    except ValueError:
-        return 0.0
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=KST)
-    return max((now - dt.astimezone(KST)).days, 0)
-
-
-def _as_float(value: object) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return 0.0
-
-
-def _normalize(vector: list[float]) -> list[float]:
-    norm = math.sqrt(sum(v * v for v in vector))
-    if norm == 0:
-        return [0.0 for _ in vector]
-    return [v / norm for v in vector]
-
-
-def _mat_vec(matrix: list[list[float]], vector: list[float]) -> list[float]:
-    return [sum(row[i] * vector[i] for i in range(len(vector))) for row in matrix]
-
-
-def _power_iteration(matrix: list[list[float]], start_index: int) -> tuple[list[float], float]:
-    n = len(matrix)
-    if n == 0:
-        return [], 0.0
-    vector = [0.0] * n
-    vector[min(start_index, n - 1)] = 1.0
-    for _ in range(200):
-        next_vector = _normalize(_mat_vec(matrix, vector))
-        if not any(next_vector):
-            return [0.0] * n, 0.0
-        vector = next_vector
-    eigenvalue = sum(vector[i] * _mat_vec(matrix, vector)[i] for i in range(n))
-    return vector, eigenvalue
-
-
-CONT_FEATURE_NAMES = ["activity", "age", "glitches", "post count", "empty posts"]
-
-
-class SiteProjection(NamedTuple):
-    points: list[dict]
-    pca_ready: bool
-    v1: list[float]
-    v2: list[float]
-    lambda1: float
-    lambda2: float
-    total_variance: float
-    platforms: list[str]
-    n_platforms: int
-    cont_feature_names: list[str]
-
-
-def _fallback_site_projection(sites: list[dict], platforms: list[str] | None = None) -> SiteProjection:
-    platforms = platforms or sorted({str(site["platform"]) for site in sites})
-    return SiteProjection(
-        points=_fallback_grid_projection(sites),
-        pca_ready=False,
-        v1=[],
-        v2=[],
-        lambda1=0.0,
-        lambda2=0.0,
-        total_variance=0.0,
-        platforms=platforms,
-        n_platforms=len(platforms),
-        cont_feature_names=CONT_FEATURE_NAMES,
-    )
-
-
-def _project_sites(sites: list[dict], now: datetime) -> SiteProjection:
-    platforms = sorted({str(site["platform"]) for site in sites})
-    features = []
-    for site in sites:
-        row = [1.0 if site["platform"] == platform else 0.0 for platform in platforms]
-        row.extend(
-            [
-                math.log1p(len(site.get("seen_post_ids") or [])),
-                _parse_age_days(site.get("registered_at"), now),
-                _as_float(site.get("consecutive_breakage")),
-                _as_float(site.get("n_baseline")),
-                1.0 if site.get("body_empty_at_baseline") else 0.0,
-            ]
-        )
-        features.append(row)
-
-    if len(features) < 3 or len(features[0]) < 2:
-        return _fallback_site_projection(sites, platforms)
-
-    columns = list(zip(*features))
-    means = [sum(col) / len(col) for col in columns]
-    stds = []
-    for col, mean in zip(columns, means):
-        variance = sum((value - mean) ** 2 for value in col) / len(col)
-        stds.append(math.sqrt(variance))
-
-    x = []
-    for row in features:
-        x.append([(value - means[i]) / stds[i] if stds[i] else 0.0 for i, value in enumerate(row)])
-
-    if not any(any(value for value in row) for row in x):
-        return _fallback_site_projection(sites, platforms)
-
-    n_features = len(x[0])
-    covariance = []
-    for i in range(n_features):
-        cov_row = []
-        for j in range(n_features):
-            cov_row.append(sum(row[i] * row[j] for row in x) / (len(x) - 1))
-        covariance.append(cov_row)
-    total_variance = sum(covariance[i][i] for i in range(n_features))
-
-    v1, lambda1 = _power_iteration(covariance, 0)
-    if not any(v1):
-        return _fallback_site_projection(sites, platforms)
-    deflated = []
-    for i in range(n_features):
-        deflated.append([covariance[i][j] - lambda1 * v1[i] * v1[j] for j in range(n_features)])
-    v2, lambda2 = _power_iteration(deflated, 1 if n_features > 1 else 0)
-
-    points = []
-    for site, row in zip(sites, x):
-        points.append({**site, "x": sum(row[i] * v1[i] for i in range(n_features)), "y": sum(row[i] * v2[i] for i in range(n_features))})
-    return SiteProjection(
-        points=points,
-        pca_ready=any(v2),
-        v1=v1,
-        v2=v2,
-        lambda1=lambda1,
-        lambda2=lambda2,
-        total_variance=total_variance,
-        platforms=platforms,
-        n_platforms=len(platforms),
-        cont_feature_names=CONT_FEATURE_NAMES,
-    )
-
-
-def _fallback_grid_projection(sites: list[dict]) -> list[dict]:
-    if not sites:
-        return []
-    cols = max(1, math.ceil(math.sqrt(len(sites))))
-    points = []
-    for i, site in enumerate(sites):
-        points.append({**site, "x": float(i % cols), "y": float(i // cols)})
-    return points
-
-
 PALETTE = ["#52616b", "#8a6f4d", "#3d737f", "#9b6b6b", "#6f7f52", "#6d647c", "#4f6f8f", "#7b5c8c", "#5f8a72", "#a07a4f", "#506b8a", "#8c5c6d"]
 
 
@@ -403,112 +266,77 @@ def platform_color_map(sites: list[dict]) -> dict:
     return {platform: PALETTE[i % len(PALETTE)] for i, platform in enumerate(platforms)}
 
 
-def svg_pca_scatter(sites: list[dict], now: datetime, color_map: dict) -> str:
+def _hash_unit(value: str, salt: str) -> float:
+    digest = hashlib.sha256(f"{salt}:{value}".encode("utf-8")).digest()
+    return int.from_bytes(digest[:4], "big") / 0xFFFFFFFF
+
+
+def svg_grouped_scatter(sites: list[dict], color_map: dict) -> str:
     width = 760
     height = 460
     pad = 44
     plot_w = width - 2 * pad
     plot_h = height - 2 * pad
+    groups = [
+        ("board", "Watched boards"),
+        ("content", "Content pages"),
+        ("blocked", "Blocked"),
+    ]
+    centers = {
+        "board": pad + plot_w * 0.18,
+        "content": pad + plot_w * 0.50,
+        "blocked": pad + plot_w * 0.82,
+    }
 
     if not sites:
         return (
-            f'<svg viewBox="0 0 {width} {height}" role="img" aria-label="Watched site projection scatter">'
+            f'<svg id="siteScatter" viewBox="0 0 {width} {height}" role="img" aria-label="Site outcome scatter">'
             f'<rect x="0" y="0" width="{width}" height="{height}" class="scatter-bg"></rect>'
             f'<rect x="{pad}" y="{pad}" width="{plot_w}" height="{plot_h}" class="scatter-frame"></rect>'
-            f'<text x="{width / 2:.0f}" y="{height / 2:.0f}" text-anchor="middle" class="svg-label">No watched sites yet</text>'
+            f'<text x="{width / 2:.0f}" y="{height / 2:.0f}" text-anchor="middle" class="svg-label">No sites yet</text>'
             "</svg>"
         )
 
-    projection = _project_sites(sites, now)
-    points = projection.points
-    xs = [point["x"] for point in points]
-    ys = [point["y"] for point in points]
-    min_x, max_x = min(xs), max(xs)
-    min_y, max_y = min(ys), max(ys)
-    span_x = max(max_x - min_x, 1.0)
-    span_y = max(max_y - min_y, 1.0)
-    max_posts = max([len(point.get("seen_post_ids") or []) for point in points], default=0)
-
-    def sx(value: float) -> float:
-        return pad + (value - min_x) * plot_w / span_x
-
-    def sy(value: float) -> float:
-        return height - pad - (value - min_y) * plot_h / span_y
-
     circles = []
-    for point in points:
-        posts = len(point.get("seen_post_ids") or [])
-        radius = 3 + (5 * posts / max_posts if max_posts else 0)
-        platform = str(point["platform"])
-        circles.append(
-            f'<circle class="dot" cx="{sx(point["x"]):.1f}" cy="{sy(point["y"]):.1f}" r="{radius:.1f}" '
-            f'fill="{color_map.get(platform, PALETTE[0])}" '
-            f'data-pf="{esc(platform)}" data-domain="{esc(point["host"])}" '
-            f'data-status="{esc(point.get("last_status") or "unknown")}"></circle>'
+    max_board_posts = max((len(site.get("seen_post_ids") or []) for site in sites if site.get("group") == "board"), default=0)
+    for group, _ in groups:
+        group_sites = sorted(
+            [site for site in sites if site.get("group") == group],
+            key=lambda site: (str(site["platform"]), str(site["host"]), str(site["slug"])),
         )
-
-    center_x = pad + plot_w / 2
-    center_y = pad + plot_h / 2
-    loading_arrows = []
-    if projection.pca_ready:
-        arrow_scale = min(plot_w, plot_h) * 0.42
-        specs = []
-        for k, name in enumerate(projection.cont_feature_names):
-            i = projection.n_platforms + k
-            if i >= len(projection.v1) or i >= len(projection.v2):
-                continue
-            dx = projection.v1[i]
-            dy = projection.v2[i]
-            specs.append((name, dx, dy, math.sqrt(dx * dx + dy * dy)))
-        max_mag = max((mag for _, _, _, mag in specs), default=0.0)
-        placed: list[tuple[float, float]] = []
-        for name, dx, dy, mag in specs:
-            if mag == 0 or max_mag == 0:
-                continue
-            # arrow length scales with loading magnitude (proper biplot) so
-            # near-parallel (correlated) features separate by length, not overlap.
-            length = arrow_scale * (0.45 + 0.55 * mag / max_mag)
-            ux, uy = dx / mag, dy / mag
-            end_x = center_x + ux * length
-            end_y = center_y - uy * length
-            angle = math.atan2(end_y - center_y, end_x - center_x)
-            head = 7
-            spread = 0.45
-            p1 = (end_x, end_y)
-            p2 = (end_x - head * math.cos(angle - spread), end_y - head * math.sin(angle - spread))
-            p3 = (end_x - head * math.cos(angle + spread), end_y - head * math.sin(angle + spread))
-            label_x = end_x + 9 * math.cos(angle)
-            label_y = end_y + 9 * math.sin(angle)
-            # nudge label down while it collides with an already-placed label
-            for _ in range(8):
-                if not any(abs(label_x - lx) < 66 and abs(label_y - ly) < 14 for lx, ly in placed):
-                    break
-                label_y += 15
-            placed.append((label_x, label_y))
-            anchor = "start" if math.cos(angle) >= 0 else "end"
-            loading_arrows.append(
-                f'<line x1="{center_x:.1f}" y1="{center_y:.1f}" x2="{end_x:.1f}" y2="{end_y:.1f}" class="loading-arrow"></line>'
-                f'<polygon points="{p1[0]:.1f},{p1[1]:.1f} {p2[0]:.1f},{p2[1]:.1f} {p3[0]:.1f},{p3[1]:.1f}" class="loading-head"></polygon>'
-                f'<text x="{label_x:.1f}" y="{label_y:.1f}" text-anchor="{anchor}" class="svg-label loading-label">{esc(name)}</text>'
+        count = len(group_sites)
+        for i, site in enumerate(group_sites):
+            base_y = pad + 60 if count <= 1 else pad + 60 + (plot_h - 116) * i / (count - 1)
+            y = min(height - pad - 28, max(pad + 48, base_y + (_hash_unit(str(site["slug"]), "y") - 0.5) * 18))
+            x = min(pad + plot_w - 24, max(pad + 24, centers[group] + (_hash_unit(str(site["slug"]), "x") - 0.5) * 104))
+            platform = str(site["platform"])
+            posts = len(site.get("seen_post_ids") or [])
+            radius = 3.5
+            if group == "board":
+                radius = 3 + (5 * math.log1p(posts) / math.log1p(max_board_posts) if max_board_posts else 0)
+            status = str(site.get("status") or "unknown")
+            ring = ' stroke="var(--ink)" stroke-width="1.4"' if group == "board" and status == "ok" else ""
+            circles.append(
+                f'<circle class="dot" cx="{x:.1f}" cy="{y:.1f}" r="{radius:.1f}" '
+                f'fill="{color_map.get(platform, PALETTE[0])}"{ring} '
+                f'data-pf="{esc(platform)}" data-domain="{esc(site["host"])}" '
+                f'data-status="{esc(status)}"></circle>'
             )
 
-    variance_note = ""
-    if projection.pca_ready and projection.total_variance > 0:
-        pc1 = round(100 * projection.lambda1 / projection.total_variance)
-        pc2 = round(100 * projection.lambda2 / projection.total_variance)
-        variance_note = (
-            f'<text x="{pad}" y="{height - 22}" class="svg-label">PC1 = {pc1}% of variation</text>'
-            f'<text x="{width - pad}" y="{height - 22}" text-anchor="end" class="svg-label">PC2 = {pc2}% of variation</text>'
+    group_counts = Counter(str(site.get("group")) for site in sites)
+    labels = []
+    for group, label in groups:
+        labels.append(
+            f'<text x="{centers[group]:.1f}" y="{pad - 16}" text-anchor="middle" class="svg-label">'
+            f'{esc(label)} · {group_counts.get(group, 0)}</text>'
         )
-    note = "" if projection.pca_ready else f'<text x="{pad}" y="{pad - 14}" class="svg-label">Fallback layout: not enough varied data for PCA</text>'
+
     return (
-        f'<svg id="siteScatter" viewBox="0 0 {width} {height}" role="img" aria-label="Watched site projection scatter">'
+        f'<svg id="siteScatter" viewBox="0 0 {width} {height}" role="img" aria-label="Site outcome scatter">'
         f'<rect x="0" y="0" width="{width}" height="{height}" class="scatter-bg"></rect>'
         f'<rect x="{pad}" y="{pad}" width="{plot_w}" height="{plot_h}" class="scatter-frame"></rect>'
-        f"{note}"
+        + "".join(labels)
         + "".join(circles)
-        + "".join(loading_arrows)
-        + variance_note
         + "</svg>"
     )
 
@@ -526,7 +354,7 @@ def render_html(configs: dict, poll: dict, jobs: dict, generated_at: datetime) -
     bug_count = poll["markers"].get("bug", 0)
     sites = read_sites(poll)
     color_map = platform_color_map(sites)
-    scatter_chart = svg_pca_scatter(sites, generated_at, color_map)
+    scatter_chart = svg_grouped_scatter(sites, color_map)
     platform_counts = Counter(str(s["platform"]) for s in sites)
     legend_html = "".join(
         f'<li><span class="swatch" style="background:{color}"></span>{esc(platform)}<b>{platform_counts.get(platform, 0)}</b></li>'
@@ -684,16 +512,6 @@ def render_html(configs: dict, poll: dict, jobs: dict, generated_at: datetime) -
     .svg-value {{ fill: var(--ink); font-weight: 700; }}
     .scatter-bg {{ fill: var(--panel); }}
     .scatter-frame {{ fill: none; stroke: var(--muted); stroke-width: 1; }}
-    .loading-arrow {{ stroke: var(--ink); stroke-width: 1.2; opacity: 0.85; }}
-    .loading-head {{ fill: var(--ink); opacity: 0.85; }}
-    .loading-label {{
-      fill: var(--ink);
-      font-weight: 600;
-      paint-order: stroke;
-      stroke: var(--panel);
-      stroke-width: 3.5px;
-      stroke-linejoin: round;
-    }}
     .dot {{ opacity: 0.58; cursor: pointer; transition: opacity 0.12s ease; }}
     #siteScatter.dimmed .dot {{ opacity: 0.08; }}
     #siteScatter.dimmed .dot.hl {{ opacity: 0.95; }}
@@ -825,12 +643,11 @@ def render_html(configs: dict, poll: dict, jobs: dict, generated_at: datetime) -
       {scatter_chart}
       <ul class="legend">{legend_html}</ul>
       <div id="dotTip" class="dot-tip" hidden></div>
-      <figcaption>Figure 1. Arrow directions —
-        <b>activity</b>: new posts recently seen ·
-        <b>age</b>: days since we started watching ·
-        <b>glitches</b>: consecutive failed update checks ·
-        <b>post count</b>: posts captured at first scan ·
-        <b>empty posts</b>: posts that arrived with no body.</figcaption>
+      <figcaption>Figure 1. Every page we evaluated, sorted by what it turned out to be. Left = list/board
+        pages we actively watch (each dot is one board; dot color is its platform, see legend; a ring
+        marks fully active boards). Middle = single content pages (one article or info page, not a
+        board) that we skip. Right = pages we could not enter (anti-bot / Cloudflare). Broken or dead
+        URLs are left out. Hover a dot to highlight its platform and see the domain.</figcaption>
     </figure>
     <script>
       (function () {{
