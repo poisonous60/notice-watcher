@@ -42,20 +42,29 @@ def run() -> list[tuple[str, bool, str]]:
                   r is not None and r.get("adapter") == "DCInsideMGalleryAdapter",
                   f"got {None if r is None else (r.get('adapter') or r.get('strategy'))}"))
 
-    # 6b. 미니갤 전체글 — exception_mode 없음 → kwargs 에 없고 slug 무접미사
+    # 6b. 미니갤 전체글 — 필터 없음 → list_params 없고 slug 무접미사
     r = recognize("https://gall.dcinside.com/mgallery/board/lists/?id=thesingularity")
-    ok = (r is not None and "exception_mode" not in (r.get("kwargs") or {})
+    ok = (r is not None and "list_params" not in (r.get("kwargs") or {})
           and r.get("_slug_board") == "thesingularity")
-    cases.append(("mgallery_full_no_exc", ok,
+    cases.append(("mgallery_full_no_filter", ok,
                   f"got kwargs={None if r is None else r.get('kwargs')} slug={None if r is None else r.get('_slug_board')}"))
 
-    # 6c. 미니갤 개념글(recommend) 탭 — exception_mode 보존 → adapter kwargs + slug 분리
+    # 6c. 미니갤 개념글(recommend) 탭 — exception_mode 보존 → adapter list_params + slug 분리
     r = recognize("https://gall.dcinside.com/mgallery/board/lists/?id=thesingularity&exception_mode=recommend")
     ok = (r is not None
-          and (r.get("kwargs") or {}).get("exception_mode") == "recommend"
-          and r.get("_slug_board") == "thesingularity_recommend")
+          and (r.get("kwargs") or {}).get("list_params") == {"exception_mode": "recommend"}
+          and r.get("_slug_board") == "thesingularity_exception_mode_recommend")
     cases.append(("mgallery_recommend_preserved", ok,
                   f"got kwargs={None if r is None else r.get('kwargs')} slug={None if r is None else r.get('_slug_board')}"))
+
+    # 6d. 미니갤 검색(s_type+s_keyword) — 모든 list 필터 보존 + 한글 키워드 url-encode slug
+    r = recognize("https://gall.dcinside.com/mgallery/board/lists/?id=thesingularity&s_type=search_subject_memo&s_keyword=%EC%B9%B4%EC%AB%80%EC%BF%A0")
+    lp = (r.get("kwargs") or {}).get("list_params") if r else None
+    ok = (r is not None
+          and lp == {"s_type": "search_subject_memo", "s_keyword": "카쫀쿠"}
+          and r.get("_slug_board") == "thesingularity_s_keyword_%EC%B9%B4%EC%AB%80%EC%BF%A0_s_type_search_subject_memo")
+    cases.append(("mgallery_search_preserved", ok,
+                  f"got list_params={lp} slug={None if r is None else r.get('_slug_board')}"))
 
     # 7. action path `/board/lists` (board 이름 아님) — 미인식
     r = recognize("https://m.dcinside.com/board/lists?id=stock")

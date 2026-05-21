@@ -57,14 +57,15 @@ class DCInsideMGalleryAdapter(BaseAdapter):
         *,
         gallery_id: str,
         include_notices: bool = True,
-        exception_mode: Optional[str] = None,
+        list_params: Optional[dict] = None,
         timeout: float = 15.0,
     ):
         self.gallery_id = gallery_id
         self.board = gallery_id
         self.include_notices = include_notices
-        # exception_mode=recommend → 개념글(추천글) 탭만. None 이면 전체글.
-        self.exception_mode = exception_mode
+        # 목록 URL 추가 필터 (exception_mode=recommend 개념글 / s_type+s_keyword 검색 /
+        # sort_type 정렬 / search_head 말머리 …). 빈 dict 면 전체글.
+        self.list_params = dict(list_params or {})
         self._timeout = timeout
         self._client: Optional[httpx.AsyncClient] = None
 
@@ -95,8 +96,8 @@ class DCInsideMGalleryAdapter(BaseAdapter):
 
     async def fetch_list(self, *, page: int = 1, page_size: int = 50) -> list[NoticePost]:
         params: list[tuple[str, str]] = [("id", self.gallery_id)]
-        if self.exception_mode:
-            params.append(("exception_mode", self.exception_mode))
+        for k in sorted(self.list_params):
+            params.append((k, self.list_params[k]))
         if page > 1:
             params.append(("page", str(page)))
         url = f"{self.BASE}{self.LIST_PATH}?{urlencode(params, encoding='utf-8')}"
