@@ -93,7 +93,11 @@ def flush_target(conn, tok: Optional[str], target: dict, *, today_kst: str, dry_
                     passed = True
                     break
             if passed:
-                owed.append(post)
+                # post 는 fetch 시점 Row 스냅샷 — summary 컬럼이 NULL 이라
+                # 방금 계산/캐시한 summary 를 행에 붙여 digest 에 실리게 함.
+                post_d = dict(post)
+                post_d["summary"] = summary
+                owed.append(post_d)
 
     when = datetime.now(KST).strftime("%Y-%m-%d %H:%M")
     if not owed:
