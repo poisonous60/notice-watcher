@@ -1,0 +1,155 @@
+{
+  "version": 1,
+  "site": "square-enix.com",
+  "board": "ko",
+  "strategy": "httpx_html",
+  "_source_url": "https://www.square-enix.com/jp/magazine/",
+  "_note": "손작성: 원 URL은 JP magazine landing이지만 sitemap 후보의 ASIA NEWS PORTAL ko 목록이 실제 한국어 뉴스 보드다. 자동 생성은 일반 article/card selector로 시도해 posts_nonempty=0.",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+    "Referer": "https://www.square-enix.com/jp/magazine/"
+  },
+  "timeout": 15,
+  "list": {
+    "url_template": "https://www.square-enix.com/asia/newsportal/ko/",
+    "pagination": {
+      "kind": "none"
+    },
+    "page_size_max": 30,
+    "row_selector": "li.c-list-entries-item",
+    "row_required_selector": "a[href*='/asia/newsportal/ja/topics/'][href$='.html']",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a[href*='/asia/newsportal/ja/topics/'][href$='.html']",
+          "attr": "href",
+          "transform": [
+            [
+              "strip_query_fragment"
+            ],
+            [
+              "regex_extract",
+              "/asia/newsportal/ja/topics/(.+/post\\d+\\.html)$"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": ".c-list-entries-item-title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a[href*='/asia/newsportal/ja/topics/'][href$='.html']",
+          "attr": "href"
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": ".c-list-entries-item-date",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "iso8601",
+              [
+                "%Y.%m.%d"
+              ],
+              "+09:00"
+            ]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "css",
+          "selector": ".c-list-entries-item-category",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "remove_prefix",
+              "▶︎"
+            ],
+            [
+              "strip"
+            ]
+          ]
+        }
+      ],
+      "cover_image": [
+        {
+          "from": "attr",
+          "selector": ".c-list-entries-item-image img",
+          "attr": "src"
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": ".c-entry-body",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "article",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": ".c-entry-title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": ".c-entry-date",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "iso8601",
+              [
+                "%Y.%m.%d"
+              ],
+              "+09:00"
+            ]
+          ]
+        }
+      ]
+    }
+  }
+}

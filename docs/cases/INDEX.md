@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 209 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 215 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -34,6 +34,7 @@
 | [`host_status-deno-com_root_5aa73944`](host_status-deno-com_root_5aa73944.md) | ✅ 등록 (Statuspage.io Atom history feed 사용) | 2026-05-21 | F | posts_nonempty, rss_feed_available, statuspage_history_atom | https://status.deno.com/ |
 | [`host_stackoverflow-c_questions_71c08aad`](host_stackoverflow-c_questions_71c08aad.md) | ✅ 자동 등록 경로 추가 (StackExchange /questions → official API) | 2026-05-21 | F | fetch_list_403, posts_nonempty, capability_blocked | https://stackoverflow.com/questions |
 | [`host_squareup-com_us_28cd8df0`](host_squareup-com_us_28cd8df0.md) | ✅ 수동 config 등록 (static press cards, baseline 30건) | 2026-05-21 | none | posts_nonempty | https://squareup.com/us/en/press |
+| [`host_square-enix-com_jp_50b6a465`](host_square-enix-com_jp_50b6a465.md) | ✅ 손 config (작동중, baseline 9, httpx_html) | 2026-05-21 | none | posts_nonempty, first_article_url_missing | https://www.square-enix.com/jp/magazine/ |
 | [`host_sosp-org_root_06d54eed`](host_sosp-org_root_06d54eed.md) | 🧩 수동 config — 정적 proceedings index selector 지정 | 2026-05-21 | none | posts_nonempty, row_selector_wrong | https://sosp.org/ |
 | [`host_slashdot-org_root_778af9dd`](host_slashdot-org_root_778af9dd.md) | ✅ 등록 (Slashdot RSS 사용) | 2026-05-21 | none | posts_nonempty, rss_feed_available | https://slashdot.org/ |
 | [`host_sigsac-org_ccs_b1bf4263`](host_sigsac-org_ccs_b1bf4263.md) | ✅ 해결 (CCS 2026 Latest News list-only config, 외부 HotCRP/Google 링크 본문 skip) | 2026-05-21 | none | article_body_len, post_id_stable_shape, posts_nonempty, external_host_article | https://www.sigsac.org/ccs/CCS2026/ |
@@ -96,10 +97,12 @@
 | [`host_datadoghq-com_blog_447ffb34`](host_datadoghq-com_blog_447ffb34.md) | ✅ 수동 config 등록 (httpx_html, baseline 6건) | 2026-05-21 | F | posts_nonempty | https://www.datadoghq.com/blog/ |
 | [`host_conference-serv_conferences_a5105744`](host_conference-serv_conferences_a5105744.md) | no_change (capability_blocked) | 2026-05-21 |  | capability_blocked, http_403 | https://conference-service.com/conferences/ |
 | [`host_community-cloud_root_e65f04ea`](host_community-cloud_root_e65f04ea.md) | ✅ 수동 config (Playwright /latest 목록, 본문은 challenge-gated라 제목·URL 알림) | 2026-05-21 | none | article_body_len, fetch_list_403, discourse_json_challenge | https://community.cloudflare.com/ |
+| [`host_comic-days-com_info_ba9e6887`](host_comic-days-com_info_ba9e6887.md) | ✅ preflight b-hit 회복 + config 등록 (baseline 5건, httpx_html) | 2026-05-21 | none | article_body_len, matches_probe_first_article | https://comic-days.com/info |
 | [`host_cochranelibrary_root_7dafdb29`](host_cochranelibrary_root_7dafdb29.md) | ✅ playwright_html featured reviews registered from root | 2026-05-21 | F | posts_nonempty | https://www.cochranelibrary.com/ |
 | [`host_cloverworks-co-_news_b36daf52`](host_cloverworks-co-_news_b36daf52.md) | ✅ 손 config + probe 개선 (작동중, baseline 20, httpx_html) | 2026-05-21 | C+config | posts_nonempty, matches_probe_first_article | https://www.cloverworks.co.jp/news/ |
 | [`host_cloud-google-co_release-notes_68689125`](host_cloud-google-co_release-notes_68689125.md) | ✅ 해결 (Google Cloud release notes 공식 Atom feed recognizer + adapter) | 2026-05-21 | F | probe_timeout, static_docs_changelog, official_feed_available | https://cloud.google.com/release-notes |
 | [`host_circleci-com_changelog_5a868561`](host_circleci-com_changelog_5a868561.md) | 🧩 수동 config — CircleCI changelog RSS feed 로 baseline 30건 등록 | 2026-05-21 | none | posts_nonempty, row_selector_too_narrow, rss_feed_available | https://circleci.com/changelog/ |
+| [`host_cdjapan-co-jp_feature_ba56403b`](host_cdjapan-co-jp_feature_ba56403b.md) | ✅ 손 config (작동중, baseline 23, httpx_html) | 2026-05-21 | config | post_id_unique, title_nonempty, post_id_stable_shape | https://www.cdjapan.co.jp/feature/ |
 | [`host_canva-com_whats-new_1e430553`](host_canva-com_whats-new_1e430553.md) | ✅ 등록 (Canva public newsroom whats-new articles) | 2026-05-21 | F | capability_blocked, cloudflare, login_redirect, canva_whats_new | https://www.canva.com/whats-new/ |
 | [`host_cambridge-org_core_9f561f6b`](host_cambridge-org_core_9f561f6b.md) | ✅ playwright_html journal directory registered | 2026-05-21 | F | capability_blocked, posts_nonempty | https://www.cambridge.org/core/what-we-publish/journals |
 | [`host_call-for-papers_root_90032f22`](host_call-for-papers_root_90032f22.md) | 🚫 거부 (root는 안내 페이지 + 카테고리 메뉴, RSS는 빈 channel — 실제 CFP 목록 없음) | 2026-05-21 | none | posts_nonempty, matches_probe_first_article, empty_feed, nav_category_menu | https://call-for-papers.sas.upenn.edu/ |
@@ -110,7 +113,10 @@
 | [`host_asanet-org_annual-meeting_b1101614`](host_asanet-org_annual-meeting_b1101614.md) | no_change (capability_blocked) | 2026-05-21 |  | capability_blocked, cloudflare_challenge | https://www.asanet.org/annual-meeting/ |
 | [`host_apnews-com_root_5ee5ebc1`](host_apnews-com_root_5ee5ebc1.md) | 🔧 손 config 등록 (baseline 30건, httpx_html) | 2026-05-21 | F | title_nonempty, posts_nonempty, article_body_len | https://apnews.com/ |
 | [`host_apa-org_science_e0556b0f`](host_apa-org_science_e0556b0f.md) | 🚫 거부 (입력 URL이 APA PSA 목록이 아니라 404/사이트 안내 링크만 제공 — poll 대상 게시판 아님) | 2026-05-21 | none | posts_nonempty, matches_probe_first_article, nav_only_same_host | https://www.apa.org/science/about/psa/ |
+| [`host_animenewsnetwor_encyclopedia_83ff8a2d`](host_animenewsnetwor_encyclopedia_83ff8a2d.md) | ✅ preflight 회복 + config 등록 (작동중, baseline 30, httpx_html) | 2026-05-21 | none | fetch_list, posts_nonempty | https://www.animenewsnetwork.com/encyclopedia/releases.php |
+| [`host_anime-japan-jp_news_90aa37b1`](host_anime-japan-jp_news_90aa37b1.md) | ✅ config 등록 (baseline 30, playwright_html) | 2026-05-21 | none | posts_nonempty, matches_probe_first_article | https://www.anime-japan.jp/news/ |
 | [`host_anilist-co_search_784ba699`](host_anilist-co_search_784ba699.md) | 🧩 손어댑터 — AniList GraphQL endpoint 로 top anime baseline 30건 등록 | 2026-05-21 | F | title_nonempty, matches_probe_first_article, graphql_post_api_schema_gap | https://anilist.co/search/anime |
+| [`host_anichart-net_airing_f90ddb8c`](host_anichart-net_airing_f90ddb8c.md) | 🧩 손어댑터 — AniChart airing schedule GraphQL endpoint 로 baseline 30건 등록 | 2026-05-21 | F | posts_nonempty, spa_shell_static_empty, graphql_post_api_schema_gap | https://anichart.net/airing |
 | [`host_aljazeera-com_root_2ac8d25a`](host_aljazeera-com_root_2ac8d25a.md) | ✅ preflight b-hit 회복 + config 등록 (baseline 25건, httpx_html RSS) | 2026-05-21 | F | posts_nonempty, title_nonempty, post_id_unique | https://www.aljazeera.com/ |
 | [`host_airtable-com_whatsnew_6412a843`](host_airtable-com_whatsnew_6412a843.md) | 🧩 손어댑터 — /whatsnew 빈 마케팅 셸 대신 Newsroom page-data 를 최신순으로 읽어 baseline 30건 등록 | 2026-05-21 | F | posts_nonempty, wrong_first_article_url, marketing_shell_no_rows, next_page_data_reordered | https://www.airtable.com/whatsnew |
 | [`host_adobe-com_products_2fe98bba`](host_adobe-com_products_2fe98bba.md) | ✅ 등록 (Adobe Creative Cloud features AEM fragments) | 2026-05-21 | adapter | capability_blocked, baseline_blocked, adobe_akamai, curl_cffi_impersonate, aem_fragments | https://www.adobe.com/products/new-creative-cloud-features.html |
@@ -232,27 +238,28 @@
 | C+config | 2 |
 | E | 5 |
 | E+A+C+D | 1 |
-| F | 79 |
+| F | 80 |
 | F+A | 1 |
 | F+C | 3 |
 | adapter | 1 |
-| none | 62 |
+| config | 1 |
+| none | 66 |
 
 ### config_strategy 분포
 
 | strategy | count |
 |---|---|
 | (미기재) | 43 |
-| handwritten | 26 |
-| httpx_html | 65 |
+| handwritten | 27 |
+| httpx_html | 69 |
 | httpx_json | 17 |
 | httpx_json (미적용 — 콘텐츠 0) | 1 |
 | mixed | 1 |
 | none | 33 |
-| playwright_html | 22 |
+| playwright_html | 23 |
 | rejected | 1 |
 
 ### 최근 90일 (≥ 2026-02-20)
 
-케이스 209 건.
+케이스 215 건.
 
