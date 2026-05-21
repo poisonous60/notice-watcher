@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 143 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 144 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -21,6 +21,7 @@
 | [`host_t-me_s_ce7a5d31`](host_t-me_s_ce7a5d31.md) | ✅ 등록 (Telegram public channel list-only) | 2026-05-21 | none | article_body_len, body_empty_acceptable, list_only | https://t.me/s/durov |
 | [`host_status-deno-com_root_5aa73944`](host_status-deno-com_root_5aa73944.md) | ✅ 등록 (Statuspage.io Atom history feed 사용) | 2026-05-21 | F | posts_nonempty, rss_feed_available, statuspage_history_atom | https://status.deno.com/ |
 | [`host_stackoverflow-c_questions_71c08aad`](host_stackoverflow-c_questions_71c08aad.md) | ✅ 자동 등록 경로 추가 (StackExchange /questions → official API) | 2026-05-21 | F | fetch_list_403, posts_nonempty, capability_blocked | https://stackoverflow.com/questions |
+| [`host_squareup-com_us_28cd8df0`](host_squareup-com_us_28cd8df0.md) | ✅ 수동 config 등록 (static press cards, baseline 30건) | 2026-05-21 | none | posts_nonempty | https://squareup.com/us/en/press |
 | [`host_slashdot-org_root_778af9dd`](host_slashdot-org_root_778af9dd.md) | ✅ 등록 (Slashdot RSS 사용) | 2026-05-21 | none | posts_nonempty, rss_feed_available | https://slashdot.org/ |
 | [`host_shopify-enginee_root_25b7d4e3`](host_shopify-enginee_root_25b7d4e3.md) | ✅ 수동 config 등록 (static article cards, baseline 16건) | 2026-05-21 | F | register_subprocess_timeout, posts_nonempty | https://shopify.engineering/ |
 | [`host_producthunt-com_feed_51ccf15a`](host_producthunt-com_feed_51ccf15a.md) | ✅ 등록 (Product Hunt Atom feed 사용, 본문은 list-only) | 2026-05-21 | none | posts_nonempty, rss_feed_available, atom_feed, body_empty_acceptable | https://www.producthunt.com/feed |
@@ -167,7 +168,7 @@
 | F | 69 |
 | F+A | 1 |
 | F+C | 3 |
-| none | 24 |
+| none | 25 |
 
 ### config_strategy 분포
 
@@ -175,7 +176,7 @@
 |---|---|
 | (미기재) | 31 |
 | handwritten | 21 |
-| httpx_html | 39 |
+| httpx_html | 40 |
 | httpx_json | 14 |
 | mixed | 1 |
 | none | 26 |
@@ -184,5 +185,5 @@
 
 ### 최근 90일 (≥ 2026-02-20)
 
-케이스 143 건.
+케이스 144 건.
 
