@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 188 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 189 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -87,6 +87,7 @@
 | [`host_canva-com_whats-new_1e430553`](host_canva-com_whats-new_1e430553.md) | ✅ 등록 (Canva public newsroom whats-new articles) | 2026-05-21 | F | capability_blocked, cloudflare, login_redirect, canva_whats_new | https://www.canva.com/whats-new/ |
 | [`host_cambridge-org_core_9f561f6b`](host_cambridge-org_core_9f561f6b.md) | ✅ playwright_html journal directory registered | 2026-05-21 | F | capability_blocked, posts_nonempty | https://www.cambridge.org/core/what-we-publish/journals |
 | [`host_brunch-co-kr_springboot_58aa9ddd`](host_brunch-co-kr_springboot_58aa9ddd.md) | ✅ 수동 config 등록 (Brunch RSS, baseline 20건) | 2026-05-21 | F | register_subprocess_timeout, posts_nonempty | https://brunch.co.kr/@springboot |
+| [`host_box-com_blog_de163a6a`](host_box-com_blog_de163a6a.md) | ⛔ capability_blocked — original URL is Cloudflare-challenged for static fetch and 404 under Playwright; moved Box Blog category is also CF managed-challenge at runtime | 2026-05-21 | none | capability_blocked, cloudflare_challenge, original_url_404, moved_blog_category, playwright_runtime_blocked | https://box.com/blog/category/product-news |
 | [`host_blog-unity-com_root_9fe1176b`](host_blog-unity-com_root_9fe1176b.md) | ✅ 수동 config 등록 (RSS 목록, baseline 30건; 본문 비움 허용) | 2026-05-21 | F | posts_nonempty | https://blog.unity.com/ |
 | [`host_aussie-zone_root_a8115780`](host_aussie-zone_root_a8115780.md) | rc=5 capability_blocked — Lemmy root HTML anti-bot; dev box API CF-403, 미등록 (rescue 인프라 일반화) | 2026-05-21 | F | capability_blocked, fediverse_api_rescue, lemmy_api_rescue | https://aussie.zone/ |
 | [`host_asanet-org_annual-meeting_b1101614`](host_asanet-org_annual-meeting_b1101614.md) | no_change (capability_blocked) | 2026-05-21 |  | capability_blocked, cloudflare_challenge | https://www.asanet.org/annual-meeting/ |
@@ -213,7 +214,7 @@
 | F+A | 1 |
 | F+C | 3 |
 | adapter | 1 |
-| none | 45 |
+| none | 46 |
 
 ### config_strategy 분포
 
@@ -224,11 +225,11 @@
 | httpx_html | 56 |
 | httpx_json | 15 |
 | mixed | 1 |
-| none | 27 |
+| none | 28 |
 | playwright_html | 20 |
 | rejected | 1 |
 
 ### 최근 90일 (≥ 2026-02-20)
 
-케이스 188 건.
+케이스 189 건.
 
