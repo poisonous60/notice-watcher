@@ -1,0 +1,120 @@
+{
+  "version": 1,
+  "site": "madhouse.co.jp",
+  "board": "news",
+  "strategy": "playwright_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept-Language": "ja-JP,ja;q=0.9,ko;q=0.8"
+  },
+  "timeout": 20,
+  "nav_timeout_ms": 20000,
+  "idle_timeout_ms": 4000,
+  "list": {
+    "url_template": "https://www.madhouse.co.jp/news/",
+    "pagination": {
+      "kind": "none"
+    },
+    "page_size_max": 30,
+    "wait_selector": "li.news-item",
+    "row_selector": "li.news-item",
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a",
+          "attr": "href",
+          "transform": [
+            ["regex_extract", "/news/([^/]+)/?$"]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "h2.news-title",
+          "text": true,
+          "transform": [
+            ["collapse_ws"]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a",
+          "attr": "href",
+          "transform": [
+            ["urljoin", "https://www.madhouse.co.jp"]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "time.news-date",
+          "attr": "datetime",
+          "transform": [
+            ["date_only_to_iso", "+09:00"]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "css",
+          "selector": "span.news-category",
+          "text": true,
+          "transform": [
+            ["collapse_ws"]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "url_template": "https://www.madhouse.co.jp/news/{post_id}/",
+    "fetch_kind": "html",
+    "wait_selector": ".wysiwyg",
+    "content": [
+      {
+        "from": "css",
+        "selector": ".wysiwyg",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": ".news-article__title",
+          "text": true,
+          "transform": [
+            ["collapse_ws"]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": ".news-article__date",
+          "attr": "datetime",
+          "transform": [
+            ["date_only_to_iso", "+09:00"]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "css",
+          "selector": ".news-article__label",
+          "text": true,
+          "transform": [
+            ["collapse_ws"]
+          ]
+        }
+      ]
+    }
+  },
+  "_source_url": "https://www.madhouse.co.jp/news/",
+  "_note": "Madhouse news renders rows and article body from client-side JSON. Static HTML has only shell/nav, so use playwright_html with rendered DOM selectors."
+}
