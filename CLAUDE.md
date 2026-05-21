@@ -181,6 +181,7 @@ bash scripts/setup-hooks.sh   # 또는 pwsh scripts/setup-hooks.ps1
 ## 9. 관련 문서
 
 - `docs/운영 메모.md` — N100 SSH·systemd·배포 사이클 §1~9
+- `docs/공개 현황 사이트.md` — N100 Tailscale Funnel 공개 정적 사이트 접속·재부팅 복구·끄기 (ADR 0010)
 - `docs/자가개선 인프라 계획.md` — hand-config 자가개선 인프라 v3 설계
 - `docs/cases/INDEX.md` — 사이트별 등록 시도 사례 (자동 생성)
 - `docs/config 기반 엔진 가이드.md` — config 엔진 전체 구조
