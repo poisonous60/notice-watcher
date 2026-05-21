@@ -12,6 +12,7 @@ from .discourse import DiscourseAdapter
 from .lemmy import LemmyAdapter
 from .peertube import PeerTubeAdapter
 from .google_news_rss import GoogleNewsRssAdapter
+from .posthog_changelog import PostHogChangelogAdapter
 
 __all__ = [
     "BaseAdapter",
@@ -29,4 +30,5 @@ __all__ = [
     "LemmyAdapter",
     "PeerTubeAdapter",
     "GoogleNewsRssAdapter",
+    "PostHogChangelogAdapter",
 ]
