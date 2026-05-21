@@ -88,7 +88,7 @@ PYTHONPATH=. python scripts/cluster_report.py
 ## 7. 리뷰 → 배포
 
 - `Agent(subagent_type='hand-config-reviewer', model='sonnet')` 호출.
-- `docs/cases/<platform>-recognizer.md` 작성 + `python scripts/cases_index.py` + `--backfill-db output/cases.sqlite3` (CLAUDE.md §6).
+- `docs/cases/<platform>-recognizer.md` 작성 + `python scripts/cases_index.py --backfill-db output/cases.sqlite3` (INDEX.md + DB 한 번에, CLAUDE.md §6).
 - pre-push hook (probe_smoke stage 3·5) 통과 → push → N100 pull → `systemctl --user restart notice-bot.service` (engine/ 변경이므로 restart 필요).
 
 ## 8. 기존 config 처리
