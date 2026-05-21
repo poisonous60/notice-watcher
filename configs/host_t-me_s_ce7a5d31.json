@@ -1,0 +1,112 @@
+{
+  "version": 1,
+  "site": "t.me",
+  "board": "durov",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+    "Referer": "https://t.me/s/durov"
+  },
+  "timeout": 15,
+  "list": {
+    "url_template": "https://t.me/s/{board}",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "section.tgme_channel_history.js-message_history > div.tgme_widget_message_wrap.js-widget_message_wrap",
+    "row_required_selector": "div.tgme_widget_message",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "div.tgme_widget_message",
+          "attr": "data-post",
+          "transform": [
+            [
+              "regex_extract",
+              "/([0-9]+)$"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "div.tgme_widget_message_text.js-message_text",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a.tgme_widget_message_date",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://t.me"
+            ]
+          ]
+        },
+        {
+          "from": "template",
+          "value": "https://t.me/{board}/{post_id}"
+        }
+      ],
+      "published_at": [
+        {
+          "from": "attr",
+          "selector": "a.tgme_widget_message_date time",
+          "attr": "datetime",
+          "transform": [
+            [
+              "iso8601",
+              [
+                "%Y-%m-%dT%H:%M:%S%z"
+              ]
+            ]
+          ]
+        }
+      ],
+      "author": [
+        {
+          "from": "css",
+          "selector": "div.tgme_widget_message_owner_name",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "div.tgme_widget_message_text.js-message_text",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [],
+    "body_empty_acceptable": true
+  },
+  "_source_url": "https://t.me/s/durov",
+  "_note": "Telegram public channel list page contains message text in the list rows. Direct message URLs do not expose the same body selector reliably, so register as title/URL/summary only with body_empty_acceptable."
+}

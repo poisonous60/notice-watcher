@@ -1,0 +1,107 @@
+{
+  "version": 1,
+  "site": "status.deno.com",
+  "board": "history",
+  "strategy": "httpx_html",
+  "list": {
+    "url_template": "https://status.deno.com/history.atom",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "entry",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "css",
+          "selector": "id",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "strip"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "link[rel=\"alternate\"]",
+          "attr": "href",
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "strip"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "published",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "iso8601",
+              [
+                "%Y-%m-%dT%H:%M:%S.%f%z",
+                "%Y-%m-%dT%H:%M:%S%z"
+              ]
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "content",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": ".prose",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "main",
+        "html": true
+      }
+    ],
+    "body_empty_acceptable": true
+  },
+  "_source_url": "https://status.deno.com/history.atom",
+  "_note": "Statuspage.io Atom history feed. Root page exposed no static incident rows; /history.atom provides entry id/title/published/content and incident links."
+}
