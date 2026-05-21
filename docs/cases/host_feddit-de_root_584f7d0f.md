@@ -1,13 +1,13 @@
 ---
 slug: host_feddit-de_root_584f7d0f
 url: https://feddit.de/
-status: "rc=5 capability_blocked target — Lemmy API rescue path generalized; endpoint currently not open from dev box"
-outcome: improved
+status: "rc=5 capability_blocked — Lemmy root; dev box API 404, 미등록 (rescue 인프라 일반화)"
+outcome: no_change
 date: 2026-05-21
 requested_by: batch
 failure_keys: [capability_blocked, fediverse_api_rescue, lemmy_api_rescue]
 fix_layer: F
-config_strategy: handwritten
+config_strategy: none
 adapters_changed: []
 engine_files_touched: [scripts/register.py]
 tags: [lemmy, fediverse, api-rescue, anti-bot, batch-2026-05-21-fedi]

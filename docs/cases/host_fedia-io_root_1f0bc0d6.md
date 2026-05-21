@@ -2,7 +2,7 @@
 slug: host_fedia-io_root_1f0bc0d6
 url: https://fedia.io/
 status: "⛔ capability_blocked — root/combined가 login으로 redirect, mbin API는 현재 401; rc=5 Mbin rescue path 추가"
-outcome: improved
+outcome: no_change
 date: 2026-05-21
 requested_by: batch
 failure_keys: [capability_blocked, login_redirect, mbin_api_unauthorized, fediverse_api_rescue]

@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 115 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 118 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -11,18 +11,22 @@
 | [`infra_root_marketing_loosen_2026-05-21`](infra_root_marketing_loosen_2026-05-21.md) | ✅ 게이트 완화 — root_marketing 이 same-host self-article 있는 board 를 오거부하던 것 차단 | 2026-05-21 | C | gate_reject_root_marketing | https://community.nodebb.org/ |
 | [`infra_discourse_root_form_2026-05-21`](infra_discourse_root_form_2026-05-21.md) | ✅ 자동 등록 (probe generator-meta 신호 → DiscourseAdapter dispatch — root-form 봉합) | 2026-05-21 | C | posts_nonempty, article_body_len | https://forum.openwrt.org/ |
 | [`infra_antibot_challenge_classify_2026-05-21`](infra_antibot_challenge_classify_2026-05-21.md) | ✅ probe 분류 게이트 — JS-챌린지 인터스티셜(Anubis PoW / Cloudflare)을 BLOCKED_BOT 으로 인식 → gate_reject(rc=3) 오분류를 capability_blocked(rc=5)로 교정 | 2026-05-21 | C | board_shape_check, gate_reject | https://forums.debian.net/ |
-| [`host_watchuseek-com_root_7f9f4699`](host_watchuseek-com_root_7f9f4699.md) | 🐛 BUG 방어 — SIGBUS subprocess death 를 gen_fail 로 오분류하지 않고 BUG 경로로 보냄 | 2026-05-21 | F | subprocess_signal, sigbus, headless_dom_pressure, xenforo_rss | https://www.watchuseek.com/ |
+| [`host_watchuseek-com_root_7f9f4699`](host_watchuseek-com_root_7f9f4699.md) | ⛔ capability_blocked — dev box 에서 root/RSS 모두 timeout, XenForo RSS 경량 경로도 edge/IP 차단 | 2026-05-21 | none | baseline_blocked, capability_blocked, page_goto_timeout, rss_timeout, xenforo_rss, subprocess_signal, sigbus, headless_dom_pressure | https://www.watchuseek.com/ |
 | [`host_techhub-social_about_fbf89ae2`](host_techhub-social_about_fbf89ae2.md) | social platform detect-reject | 2026-05-21 | C | posts_nonempty, article_body_len | https://techhub.social/about |
 | [`host_t-me_s_ce7a5d31`](host_t-me_s_ce7a5d31.md) | ✅ 등록 (Telegram public channel list-only) | 2026-05-21 | none | article_body_len, body_empty_acceptable, list_only | https://t.me/s/durov |
 | [`host_status-deno-com_root_5aa73944`](host_status-deno-com_root_5aa73944.md) | ✅ 등록 (Statuspage.io Atom history feed 사용) | 2026-05-21 | F | posts_nonempty, rss_feed_available, statuspage_history_atom | https://status.deno.com/ |
 | [`host_stackoverflow-c_questions_71c08aad`](host_stackoverflow-c_questions_71c08aad.md) | ✅ 자동 등록 경로 추가 (StackExchange /questions → official API) | 2026-05-21 | F | fetch_list_403, posts_nonempty, capability_blocked | https://stackoverflow.com/questions |
 | [`host_slashdot-org_root_778af9dd`](host_slashdot-org_root_778af9dd.md) | ✅ 등록 (Slashdot RSS 사용) | 2026-05-21 | none | posts_nonempty, rss_feed_available | https://slashdot.org/ |
 | [`host_producthunt-com_feed_51ccf15a`](host_producthunt-com_feed_51ccf15a.md) | ✅ 등록 (Product Hunt Atom feed 사용, 본문은 list-only) | 2026-05-21 | none | posts_nonempty, rss_feed_available, atom_feed, body_empty_acceptable | https://www.producthunt.com/feed |
+| [`host_namu-wiki_RecentChanges_2370318a`](host_namu-wiki_RecentChanges_2370318a.md) | ✅ 기존 손 config 동작 확인 — RecentChanges 목록 30건 baseline, 본문은 body_empty_acceptable | 2026-05-21 | none | post_id_stable_shape, matches_probe_first_article | https://namu.wiki/RecentChanges |
 | [`host_lemmy-ml_root_9bc876aa`](host_lemmy-ml_root_9bc876aa.md) | ✅ 자동 등록 가능 (Lemmy recognizer + LemmyAdapter 신규 — API v3 직접 호출) | 2026-05-21 | F | posts_nonempty, article_body_len | https://lemmy.ml/ |
-| [`host_indiehackers-co_root_e4490db0`](host_indiehackers-co_root_e4490db0.md) | ⏸️ 중단 (SPA/click-render, 현재 config 어휘로 안정 표현 불가) | 2026-05-21 | none | posts_nonempty, spa_no_static_rows, click_render_required | https://www.indiehackers.com/ |
-| [`host_fedia-io_root_1f0bc0d6`](host_fedia-io_root_1f0bc0d6.md) | ⚠️ 플랫폼 감지 추가, fedia.io 현재 API 401로 등록 폴백 | 2026-05-21 | F | posts_nonempty, capability_blocked | https://fedia.io/ |
+| [`host_indiehackers-co_root_e4490db0`](host_indiehackers-co_root_e4490db0.md) | 🔧 손 config 추가 — 정적 Ember HTML의 story 카드에서 홈 피드 30건 baseline | 2026-05-21 | none | posts_nonempty, first_article_url_missing, static_variant_rows_not_promoted | https://www.indiehackers.com/ |
+| [`host_fedia-io_root_1f0bc0d6`](host_fedia-io_root_1f0bc0d6.md) | ⛔ capability_blocked — root/combined가 login으로 redirect, mbin API는 현재 401; rc=5 Mbin rescue path 추가 | 2026-05-21 | F | capability_blocked, login_redirect, mbin_api_unauthorized, fediverse_api_rescue | https://fedia.io/ |
+| [`host_feddit-de_root_584f7d0f`](host_feddit-de_root_584f7d0f.md) | rc=5 capability_blocked — Lemmy root; dev box API 404, 미등록 (rescue 인프라 일반화) | 2026-05-21 | F | capability_blocked, fediverse_api_rescue, lemmy_api_rescue | https://feddit.de/ |
 | [`host_diode-zone_root_531d9bcb`](host_diode-zone_root_531d9bcb.md) | ✅ 자동 등록 가능 (PeerTube recognizer + PeerTubeAdapter 신규 — API v1 직접 호출) | 2026-05-21 | F | posts_nonempty, article_body_len | https://diode.zone/ |
+| [`host_df-nexon-com_community_cae73546`](host_df-nexon-com_community_cae73546.md) | ✅ 수동 config (작동중, baseline 21, httpx_html) | 2026-05-21 | none | posts_nonempty | https://df.nexon.com/community/news/notice/list |
 | [`host_community-cloud_root_e65f04ea`](host_community-cloud_root_e65f04ea.md) | ✅ 수동 config (Playwright /latest 목록, 본문은 challenge-gated라 제목·URL 알림) | 2026-05-21 | none | article_body_len, fetch_list_403, discourse_json_challenge | https://community.cloudflare.com/ |
+| [`host_aussie-zone_root_a8115780`](host_aussie-zone_root_a8115780.md) | rc=5 capability_blocked — Lemmy root HTML anti-bot; dev box API CF-403, 미등록 (rescue 인프라 일반화) | 2026-05-21 | F | capability_blocked, fediverse_api_rescue, lemmy_api_rescue | https://aussie.zone/ |
 | [`batch_forums_genfail_boardurl_2026-05-21`](batch_forums_genfail_boardurl_2026-05-21.md) | ✅ 4 사이트 hand-config (포털/board-root → 실제 board URL) + engine encoding 옵션 | 2026-05-21 | F | posts_nonempty, matches_probe_first_article | https://www.humoruniv.com/ |
 | [`batch_forums_antibot_playwright_2026-05-21`](batch_forums_antibot_playwright_2026-05-21.md) | ✅ anti-bot 4 사이트 playwright_html 통과 등록 (Anubis PoW·CF) + simplemachines terminal | 2026-05-21 | F | board_shape_check, gate_reject, capability_blocked | https://www.techpowerup.com/forums/ |
 | [`steam-news-recognizer`](steam-news-recognizer.md) | ✅ recognizer 승급 (cluster 10건 → engine/recognizers/steam_news.py) | 2026-05-20 |  |  | https://store.steampowered.com/feeds/news/app/730/ |
@@ -54,7 +58,6 @@
 | [`host_page-onstove-co_epicseven_1dd46993`](host_page-onstove-co_epicseven_1dd46993.md) | ✅ 수동 config (api.onstove.com cwms v3.0 article list, 15건 baseline) | 2026-05-19 | F | gen_fail_posts_nonempty, spa_no_article_links | https://page.onstove.com/epicseven/kr/list/e7kr001 |
 | [`host_news-blizzard-c_en-us_ef8e0474`](host_news-blizzard-c_en-us_ef8e0474.md) | ✅ 수동 config (/api/news Contentstack feed, 24건 baseline) | 2026-05-19 | F | board_shape_gate_rejected, spa_no_article_links | https://news.blizzard.com/en-us/ |
 | [`host_nationalgeograp_root_2be4a852`](host_nationalgeograp_root_2be4a852.md) | 🚫 거부 (NatGeo root 도메인 마케팅 랜딩 — board 아님. 카테고리/섹션 URL 권장) — root_marketing_homepage 게이트 (C+F+A) | 2026-05-19 | C | post_id_stable_shape, title_nonempty, article_body_len, row_type_mix, matches_probe_first_article, root_marketing_homepage | https://www.nationalgeographic.com/ |
-| [`host_namu-wiki_RecentChanges_2370318a`](host_namu-wiki_RecentChanges_2370318a.md) | ✅ 수동 config (playwright_html + a[href^=/w/] row, 30건 baseline) | 2026-05-19 | F | gen_fail_unknown, spa_obfuscated_classes, vue-ssr-3kb-shell | https://namu.wiki/RecentChanges |
 | [`host_leagueoflegends_en-us_74f516a8`](host_leagueoflegends_en-us_74f516a8.md) | ✅ 수동 config (httpx_json + script_root __NEXT_DATA__, 30건 baseline) | 2026-05-19 | E | gen_fail_unknown, spa_no_external_api, next-data-inline-json | https://www.leagueoflegends.com/en-us/news/ |
 | [`host_investopedia-co_news-4427706_c33346a4`](host_investopedia-co_news-4427706_c33346a4.md) | 🚫 거부 (게시판 형식 아닌 것으로 판정 — candidates_zero / list_url_none). | 2026-05-19 |  | candidates_zero, list_url_none, posts_nonempty, hub_url_not_board | https://www.investopedia.com/news-4427706 |
 | [`host_hoyolab-com_circles_f742739b`](host_hoyolab-com_circles_f742739b.md) | ✅ 수동 config (bbs-api-os getNewsList gids=8, 15건 baseline) | 2026-05-19 | F | board_shape_gate_rejected, gen_fail_posts_nonempty, spa_no_article_links | https://www.hoyolab.com/circles/8/0/official?lang=ko-kr |
@@ -139,7 +142,7 @@
 | F | 50 |
 | F+A | 1 |
 | F+C | 3 |
-| none | 17 |
+| none | 20 |
 
 ### config_strategy 분포
 
@@ -147,14 +150,14 @@
 |---|---|
 | (미기재) | 31 |
 | handwritten | 18 |
-| httpx_html | 18 |
-| httpx_json | 14 |
+| httpx_html | 20 |
+| httpx_json | 13 |
 | mixed | 1 |
-| none | 23 |
+| none | 25 |
 | playwright_html | 9 |
 | rejected | 1 |
 
 ### 최근 90일 (≥ 2026-02-20)
 
-케이스 115 건.
+케이스 118 건.
 

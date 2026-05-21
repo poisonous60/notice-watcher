@@ -1,13 +1,13 @@
 ---
 slug: host_aussie-zone_root_a8115780
 url: https://aussie.zone/
-status: "rc=5 capability_blocked — Lemmy root HTML anti-bot; API rescue path generalized"
-outcome: improved
+status: "rc=5 capability_blocked — Lemmy root HTML anti-bot; dev box API CF-403, 미등록 (rescue 인프라 일반화)"
+outcome: no_change
 date: 2026-05-21
 requested_by: batch
 failure_keys: [capability_blocked, fediverse_api_rescue, lemmy_api_rescue]
 fix_layer: F
-config_strategy: handwritten
+config_strategy: none
 adapters_changed: []
 engine_files_touched: [scripts/register.py]
 tags: [lemmy, fediverse, api-rescue, anti-bot, batch-2026-05-21-fedi]
