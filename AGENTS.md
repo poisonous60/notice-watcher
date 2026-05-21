@@ -144,13 +144,20 @@ bash scripts/setup-hooks.sh   # 또는 pwsh scripts/setup-hooks.ps1
 ## 6. hand-config 워크플로 — 자율 개선 시
 
 자동 등록 실패 사이트 손-config 또는 probe/prompt/schema/엔진 코드 개선 시:
-- `.claude/skills/hand-config/SKILL.md` 절차 따름
+- **권위 플레이북 = `.claude/skills/hand-config/SKILL.md`** (git-tracked SoT). `.agents/skills/hand-config/` 는 그 junction (같은 파일) — codex auto-discovery 용. 둘이 어긋나면 `.claude/` 가 진본.
 - 자가 점검 가이드 (SKILL.md §6, 가이드라인, 권장)
 - `docs/cases/<slug>.md` 작성 + `python scripts/cases_index.py`
-- `Agent(subagent_type='hand-config-reviewer', model='sonnet')` 호출
+- **reviewer = native `hand-config-reviewer` subagent** — codex CLI 가 `.codex/agents/hand-config-reviewer.toml` 로 노출, 프롬프트에서 이름으로 위임 호출.
 - pre-push hook 통과 후 push → N100 pull → restart
 
-`docs/자가개선 인프라 계획.md` 전체 설계 (rev 3).
+### codex CLI override (이 repo 오케스트레이션 driver = codex CLI)
+
+SKILL.md 를 verbatim 따르되 reviewer 호출만 교체:
+- SKILL.md §7a 의 `codex-companion.mjs` Bash 경로 = Claude-orchestration 잔재 (codex→codex nested). **codex CLI 에선 무시**.
+- SKILL.md §7b 의 Claude `Agent(subagent_type=..., model='sonnet')` = Claude 전용 도구. **codex 는 호출 불가 — 무시**.
+- 1순위 = native `hand-config-reviewer` subagent. fallback 순서: native subagent → (불가 시) §7a codex-companion → (사용자 명시 요청 시만) Claude Agent.
+
+`docs/자가개선 인프라 계획.md` 전체 설계 (rev 3). 본 driver 결정 = `docs/adr/0008-handconfig-orchestration-on-codex.md`.
 
 ## 7. 안전 동작
 
@@ -169,7 +176,7 @@ bash scripts/setup-hooks.sh   # 또는 pwsh scripts/setup-hooks.ps1
 - dev box `git commit && git push`
 - `python scripts/probe_smoke.py`·`python scripts/cases_index.py`
 - pre-push hook 자동 검증
-- `Agent(subagent_type='hand-config-reviewer', model='sonnet')` 호출
+- native `hand-config-reviewer` subagent 호출 (codex CLI — §6 override)
 
 ## 8. 관련 문서
 
