@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 142 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 143 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -19,6 +19,7 @@
 | [`host_techhub-social_about_fbf89ae2`](host_techhub-social_about_fbf89ae2.md) | social platform detect-reject | 2026-05-21 | C | posts_nonempty, article_body_len | https://techhub.social/about |
 | [`host_tailscale-com_blog_07031656`](host_tailscale-com_blog_07031656.md) | ✅ 등록 완료 (static HTML httpx_html config; Playwright timeout 우회) | 2026-05-21 | none | probe_timeout | https://tailscale.com/blog/ |
 | [`host_t-me_s_ce7a5d31`](host_t-me_s_ce7a5d31.md) | ✅ 등록 (Telegram public channel list-only) | 2026-05-21 | none | article_body_len, body_empty_acceptable, list_only | https://t.me/s/durov |
+| [`host_support-google-_a_f31fe093`](host_support-google-_a_f31fe093.md) | 🚫 거부 (Google Support 도움말 table/article hub — same-host 반복 링크가 전부 nav 안에만 있어 게시판 아님) | 2026-05-21 | none | posts_nonempty, not_a_board, nav_only_same_host | https://support.google.com/a/table/7539891 |
 | [`host_status-deno-com_root_5aa73944`](host_status-deno-com_root_5aa73944.md) | ✅ 등록 (Statuspage.io Atom history feed 사용) | 2026-05-21 | F | posts_nonempty, rss_feed_available, statuspage_history_atom | https://status.deno.com/ |
 | [`host_stackoverflow-c_questions_71c08aad`](host_stackoverflow-c_questions_71c08aad.md) | ✅ 자동 등록 경로 추가 (StackExchange /questions → official API) | 2026-05-21 | F | fetch_list_403, posts_nonempty, capability_blocked | https://stackoverflow.com/questions |
 | [`host_slashdot-org_root_778af9dd`](host_slashdot-org_root_778af9dd.md) | ✅ 등록 (Slashdot RSS 사용) | 2026-05-21 | none | posts_nonempty, rss_feed_available | https://slashdot.org/ |
@@ -166,7 +167,7 @@
 | F | 68 |
 | F+A | 1 |
 | F+C | 3 |
-| none | 24 |
+| none | 25 |
 
 ### config_strategy 분포
 
@@ -177,11 +178,11 @@
 | httpx_html | 39 |
 | httpx_json | 14 |
 | mixed | 1 |
-| none | 26 |
+| none | 27 |
 | playwright_html | 10 |
 | rejected | 1 |
 
 ### 최근 90일 (≥ 2026-02-20)
 
-케이스 142 건.
+케이스 143 건.
 
