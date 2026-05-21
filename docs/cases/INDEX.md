@@ -2,13 +2,14 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 161 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 162 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
 | [`xenforo_subpath_install_2026-05-21`](xenforo_subpath_install_2026-05-21.md) | ✅ 자동 등록 (XenForo recognizer 서브폴더 설치 install path 보존 — /community/forums/-/index.rss) | 2026-05-21 | F | posts_nonempty | https://xenforo.com/community/ |
 | [`ruliweb-recognizer`](ruliweb-recognizer.md) | ✅ recognizer 승급 (Ruliweb bbs cluster 4건 → engine/recognizers/ruliweb.py) | 2026-05-21 |  |  | https://bbs.ruliweb.com/mobile/board/1004/rss |
 | [`ppomppu-recognizer`](ppomppu-recognizer.md) | ✅ recognizer 승급 (cluster 3건 → engine/recognizers/ppomppu.py) | 2026-05-21 |  | posts_nonempty | https://www.ppomppu.co.kr/zboard/zboard.php?id=ppomppu |
+| [`mediawiki-recognizer`](mediawiki-recognizer.md) | ✅ recognizer 승급 (MediaWiki RecentChanges cluster 8건 → engine/recognizers/mediawiki.py) | 2026-05-21 |  | posts_nonempty | https://en.wikipedia.org/wiki/Special:RecentChanges |
 | [`infra_selector_compile_validate_2026-05-21`](infra_selector_compile_validate_2026-05-21.md) | ✅ E-게이트 — 미escape CSS 선택자(Tailwind `.1.5`)를 validate 시점에 거부 → 런타임 SelectorSyntaxError 크래시(rc=1) 봉합, retry feedback 회수 | 2026-05-21 | E | fetch_list | https://www.etoland.co.kr/ |
 | [`infra_root_marketing_loosen_2026-05-21`](infra_root_marketing_loosen_2026-05-21.md) | ✅ 게이트 완화 — root_marketing 이 same-host self-article 있는 board 를 오거부하던 것 차단 | 2026-05-21 | C | gate_reject_root_marketing | https://community.nodebb.org/ |
 | [`infra_discourse_root_form_2026-05-21`](infra_discourse_root_form_2026-05-21.md) | ✅ 자동 등록 (probe generator-meta 신호 → DiscourseAdapter dispatch — root-form 봉합) | 2026-05-21 | C | posts_nonempty, article_body_len | https://forum.openwrt.org/ |
@@ -174,7 +175,7 @@
 
 | layer | count |
 |---|---|
-| (미기재) | 26 |
+| (미기재) | 27 |
 | C | 13 |
 | C+A | 1 |
 | C+D | 2 |
@@ -193,7 +194,7 @@
 |---|---|
 | (미기재) | 32 |
 | handwritten | 22 |
-| httpx_html | 53 |
+| httpx_html | 54 |
 | httpx_json | 15 |
 | mixed | 1 |
 | none | 27 |
@@ -202,5 +203,5 @@
 
 ### 최근 90일 (≥ 2026-02-20)
 
-케이스 161 건.
+케이스 162 건.
 
