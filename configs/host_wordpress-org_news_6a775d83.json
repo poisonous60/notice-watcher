@@ -1,0 +1,165 @@
+{
+  "version": 1,
+  "site": "wordpress.org/news",
+  "board": "all-posts",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+    "Referer": "https://wordpress.org/news/"
+  },
+  "timeout": 15,
+  "list": {
+    "url_template": "https://wordpress.org/news/all-posts/",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "main .wp-block-post-template > li.wp-block-post",
+    "row_required_selector": "h2.wp-block-post-title a",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": ":self",
+          "attr": "class",
+          "transform": [
+            [
+              "regex_extract",
+              "(?:^|\\s)post-(\\d+)(?:\\s|$)"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "h2.wp-block-post-title a",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "h2.wp-block-post-title a",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://wordpress.org"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": ".wp-block-post-date time",
+          "attr": "datetime",
+          "transform": [
+            [
+              "iso8601",
+              [
+                "%Y-%m-%dT%H:%M:%S%z"
+              ]
+            ]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "css",
+          "selector": ".taxonomy-category a",
+          "pick": "first_matching",
+          "match": ".+",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": ".wp-block-post-excerpt__excerpt",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "cover_image": [
+        {
+          "from": "css",
+          "selector": "figure.wp-block-post-featured-image img",
+          "attr": "src",
+          "transform": [
+            [
+              "urljoin",
+              "https://wordpress.org"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "article .wp-block-post-content",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "main .wp-block-post-content",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "article",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "h1.wp-block-post-title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "time[datetime]",
+          "attr": "datetime",
+          "transform": [
+            [
+              "iso8601",
+              [
+                "%Y-%m-%dT%H:%M:%S%z"
+              ]
+            ]
+          ]
+        }
+      ]
+    }
+  }
+}

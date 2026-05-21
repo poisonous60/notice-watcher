@@ -1000,12 +1000,10 @@ def detect_mastodon_platform(html: str, base_url: str) -> Optional[dict]:
     if not host or "." not in host:
         return None
 
-    low = html.lower()
     marker_hit = any((
         re.search(r'<div[^>]+\bid=["\']mastodon["\']', html, re.I) is not None,
         re.search(r'"meta"\s*:\s*\{[^{}]*"streaming_api"', html, re.I | re.S) is not None,
         re.search(r'<link[^>]+href=["\'][^"\']*/api/v1/streaming\b', html, re.I) is not None,
-        "<noscript" in low and "mastodon" in low,
         re.search(r'<meta[^>]+name=["\']generator["\'][^>]+content=["\'][^"\']*mastodon', html, re.I) is not None,
     ))
     if not marker_hit:

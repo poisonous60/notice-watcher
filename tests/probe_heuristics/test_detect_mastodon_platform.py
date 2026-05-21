@@ -79,6 +79,36 @@ def run() -> list[tuple[str, bool, str]]:
                   and detect_pixelfed_platform(board_html, "https://example.edu/notices") is None,
                   ""))
 
+    mastodon_social_link_htmls = [
+        (
+            "404media_social_link_no_match",
+            "https://www.404media.co/",
+            '<html><head><meta name="generator" content="Ghost 6.40"></head><body>'
+            '<noscript><style>.gh-head-actions{display:none}</style></noscript>'
+            '<a class="social-links__item mastodon" href="https://mastodon.social/@404mediaco" '
+            'title="Mastodon">Mastodon</a></body></html>',
+        ),
+        (
+            "wordpress_social_css_no_match",
+            "https://wordpress.org/news/",
+            '<html><head><meta name="generator" content="WordPress 7.1-alpha">'
+            '<style>.wp-social-link-mastodon{background-color:#3288d4;color:#fff}</style></head>'
+            '<body><noscript><iframe src="https://www.googletagmanager.com/ns.html"></iframe></noscript>'
+            '<a href="https://mastodon.world/@WordPress" class="wp-block-social-link-anchor">Mastodon</a>'
+            '</body></html>',
+        ),
+        (
+            "tailscale_social_link_no_match",
+            "https://tailscale.com/blog/",
+            '<html><head><title>Blog | Tailscale</title></head><body>'
+            '<noscript data-n-css=""></noscript>'
+            '<a href="https://hachyderm.io/@tailscale">Mastodon</a>'
+            '</body></html>',
+        ),
+    ]
+    for name, url, html in mastodon_social_link_htmls:
+        cases.append((name, detect_mastodon_platform(html, url) is None, ""))
+
     cases.append(("social_roots_not_url_recognized",
                   recognize("https://techhub.social/about") is None
                   and recognize("https://misskey.io/") is None

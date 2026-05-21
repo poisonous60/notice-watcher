@@ -350,23 +350,28 @@ def _fallback_grid_projection(sites: list[dict]) -> list[dict]:
     return points
 
 
-def svg_pca_scatter(sites: list[dict], now: datetime) -> str:
+PALETTE = ["#52616b", "#8a6f4d", "#3d737f", "#9b6b6b", "#6f7f52", "#6d647c", "#4f6f8f", "#7b5c8c", "#5f8a72", "#a07a4f", "#506b8a", "#8c5c6d"]
+
+
+def platform_color_map(sites: list[dict]) -> dict:
+    platforms = sorted({str(site["platform"]) for site in sites})
+    return {platform: PALETTE[i % len(PALETTE)] for i, platform in enumerate(platforms)}
+
+
+def svg_pca_scatter(sites: list[dict], now: datetime, color_map: dict) -> str:
     width = 760
-    height = 460
-    pad = 48
-    colors = ["#52616b", "#8a6f4d", "#3d737f", "#9b6b6b", "#6f7f52", "#6d647c", "#4f6f8f", "#7b5c8c"]
+    height = 440
+    pad = 28
 
     if not sites:
         return (
             f'<svg viewBox="0 0 {width} {height}" role="img" aria-label="Watched site projection scatter">'
-            '<rect x="0" y="0" width="760" height="460" class="scatter-bg"></rect>'
-            '<text x="380" y="230" text-anchor="middle" class="svg-label">No watched sites yet</text>'
+            f'<rect x="0" y="0" width="{width}" height="{height}" class="scatter-bg"></rect>'
+            f'<text x="{width / 2:.0f}" y="{height / 2:.0f}" text-anchor="middle" class="svg-label">No watched sites yet</text>'
             "</svg>"
         )
 
     points, pca_ready = _project_sites(sites, now)
-    platforms = sorted({str(point["platform"]) for point in points})
-    color_for = {platform: colors[i % len(colors)] for i, platform in enumerate(platforms)}
     xs = [point["x"] for point in points]
     ys = [point["y"] for point in points]
     min_x, max_x = min(xs), max(xs)
@@ -388,29 +393,16 @@ def svg_pca_scatter(sites: list[dict], now: datetime) -> str:
         title = f"{point['host']} · {point['platform']} · {point.get('last_status') or 'unknown'}"
         circles.append(
             f'<circle cx="{sx(point["x"]):.1f}" cy="{sy(point["y"]):.1f}" r="{radius:.1f}" '
-            f'fill="{color_for[point["platform"]]}" opacity="0.84">'
+            f'fill="{color_map.get(point["platform"], PALETTE[0])}" opacity="0.82">'
             f"<title>{esc(title)}</title></circle>"
         )
 
-    legend = []
-    for i, platform in enumerate(platforms[:10]):
-        y = 24 + i * 22
-        legend.append(
-            f'<rect x="{width - 185}" y="{y - 11}" width="10" height="10" fill="{color_for[platform]}"></rect>'
-            f'<text x="{width - 168}" y="{y - 2}" class="svg-label">{esc(platform)}</text>'
-        )
-
-    note = "" if pca_ready else '<text x="48" y="64" class="svg-label">Fallback layout: not enough varied data for PCA</text>'
+    note = "" if pca_ready else f'<text x="{pad}" y="{pad + 16}" class="svg-label">Fallback layout: not enough varied data for PCA</text>'
     return (
         f'<svg viewBox="0 0 {width} {height}" role="img" aria-label="Watched site projection scatter">'
-        '<rect x="0" y="0" width="760" height="460" class="scatter-bg"></rect>'
-        f'<line x1="{pad}" y1="{height - pad}" x2="{width - pad}" y2="{height - pad}" class="axis"></line>'
-        f'<line x1="{pad}" y1="{pad}" x2="{pad}" y2="{height - pad}" class="axis"></line>'
-        f'<text x="{width / 2:.0f}" y="{height - 10}" text-anchor="middle" class="svg-label">principal component 1 score</text>'
-        f'<text x="16" y="{height / 2:.0f}" transform="rotate(-90 16 {height / 2:.0f})" text-anchor="middle" class="svg-label">principal component 2 score</text>'
+        f'<rect x="0" y="0" width="{width}" height="{height}" class="scatter-bg"></rect>'
         f"{note}"
         + "".join(circles)
-        + "".join(legend)
         + "</svg>"
     )
 
@@ -426,7 +418,14 @@ def render_html(configs: dict, poll: dict, jobs: dict, generated_at: datetime) -
     failed_count = poll["markers"].get("failed", 0)
     rejected_count = poll["markers"].get("rejected", 0)
     bug_count = poll["markers"].get("bug", 0)
-    scatter_chart = svg_pca_scatter(read_sites(poll), generated_at)
+    sites = read_sites(poll)
+    color_map = platform_color_map(sites)
+    scatter_chart = svg_pca_scatter(sites, generated_at, color_map)
+    platform_counts = Counter(str(s["platform"]) for s in sites)
+    legend_html = "".join(
+        f'<li><span class="swatch" style="background:{color}"></span>{esc(platform)}<b>{platform_counts.get(platform, 0)}</b></li>'
+        for platform, color in color_map.items()
+    ) or '<li>No watched sites yet</li>'
 
     recent_rows = []
     for item in jobs["recent"]:
@@ -441,9 +440,13 @@ def render_html(configs: dict, poll: dict, jobs: dict, generated_at: datetime) -
     if not recent_rows:
         recent_rows.append('<tr><td colspan="4">No completed registration jobs on this machine yet.</td></tr>')
 
-    top_hosts = "".join(f"<li><span>{esc(host)}</span><b>{count}</b></li>" for host, count in top_items(configs["hosts"], 10))
+    all_hosts = sorted(configs["hosts"].items(), key=lambda kv: (-kv[1], kv[0]))
+    host_total = len(all_hosts)
+    top_hosts = "".join(
+        f'<li data-host="{esc(host)}"><span>{esc(host)}</span><b>{count}</b></li>' for host, count in all_hosts
+    )
     if not top_hosts:
-        top_hosts = "<li><span>No public host summary yet</span><b>0</b></li>"
+        top_hosts = '<li data-host=""><span>No public host summary yet</span><b>0</b></li>'
 
     job_status = ", ".join(f"{name}: {count}" for name, count in top_items(jobs["status"], 6))
     if not job_status:
@@ -574,13 +577,48 @@ def render_html(configs: dict, poll: dict, jobs: dict, generated_at: datetime) -
     }}
     .svg-value {{ fill: var(--ink); font-weight: 700; }}
     .scatter-bg {{ fill: var(--panel); }}
-    .axis {{ stroke: var(--line); stroke-width: 1; }}
     ol, ul {{ padding-left: 22px; }}
+    .legend {{
+      list-style: none;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 18px;
+      padding: 0;
+      margin: 14px 0 0;
+    }}
+    .legend li {{
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--muted);
+      font-size: 0.86rem;
+    }}
+    .legend b {{ color: var(--ink); }}
+    .swatch {{
+      width: 11px;
+      height: 11px;
+      border-radius: 2px;
+      display: inline-block;
+    }}
+    .host-search {{
+      width: 100%;
+      padding: 10px 12px;
+      margin: 10px 0 0;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      color: var(--ink);
+      font: inherit;
+    }}
+    .host-empty {{ margin-top: 10px; }}
     .host-list {{
       list-style: none;
       padding: 0;
-      margin: 8px 0 0;
+      margin: 10px 0 0;
       border-top: 1px solid var(--line);
+    }}
+    .host-list.scroll {{
+      max-height: 360px;
+      overflow-y: auto;
     }}
     .host-list li {{
       display: flex;
@@ -649,14 +687,29 @@ def render_html(configs: dict, poll: dict, jobs: dict, generated_at: datetime) -
     <h2 id="figures">Figures</h2>
     <figure>
       {scatter_chart}
-      <figcaption>Figure 1. Each point is one watched site, projected from a multi-feature space onto two principal components. Proximity reflects similarity in platform, activity, and age; color encodes platform. Axes carry no intrinsic unit.</figcaption>
+      <ul class="legend">{legend_html}</ul>
+      <figcaption>Figure 1. Each point is one watched site, placed by projecting a multi-feature description (platform, activity, age, health) into two dimensions. Nearby points are similar; color encodes platform. The two directions are a learned projection and carry no intrinsic unit — only relative position matters. Hover a point for its domain.</figcaption>
     </figure>
   </section>
 
   <section aria-labelledby="sources">
     <h2 id="sources">Public Source Domains</h2>
-    <h3>Most Represented Hosts</h3>
-    <ul class="host-list">{top_hosts}</ul>
+    <p class="meta">{host_total} domains tracked. Type to check whether one is already watched.</p>
+    <input id="hostSearch" class="host-search" type="search" placeholder="Search a domain…" autocomplete="off" oninput="filterHosts(this.value)">
+    <p id="hostEmpty" class="meta host-empty" hidden>No matching domain.</p>
+    <ul id="hostList" class="host-list scroll">{top_hosts}</ul>
+    <script>
+      function filterHosts(q) {{
+        q = q.trim().toLowerCase();
+        var shown = 0;
+        document.querySelectorAll('#hostList li').forEach(function (li) {{
+          var match = (li.dataset.host || '').indexOf(q) !== -1;
+          li.hidden = !match;
+          if (match) shown++;
+        }});
+        document.getElementById('hostEmpty').hidden = shown !== 0;
+      }}
+    </script>
   </section>
 
   <section aria-labelledby="activity">

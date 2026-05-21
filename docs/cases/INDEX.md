@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 118 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 119 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -27,6 +27,7 @@
 | [`host_df-nexon-com_community_cae73546`](host_df-nexon-com_community_cae73546.md) | ✅ 수동 config (작동중, baseline 21, httpx_html) | 2026-05-21 | none | posts_nonempty | https://df.nexon.com/community/news/notice/list |
 | [`host_community-cloud_root_e65f04ea`](host_community-cloud_root_e65f04ea.md) | ✅ 수동 config (Playwright /latest 목록, 본문은 challenge-gated라 제목·URL 알림) | 2026-05-21 | none | article_body_len, fetch_list_403, discourse_json_challenge | https://community.cloudflare.com/ |
 | [`host_aussie-zone_root_a8115780`](host_aussie-zone_root_a8115780.md) | rc=5 capability_blocked — Lemmy root HTML anti-bot; dev box API CF-403, 미등록 (rescue 인프라 일반화) | 2026-05-21 | F | capability_blocked, fediverse_api_rescue, lemmy_api_rescue | https://aussie.zone/ |
+| [`host_404media-co_root_9e71a06a`](host_404media-co_root_9e71a06a.md) | Mastodon false-positive detector narrowed; 404media/WordPress/Tailscale social-link pages no longer match fresh detection | 2026-05-21 | C | mastodon_platform_false_positive, social_link_mastodon, stale_probe_artifact | https://www.404media.co/ |
 | [`batch_forums_genfail_boardurl_2026-05-21`](batch_forums_genfail_boardurl_2026-05-21.md) | ✅ 4 사이트 hand-config (포털/board-root → 실제 board URL) + engine encoding 옵션 | 2026-05-21 | F | posts_nonempty, matches_probe_first_article | https://www.humoruniv.com/ |
 | [`batch_forums_antibot_playwright_2026-05-21`](batch_forums_antibot_playwright_2026-05-21.md) | ✅ anti-bot 4 사이트 playwright_html 통과 등록 (Anubis PoW·CF) + simplemachines terminal | 2026-05-21 | F | board_shape_check, gate_reject, capability_blocked | https://www.techpowerup.com/forums/ |
 | [`steam-news-recognizer`](steam-news-recognizer.md) | ✅ recognizer 승급 (cluster 10건 → engine/recognizers/steam_news.py) | 2026-05-20 |  |  | https://store.steampowered.com/feeds/news/app/730/ |
@@ -132,7 +133,7 @@
 | layer | count |
 |---|---|
 | (미기재) | 21 |
-| C | 12 |
+| C | 13 |
 | C+A | 1 |
 | C+D | 2 |
 | C+F | 2 |
@@ -150,7 +151,7 @@
 |---|---|
 | (미기재) | 31 |
 | handwritten | 18 |
-| httpx_html | 20 |
+| httpx_html | 21 |
 | httpx_json | 13 |
 | mixed | 1 |
 | none | 25 |
@@ -159,5 +160,5 @@
 
 ### 최근 90일 (≥ 2026-02-20)
 
-케이스 118 건.
+케이스 119 건.
 
