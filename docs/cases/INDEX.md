@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 203 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 209 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -22,6 +22,7 @@
 | [`host_viz-com_blog_372c6f29`](host_viz-com_blog_372c6f29.md) | 🔧 손 config (작동중, baseline 2, httpx_html) | 2026-05-21 | C+config | article_body_len, headless_429_static_ok | https://www.viz.com/blog |
 | [`host_venturebeat-com_root_b5f7c603`](host_venturebeat-com_root_b5f7c603.md) | ✅ preflight b-hit 회복 + config 등록 (baseline 8건, httpx_html) | 2026-05-21 | F | post_id_unique | https://venturebeat.com/ |
 | [`host_velog-io_teo_0a627fc6`](host_velog-io_teo_0a627fc6.md) | ✅ 수동 config 등록 (Velog RSS, baseline 20건) | 2026-05-21 | F | register_subprocess_timeout, posts_nonempty | https://velog.io/@teo |
+| [`host_tms-e-co-jp_news_0318632c`](host_tms-e-co-jp_news_0318632c.md) | 🧩 수동 config — TMS official RSS feed 로 baseline 10건 등록 | 2026-05-21 | none | posts_nonempty, wrong_first_article, rss_feed_available | https://www.tms-e.co.jp/news/ |
 | [`host_techradar-com_root_8baaf5b7`](host_techradar-com_root_8baaf5b7.md) | ✅ 수동 config 등록 (static WDN list cards, baseline 30건) | 2026-05-21 | F | register_subprocess_timeout, posts_nonempty | https://www.techradar.com/ |
 | [`host_techhub-social_about_fbf89ae2`](host_techhub-social_about_fbf89ae2.md) | social platform detect-reject | 2026-05-21 | C | posts_nonempty, article_body_len | https://techhub.social/about |
 | [`host_tandfonline-com_action_50531308`](host_tandfonline-com_action_50531308.md) | ✅ playwright_html all-journals directory registered | 2026-05-21 | F | posts_nonempty, board_shape_check | https://www.tandfonline.com/action/showPublications |
@@ -57,10 +58,13 @@
 | [`host_medium-com_feed_19419ab9`](host_medium-com_feed_19419ab9.md) | ✅ 등록 완료 (Medium tag RSS — httpx_html XML config + Medium recognizer) | 2026-05-21 | F | posts_nonempty, feed_candidates | https://medium.com/feed/tag/programming |
 | [`host_medium-com_airbnb-engineering_2931b5a3`](host_medium-com_airbnb-engineering_2931b5a3.md) | ✅ 등록 완료 (Medium publication → RSS config + recognizer) | 2026-05-21 | F | posts_nonempty, feed_candidates | https://medium.com/airbnb-engineering |
 | [`host_mdpi-com_journal_df52afcc`](host_mdpi-com_journal_df52afcc.md) | ❌ capability_blocked (N100 production host cloudflare 403) | 2026-05-21 | none | capability_blocked, rss_fallback | https://www.mdpi.com/journal/rss |
+| [`host_madhouse-co-jp_news_841caf98`](host_madhouse-co-jp_news_841caf98.md) | ✅ 수동 config 등록 (playwright_html, baseline 4건) | 2026-05-21 | none | posts_nonempty, json_api_article_body_len, published_at_iso | https://www.madhouse.co.jp/news/ |
 | [`host_maa-org_meetings_8a350379`](host_maa-org_meetings_8a350379.md) | 🚫 거부 (입력 URL은 404, 발견된 feed는 전체 MAA 일반 글 feed라 meetings board와 불일치) | 2026-05-21 | none | target_not_found, posts_nonempty, unrelated_feed | https://www.maa.org/meetings |
 | [`host_link-springer-c_search_461b97e6`](host_link-springer-c_search_461b97e6.md) | ✅ playwright_html journal A-Z directory registered via linked journal-list URL | 2026-05-21 | F | board_shape_check, posts_nonempty | https://link.springer.com/search |
+| [`host_lidenfilms-jp_news_ac5488a7`](host_lidenfilms-jp_news_ac5488a7.md) | ✅ 등록 (WordPress RSS news feed, baseline 10건; 본문은 list-only) | 2026-05-21 | none | post_id_unique, post_id_stable_shape, rss_feed_available, body_empty_acceptable | https://www.lidenfilms.jp/news/ |
 | [`host_lens-org_lens_fbd1435c`](host_lens-org_lens_fbd1435c.md) | ⚪ no_change — Lens URL은 앱/검색 랜딩이며 반복 신규 항목 목록 아님 | 2026-05-21 | none | not_a_board, search_landing, nav_links_only | https://www.lens.org/lens/ |
 | [`host_lemmy-ml_root_9bc876aa`](host_lemmy-ml_root_9bc876aa.md) | ✅ 자동 등록 가능 (Lemmy recognizer + LemmyAdapter 신규 — API v3 직접 호출) | 2026-05-21 | F | posts_nonempty, article_body_len | https://lemmy.ml/ |
+| [`host_kyotoanimation-_information_8114f41d`](host_kyotoanimation-_information_8114f41d.md) | ✅ 수동 config 등록 (httpx_html, baseline 10건) — 날짜+href post_id, list-only 알림 | 2026-05-21 | none | article_body_len, post_id_unique, post_id_stable_shape | https://www.kyotoanimation.co.jp/information/ |
 | [`host_kaggle-com_datasets_30f39835`](host_kaggle-com_datasets_30f39835.md) | ⚪ no_change — Kaggle datasets page renders reCAPTCHA challenge only in headless | 2026-05-21 | none | captcha, capability_blocked, no_board_rows | https://www.kaggle.com/datasets |
 | [`host_jstage-jst-go-j_browse_b0d95528`](host_jstage-jst-go-j_browse_b0d95528.md) | 🔧 손 config 등록 후보 — J-STAGE latest issue rows playwright_html 10건 검증 | 2026-05-21 | none | spa_render_required, issue_rows | https://www.jstage.jst.go.jp/browse/-char/en |
 | [`host_journals-sagepu_action_5a296461`](host_journals-sagepu_action_5a296461.md) | ⚪ no change — Cloudflare managed challenge blocks playwright_html | 2026-05-21 | none | capability_blocked, anti_bot_challenge | https://journals.sagepub.com/action/showPublications |
@@ -71,6 +75,7 @@
 | [`host_hubspot-com_product-updates_33c05b99`](host_hubspot-com_product-updates_33c05b99.md) | 🔧 수동 config — HubSpot Releases and Updates JSON API 로 baseline 30건 등록 | 2026-05-21 | none | posts_nonempty, khoros_resources_api | https://www.hubspot.com/product-updates |
 | [`host_historians-org_annual-meeting_aae80fef`](host_historians-org_annual-meeting_aae80fef.md) | ✅ 해결 (Annual Meeting 관련 article 링크 4건 list-only config) | 2026-05-21 | none | fetch_list_403, article_body_len, cloudflare_protected | https://www.historians.org/annual-meeting |
 | [`host_grafana-com_blog_d681aff2`](host_grafana-com_blog_d681aff2.md) | ✅ 수동 config 등록 (httpx_html, baseline 30건) | 2026-05-21 | F | posts_nonempty | https://grafana.com/blog/ |
+| [`host_gkids-com_news_9f98bf89`](host_gkids-com_news_9f98bf89.md) | 🔧 손 config (httpx_json, baseline 20건) — WordPress REST posts API 사용 | 2026-05-21 | none | article_body_len | https://www.gkids.com/news/ |
 | [`host_france24-com_en_a8047c17`](host_france24-com_en_a8047c17.md) | 🚫 보류 (anti-bot 403 capability_blocked; stealth 우회 구현 안 함) | 2026-05-21 | none | capability_blocked, fetch_list | https://www.france24.com/en/ |
 | [`host_firebase-google_support_1f0ed638`](host_firebase-google_support_1f0ed638.md) | ⏸ deferred — 앵커-glob 단일페이지 (가치 낮음) | 2026-05-21 |  | meta_diverging, posts_nonempty | https://firebase.google.com/support/releases |
 | [`host_fedia-io_root_1f0bc0d6`](host_fedia-io_root_1f0bc0d6.md) | ⛔ capability_blocked — root/combined가 login으로 redirect, mbin API는 현재 401; rc=5 Mbin rescue path 추가 | 2026-05-21 | F | capability_blocked, login_redirect, mbin_api_unauthorized, fediverse_api_rescue | https://fedia.io/ |
@@ -92,6 +97,7 @@
 | [`host_conference-serv_conferences_a5105744`](host_conference-serv_conferences_a5105744.md) | no_change (capability_blocked) | 2026-05-21 |  | capability_blocked, http_403 | https://conference-service.com/conferences/ |
 | [`host_community-cloud_root_e65f04ea`](host_community-cloud_root_e65f04ea.md) | ✅ 수동 config (Playwright /latest 목록, 본문은 challenge-gated라 제목·URL 알림) | 2026-05-21 | none | article_body_len, fetch_list_403, discourse_json_challenge | https://community.cloudflare.com/ |
 | [`host_cochranelibrary_root_7dafdb29`](host_cochranelibrary_root_7dafdb29.md) | ✅ playwright_html featured reviews registered from root | 2026-05-21 | F | posts_nonempty | https://www.cochranelibrary.com/ |
+| [`host_cloverworks-co-_news_b36daf52`](host_cloverworks-co-_news_b36daf52.md) | ✅ 손 config + probe 개선 (작동중, baseline 20, httpx_html) | 2026-05-21 | C+config | posts_nonempty, matches_probe_first_article | https://www.cloverworks.co.jp/news/ |
 | [`host_cloud-google-co_release-notes_68689125`](host_cloud-google-co_release-notes_68689125.md) | ✅ 해결 (Google Cloud release notes 공식 Atom feed recognizer + adapter) | 2026-05-21 | F | probe_timeout, static_docs_changelog, official_feed_available | https://cloud.google.com/release-notes |
 | [`host_circleci-com_changelog_5a868561`](host_circleci-com_changelog_5a868561.md) | 🧩 수동 config — CircleCI changelog RSS feed 로 baseline 30건 등록 | 2026-05-21 | none | posts_nonempty, row_selector_too_narrow, rss_feed_available | https://circleci.com/changelog/ |
 | [`host_canva-com_whats-new_1e430553`](host_canva-com_whats-new_1e430553.md) | ✅ 등록 (Canva public newsroom whats-new articles) | 2026-05-21 | F | capability_blocked, cloudflare, login_redirect, canva_whats_new | https://www.canva.com/whats-new/ |
@@ -223,14 +229,14 @@
 | C+D | 2 |
 | C+F | 2 |
 | C+F+A | 1 |
-| C+config | 1 |
+| C+config | 2 |
 | E | 5 |
 | E+A+C+D | 1 |
 | F | 79 |
 | F+A | 1 |
 | F+C | 3 |
 | adapter | 1 |
-| none | 57 |
+| none | 62 |
 
 ### config_strategy 분포
 
@@ -238,15 +244,15 @@
 |---|---|
 | (미기재) | 43 |
 | handwritten | 26 |
-| httpx_html | 61 |
-| httpx_json | 16 |
+| httpx_html | 65 |
+| httpx_json | 17 |
 | httpx_json (미적용 — 콘텐츠 0) | 1 |
 | mixed | 1 |
 | none | 33 |
-| playwright_html | 21 |
+| playwright_html | 22 |
 | rejected | 1 |
 
 ### 최근 90일 (≥ 2026-02-20)
 
-케이스 203 건.
+케이스 209 건.
 
