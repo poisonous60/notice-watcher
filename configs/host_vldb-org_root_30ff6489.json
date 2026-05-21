@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "site": "vldb.org",
+  "board": "latest-news",
+  "strategy": "httpx_html",
+  "_source_url": "https://vldb.org/",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+    "Referer": "https://vldb.org/"
+  },
+  "timeout": 15,
+  "list": {
+    "url_template": "https://vldb.org/news.html",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "div.content li:has(a[href])",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a[href]",
+          "attr": "href",
+          "transform": [
+            ["regex_extract", "newslist/([^./]+)\\.html"]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": ":self",
+          "text": true,
+          "transform": [
+            ["collapse_ws"]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a[href]",
+          "attr": "href",
+          "transform": [
+            ["urljoin", "https://vldb.org/news.html"]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "div.content",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "body",
+        "html": true
+      }
+    ],
+    "body_empty_acceptable": true
+  },
+  "_note": "The VLDB root page is an organization landing page; its stable notice-like list is linked as Latest News at /news.html. This config follows that static list instead of scraping root navigation menus."
+}
