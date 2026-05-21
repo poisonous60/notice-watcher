@@ -1,0 +1,126 @@
+{
+  "version": 1,
+  "site": "platform.openai.com",
+  "board": "docs/changelog",
+  "strategy": "httpx_html",
+  "headers": {
+    "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+    "accept-language": "ko-KR",
+    "upgrade-insecure-requests": "1",
+    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "sec-ch-ua": "\"HeadlessChrome\";v=\"147\", \"Not.A/Brand\";v=\"8\", \"Chromium\";v=\"147\"",
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": "\"Windows\""
+  },
+  "timeout": 20.0,
+  "polite_sleep": {
+    "min": 5.0,
+    "max": 8.0
+  },
+  "list": {
+    "url_template": "https://platform.openai.com/docs/changelog",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "main div.mb-12 div.mt-5",
+    "row_required_selector": "div[class*=\"MarkdownContent\"] p",
+    "fields": {
+      "post_id": [
+        {
+          "from": "concat",
+          "parts": [
+            {
+              "from": "css",
+              "selector": "div[data-variant=\"outline\"]",
+              "text": true
+            },
+            {
+              "const": "-"
+            },
+            {
+              "from": "css",
+              "selector": "div[class*=\"MarkdownContent\"] p",
+              "text": true
+            }
+          ],
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "lower"
+            ],
+            [
+              "replace",
+              " ",
+              "-"
+            ],
+            [
+              "replace",
+              "·",
+              "-"
+            ],
+            [
+              "regex_extract",
+              "^([\\w./:%-]{1,180})"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "div[class*=\"MarkdownContent\"] p",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a[href]",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://platform.openai.com/docs/changelog"
+            ]
+          ]
+        },
+        {
+          "from": "const",
+          "value": "https://platform.openai.com/docs/changelog"
+        }
+      ],
+      "category": [
+        {
+          "from": "css",
+          "selector": "div[data-color=\"success\"] span, div[data-color=\"success\"]",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "div[class*=\"MarkdownContent\"]",
+          "html": true
+        }
+      ]
+    }
+  },
+  "article": {
+    "content": [],
+    "body_empty_acceptable": true
+  },
+  "_source_url": "https://platform.openai.com/docs/changelog",
+  "_note": "Hand config: changelog entries are rendered in static HTML after captured docs headers; no per-entry article page, so alerts use title/url/summary."
+}
