@@ -150,11 +150,15 @@ def write_prompt(kind: str, tag: str, body: str) -> Path:
 
 
 def launch(prompt_path: Path, title: str,
-           profile: str = "", reasoning: str = "") -> Path:
+           profile: str = "", reasoning: str = "",
+           worktree: bool = False, worktree_tag: str = "") -> Path:
     """codex_run.ps1 로 보이는 창에서 실행. 결과 파일 경로 반환.
 
     profile/reasoning = 속도 노브 (codex_run.ps1 로 전달). profile='light' = gpt-5.4-mini
     + low reasoning (기계적 청크 권장). reasoning='low'|'minimal' = default 모델 사고만 축소.
+    worktree=True → codex 가 HEAD 에서 분리된 git worktree+branch(codex-wt/<tag>) 에서 실행 →
+    edit 격리(병렬 codex/다중 세션 same-tree race 0). rc=0 시 변경이 그 branch 에 커밋됨 →
+    Claude 가 `git diff main..codex-wt/<tag>` review + `git merge` 후 `git worktree remove`.
     """
     result = prompt_path.with_suffix(".result.md")
     ps1 = ROOT / "scripts" / "codex_run.ps1"
@@ -164,6 +168,10 @@ def launch(prompt_path: Path, title: str,
         cmd += ["-CodexProfile", profile]
     if reasoning:
         cmd += ["-Reasoning", reasoning]
+    if worktree:
+        cmd += ["-Worktree"]
+        if worktree_tag:
+            cmd += ["-WorktreeTag", worktree_tag]
     subprocess.run(cmd, check=True)
     return result
 
@@ -192,6 +200,11 @@ def main(argv: list[str] | None = None) -> int:
                        help="codex 속도 노브: 'light' = gpt-5.4-mini+low (기계적 청크 권장)")
         p.add_argument("--reasoning", default="",
                        help="codex reasoning_effort: low|minimal (default 모델 사고 축소)")
+        p.add_argument("--worktree", action="store_true",
+                       help="격리 git worktree+branch(codex-wt/<tag>) 에서 실행 — 병렬/다중세션 same-tree race 0. "
+                            "rc=0 시 변경이 branch 에 커밋 → Claude 가 review+merge")
+        p.add_argument("--worktree-tag", default="",
+                       help="worktree branch/dir 태그 (기본: title)")
 
     args = ap.parse_args(argv)
 
@@ -208,7 +221,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if getattr(args, "launch", False):
         result = launch(path, title, profile=getattr(args, "profile", ""),
-                        reasoning=getattr(args, "reasoning", ""))
+                        reasoning=getattr(args, "reasoning", ""),
+                        worktree=getattr(args, "worktree", False),
+                        worktree_tag=getattr(args, "worktree_tag", "") or tag)
         print(f"[codex_handoff] launched. result file: {result}")
         print(f"  완료 감지: python scripts/codex_watch.py {result} --loop")
     else:
