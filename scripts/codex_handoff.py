@@ -149,15 +149,22 @@ def write_prompt(kind: str, tag: str, body: str) -> Path:
     return path
 
 
-def launch(prompt_path: Path, title: str) -> Path:
-    """codex_run.ps1 로 보이는 창에서 실행. 결과 파일 경로 반환."""
+def launch(prompt_path: Path, title: str,
+           profile: str = "", reasoning: str = "") -> Path:
+    """codex_run.ps1 로 보이는 창에서 실행. 결과 파일 경로 반환.
+
+    profile/reasoning = 속도 노브 (codex_run.ps1 로 전달). profile='light' = gpt-5.4-mini
+    + low reasoning (기계적 청크 권장). reasoning='low'|'minimal' = default 모델 사고만 축소.
+    """
     result = prompt_path.with_suffix(".result.md")
     ps1 = ROOT / "scripts" / "codex_run.ps1"
-    subprocess.run(
-        ["powershell", "-NoProfile", "-File", str(ps1),
-         "-PromptFile", str(prompt_path), "-ResultFile", str(result), "-Title", title],
-        check=True,
-    )
+    cmd = ["powershell", "-NoProfile", "-File", str(ps1),
+           "-PromptFile", str(prompt_path), "-ResultFile", str(result), "-Title", title]
+    if profile:
+        cmd += ["-CodexProfile", profile]
+    if reasoning:
+        cmd += ["-Reasoning", reasoning]
+    subprocess.run(cmd, check=True)
     return result
 
 
@@ -181,6 +188,10 @@ def main(argv: list[str] | None = None) -> int:
 
     for p in (p_hc, p_bf, p_ge):
         p.add_argument("--launch", action="store_true", help="codex_run.ps1 로 보이는 창에서 즉시 실행")
+        p.add_argument("--profile", default="",
+                       help="codex 속도 노브: 'light' = gpt-5.4-mini+low (기계적 청크 권장)")
+        p.add_argument("--reasoning", default="",
+                       help="codex reasoning_effort: low|minimal (default 모델 사고 축소)")
 
     args = ap.parse_args(argv)
 
@@ -196,7 +207,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"[codex_handoff] prompt written: {path}")
 
     if getattr(args, "launch", False):
-        result = launch(path, title)
+        result = launch(path, title, profile=getattr(args, "profile", ""),
+                        reasoning=getattr(args, "reasoning", ""))
         print(f"[codex_handoff] launched. result file: {result}")
         print(f"  완료 감지: python scripts/codex_watch.py {result} --loop")
     else:

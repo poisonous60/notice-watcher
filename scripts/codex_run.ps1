@@ -34,11 +34,20 @@
 param(
     [Parameter(Mandatory = $true)][string]$PromptFile,
     [string]$ResultFile,
-    [string]$Title = "codex"
+    [string]$Title = "codex",
+    # 속도 노브: -Profile light (= gpt-5.4-mini + low reasoning, config 의 [profiles.light]) 또는
+    # -Reasoning low|minimal (default 모델로 사고만 줄임). 기계적 청크(recognizer 템플릿 복제)에 권장.
+    [string]$CodexProfile = "",
+    [string]$Reasoning = ""
 )
 
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
+
+# codex exec 추가 인자 — 속도 노브. default 무지정(config 의 model=gpt-5.5 medium).
+$codexArgs = ""
+if ($CodexProfile) { $codexArgs += " --profile $CodexProfile" }
+if ($Reasoning)    { $codexArgs += " -c model_reasoning_effort=$Reasoning" }
 
 if (-not (Test-Path $PromptFile)) {
     throw "PromptFile not found: $PromptFile"
@@ -58,7 +67,7 @@ Write-Host 'prompt: $promptAbs' -ForegroundColor DarkGray
 Write-Host 'result: $ResultFile' -ForegroundColor DarkGray
 Write-Host '(이 창이 진행 view — 안 자라면 멈춘 것. Claude 는 result 파일로 완료 감지.)' -ForegroundColor DarkGray
 Write-Host ''
-Get-Content -Raw -Encoding UTF8 '$promptAbs' | codex exec --dangerously-bypass-approvals-and-sandbox -o '$ResultFile' -
+Get-Content -Raw -Encoding UTF8 '$promptAbs' | codex exec$codexArgs --dangerously-bypass-approvals-and-sandbox -o '$ResultFile' -
 `$rc = `$LASTEXITCODE
 Write-Host ''
 if (`$rc -eq 0) {
