@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "site": "developer.salesforce.com",
+  "board": "docs",
+  "strategy": "handwritten",
+  "adapter": "SalesforceDocsReleaseNotesAdapter",
+  "kwargs": {
+    "board": "docs",
+    "root_sitemap": "https://developer.salesforce.com/docs/ssg-sitemap.xml",
+    "timeout": 20.0
+  },
+  "_source_url": "https://developer.salesforce.com/docs/platform/release-notes/",
+  "_note": "Salesforce developer docs release-note pages are discoverable through the official docs SSG sitemap, while the user-supplied /docs/platform/release-notes/ path currently returns a Salesforce 404 and normal httpx/Playwright probe is bot-gated. The handwritten adapter uses curl_cffi Chrome impersonation for the official sitemap and individual docs pages, keeping conservative 5-8s sleeps."
+}
