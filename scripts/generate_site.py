@@ -13,6 +13,7 @@ import sys
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
+from typing import NamedTuple
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
@@ -285,7 +286,39 @@ def _power_iteration(matrix: list[list[float]], start_index: int) -> tuple[list[
     return vector, eigenvalue
 
 
-def _project_sites(sites: list[dict], now: datetime) -> tuple[list[dict], bool]:
+CONT_FEATURE_NAMES = ["activity", "age", "instability", "baseline", "empty body"]
+
+
+class SiteProjection(NamedTuple):
+    points: list[dict]
+    pca_ready: bool
+    v1: list[float]
+    v2: list[float]
+    lambda1: float
+    lambda2: float
+    total_variance: float
+    platforms: list[str]
+    n_platforms: int
+    cont_feature_names: list[str]
+
+
+def _fallback_site_projection(sites: list[dict], platforms: list[str] | None = None) -> SiteProjection:
+    platforms = platforms or sorted({str(site["platform"]) for site in sites})
+    return SiteProjection(
+        points=_fallback_grid_projection(sites),
+        pca_ready=False,
+        v1=[],
+        v2=[],
+        lambda1=0.0,
+        lambda2=0.0,
+        total_variance=0.0,
+        platforms=platforms,
+        n_platforms=len(platforms),
+        cont_feature_names=CONT_FEATURE_NAMES,
+    )
+
+
+def _project_sites(sites: list[dict], now: datetime) -> SiteProjection:
     platforms = sorted({str(site["platform"]) for site in sites})
     features = []
     for site in sites:
@@ -302,7 +335,7 @@ def _project_sites(sites: list[dict], now: datetime) -> tuple[list[dict], bool]:
         features.append(row)
 
     if len(features) < 3 or len(features[0]) < 2:
-        return _fallback_grid_projection(sites), False
+        return _fallback_site_projection(sites, platforms)
 
     columns = list(zip(*features))
     means = [sum(col) / len(col) for col in columns]
@@ -316,7 +349,7 @@ def _project_sites(sites: list[dict], now: datetime) -> tuple[list[dict], bool]:
         x.append([(value - means[i]) / stds[i] if stds[i] else 0.0 for i, value in enumerate(row)])
 
     if not any(any(value for value in row) for row in x):
-        return _fallback_grid_projection(sites), False
+        return _fallback_site_projection(sites, platforms)
 
     n_features = len(x[0])
     covariance = []
@@ -325,19 +358,31 @@ def _project_sites(sites: list[dict], now: datetime) -> tuple[list[dict], bool]:
         for j in range(n_features):
             cov_row.append(sum(row[i] * row[j] for row in x) / (len(x) - 1))
         covariance.append(cov_row)
+    total_variance = sum(covariance[i][i] for i in range(n_features))
 
     v1, lambda1 = _power_iteration(covariance, 0)
     if not any(v1):
-        return _fallback_grid_projection(sites), False
+        return _fallback_site_projection(sites, platforms)
     deflated = []
     for i in range(n_features):
         deflated.append([covariance[i][j] - lambda1 * v1[i] * v1[j] for j in range(n_features)])
-    v2, _ = _power_iteration(deflated, 1 if n_features > 1 else 0)
+    v2, lambda2 = _power_iteration(deflated, 1 if n_features > 1 else 0)
 
     points = []
     for site, row in zip(sites, x):
         points.append({**site, "x": sum(row[i] * v1[i] for i in range(n_features)), "y": sum(row[i] * v2[i] for i in range(n_features))})
-    return points, any(v2)
+    return SiteProjection(
+        points=points,
+        pca_ready=any(v2),
+        v1=v1,
+        v2=v2,
+        lambda1=lambda1,
+        lambda2=lambda2,
+        total_variance=total_variance,
+        platforms=platforms,
+        n_platforms=len(platforms),
+        cont_feature_names=CONT_FEATURE_NAMES,
+    )
 
 
 def _fallback_grid_projection(sites: list[dict]) -> list[dict]:
@@ -360,18 +405,22 @@ def platform_color_map(sites: list[dict]) -> dict:
 
 def svg_pca_scatter(sites: list[dict], now: datetime, color_map: dict) -> str:
     width = 760
-    height = 440
-    pad = 28
+    height = 460
+    pad = 44
+    plot_w = width - 2 * pad
+    plot_h = height - 2 * pad
 
     if not sites:
         return (
             f'<svg viewBox="0 0 {width} {height}" role="img" aria-label="Watched site projection scatter">'
             f'<rect x="0" y="0" width="{width}" height="{height}" class="scatter-bg"></rect>'
+            f'<rect x="{pad}" y="{pad}" width="{plot_w}" height="{plot_h}" class="scatter-frame"></rect>'
             f'<text x="{width / 2:.0f}" y="{height / 2:.0f}" text-anchor="middle" class="svg-label">No watched sites yet</text>'
             "</svg>"
         )
 
-    points, pca_ready = _project_sites(sites, now)
+    projection = _project_sites(sites, now)
+    points = projection.points
     xs = [point["x"] for point in points]
     ys = [point["y"] for point in points]
     min_x, max_x = min(xs), max(xs)
@@ -381,28 +430,91 @@ def svg_pca_scatter(sites: list[dict], now: datetime, color_map: dict) -> str:
     max_posts = max([len(point.get("seen_post_ids") or []) for point in points], default=0)
 
     def sx(value: float) -> float:
-        return pad + (value - min_x) * (width - 2 * pad) / span_x
+        return pad + (value - min_x) * plot_w / span_x
 
     def sy(value: float) -> float:
-        return height - pad - (value - min_y) * (height - 2 * pad) / span_y
+        return height - pad - (value - min_y) * plot_h / span_y
 
     circles = []
+    centroids = {}
     for point in points:
         posts = len(point.get("seen_post_ids") or [])
         radius = 4 + (8 * posts / max_posts if max_posts else 0)
         title = f"{point['host']} · {point['platform']} · {point.get('last_status') or 'unknown'}"
+        px = sx(point["x"])
+        py = sy(point["y"])
+        platform = str(point["platform"])
+        bucket = centroids.setdefault(platform, [0.0, 0.0, 0])
+        bucket[0] += px
+        bucket[1] += py
+        bucket[2] += 1
         circles.append(
-            f'<circle cx="{sx(point["x"]):.1f}" cy="{sy(point["y"]):.1f}" r="{radius:.1f}" '
+            f'<circle cx="{px:.1f}" cy="{py:.1f}" r="{radius:.1f}" '
             f'fill="{color_map.get(point["platform"], PALETTE[0])}" opacity="0.82">'
             f"<title>{esc(title)}</title></circle>"
         )
 
-    note = "" if pca_ready else f'<text x="{pad}" y="{pad + 16}" class="svg-label">Fallback layout: not enough varied data for PCA</text>'
+    center_x = pad + plot_w / 2
+    center_y = pad + plot_h / 2
+    loading_arrows = []
+    if projection.pca_ready:
+        arrow_scale = min(plot_w, plot_h) * 0.35
+        for k, name in enumerate(projection.cont_feature_names):
+            i = projection.n_platforms + k
+            if i >= len(projection.v1) or i >= len(projection.v2):
+                continue
+            dx = projection.v1[i]
+            dy = projection.v2[i]
+            length = math.sqrt(dx * dx + dy * dy)
+            if length == 0:
+                end_x = center_x
+                end_y = center_y
+                angle = (k / max(len(projection.cont_feature_names), 1)) * math.tau
+            else:
+                end_x = center_x + dx / length * arrow_scale
+                end_y = center_y - dy / length * arrow_scale
+                angle = math.atan2(end_y - center_y, end_x - center_x)
+            head = 7
+            spread = 0.45
+            p1 = (end_x, end_y)
+            p2 = (end_x - head * math.cos(angle - spread), end_y - head * math.sin(angle - spread))
+            p3 = (end_x - head * math.cos(angle + spread), end_y - head * math.sin(angle + spread))
+            label_x = end_x + 9 * math.cos(angle)
+            label_y = end_y + 9 * math.sin(angle)
+            anchor = "start" if math.cos(angle) >= 0 else "end"
+            loading_arrows.append(
+                f'<line x1="{center_x:.1f}" y1="{center_y:.1f}" x2="{end_x:.1f}" y2="{end_y:.1f}" class="loading-arrow"></line>'
+                f'<polygon points="{p1[0]:.1f},{p1[1]:.1f} {p2[0]:.1f},{p2[1]:.1f} {p3[0]:.1f},{p3[1]:.1f}" class="loading-head"></polygon>'
+                f'<text x="{label_x:.1f}" y="{label_y:.1f}" text-anchor="{anchor}" class="svg-label loading-label">{esc(name)}</text>'
+            )
+
+    cluster_labels = []
+    for platform, (total_x, total_y, count) in centroids.items():
+        if count <= 0:
+            continue
+        cluster_labels.append(
+            f'<text x="{total_x / count:.1f}" y="{(total_y / count) - 10:.1f}" text-anchor="middle" '
+            f'class="cluster-label" fill="{color_map.get(platform, PALETTE[0])}">{esc(platform)}</text>'
+        )
+
+    variance_note = ""
+    if projection.pca_ready and projection.total_variance > 0:
+        pc1 = round(100 * projection.lambda1 / projection.total_variance)
+        pc2 = round(100 * projection.lambda2 / projection.total_variance)
+        variance_note = (
+            f'<text x="{pad}" y="{height - 22}" class="svg-label">PC1 = {pc1}% of variation</text>'
+            f'<text x="{width - pad}" y="{height - 22}" text-anchor="end" class="svg-label">PC2 = {pc2}% of variation</text>'
+        )
+    note = "" if projection.pca_ready else f'<text x="{pad}" y="{pad - 14}" class="svg-label">Fallback layout: not enough varied data for PCA</text>'
     return (
         f'<svg viewBox="0 0 {width} {height}" role="img" aria-label="Watched site projection scatter">'
         f'<rect x="0" y="0" width="{width}" height="{height}" class="scatter-bg"></rect>'
+        f'<rect x="{pad}" y="{pad}" width="{plot_w}" height="{plot_h}" class="scatter-frame"></rect>'
         f"{note}"
+        + "".join(loading_arrows)
         + "".join(circles)
+        + "".join(cluster_labels)
+        + variance_note
         + "</svg>"
     )
 
@@ -577,6 +689,11 @@ def render_html(configs: dict, poll: dict, jobs: dict, generated_at: datetime) -
     }}
     .svg-value {{ fill: var(--ink); font-weight: 700; }}
     .scatter-bg {{ fill: var(--panel); }}
+    .scatter-frame {{ fill: none; stroke: var(--muted); stroke-width: 1; }}
+    .loading-arrow {{ stroke: var(--ink); stroke-width: 1; opacity: 0.7; }}
+    .loading-head {{ fill: var(--ink); opacity: 0.7; }}
+    .loading-label {{ fill: var(--ink); opacity: 0.72; }}
+    .cluster-label {{ font: 600 12px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
     ol, ul {{ padding-left: 22px; }}
     .legend {{
       list-style: none;
@@ -627,6 +744,7 @@ def render_html(configs: dict, poll: dict, jobs: dict, generated_at: datetime) -
       border-bottom: 1px solid var(--line);
       padding: 9px 0;
     }}
+    .host-list li[hidden] {{ display: none; }}
     .host-list span {{
       overflow-wrap: anywhere;
     }}
@@ -688,7 +806,7 @@ def render_html(configs: dict, poll: dict, jobs: dict, generated_at: datetime) -
     <figure>
       {scatter_chart}
       <ul class="legend">{legend_html}</ul>
-      <figcaption>Figure 1. Each point is one watched site, placed by projecting a multi-feature description (platform, activity, age, health) into two dimensions. Nearby points are similar; color encodes platform. The two directions are a learned projection and carry no intrinsic unit — only relative position matters. Hover a point for its domain.</figcaption>
+      <figcaption>Figure 1. Biplot of watched sites. Each point is one site, positioned so that nearby sites are similar across platform, activity, age, and health; color encodes platform and clusters are labeled. Arrows show how the underlying features align with the two principal directions (a point further along an arrow scores higher on that feature). PC1/PC2 capture the listed share of total variation. Hover a point for its domain.</figcaption>
     </figure>
   </section>
 
