@@ -450,22 +450,27 @@ def svg_pca_scatter(sites: list[dict], now: datetime, color_map: dict) -> str:
     center_y = pad + plot_h / 2
     loading_arrows = []
     if projection.pca_ready:
-        arrow_scale = min(plot_w, plot_h) * 0.35
+        arrow_scale = min(plot_w, plot_h) * 0.42
+        specs = []
         for k, name in enumerate(projection.cont_feature_names):
             i = projection.n_platforms + k
             if i >= len(projection.v1) or i >= len(projection.v2):
                 continue
             dx = projection.v1[i]
             dy = projection.v2[i]
-            length = math.sqrt(dx * dx + dy * dy)
-            if length == 0:
-                end_x = center_x
-                end_y = center_y
-                angle = (k / max(len(projection.cont_feature_names), 1)) * math.tau
-            else:
-                end_x = center_x + dx / length * arrow_scale
-                end_y = center_y - dy / length * arrow_scale
-                angle = math.atan2(end_y - center_y, end_x - center_x)
+            specs.append((name, dx, dy, math.sqrt(dx * dx + dy * dy)))
+        max_mag = max((mag for _, _, _, mag in specs), default=0.0)
+        placed: list[tuple[float, float]] = []
+        for name, dx, dy, mag in specs:
+            if mag == 0 or max_mag == 0:
+                continue
+            # arrow length scales with loading magnitude (proper biplot) so
+            # near-parallel (correlated) features separate by length, not overlap.
+            length = arrow_scale * (0.45 + 0.55 * mag / max_mag)
+            ux, uy = dx / mag, dy / mag
+            end_x = center_x + ux * length
+            end_y = center_y - uy * length
+            angle = math.atan2(end_y - center_y, end_x - center_x)
             head = 7
             spread = 0.45
             p1 = (end_x, end_y)
@@ -473,6 +478,12 @@ def svg_pca_scatter(sites: list[dict], now: datetime, color_map: dict) -> str:
             p3 = (end_x - head * math.cos(angle + spread), end_y - head * math.sin(angle + spread))
             label_x = end_x + 9 * math.cos(angle)
             label_y = end_y + 9 * math.sin(angle)
+            # nudge label down while it collides with an already-placed label
+            for _ in range(8):
+                if not any(abs(label_x - lx) < 66 and abs(label_y - ly) < 14 for lx, ly in placed):
+                    break
+                label_y += 15
+            placed.append((label_x, label_y))
             anchor = "start" if math.cos(angle) >= 0 else "end"
             loading_arrows.append(
                 f'<line x1="{center_x:.1f}" y1="{center_y:.1f}" x2="{end_x:.1f}" y2="{end_y:.1f}" class="loading-arrow"></line>'
