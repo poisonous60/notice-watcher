@@ -163,6 +163,9 @@ def cmd_log(args: argparse.Namespace) -> int:
     url, requester = _lookup_url_and_requester(args.slug)
     if args.requested_by:  # CLI override
         requester = args.requested_by
+    # case .md 는 관례상 docs/cases/<slug>.md → 미지정 시 slug 로 기본 (dashboard /cases md 링크가
+    # case_md_slug 컬럼으로 .md 를 찾음 — null 이면 md 안 보임). 다른 .md 명이면 --case-md-slug 명시.
+    case_md_slug = args.case_md_slug or args.slug
 
     conn = _ensure_db()
     try:
@@ -176,7 +179,7 @@ def cmd_log(args: argparse.Namespace) -> int:
                 json.dumps(failure_keys, ensure_ascii=False) if failure_keys else None,
                 args.fix_layer,
                 json.dumps(files_changed, ensure_ascii=False) if files_changed is not None else None,
-                args.case_md_slug,
+                case_md_slug,
                 args.reason,
                 requester,
                 commit_sha,

@@ -47,7 +47,10 @@ def _row_to_view(row) -> dict[str, Any]:
     d["outcome_label"] = OUTCOME_LABELS.get(d.get("outcome") or "", d.get("outcome") or "")
     reason = d.get("reason") or ""
     d["reason_short"] = (reason[:120] + "…") if len(reason) > 120 else reason
-    md_slug = d.get("case_md_slug")
+    # case .md 는 관례상 docs/cases/<slug>.md → case_md_slug 미기록(null) row 는 slug 로 폴백.
+    # (구 case_log 가 case_md_slug 안 채운 row — .md 는 디스크에 있는데 md 링크가 안 뜨던 버그.)
+    md_slug = d.get("case_md_slug") or d.get("slug")
+    d["case_md_slug"] = md_slug
     d["case_md_exists"] = bool(md_slug and state.cases_md_path(md_slug) is not None)
     return d
 
