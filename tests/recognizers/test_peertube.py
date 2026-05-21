@@ -32,6 +32,18 @@ def run() -> list[tuple[str, bool, str]]:
                   cfg_api is not None and cfg_api.get("_recognized_platform") == "peertube"
                   and cfg_api.get("kwargs") == {"base_url": "https://diode.zone"},
                   f"got {cfg_api!r}"))
+    cfg_sort = recognize("https://diode.zone/api/v1/videos?sort=-createdAt&count=20&utm_source=x")
+    cases.append(("api_sort_preserved",
+                  cfg_sort is not None
+                  and cfg_sort.get("kwargs") == {"base_url": "https://diode.zone", "sort": "-createdAt"}
+                  and cfg_sort.get("_slug_board") == "diode.zone_sort_-createdAt",
+                  f"got {cfg_sort!r}"))
+    cfg_track = recognize("https://diode.zone/api/v1/videos?utm_source=x&fbclid=y")
+    cases.append(("tracking_params_dropped",
+                  cfg_track is not None
+                  and cfg_track.get("kwargs") == {"base_url": "https://diode.zone"}
+                  and cfg_track.get("_slug_board") == "diode.zone",
+                  f"got {cfg_track!r}"))
 
     cases.append(("root_not_recognized",
                   recognize("https://diode.zone/") is None,

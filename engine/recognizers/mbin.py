@@ -75,5 +75,4 @@ def _build(m: "re.Match", url: str) -> Optional[dict]:
 
 PATTERNS = [
     (re.compile(r"^https?://[^/?#]+/api/entries(?:\?|$)", re.I), _build),
-    (re.compile(r"^https?://[^/?#]+/m/[^/?#]+(?:[/?#].*)?$", re.I), _build),
 ]

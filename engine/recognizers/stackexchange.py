@@ -22,9 +22,9 @@ from __future__ import annotations
 
 import re
 from typing import Optional
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
-from ._common import UA
+from ._common import UA, qs
 
 NAME = "stackexchange"
 
@@ -37,6 +37,15 @@ _ALLOWED_EXACT_HOSTS = frozenset({
 })
 
 _QUESTIONS_RE = re.compile(r"^https?://([^/?#]+)/questions/?(?:[?#].*)?$", re.I)
+_DEFAULT_SORT = "creation"
+_TAB_SORTS = {
+    "newest": "creation",
+    "active": "activity",
+    "votes": "votes",
+    "hot": "hot",
+    "week": "week",
+    "month": "month",
+}
 
 _NOTE = (
     "StackExchange questions board — known-platform 자동 인식. HTML `/questions` 는 "
@@ -56,15 +65,25 @@ def _api_site(host: str) -> str:
     return host.removesuffix(".com").removesuffix(".net")
 
 
+def _sort_for(url: str) -> str:
+    q = qs(url)
+    sort = (q.get("sort") or "").strip().lower()
+    if sort:
+        return sort
+    tab = (q.get("tab") or "").strip().lower()
+    return _TAB_SORTS.get(tab, _DEFAULT_SORT)
+
+
 def _build(m: "re.Match", url: str) -> Optional[dict]:
     parts = urlsplit(url)
     host = (parts.netloc or m.group(1) or "").strip().lower().removeprefix("www.")
     if not _allowed_host(host):
         return None
+    sort = _sort_for(url)
     api_site = _api_site(host)
     list_url = (
         "https://api.stackexchange.com/2.3/questions"
-        f"?order=desc&sort=creation&site={api_site}&pagesize=30&filter=withbody"
+        f"?order=desc&sort={sort}&site={api_site}&pagesize=30&filter=withbody"
     )
     article_url = (
         "https://api.stackexchange.com/2.3/questions/{post_id}"
@@ -122,7 +141,11 @@ def _build(m: "re.Match", url: str) -> Optional[dict]:
             "content": [{"from": "json", "path": ["body"]}],
             "re_extract": True,
         },
-        "_slug_board": f"{host}_questions",
+        "_slug_board": (
+            f"{host}_questions"
+            if sort == _DEFAULT_SORT
+            else f"{host}_questions_sort_{quote(sort, safe='')}"
+        ),
         "_source_url": list_url,
         "_note": _NOTE,
     }

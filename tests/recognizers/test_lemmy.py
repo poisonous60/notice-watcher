@@ -37,6 +37,25 @@ def run() -> list[tuple[str, bool, str]]:
                   cfg_api is not None and cfg_api.get("_recognized_platform") == "lemmy"
                   and cfg_api.get("kwargs") == {"base_url": "https://lemmy.ml"},
                   f"got {cfg_api!r}"))
+    cfg_sort = recognize("https://lemmy.ml/api/v3/post/list?sort=Active&limit=20&type_=All&utm_source=x")
+    cases.append(("api_sort_type_preserved",
+                  cfg_sort is not None
+                  and cfg_sort.get("kwargs") == {"base_url": "https://lemmy.ml", "sort": "Active", "type_": "All"}
+                  and cfg_sort.get("_slug_board") == "lemmy.ml_sort_Active_type_All",
+                  f"got {cfg_sort!r}"))
+    cfg_community = recognize("https://lemmy.ml/api/v3/post/list?community_name=technology&sort=Hot&type_=Local")
+    cases.append(("api_community_query_preserved",
+                  cfg_community is not None
+                  and cfg_community.get("kwargs", {}).get("community_name") == "technology"
+                  and cfg_community.get("kwargs", {}).get("sort") == "Hot"
+                  and cfg_community.get("_slug_board") == "lemmy.ml_c_technology_sort_Hot",
+                  f"got {cfg_community!r}"))
+    cfg_track = recognize("https://lemmy.ml/api/v3/post/list?utm_source=x&fbclid=y")
+    cases.append(("tracking_params_dropped",
+                  cfg_track is not None
+                  and cfg_track.get("kwargs") == {"base_url": "https://lemmy.ml"}
+                  and cfg_track.get("_slug_board") == "lemmy.ml",
+                  f"got {cfg_track!r}"))
 
     cases.append(("root_not_recognized",
                   recognize("https://lemmy.ml/") is None,

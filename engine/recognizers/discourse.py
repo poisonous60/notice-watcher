@@ -21,6 +21,9 @@ from __future__ import annotations
 
 import re
 from typing import Optional
+from urllib.parse import quote
+
+from ._common import qs
 
 NAME = "discourse"
 
@@ -31,7 +34,10 @@ _NOTE = ("Discourse 포럼 — known-platform 자동 인식. 손어댑터 Discou
 _LATEST_RE = re.compile(r"^https?://([^/?#]+)/latest/?(?:\?|#|$)", re.I)
 
 
-def build_config(base_url: str) -> Optional[dict]:
+_LIST_KEYS = {"order", "ascending"}
+
+
+def build_config(base_url: str, *, list_params: Optional[dict] = None) -> Optional[dict]:
     """`https://<host>` → DiscourseAdapter config. recognizer(`/latest` URL) 와
     register.py 의 probe-후 detect_discourse_platform 신호 양쪽이 공유."""
     from urllib.parse import urlsplit
@@ -40,18 +46,34 @@ def build_config(base_url: str) -> Optional[dict]:
     if not host or "." not in host:
         return None
     base = f"{parts.scheme or 'https'}://{host}"
+    params = {
+        k: str(v).strip()
+        for k, v in (list_params or {}).items()
+        if k in _LIST_KEYS and str(v).strip()
+    }
+    kwargs: dict = {"base_url": base}
+    slug_board = host
+    source_url = f"{base}/latest"
+    if params:
+        kwargs["list_params"] = params
+        slug_parts = [host]
+        for k in sorted(params):
+            slug_parts += [k, quote(params[k], safe="")]
+        slug_board = "_".join(slug_parts)
+        from urllib.parse import urlencode
+        source_url = f"{base}/latest?{urlencode(sorted(params.items()), encoding='utf-8')}"
     return {
         "version": 1, "site": host, "board": "latest",
         "strategy": "handwritten", "adapter": "DiscourseAdapter",
-        "kwargs": {"base_url": base},
-        "_slug_board": host,
-        "_source_url": f"{base}/latest",
+        "kwargs": kwargs,
+        "_slug_board": slug_board,
+        "_source_url": source_url,
         "_note": _NOTE,
     }
 
 
 def _build(m: "re.Match", url: str) -> Optional[dict]:
-    return build_config(f"https://{m.group(1).lower()}")
+    return build_config(f"https://{m.group(1).lower()}", list_params=qs(url))
 
 
 PATTERNS = [

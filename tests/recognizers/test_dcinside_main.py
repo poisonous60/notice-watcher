@@ -36,6 +36,15 @@ def run() -> list[tuple[str, bool, str]]:
                   r is not None and r.get("board") == "stock" and r.get("strategy") == "httpx_html",
                   f"got {None if r is None else r.get('board')}"))
 
+    # 5b. desktop 정식갤 개념글/검색 탭 — 필터를 list URL + slug 에 보존
+    r = recognize("https://gall.dcinside.com/board/lists/?id=stock&exception_mode=recommend&utm_source=x")
+    cases.append(("dcinside_main_desktop_filter_preserved",
+                  r is not None
+                  and r.get("_slug_board") == "stock_exception_mode_recommend"
+                  and "exception_mode=recommend" in r.get("list", {}).get("url_template", "")
+                  and "utm_source" not in r.get("list", {}).get("url_template", ""),
+                  f"got slug={None if r is None else r.get('_slug_board')} list={None if r is None else r.get('list', {}).get('url_template')}"))
+
     # 6. 미니갤 — dcinside_mgallery 로 가야 함 (dcinside_main 가로채면 X)
     r = recognize("https://gall.dcinside.com/mgallery/board/lists/?id=chokaguyahime")
     cases.append(("mgallery_not_hijacked",

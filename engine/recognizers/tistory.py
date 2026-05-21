@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import re
 from typing import Optional
+from urllib.parse import urlsplit
 
 NAME = "tistory"
 
@@ -40,6 +41,9 @@ _HOST_RE = re.compile(r"^https?://([a-z0-9][a-z0-9-]*)\.tistory\.com(?:/|$|\?|#)
 def _build(m: "re.Match", url: str) -> Optional[dict]:
     sub = m.group(1).lower()
     if sub in _RESERVED_SUB:
+        return None
+    path = urlsplit(url).path or "/"
+    if path.startswith("/category/") or path.startswith("/tag/"):
         return None
     host = f"{sub}.tistory.com"
     return {

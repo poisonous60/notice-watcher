@@ -32,8 +32,8 @@ def run() -> list[tuple[str, bool, str]]:
                   f"got {cfg_api!r}"))
 
     cfg_mag = recognize("https://fedia.io/m/news")
-    cases.append(("magazine_url_recognized",
-                  cfg_mag is not None and cfg_mag.get("_recognized_platform") == "mbin",
+    cases.append(("magazine_url_not_lossy",
+                  cfg_mag is None,
                   f"got {cfg_mag!r}"))
 
     cases.append(("root_not_recognized",

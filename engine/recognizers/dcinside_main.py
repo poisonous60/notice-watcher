@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import re
 from typing import Optional
+from urllib.parse import quote, urlencode
 
 from ._common import qs
 
@@ -24,6 +25,7 @@ _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 _MOBILE_RE = re.compile(r"^https?://m\.dcinside\.com/board/(?!lists\b|view\b)([A-Za-z0-9_]+)", re.I)
 # desktop 정식갤 list (mgallery 아님) — `/board/lists/?id=<id>`.
 _DESKTOP_RE = re.compile(r"^https?://gall\.dcinside\.com/board/lists/?\?", re.I)
+_RESERVED = {"id", "page"}
 
 
 def _board_id(url: str) -> Optional[str]:
@@ -39,6 +41,18 @@ def _build(m: "re.Match", url: str) -> Optional[dict]:
     board = _board_id(url)
     if not board:
         return None
+    q = qs(url)
+    filters = {k: v for k, v in q.items() if k not in _RESERVED}
+    source_url = f"https://m.dcinside.com/board/{board}"
+    list_url = "https://m.dcinside.com/board/{board}"
+    slug_parts = [board]
+    if filters:
+        src_params = [("id", board)]
+        for k in sorted(filters):
+            src_params.append((k, filters[k]))
+            slug_parts += [k, quote(filters[k], safe="")]
+        source_url = "https://gall.dcinside.com/board/lists/?" + urlencode(src_params, encoding="utf-8")
+        list_url = source_url
     return {
         "version": 1, "site": "m.dcinside.com", "board": board,
         "strategy": "httpx_html",
@@ -52,7 +66,7 @@ def _build(m: "re.Match", url: str) -> Optional[dict]:
         # robots Crawl-Delay 30 준수.
         "polite_sleep": {"min": 30, "max": 35},
         "list": {
-            "url_template": "https://m.dcinside.com/board/{board}",
+            "url_template": list_url,
             "pagination": {"kind": "query_param", "page_param": "page"},
             "row_selector": "tbody.listwrap2 > tr.ub-content.us-post",
             "include_notices": True,
@@ -106,8 +120,8 @@ def _build(m: "re.Match", url: str) -> Optional[dict]:
                 ],
             },
         },
-        "_slug_board": board,
-        "_source_url": f"https://m.dcinside.com/board/{board}",
+        "_slug_board": "_".join(slug_parts),
+        "_source_url": source_url,
         "_note": ("디시인사이드 정식갤 (모바일 보드 페이지) — known-platform 자동 인식. "
                   "httpx_html, robots Crawl-Delay 30 준수(폴링 느림). 본문은 desktop view."),
     }

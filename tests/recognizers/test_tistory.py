@@ -34,12 +34,12 @@ def run() -> list[tuple[str, bool, str]]:
         f"got {cfg and cfg.get('_slug_board')!r}",
     ))
 
-    # 3) 카테고리 URL — 블로그 단위로 묶임 (RSS 는 전체 글)
+    # 3) 카테고리 URL — 전체 RSS 로 조용히 바꾸면 feed 정체성이 달라지므로 미인식
     cfg = _try("https://leedakyeong.tistory.com/category/Python/Pandas%20Tutorial")
     cases.append((
         "category_url",
-        cfg is not None and cfg.get("kwargs", {}).get("host") == "leedakyeong.tistory.com",
-        f"got {cfg and cfg.get('kwargs')!r}",
+        cfg is None,
+        f"got {cfg!r}",
     ))
 
     # 4) 블로그 루트 URL
@@ -50,12 +50,12 @@ def run() -> list[tuple[str, bool, str]]:
         f"got {cfg and cfg.get('_slug_board')!r}",
     ))
 
-    # 5) tag URL
+    # 5) tag URL — per-tag RSS 가 보장되지 않으므로 미인식
     cfg = _try("https://leedakyeong.tistory.com/tag/pandas")
     cases.append((
         "tag_url",
-        cfg is not None and cfg.get("_slug_board") == "leedakyeong",
-        f"got {cfg and cfg.get('_slug_board')!r}",
+        cfg is None,
+        f"got {cfg!r}",
     ))
 
     # 6) www.tistory.com/ — multi-blog hub, recognizer reject 영역. 이 인식기는 None

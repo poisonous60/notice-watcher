@@ -51,6 +51,7 @@ class DiscourseAdapter(BaseAdapter):
         base_url: str,
         category_slug: Optional[str] = None,
         category_id: Optional[int] = None,
+        list_params: Optional[dict] = None,
         timeout: float = 15.0,
     ):
         self.base_url = base_url.rstrip("/")
@@ -64,6 +65,7 @@ class DiscourseAdapter(BaseAdapter):
             if self.category_slug and self.category_id is not None
             else "latest"
         )
+        self.list_params = dict(list_params or {})
         self._timeout = timeout
         self._client: Optional[httpx.AsyncClient] = None
         self._headers = {
@@ -119,7 +121,7 @@ class DiscourseAdapter(BaseAdapter):
         if page and page > 1:
             return []
         try:
-            data = await self._get_json(self._list_url())
+            data = await self._get_json(self._list_url(), params=self.list_params or None)
         except httpx.HTTPStatusError as e:
             if e.response is not None and e.response.status_code in (401, 403, 404):
                 return []
