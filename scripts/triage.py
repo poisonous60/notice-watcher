@@ -5,7 +5,7 @@
   - `output/triage_queue.jsonl`            : 봇이 `_ensure_registered` 실패 때마다 한 줄씩 append — `{ts,url,slug,via("preview"|"watch"),requested_by,register_tail}`.
 성공 등록되면(자동이든 `register.py --config` 든) `_save_state` 가 둘 다 정리한다.
 
-흐름:  python scripts/triage.py pull [--skip-later]   # N100 → 로컬 (FAILED.json + triage_queue.jsonl + 각 실패 slug 의 probe/)
+흐름:  python scripts/triage.py pull [--skip-later] [--no-auto-defer]   # N100 → 로컬 (FAILED.json + triage_queue.jsonl + 각 실패 slug 의 probe/)
        python scripts/triage.py list [--skip-later]   # 로컬에 받아온 실패 목록 표
        python scripts/triage.py show <slug>           # 그 slug 의 .FAILED.json + 요청자 + probe digest (diagnosis/list_candidates/HAR slice)
    → 그다음 hand-config 스킬 "모드 B(triage)" 로 사이트별 처리(probe 고치거나 손 config/손어댑터 작성 → register --config → N100 배포).
@@ -13,6 +13,9 @@
 `--skip-later` : dashboard `/triage/failed` 에서 '나중에' 토글한 slug 제외 (`output/triage_later.json` 공유).
                   pull 시 → Later slug 의 `.FAILED.json`·`probe/<slug>/` 로컬에서 제거(다음 호출에서도 안 누적).
                   list 시 → Later slug 행 안 보임.
+`--no-auto-defer` : pull 의 capability_blocked(rc=5 anti-bot/captcha/cloudflare) 자동 '나중에' 이동 끄기.
+                  기본 ON — 능력 부족 차단은 능력(stealth) 생겨야 풀리므로 ingest 시점에 활성 큐서 자동 분리.
+                  `triage_later.json` 에 누적 → dashboard 에도 반영. 명시 `show <slug>` 는 통과(작업 가능).
                   show <slug> 는 명시 호출이라 Later 라도 통과.
 
 N100 호스트: 환경변수 `DEPLOY_HOST`(기본 `<user>@<host>` — Tailscale MagicDNS) / `DEPLOY_PATH`(기본 `~/notice-watcher`).
@@ -50,6 +53,27 @@ def _load_later() -> set[str]:
     except (OSError, json.JSONDecodeError):
         return set()
     return {str(s) for s in (d.get("later") or []) if s}
+
+
+def _save_later(slugs: set[str]) -> None:
+    """`triage_later.json` 에 slug 들을 merge 저장 (dashboard 토글과 같은 파일)."""
+    merged = sorted(_load_later() | {str(s) for s in slugs if s})
+    LATER_STORE.parent.mkdir(parents=True, exist_ok=True)
+    LATER_STORE.write_text(json.dumps({"later": merged}, ensure_ascii=False, indent=2),
+                           encoding="utf-8")
+
+
+def _is_capability_blocked(slug: str) -> bool:
+    """로컬 `<slug>.FAILED.json` 이 rc=5 capability_blocked (anti-bot/captcha/cloudflare) 인가.
+    register.py `_save_failed` 가 reason 을 `capability_blocked …` 로 박는다 (register.py rc=5 분기)."""
+    fp = STATE_DIR / f"{slug}{_FAILED_SUFFIX}"
+    if not fp.exists():
+        return False
+    try:
+        d = json.loads(fp.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return str(d.get("reason") or "").lstrip().startswith("capability_blocked")
 
 
 def _run(cmd: list[str]) -> tuple[int, str]:
@@ -190,7 +214,7 @@ def _print_har_digest(pd: Path) -> None:
 
 
 # --------------------------------------------------------------------------- #
-def cmd_pull(skip_later: bool = False) -> int:
+def cmd_pull(skip_later: bool = False, auto_defer: bool = True) -> int:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     OUTPUT.mkdir(parents=True, exist_ok=True)
     later = _load_later() if skip_later else set()
@@ -252,6 +276,22 @@ def cmd_pull(skip_later: bool = False) -> int:
     if rc != 0 and not any(s in out for s in ("No such file", "not a regular file", "matches no files")):
         sys.stderr.write(f"[triage pull] FAILED.json 가져오기 경고: {out}\n")
 
+    # 1a-defer) capability_blocked (rc=5 anti-bot/captcha/cloudflare) 자동 '나중에' 이동.
+    # 이건 *능력 부족* — 능력(stealth/storage_state 어댑터)이 생겨야 풀린다. register.py 가 FAILED 로
+    # 남기지만(재시도 가능) 활성 triage 큐를 영구히 채워 다음 batch 마다 또 뜬다 → batch 결과 ingest 시점
+    # (= pull) 에 자동으로 later 큐로 분류해 활성 큐 청소. 명시 `show <slug>` 는 여전히 통과(작업 가능).
+    # 끄려면 --no-auto-defer.
+    auto_deferred: list[str] = []
+    if auto_defer:
+        already = _load_later()
+        for slug in _failed_slugs():
+            if slug not in already and _is_capability_blocked(slug):
+                auto_deferred.append(slug)
+        if auto_deferred:
+            _save_later(set(auto_deferred))
+            if skip_later:
+                later |= set(auto_deferred)  # 아래 prune 이 이번에 바로 정리
+
     # 1b) skip-later: glob 받은 뒤 Later slug 의 marker 즉시 삭제 (selective scp 불가, 받은 뒤 정리)
     pruned_failed = 0
     if later:
@@ -302,6 +342,9 @@ def cmd_pull(skip_later: bool = False) -> int:
     print(f"  FAILED.json: {len(slugs)}건   triage_queue slug: {nq}건   probe 디렉토리: {sum(1 for s in slugs if (PROBE_DIR / s).exists())}개")
     if pruned_stale or pruned_stale_probe:
         print(f"  stale 정리 (N100 에서 이미 REJECTED/등록 완료): FAILED.json {pruned_stale}건 / probe {pruned_stale_probe}개")
+    if auto_deferred:
+        print(f"  capability_blocked 자동 '나중에' 이동: {len(auto_deferred)}건 "
+              f"(능력 생기면 재시도; 활성 큐서 숨김 · `show <slug>` 는 통과 · 끄기 --no-auto-defer)")
     if later:
         print(f"  Later 제외: FAILED.json {pruned_failed}건 / probe {pruned_probe}개 정리   (`output/triage_later.json` — dashboard 토글)")
     print("  → `python scripts/triage.py list`")
@@ -593,8 +636,12 @@ def main(argv: list[str]) -> int:
     if "--skip-later" in rest:
         skip_later = True
         rest = [a for a in rest if a != "--skip-later"]
+    auto_defer = True
+    if "--no-auto-defer" in rest:
+        auto_defer = False
+        rest = [a for a in rest if a != "--no-auto-defer"]
     if cmd == "pull":
-        return cmd_pull(skip_later=skip_later)
+        return cmd_pull(skip_later=skip_later, auto_defer=auto_defer)
     if cmd == "list":
         return cmd_list(skip_later=skip_later)
     if cmd == "show":
