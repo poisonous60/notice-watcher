@@ -116,8 +116,12 @@ def catalog_run_and_fix(*, catalog_name: str,
     Claude 가 새 세션에서 받으면 register_batch 실행 → drain 대기 → fail 분류 → hand-config /
     bug-fix workflow 분기 → re-run `--failed` 까지 자율 진행.
     """
-    lines = [f"catalog `{catalog_name}` batch 돌리고 결과 진단·수정해줘 (skill: hand-config).", ""]
+    lines = [f"catalog `{catalog_name}` batch 돌리고 결과 진단·수정해줘 (skill: hand-config — codex 위임 모드).", ""]
     lines.append(f"현재 분포: untried={untried} / failed={failed} / bug={bug}")
+    lines.append("")
+    lines.append("ADR 0008 위임 하네스로 — batch 실행·fail 분류·diff 검토·commit·배포는 너(Claude), "
+                 "중간 진단·fix(gen_fail·capability_blocked·bug)는 codex 보이는 창 (Claude 토큰 0). "
+                 "절차 = SKILL.md \"§0c codex 위임 모드\". codex 결과 맹신 X — 각 청크 diff 검토 게이트.")
     lines.append("")
     lines.append("절차:")
     lines.append(f"1. `python scripts/remote.py batch-register --catalog={catalog_name}` 호출 → untried entry 큐 enqueue.")
@@ -129,6 +133,10 @@ def catalog_run_and_fix(*, catalog_name: str,
     lines.append("   3) **capability_blocked** (rc=5, `.FAILED.json`): captcha/anti-bot/cloudflare 차단 = *능력 부족(정책 아님)*. stealth/anti-detection 어댑터로 재도전 (§2e + `docs/크롤링 지침.md` §6 stealth 허용).")
     lines.append("   4) **gen_fail** (rc=1, `.FAILED.json`): hand-config 진단 → 수동 config 또는 probe/prompt 개선 (두 트랙 동시).")
     lines.append("   - **policy_reject** (rc=2, LOGIN_REQUIRED) · **url_dead** (rc=4, 404/cert·dns 깨짐) = 작업 X (정상 거부, `docs/크롤링 지침.md`). 우회 X.")
+    lines.append("   - **실행 = codex 위임** (SKILL §0c): bug·gen_fail·capability_blocked 의 진단·fix 는 "
+                 "`python scripts/codex_batch.py plan/launch` (gen_fail 큐) 또는 `codex_handoff.py {bugfix|handconfig} --launch` "
+                 "로 codex 보이는 창에 위임 (기본 1청크=관측-우선). 청크별 `codex_watch.py <result> --loop` 완료 대기 → "
+                 "**git diff + result 검토 게이트** (codex HARD-STOP 지켰나/타당한가/over-edit 없나) → 공유 인덱스 직렬 → commit → 배포.")
     lines.append(f"5. 재시도: `python scripts/remote.py batch-register --catalog={catalog_name} --failed` (rc∈{{1,5,-1,-2,-3,-99}} — capability_blocked 포함).")
     lines.append("6. registered 100% 또는 root-cause 못 잡는 사이트만 남을 때까지 반복.")
     lines.append("")
