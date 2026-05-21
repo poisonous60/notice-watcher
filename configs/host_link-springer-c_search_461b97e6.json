@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "site": "link.springer.com",
+  "board": "journals-a",
+  "strategy": "playwright_html",
+  "nav_timeout_ms": 30000,
+  "idle_timeout_ms": 14000,
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+  },
+  "list": {
+    "url_template": "https://link.springer.com/journals/a/1",
+    "pagination": {"kind": "none"},
+    "wait_selector": "li.c-atoz-list__item a.c-atoz-list__link[href*='/journal/']",
+    "row_selector": "li.c-atoz-list__item",
+    "row_required_selector": "a.c-atoz-list__link[href*='/journal/']",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a.c-atoz-list__link[href*='/journal/']",
+          "attr": "href",
+          "transform": [["regex_extract", "/journal/(\\d+)"]]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "a.c-atoz-list__link[href*='/journal/']",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a.c-atoz-list__link[href*='/journal/']",
+          "attr": "href",
+          "transform": [["urljoin", "https://link.springer.com"]]
+        }
+      ]
+    }
+  },
+  "article": {"fetch_kind": "html", "content": [], "body_empty_acceptable": true},
+  "_source_url": "https://link.springer.com/search",
+  "_note": "Original /search URL is a generic empty search form, not a board. The journal-list target is the linked Journals A-Z page (/journals/a/1), which renders stable journal rows under playwright_html."
+}

@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "site": "www.cambridge.org",
+  "board": "journals",
+  "strategy": "playwright_html",
+  "nav_timeout_ms": 30000,
+  "idle_timeout_ms": 14000,
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+  },
+  "list": {
+    "url_template": "https://www.cambridge.org/core/what-we-publish/journals",
+    "pagination": {"kind": "none"},
+    "wait_selector": "li.product-list-entry a.title[href^='/core/journals/']",
+    "row_selector": "li.product-list-entry",
+    "row_required_selector": "a.title[href^='/core/journals/']",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a.title[href^='/core/journals/']",
+          "attr": "href",
+          "transform": [["regex_extract", "/core/journals/([^/?#]+)"]]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "a.title[href^='/core/journals/']",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a.title[href^='/core/journals/']",
+          "attr": "href",
+          "transform": [["urljoin", "https://www.cambridge.org"]]
+        }
+      ]
+    }
+  },
+  "article": {"fetch_kind": "html", "content": [], "body_empty_acceptable": true},
+  "_source_url": "https://www.cambridge.org/core/what-we-publish/journals",
+  "_note": "Cambridge Core journals A-Z. httpx batch had anti-bot/posts0 symptoms; playwright_html renders 429 journal entries. Journal directory rows only, so body_empty_acceptable=true."
+}

@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "site": "www.cochranelibrary.com",
+  "board": "featured-reviews",
+  "strategy": "playwright_html",
+  "nav_timeout_ms": 30000,
+  "idle_timeout_ms": 14000,
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+  },
+  "list": {
+    "url_template": "https://www.cochranelibrary.com/",
+    "pagination": {"kind": "none"},
+    "wait_selector": "div.mySlides.fade a[href*='/cdsr/doi/']",
+    "row_selector": "div.mySlides.fade",
+    "row_required_selector": "a[href*='/cdsr/doi/']",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a[href*='/cdsr/doi/']",
+          "attr": "href",
+          "transform": [["regex_extract", "/cdsr/doi/([^?#]+)"]]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "a[href*='/cdsr/doi/']",
+          "text": true,
+          "transform": [["replace", "Read Review", ""], ["collapse_ws"]]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a[href*='/cdsr/doi/']",
+          "attr": "href",
+          "transform": [["urljoin", "https://www.cochranelibrary.com"]]
+        }
+      ]
+    }
+  },
+  "article": {"fetch_kind": "html", "content": [], "body_empty_acceptable": true},
+  "_source_url": "https://www.cochranelibrary.com/",
+  "_note": "Cochrane Library root exposes a small featured-review carousel under playwright_html. It is not an all-journal directory; board scope is featured reviews from the requested root."
+}
