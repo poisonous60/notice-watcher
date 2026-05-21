@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 215 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 216 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -10,6 +10,7 @@
 | [`ruliweb-recognizer`](ruliweb-recognizer.md) | ✅ recognizer 승급 (Ruliweb bbs cluster 4건 → engine/recognizers/ruliweb.py) | 2026-05-21 |  |  | https://bbs.ruliweb.com/mobile/board/1004/rss |
 | [`ppomppu-recognizer`](ppomppu-recognizer.md) | ✅ recognizer 승급 (cluster 3건 → engine/recognizers/ppomppu.py) | 2026-05-21 |  | posts_nonempty | https://www.ppomppu.co.kr/zboard/zboard.php?id=ppomppu |
 | [`mediawiki-recognizer`](mediawiki-recognizer.md) | ✅ recognizer 승급 (MediaWiki RecentChanges cluster 8건 → engine/recognizers/mediawiki.py) | 2026-05-21 |  | posts_nonempty | https://en.wikipedia.org/wiki/Special:RecentChanges |
+| [`infra_worker_rc4_triage_double_record_2026-05-21`](infra_worker_rc4_triage_double_record_2026-05-21.md) | 🏗 인프라 (bot/worker rc=4 분기 append_triage_queue 중복 제거 + append dedup) | 2026-05-21 | F | triage_queue_dashboard_mismatch, rc4_double_record, queue_noise, soft_404_queue_pollution | (인프라 case — 특정 사이트 X. 트리거 = batch 후 triage queue 오염 진단) |
 | [`infra_selector_compile_validate_2026-05-21`](infra_selector_compile_validate_2026-05-21.md) | ✅ E-게이트 — 미escape CSS 선택자(Tailwind `.1.5`)를 validate 시점에 거부 → 런타임 SelectorSyntaxError 크래시(rc=1) 봉합, retry feedback 회수 | 2026-05-21 | E | fetch_list | https://www.etoland.co.kr/ |
 | [`infra_root_marketing_loosen_2026-05-21`](infra_root_marketing_loosen_2026-05-21.md) | ✅ 게이트 완화 — root_marketing 이 same-host self-article 있는 board 를 오거부하던 것 차단 | 2026-05-21 | C | gate_reject_root_marketing | https://community.nodebb.org/ |
 | [`infra_discourse_root_form_2026-05-21`](infra_discourse_root_form_2026-05-21.md) | ✅ 자동 등록 (probe generator-meta 신호 → DiscourseAdapter dispatch — root-form 봉합) | 2026-05-21 | C | posts_nonempty, article_body_len | https://forum.openwrt.org/ |
@@ -97,7 +98,7 @@
 | [`host_datadoghq-com_blog_447ffb34`](host_datadoghq-com_blog_447ffb34.md) | ✅ 수동 config 등록 (httpx_html, baseline 6건) | 2026-05-21 | F | posts_nonempty | https://www.datadoghq.com/blog/ |
 | [`host_conference-serv_conferences_a5105744`](host_conference-serv_conferences_a5105744.md) | no_change (capability_blocked) | 2026-05-21 |  | capability_blocked, http_403 | https://conference-service.com/conferences/ |
 | [`host_community-cloud_root_e65f04ea`](host_community-cloud_root_e65f04ea.md) | ✅ 수동 config (Playwright /latest 목록, 본문은 challenge-gated라 제목·URL 알림) | 2026-05-21 | none | article_body_len, fetch_list_403, discourse_json_challenge | https://community.cloudflare.com/ |
-| [`host_comic-days-com_info_ba9e6887`](host_comic-days-com_info_ba9e6887.md) | ✅ preflight b-hit 회복 + config 등록 (baseline 5건, httpx_html) | 2026-05-21 | none | article_body_len, matches_probe_first_article | https://comic-days.com/info |
+| [`host_comic-days-com_info_ba9e6887`](host_comic-days-com_info_ba9e6887.md) | ✅ preflight b-hit 회복 + config 등록 (baseline 5건, httpx_html) | 2026-05-21 | C | article_body_len, matches_probe_first_article | https://comic-days.com/info |
 | [`host_cochranelibrary_root_7dafdb29`](host_cochranelibrary_root_7dafdb29.md) | ✅ playwright_html featured reviews registered from root | 2026-05-21 | F | posts_nonempty | https://www.cochranelibrary.com/ |
 | [`host_cloverworks-co-_news_b36daf52`](host_cloverworks-co-_news_b36daf52.md) | ✅ 손 config + probe 개선 (작동중, baseline 20, httpx_html) | 2026-05-21 | C+config | posts_nonempty, matches_probe_first_article | https://www.cloverworks.co.jp/news/ |
 | [`host_cloud-google-co_release-notes_68689125`](host_cloud-google-co_release-notes_68689125.md) | ✅ 해결 (Google Cloud release notes 공식 Atom feed recognizer + adapter) | 2026-05-21 | F | probe_timeout, static_docs_changelog, official_feed_available | https://cloud.google.com/release-notes |
@@ -113,8 +114,8 @@
 | [`host_asanet-org_annual-meeting_b1101614`](host_asanet-org_annual-meeting_b1101614.md) | no_change (capability_blocked) | 2026-05-21 |  | capability_blocked, cloudflare_challenge | https://www.asanet.org/annual-meeting/ |
 | [`host_apnews-com_root_5ee5ebc1`](host_apnews-com_root_5ee5ebc1.md) | 🔧 손 config 등록 (baseline 30건, httpx_html) | 2026-05-21 | F | title_nonempty, posts_nonempty, article_body_len | https://apnews.com/ |
 | [`host_apa-org_science_e0556b0f`](host_apa-org_science_e0556b0f.md) | 🚫 거부 (입력 URL이 APA PSA 목록이 아니라 404/사이트 안내 링크만 제공 — poll 대상 게시판 아님) | 2026-05-21 | none | posts_nonempty, matches_probe_first_article, nav_only_same_host | https://www.apa.org/science/about/psa/ |
-| [`host_animenewsnetwor_encyclopedia_83ff8a2d`](host_animenewsnetwor_encyclopedia_83ff8a2d.md) | ✅ preflight 회복 + config 등록 (작동중, baseline 30, httpx_html) | 2026-05-21 | none | fetch_list, posts_nonempty | https://www.animenewsnetwork.com/encyclopedia/releases.php |
-| [`host_anime-japan-jp_news_90aa37b1`](host_anime-japan-jp_news_90aa37b1.md) | ✅ config 등록 (baseline 30, playwright_html) | 2026-05-21 | none | posts_nonempty, matches_probe_first_article | https://www.anime-japan.jp/news/ |
+| [`host_animenewsnetwor_encyclopedia_83ff8a2d`](host_animenewsnetwor_encyclopedia_83ff8a2d.md) | ✅ preflight 회복 + config 등록 (작동중, baseline 30, httpx_html) | 2026-05-21 | C | fetch_list, posts_nonempty | https://www.animenewsnetwork.com/encyclopedia/releases.php |
+| [`host_anime-japan-jp_news_90aa37b1`](host_anime-japan-jp_news_90aa37b1.md) | ✅ config 등록 (baseline 30, playwright_html) | 2026-05-21 | C | posts_nonempty, matches_probe_first_article | https://www.anime-japan.jp/news/ |
 | [`host_anilist-co_search_784ba699`](host_anilist-co_search_784ba699.md) | 🧩 손어댑터 — AniList GraphQL endpoint 로 top anime baseline 30건 등록 | 2026-05-21 | F | title_nonempty, matches_probe_first_article, graphql_post_api_schema_gap | https://anilist.co/search/anime |
 | [`host_anichart-net_airing_f90ddb8c`](host_anichart-net_airing_f90ddb8c.md) | 🧩 손어댑터 — AniChart airing schedule GraphQL endpoint 로 baseline 30건 등록 | 2026-05-21 | F | posts_nonempty, spa_shell_static_empty, graphql_post_api_schema_gap | https://anichart.net/airing |
 | [`host_aljazeera-com_root_2ac8d25a`](host_aljazeera-com_root_2ac8d25a.md) | ✅ preflight b-hit 회복 + config 등록 (baseline 25건, httpx_html RSS) | 2026-05-21 | F | posts_nonempty, title_nonempty, post_id_unique | https://www.aljazeera.com/ |
@@ -230,7 +231,7 @@
 |---|---|
 | (미기재) | 35 |
 | B | 1 |
-| C | 13 |
+| C | 16 |
 | C+A | 1 |
 | C+D | 2 |
 | C+F | 2 |
@@ -238,18 +239,18 @@
 | C+config | 2 |
 | E | 5 |
 | E+A+C+D | 1 |
-| F | 80 |
+| F | 81 |
 | F+A | 1 |
 | F+C | 3 |
 | adapter | 1 |
 | config | 1 |
-| none | 66 |
+| none | 63 |
 
 ### config_strategy 분포
 
 | strategy | count |
 |---|---|
-| (미기재) | 43 |
+| (미기재) | 44 |
 | handwritten | 27 |
 | httpx_html | 69 |
 | httpx_json | 17 |
@@ -261,5 +262,5 @@
 
 ### 최근 90일 (≥ 2026-02-20)
 
-케이스 215 건.
+케이스 216 건.
 

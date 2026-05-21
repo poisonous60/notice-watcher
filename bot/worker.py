@@ -349,6 +349,15 @@ async def _process_job_inner(client, conn, job, dm_owner) -> None:
                     await edit_channel_message(
                         client, job["ack_channel_id"], job["ack_message_id"],
                         msg("blocked_bug", slug=slug))
+                elif rc == 4:
+                    # url_dead (target_not_found / cert_or_dns_broken / soft_404) — register 가 이미
+                    # `_save_rejected` → `.REJECTED.json` + `_prune_triage_queue` 마쳤음. rc=2/3 와 동일하게
+                    # 여기서 append_triage_queue 다시 부르면 prune 직후 re-add 라 죽은/soft-404 URL 이 work 큐
+                    # 오염 (다음 batch/triage 가 이중으로 봄). 안 쌓는다. (2026-05-21 — rc=2 와 같은 버그가
+                    # rc=4 split 이후 재발: docs/cases/infra_worker_rc2_triage_double_record_2026-05-17.md)
+                    await edit_channel_message(
+                        client, job["ack_channel_id"], job["ack_message_id"],
+                        msg("worker_url_dead", slug=slug))
                 else:
                     append_triage_queue(url, slug, job["via"], req_by, tail)
                     await edit_channel_message(client, job["ack_channel_id"], job["ack_message_id"],

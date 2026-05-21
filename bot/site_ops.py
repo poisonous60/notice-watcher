@@ -299,13 +299,29 @@ def blocking_register(url: str, article_url: Optional[str] = None,
 
 def append_triage_queue(url: str, slug: str, via: str,
                         requested_by: Optional[dict], note: str) -> None:
-    """자동 등록 실패를 output/triage_queue.jsonl 에 한 줄 append. scripts/triage.py 가 읽음."""
+    """자동 등록 실패를 output/triage_queue.jsonl 에 기록. scripts/triage.py 가 읽음.
+
+    같은 slug 의 *기존 줄은 제거*하고 새 줄로 교체 (slug 당 최대 1줄) — 같은 사이트가 batch 를
+    거듭 실패해도 줄이 쌓여 다음 batch/triage 가 이중으로 보는 것 방지. 최신 실패만 남긴다.
+    """
     try:
         TRIAGE_QUEUE.parent.mkdir(parents=True, exist_ok=True)
         rec = {"ts": now_iso(), "url": url, "slug": slug, "via": via,
                "requested_by": requested_by or {}, "register_tail": (note or "")[-2000:]}
-        with TRIAGE_QUEUE.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        kept: list[str] = []
+        if TRIAGE_QUEUE.exists():
+            for line in TRIAGE_QUEUE.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    if json.loads(line).get("slug") == slug:
+                        continue  # 같은 slug 옛 줄 제거 (교체)
+                except json.JSONDecodeError:
+                    pass  # 깨진 줄은 관용적으로 보존
+                kept.append(line)
+        kept.append(json.dumps(rec, ensure_ascii=False))
+        TRIAGE_QUEUE.write_text("\n".join(kept) + "\n", encoding="utf-8")
     except Exception as e:  # noqa: BLE001
         log.warning("triage_queue 기록 실패 (%s): %r", slug, e)
 
