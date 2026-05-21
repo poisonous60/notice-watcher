@@ -169,7 +169,7 @@ def fetch_with_capture(
     storage_state_path: Optional[Path] = None,
     headless: bool = True,
     baseline_blocked: bool = False,
-    timeout_ms: int = 30000,
+    timeout_ms: int = 15000,
     idle_timeout_ms: int = 1000,
 ) -> Result:
     """Chromium 띄워 URL 로드, HAR 표준 포맷으로 트래픽 자동 기록.
@@ -180,7 +180,10 @@ def fetch_with_capture(
       - traffic.har (+ traffic.har_data/)
       - captured_headers.json : 메인 문서 요청 헤더만
 
-    timeout_ms: page.goto(domcontentloaded) 타임아웃 — 페이지 자체가 떠야 하므로 넉넉히(30s).
+    timeout_ms: page.goto(domcontentloaded) 타임아웃 (15s). domcontentloaded 는 DOM 파싱 완료
+      시점이라 정상 페이지는 <3s 에 뜬다 — 15s 를 넘기는 건 사실상 anti-bot challenge/redirect 로
+      매달린 것(예: Cloudflare 사이트의 글 본문 페이지가 25~30s 매달리다 빈 HTML 반환). 그 hung
+      render 를 fail-fast 시키려 30s→15s 로 낮춤 (목록은 보통 2s 에 떠 영향 없음).
     idle_timeout_ms: 그 뒤 networkidle(XHR 다 잠잠해질 때까지) 추가 대기 상한(기본 2s) —
       광고/트래커가 계속 떠드는 사이트는 networkidle 이 영영 안 와서 이 상한까지 꽉 기다린다(정찰 시간의 큰 몫).
       대다수 사이트는 networkidle 이 1s 내 도달 → 2s ceiling 영향 없음. 매우 느린 SPA 의

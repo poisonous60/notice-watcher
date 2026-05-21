@@ -57,7 +57,7 @@ def _body_is_feed(text: str) -> bool:
     return False
 
 
-def _url_serves_feed(url: str) -> bool:
+def _url_serves_feed(url: str, *, timeout: float = 10.0) -> bool:
     """입력 URL 을 raw httpx 로 직접 fetch 해 RSS/Atom 피드 응답인지 (content-type/본문 root).
 
     `_looks_like_feed_url` 는 path 휴리스틱 — `hnrss.org/newest`(피드 토큰 없음)·
@@ -67,7 +67,7 @@ def _url_serves_feed(url: str) -> bool:
     2026-05-20-b batch). 실패는 fail-soft(False) — probe 일회성 정찰이라 fetch 1회 추가 OK.
     """
     try:
-        with httpx.Client(headers=preset_h2_chrome_min(), timeout=10.0, follow_redirects=True) as client:
+        with httpx.Client(headers=preset_h2_chrome_min(), timeout=timeout, follow_redirects=True) as client:
             r = client.get(url)
         if r.status_code != 200:
             return False
@@ -79,8 +79,12 @@ def _url_serves_feed(url: str) -> bool:
         return False
 
 
-def discover_feeds(*, page_url: str, page_html: str, out_dir: Path) -> dict:
-    """페이지 head에서 alternate 피드 + 관용 경로 추측 + 입력 URL 자체 feed 검출."""
+def discover_feeds(*, page_url: str, page_html: str, out_dir: Path, timeout: float = 10.0) -> dict:
+    """페이지 head에서 alternate 피드 + 관용 경로 추측 + 입력 URL 자체 feed 검출.
+
+    `timeout`: httpx GET 한도. baseline 이 httpx 로 못 뚫린(blocked) 사이트는 모든 well-known
+    path fetch 가 ReadTimeout 까지 꽉 기다림 — 호출자가 짧게(fast-fail) 내려준다.
+    """
     candidates: list[dict] = []
 
     # 입력 URL 자체가 feed path 면 1st candidate 로 박는다 — `_board_shape_check` 가
@@ -90,7 +94,7 @@ def discover_feeds(*, page_url: str, page_html: str, out_dir: Path) -> dict:
         candidates.append({"source": "input-url-feed-path", "url": page_url})
     elif _body_is_feed(page_html):
         candidates.append({"source": "input-url-feed-content", "url": page_url})
-    elif _url_serves_feed(page_url):
+    elif _url_serves_feed(page_url, timeout=timeout):
         candidates.append({"source": "input-url-feed-fetch", "url": page_url})
 
     soup = BeautifulSoup(page_html or "", "lxml")
@@ -114,7 +118,7 @@ def discover_feeds(*, page_url: str, page_html: str, out_dir: Path) -> dict:
     def _try(path: str) -> dict | None:
         url = urljoin(base, path)
         try:
-            with httpx.Client(headers=headers, timeout=10.0, follow_redirects=True) as client:
+            with httpx.Client(headers=headers, timeout=timeout, follow_redirects=True) as client:
                 r = client.get(url)
             if r.status_code == 200 and ("xml" in (r.headers.get("content-type", "")).lower()
                                          or r.text.lstrip().startswith("<?xml")):
@@ -147,7 +151,7 @@ _CRAWL_DELAY_RE = re.compile(r"^\s*crawl-delay\s*:\s*(\d+(?:\.\d+)?)", re.IGNORE
 _SITEMAP_LINE_RE = re.compile(r"(?im)^\s*sitemap\s*:\s*(\S+)\s*$")
 
 
-def read_robots(*, page_url: str, out_dir: Path) -> dict:
+def read_robots(*, page_url: str, out_dir: Path, timeout: float = 10.0) -> dict:
     parts = urlsplit(page_url)
     url = f"{parts.scheme}://{parts.netloc}/robots.txt"
     info: dict = {
@@ -155,7 +159,7 @@ def read_robots(*, page_url: str, out_dir: Path) -> dict:
         "disallow": [], "sitemaps": [], "raw_path": None,
     }
     try:
-        with httpx.Client(headers=preset_h2_chrome_min(), timeout=10.0, follow_redirects=True) as c:
+        with httpx.Client(headers=preset_h2_chrome_min(), timeout=timeout, follow_redirects=True) as c:
             r = c.get(url)
             info["status"] = r.status_code
             if r.status_code == 200:

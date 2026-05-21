@@ -7,7 +7,10 @@ adapters/arca.py 를 일반화. 파싱(HTML→NoticePost)은 httpx_html 의 pars
   config 최상위:
     storage_state_path     : Playwright storage_state.json 경로(로그인 세션 재사용; 파일 있으면 로드)
     headless               : 기본 true
-    nav_timeout_ms / idle_timeout_ms : goto / XHR-quiet hard cap (기본 30000 / 2000)
+    nav_timeout_ms / idle_timeout_ms : goto / XHR-quiet hard cap (기본 15000 / 2000)
+                                       — domcontentloaded 는 정상 페이지 <3s. 15s 넘기는 건 anti-bot
+                                         challenge/redirect 로 매달린 것 → fail-fast (register 검증·폴링
+                                         양쪽의 hung-render 비용 차단). 더 느린 사이트는 config 로 상향.
     quiet_ms                          : XHR/fetch/document 무응답 임계 (기본 500ms; 이 시간 새 데이터 응답 0이면 즉시 종료)
 프록시(proxy_url)는 미지원(브라우저라). 이 strategy 는 playwright 패키지가 설치돼 있어야 동작.
 """
@@ -117,7 +120,7 @@ async def close_session(adapter) -> None:
 async def _goto(adapter, url: str, *, wait_selector: Optional[str] = None) -> str:
     cfg = adapter.cfg
     page = adapter._page
-    nav_to = int(cfg.get("nav_timeout_ms", 30000))
+    nav_to = int(cfg.get("nav_timeout_ms", 15000))
     idle_to = int(cfg.get("idle_timeout_ms", 2000))
     quiet_to = int(cfg.get("quiet_ms", 500))
     await page.goto(url, wait_until="domcontentloaded", timeout=nav_to)

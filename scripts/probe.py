@@ -119,6 +119,14 @@ def _run(args: argparse.Namespace, url: str, slug: str) -> int:
     for r in baseline.values():
         print(f"  {r.strategy} {r.url} → {r.status} {r.classification.value}")
 
+    # baseline 이 httpx 로 못 뚫렸으면(blocked) — Cloudflare/봇보호 류라 같은 httpx 를 또 두드려봐야
+    # 전부 ReadTimeout 까지 꽉 기다린다 (Phase 1/3/6 각 10~25s 낭비; 페이지는 Phase 2 headless 가 2s 에 뜸).
+    # 그 페이즈들 httpx 한도를 짧게 잡아 fail-fast — blocked 사이트는 어차피 빈 결과라 손실 없음.
+    if blocked:
+        print("  → baseline httpx blocked: Phase 1/3/6 httpx fail-fast (4s)")
+    _http_to = 4.0 if blocked else 15.0
+    _disc_to = 4.0 if blocked else 10.0
+
     # ---- Phase 1: static GET with header presets ----
     presets = all_presets(url)
     if args.lite:
@@ -161,6 +169,7 @@ def _run(args: argparse.Namespace, url: str, slug: str) -> int:
             out_dir=out_dir,
             body_name=f"s1.{preset_name}",
             baseline_blocked=blocked,
+            timeout=_http_to,
         )
 
     static_results: list[Result] = []
@@ -186,6 +195,7 @@ def _run(args: argparse.Namespace, url: str, slug: str) -> int:
             out_dir=out_dir,
             body_name="s1.Huser",
             baseline_blocked=blocked,
+            timeout=_http_to,
         )
         static_results.append(r)
         print(f"  S1.Huser  {r.status} {r.classification.value}")
@@ -224,6 +234,7 @@ def _run(args: argparse.Namespace, url: str, slug: str) -> int:
                 out_dir=out_dir,
                 body_name="s1.Hcap",
                 baseline_blocked=blocked,
+                timeout=_http_to,
             )
         print(f"  S1.Hcap    {captured_retry.status} {captured_retry.classification.value}")
         all_results.append(captured_retry)
@@ -326,11 +337,11 @@ def _run(args: argparse.Namespace, url: str, slug: str) -> int:
     with ThreadPoolExecutor(max_workers=2) as _phase6_ex:
         def _traced_feeds():
             with current_trace().span("phase6_discover_feeds"):
-                return discover_feeds(page_url=url, page_html=page_html, out_dir=out_dir)
+                return discover_feeds(page_url=url, page_html=page_html, out_dir=out_dir, timeout=_disc_to)
 
         def _traced_robots():
             with current_trace().span("phase6_read_robots"):
-                return read_robots(page_url=url, out_dir=out_dir)
+                return read_robots(page_url=url, out_dir=out_dir, timeout=_disc_to)
 
         _feeds_fut = _phase6_ex.submit(_cv.copy_context().run, _traced_feeds)
         _robots_fut = _phase6_ex.submit(_cv.copy_context().run, _traced_robots)
