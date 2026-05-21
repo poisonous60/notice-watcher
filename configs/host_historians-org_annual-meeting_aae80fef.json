@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "site": "historians.org",
+  "board": "annual-meeting",
+  "strategy": "playwright_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+    "Referer": "https://www.historians.org/annual-meeting"
+  },
+  "timeout": 20,
+  "list": {
+    "url_template": "https://www.historians.org/annual-meeting",
+    "pagination": {
+      "kind": "none"
+    },
+    "wait_selector": "a[href*='/perspectives-article/']",
+    "row_selector": "a[href*='/perspectives-article/']",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": ":self",
+          "attr": "href",
+          "transform": [
+            [
+              "regex_extract",
+              "/perspectives-article/([^/?#]+)/?"
+            ],
+            [
+              "strip",
+              "/"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": ":self",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": ":self",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://www.historians.org"
+            ],
+            [
+              "strip_query_fragment"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "body_empty_acceptable": true,
+    "content": []
+  }
+}

@@ -1,0 +1,128 @@
+{
+  "version": 1,
+  "site": "eccv.ecva.net",
+  "board": "2026",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR",
+    "Referer": "https://eccv.ecva.net/Conferences/2026"
+  },
+  "timeout": 15,
+  "polite_sleep": {
+    "min": 10,
+    "max": 10
+  },
+  "list": {
+    "url_template": "https://eccv.ecva.net/Conferences/{board}",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "div.p-4.rounded-4.firstback li",
+    "row_required_selector": "a[href^='/Conferences/2026/']",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a[href^='/Conferences/2026/']",
+          "attr": "href",
+          "transform": [
+            [
+              "regex_extract",
+              "^/Conferences/2026/([^/?#]+)"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "a[href^='/Conferences/2026/']",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a[href^='/Conferences/2026/']",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://eccv.ecva.net"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "strong",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "regex_extract",
+              "([A-Za-z]{3}\\s+\\d{1,2})"
+            ],
+            [
+              "prepend",
+              "2026 "
+            ],
+            [
+              "iso8601",
+              [
+                "%Y %b %d"
+              ],
+              "+09:00"
+            ]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "const",
+          "value": "Announcements"
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "main#main div.container div.container > div",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "main#main div.container div.container",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "main#main h1",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  }
+}

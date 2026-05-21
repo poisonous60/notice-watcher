@@ -1,0 +1,216 @@
+{
+  "version": 1,
+  "site": "sigsac.org",
+  "board": "ccs-2026",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+    "Referer": "https://www.sigsac.org/ccs/CCS2026/"
+  },
+  "timeout": 15,
+  "polite_sleep": {
+    "min": 20,
+    "max": 25
+  },
+  "list": {
+    "url_template": "https://www.sigsac.org/ccs/CCS2026/",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "div.news > ul > li",
+    "row_required_selector": "b",
+    "include_notices": true,
+    "fields": {
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "b",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "iso8601",
+              [
+                "%B %d, %Y"
+              ],
+              "+00:00"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "a",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        },
+        {
+          "from": "css",
+          "selector": ":self",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "regex_extract",
+              "^[^:]+:\\s*(.+)$"
+            ],
+            [
+              "strip",
+              " .!"
+            ]
+          ]
+        }
+      ],
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://www.sigsac.org/ccs/CCS2026/"
+            ],
+            [
+              "strip_query_fragment"
+            ],
+            [
+              "lower"
+            ],
+            [
+              "replace",
+              "https://",
+              ""
+            ],
+            [
+              "replace",
+              "http://",
+              ""
+            ],
+            [
+              "replace",
+              "/",
+              "-"
+            ],
+            [
+              "replace",
+              ".",
+              "-"
+            ],
+            [
+              "strip",
+              "-"
+            ]
+          ]
+        },
+        {
+          "from": "concat",
+          "parts": [
+            {
+              "field": "published_at"
+            },
+            {
+              "const": "|"
+            },
+            {
+              "field": "title"
+            }
+          ],
+          "transform": [
+            [
+              "lower"
+            ],
+            [
+              "replace",
+              "+00:00",
+              ""
+            ],
+            [
+              "replace",
+              "t00:00:00",
+              ""
+            ],
+            [
+              "replace",
+              "|",
+              "-"
+            ],
+            [
+              "replace",
+              " ",
+              "-"
+            ],
+            [
+              "replace",
+              "/",
+              "-"
+            ],
+            [
+              "replace",
+              ".",
+              ""
+            ],
+            [
+              "replace",
+              ":",
+              ""
+            ],
+            [
+              "replace",
+              "!",
+              ""
+            ],
+            [
+              "strip",
+              "-"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://www.sigsac.org/ccs/CCS2026/"
+            ],
+            [
+              "strip_query_fragment"
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": ":self",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "body_empty_acceptable": true,
+    "content": []
+  }
+}
