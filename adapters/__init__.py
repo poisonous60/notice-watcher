@@ -17,6 +17,7 @@ from .posthog_changelog import PostHogChangelogAdapter
 from .anthropic_docs import AnthropicDocsReleaseNotesAdapter
 from .airtable_newsroom import AirtableNewsroomAdapter
 from .adobe_creative_cloud import AdobeCreativeCloudFeaturesAdapter
+from .canva_whats_new import CanvaWhatsNewAdapter
 
 __all__ = [
     "BaseAdapter",
@@ -39,4 +40,5 @@ __all__ = [
     "AnthropicDocsReleaseNotesAdapter",
     "AirtableNewsroomAdapter",
     "AdobeCreativeCloudFeaturesAdapter",
+    "CanvaWhatsNewAdapter",
 ]

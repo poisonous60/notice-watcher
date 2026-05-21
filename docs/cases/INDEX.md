@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 185 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 186 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -82,6 +82,7 @@
 | [`host_cochranelibrary_root_7dafdb29`](host_cochranelibrary_root_7dafdb29.md) | ✅ playwright_html featured reviews registered from root | 2026-05-21 | F | posts_nonempty | https://www.cochranelibrary.com/ |
 | [`host_cloud-google-co_release-notes_68689125`](host_cloud-google-co_release-notes_68689125.md) | ✅ 해결 (Google Cloud release notes 공식 Atom feed recognizer + adapter) | 2026-05-21 | F | probe_timeout, static_docs_changelog, official_feed_available | https://cloud.google.com/release-notes |
 | [`host_circleci-com_changelog_5a868561`](host_circleci-com_changelog_5a868561.md) | 🧩 수동 config — CircleCI changelog RSS feed 로 baseline 30건 등록 | 2026-05-21 | none | posts_nonempty, row_selector_too_narrow, rss_feed_available | https://circleci.com/changelog/ |
+| [`host_canva-com_whats-new_1e430553`](host_canva-com_whats-new_1e430553.md) | ✅ 등록 (Canva public newsroom whats-new articles) | 2026-05-21 | F | capability_blocked, cloudflare, login_redirect, canva_whats_new | https://www.canva.com/whats-new/ |
 | [`host_cambridge-org_core_9f561f6b`](host_cambridge-org_core_9f561f6b.md) | ✅ playwright_html journal directory registered | 2026-05-21 | F | capability_blocked, posts_nonempty | https://www.cambridge.org/core/what-we-publish/journals |
 | [`host_brunch-co-kr_springboot_58aa9ddd`](host_brunch-co-kr_springboot_58aa9ddd.md) | ✅ 수동 config 등록 (Brunch RSS, baseline 20건) | 2026-05-21 | F | register_subprocess_timeout, posts_nonempty | https://brunch.co.kr/@springboot |
 | [`host_blog-unity-com_root_9fe1176b`](host_blog-unity-com_root_9fe1176b.md) | ✅ 수동 config 등록 (RSS 목록, baseline 30건; 본문 비움 허용) | 2026-05-21 | F | posts_nonempty | https://blog.unity.com/ |
@@ -206,7 +207,7 @@
 | C+F+A | 1 |
 | E | 6 |
 | E+A+C+D | 1 |
-| F | 76 |
+| F | 77 |
 | F+A | 1 |
 | F+C | 3 |
 | adapter | 1 |
@@ -217,7 +218,7 @@
 | strategy | count |
 |---|---|
 | (미기재) | 43 |
-| handwritten | 23 |
+| handwritten | 24 |
 | httpx_html | 55 |
 | httpx_json | 15 |
 | mixed | 1 |
@@ -227,5 +228,5 @@
 
 ### 최근 90일 (≥ 2026-02-20)
 
-케이스 185 건.
+케이스 186 건.
 

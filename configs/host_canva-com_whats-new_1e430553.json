@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "site": "www.canva.com",
+  "board": "whats-new",
+  "strategy": "handwritten",
+  "adapter": "CanvaWhatsNewAdapter",
+  "kwargs": {
+    "board": "whats-new",
+    "sitemap_url": "https://www.canva.com/landing_page_sitemap_1.xml",
+    "timeout": 20
+  },
+  "_source_url": "https://www.canva.com/whats-new/",
+  "_note": "Canva /whats-new/ itself redirects unauthenticated headless access to login and static GET is Cloudflare-challenged. The public robots sitemap exposes Canva newsroom 'what's new' articles, so this single handwritten config polls those public newsroom URLs via curl_cffi Chrome impersonation. robots.txt does not disallow /newsroom/news/ or the sitemap; adapter keeps 5-8s polite_sleep."
+}
