@@ -1,0 +1,99 @@
+{
+  "version": 1,
+  "site": "anime-japan.jp",
+  "board": "news",
+  "strategy": "playwright_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+    "Referer": "https://www.anime-japan.jp/news/"
+  },
+  "timeout": 15,
+  "list": {
+    "url_template": "https://www.anime-japan.jp/{board}/",
+    "pagination": {
+      "kind": "none"
+    },
+    "wait_selector": "#js-news > div.mt-2.bg-white.rounded-lg.border.border-gray-300",
+    "row_selector": "#js-news > div.mt-2.bg-white.rounded-lg.border.border-gray-300",
+    "row_required_selector": "dt.js-accordion-allDevice h2",
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": ":self",
+          "attr": "id",
+          "match": "^\\d+$"
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "dt.js-accordion-allDevice h2",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "template",
+          "value": "https://www.anime-japan.jp/{board}/#{post_id}"
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "dt.js-accordion-allDevice .content__top-news-date",
+          "text": true,
+          "transform": [
+            [
+              "regex_extract",
+              "^(\\d{4}\\.\\d{1,2}\\.\\d{1,2})"
+            ],
+            [
+              "iso8601",
+              [
+                "%Y.%m.%d"
+              ],
+              "+09:00"
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "dd.js-accordion-allDevice__contents .text-sm",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "url_template": "https://www.anime-japan.jp/{board}/#{post_id}",
+    "fetch_kind": "html",
+    "wait_selector": "#js-news > div.mt-2.bg-white.rounded-lg.border.border-gray-300",
+    "content": [
+      {
+        "from": "css",
+        "selector": "dd.js-accordion-allDevice__contents .text-sm",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "dd.js-accordion-allDevice__contents",
+        "html": true
+      }
+    ]
+  }
+}
