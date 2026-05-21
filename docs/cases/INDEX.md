@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 154 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 155 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -46,6 +46,7 @@
 | [`host_firebase-google_support_1f0ed638`](host_firebase-google_support_1f0ed638.md) | ⏸ deferred — 앵커-glob 단일페이지 (가치 낮음) | 2026-05-21 |  | meta_diverging, posts_nonempty | https://firebase.google.com/support/releases |
 | [`host_fedia-io_root_1f0bc0d6`](host_fedia-io_root_1f0bc0d6.md) | ⛔ capability_blocked — root/combined가 login으로 redirect, mbin API는 현재 401; rc=5 Mbin rescue path 추가 | 2026-05-21 | F | capability_blocked, login_redirect, mbin_api_unauthorized, fediverse_api_rescue | https://fedia.io/ |
 | [`host_feddit-de_root_584f7d0f`](host_feddit-de_root_584f7d0f.md) | rc=5 capability_blocked — Lemmy root; dev box API 404, 미등록 (rescue 인프라 일반화) | 2026-05-21 | F | capability_blocked, fediverse_api_rescue, lemmy_api_rescue | https://feddit.de/ |
+| [`host_eurocrypt-iacr-_2026_baea2078`](iacr-conf.md) | ✅ 인식기 추가 — IACR conference important-dates 페이지 자동 등록 | 2026-05-21 | F | post_id_stable_shape | https://eurocrypt.iacr.org/2026/ |
 | [`host_drupal-org_project_ecbb957e`](host_drupal-org_project_ecbb957e.md) | ✅ known-platform recognizer 등록 (baseline 30건, Drupal release-history XML) | 2026-05-21 | F | posts_nonempty, fastly_client_challenge, release_history_xml | https://drupal.org/project/drupal/releases |
 | [`host_docs-snowflake-_en_67510c90`](host_docs-snowflake-_en_67510c90.md) | ✅ 등록 완료 (Snowflake docs release notes static HTML config) | 2026-05-21 | none | posts_nonempty, static_docs_release_notes | https://docs.snowflake.com/en/release-notes |
 | [`host_docs-anthropic-_en_571d0ac4`](host_docs-anthropic-_en_571d0ac4.md) | ✅ 해결 (Anthropic docs release notes handwritten adapter + slug-stable recognizer) | 2026-05-21 | F | meta_diverging_false_positive, post_id_unique, static_docs_changelog | https://docs.anthropic.com/en/release-notes/overview |
@@ -175,7 +176,7 @@
 | C+F+A | 1 |
 | E | 4 |
 | E+A+C+D | 1 |
-| F | 70 |
+| F | 71 |
 | F+A | 1 |
 | F+C | 3 |
 | none | 30 |
@@ -186,7 +187,7 @@
 |---|---|
 | (미기재) | 32 |
 | handwritten | 22 |
-| httpx_html | 46 |
+| httpx_html | 47 |
 | httpx_json | 15 |
 | mixed | 1 |
 | none | 27 |
@@ -195,5 +196,5 @@
 
 ### 최근 90일 (≥ 2026-02-20)
 
-케이스 154 건.
+케이스 155 건.
 
