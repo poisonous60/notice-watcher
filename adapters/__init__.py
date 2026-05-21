@@ -14,6 +14,7 @@ from .peertube import PeerTubeAdapter
 from .google_news_rss import GoogleNewsRssAdapter
 from .posthog_changelog import PostHogChangelogAdapter
 from .anthropic_docs import AnthropicDocsReleaseNotesAdapter
+from .airtable_newsroom import AirtableNewsroomAdapter
 
 __all__ = [
     "BaseAdapter",
@@ -33,4 +34,5 @@ __all__ = [
     "GoogleNewsRssAdapter",
     "PostHogChangelogAdapter",
     "AnthropicDocsReleaseNotesAdapter",
+    "AirtableNewsroomAdapter",
 ]

@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "site": "Airtable",
+  "board": "whatsnew",
+  "strategy": "handwritten",
+  "adapter": "AirtableNewsroomAdapter",
+  "kwargs": {
+    "url": "https://www.airtable.com/newsroom",
+    "source_url": "https://www.airtable.com/whatsnew",
+    "timeout": 20.0
+  },
+  "_slug_board": "whatsnew",
+  "_source_url": "https://www.airtable.com/whatsnew",
+  "_note": "Airtable /whatsnew currently renders as a marketing shell with no update rows in static or headless HTML. The public updates are exposed as Newsroom cards, so this whatsnew board watches https://www.airtable.com/newsroom and fetches article bodies from the linked newsroom pages. robots.txt has no Crawl-Delay; use 5-8s polite sleep."
+}
