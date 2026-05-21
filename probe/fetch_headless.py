@@ -8,7 +8,6 @@ import json
 import logging
 import os
 import re
-import threading
 import time
 from pathlib import Path
 from typing import Optional
@@ -28,23 +27,17 @@ _MAX_CAPTURED_HTML_CHARS = max(
 
 
 def _bounded_close(closeable, *, label: str, timeout_s: float = 10.0) -> None:
-    """playwright context/browser `.close()` 는 timeout 인자가 없어 anti-bot challenge 페이지
-    (예: google `/sorry/index`) 가 HAR flush 도중 응답 안 하면 sync_api 가 영원 block 한다.
-    별 thread 에서 호출하고 timeout 안에 안 끝나면 포기 — 봇 worker 의 site_ops 가
-    process-group SIGKILL 로 leak 된 chromium 까지 정리하므로 leak 영구화 X."""
-    done = threading.Event()
+    """Playwright sync 객체는 생성 thread 의 greenlet 에 묶인다.
 
-    def _go() -> None:
-        try:
-            closeable.close()
-        except Exception:  # noqa: BLE001
-            pass
-        finally:
-            done.set()
-
-    threading.Thread(target=_go, daemon=True, name=f"bounded_{label}").start()
-    if not done.wait(timeout_s):
-        log.warning("playwright %s timed out (%.0fs) — chromium leak 은 process-group kill 로 정리", label, timeout_s)
+    과거에는 close 를 별도 thread 로 던져 timeout 처리를 했지만 sync API 내부 callback 이 원래
+    greenlet 으로 switch 하려다 `greenlet.error: cannot switch to a different thread` 를 냈다.
+    이제 headless 호출자는 register.py 의 bounded subprocess 안에서 실행되므로, close 는 같은
+    thread 에서 수행하고 hang 은 부모 process timeout 이 process tree 를 kill 해 끊는다.
+    """
+    try:
+        closeable.close()
+    except Exception as e:  # noqa: BLE001
+        log.warning("playwright %s failed during close: %r", label, e)
 
 
 def is_available() -> bool:

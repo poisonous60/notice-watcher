@@ -34,6 +34,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -57,16 +58,103 @@ from generate.routing import resolve as _resolve_route  # noqa: E402
 ROOT = Path(__file__).resolve().parent.parent
 CONFIGS_DIR = ROOT / "configs"
 STATE_DIR = ROOT / "output" / "poll_state"
+DEFAULT_WALL_TIMEOUT_S = float(os.environ.get("REGISTER_WALL_TIMEOUT_S", "240"))
+PROBE_TIMEOUT_S = float(os.environ.get("REGISTER_PROBE_TIMEOUT_S", "120"))
+ARTICLE_REPROBE_TIMEOUT_S = float(os.environ.get("REGISTER_ARTICLE_REPROBE_TIMEOUT_S", "45"))
+
+
+class RegisterTimeoutError(RuntimeError):
+    """register.py 내부 phase 가 wall-clock budget 을 초과해 clean fail 해야 할 때."""
+
+
+def _kill_process_tree(proc: subprocess.Popen) -> None:
+    if proc.poll() is not None:
+        return
+    if os.name == "nt":
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+            )
+            return
+        except Exception:  # noqa: BLE001
+            pass
+    else:
+        with contextlib.suppress(Exception):
+            os.killpg(proc.pid, 9)
+            return
+    with contextlib.suppress(Exception):
+        proc.kill()
+
+
+def _subprocess_creationflags() -> int:
+    if os.name == "nt":
+        return getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    return 0
+
+
+def _run_child_bounded(cmd: list[str], *, env: dict, timeout_s: float, label: str,
+                       stream: bool = False) -> tuple[int, str]:
+    """자식 process tree 를 timeout 안에 끝내고, 초과 시 전체 tree kill.
+
+    Playwright/Chromium/Node driver 가 stdout pipe 를 붙잡은 채 남으면 부모가 EOF 를 못 받는
+    케이스가 있어 `subprocess.run(timeout=...)` 대신 Popen + process-tree kill 을 쓴다.
+    """
+    if timeout_s <= 0:
+        raise RegisterTimeoutError(f"{label} 시작 전 wall-clock budget 소진")
+    popen_kwargs = {
+        "cwd": str(ROOT),
+        "env": env,
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.STDOUT,
+        "text": True,
+        "errors": "replace",
+        "bufsize": 1,
+        "start_new_session": (os.name != "nt"),
+    }
+    if os.name == "nt":
+        popen_kwargs["creationflags"] = _subprocess_creationflags()
+    proc = subprocess.Popen(cmd, **popen_kwargs)
+    try:
+        out, _ = proc.communicate(timeout=timeout_s)
+    except subprocess.TimeoutExpired as e:
+        _kill_process_tree(proc)
+        with contextlib.suppress(Exception):
+            proc.wait(timeout=5)
+        partial = e.output or ""
+        if isinstance(partial, bytes):
+            partial = partial.decode("utf-8", errors="replace")
+        raise RegisterTimeoutError(f"{label} timeout ({int(timeout_s)}s)") from None
+    finally:
+        with contextlib.suppress(Exception):
+            if proc.stdout:
+                proc.stdout.close()
+    if stream and out:
+        print(out, end="" if out.endswith("\n") else "\n")
+    return proc.returncode if proc.returncode is not None else proc.wait(), out or ""
+
+
+def _remaining_budget(deadline: Optional[float], *, reserve_s: float = 0.0) -> float:
+    if deadline is None:
+        return 10**9
+    return max(0.0, deadline - time.monotonic() - reserve_s)
+
+
+def _ensure_budget(deadline: Optional[float], *, slug: str, url: str, phase: str) -> None:
+    if deadline is not None and time.monotonic() >= deadline:
+        raise RegisterTimeoutError(f"register wall-clock budget exceeded before {phase} (slug={slug}, url={url})")
 
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _run_probe(url: str, *, lite: bool) -> None:
+def _run_probe(url: str, *, lite: bool, timeout_s: float) -> None:
     import os
     print("[PHASE] probe", flush=True)
-    print(f"[register] {'lite' if lite else 'full'} probe: {url}")
+    print(f"[register] {'lite' if lite else 'full'} probe: {url} (timeout={int(timeout_s)}s)")
     cmd = [sys.executable, str(ROOT / "scripts" / "probe.py"), url, "--no-paid", "--no-crawl4ai"]
     if lite:
         cmd.append("--lite")
@@ -76,7 +164,7 @@ def _run_probe(url: str, *, lite: bool) -> None:
         # probe.py 의 phase spans 가 probe_subprocess 자식으로 nested. 밖에서 잡으면 parent_span=""
         # → phase 들이 형제로 떠 dashboard 에서 collapse 불가.
         child_env = {**os.environ, **env_for_child()}
-        rc = subprocess.call(cmd, env=child_env)
+        rc, _ = _run_child_bounded(cmd, env=child_env, timeout_s=timeout_s, label="probe", stream=True)
     if rc != 0:
         raise SystemExit(f"probe 실패 (rc={rc})")
 
@@ -1149,7 +1237,7 @@ def _article_hint_text(article_url: str, n_api: int) -> str:
             "또한 list 쪽: 이 글 URL 에 박힌 글 ID 가 목록 행의 어디(href/data-* 속성/JSON 필드)에 나오는지 list_html 에서 보고 list.fields.post_id 와 list.fields.url 을 그에 맞춰 잡아라.")
 
 
-def _reprobe_article(slug: str, article_url: str) -> int:
+def _reprobe_article_inprocess(slug: str, article_url: str) -> int:
     """글 본문 페이지를 Playwright(+HAR)로 다시 받아 → article.html(렌더 DOM, digest 가 자동으로 더 큰 걸 씀) +
     article_candidates.json(본문 JSON API 후보) 갱신. 발견한 본문 API 후보 개수 반환."""
     out_dir = output_dir(slug)
@@ -1204,6 +1292,38 @@ def _reprobe_article(slug: str, article_url: str) -> int:
               f"len={c.get('body_len')} html={c.get('body_looks_html')} url_id_match={c.get('url_id_match')}")
     print(f"[register]   본문 JSON API 후보 {len(cands)}건")
     return len(cands)
+
+
+def _reprobe_article(slug: str, article_url: str, *, timeout_s: float = ARTICLE_REPROBE_TIMEOUT_S) -> int:
+    """글페이지 re-probe 를 별도 process 에서 실행해 Playwright teardown hang 을 register 밖으로 격리."""
+    out_dir = output_dir(slug)
+    timeout_s = max(1.0, timeout_s)
+    cmd = [
+        sys.executable,
+        str(ROOT / "scripts" / "register.py"),
+        "--_reprobe-article-slug", slug,
+        "--_reprobe-article-url", article_url,
+    ]
+    child_env = {**os.environ, **env_for_child()}
+    try:
+        rc, out = _run_child_bounded(cmd, env=child_env, timeout_s=timeout_s,
+                                     label="article re-probe", stream=False)
+    except RegisterTimeoutError as e:
+        print(f"[register]   article re-probe timeout: {e} — 후보 없이 계속")
+        (out_dir / "article_candidates.json").write_text("[]", encoding="utf-8")
+        return 0
+    if out:
+        for line in out.splitlines():
+            print(f"[register/reprobe] {line}")
+    if rc != 0:
+        print(f"[register]   article re-probe child rc={rc} — 후보 없이 계속")
+        (out_dir / "article_candidates.json").write_text("[]", encoding="utf-8")
+        return 0
+    try:
+        data = json.loads((out_dir / "article_candidates.json").read_text(encoding="utf-8"))
+        return len(data) if isinstance(data, list) else 0
+    except Exception:  # noqa: BLE001
+        return 0
 
 
 def _has_json_api_candidates(digest: dict) -> bool:
@@ -1288,7 +1408,8 @@ def _extra_signal_hints(digest: dict) -> list[str]:
     return out
 
 
-def _preflight(slug: str, url: Optional[str], digest: dict, *, no_escalate: bool) -> dict:
+def _preflight(slug: str, url: Optional[str], digest: dict, *, no_escalate: bool,
+               article_timeout_s: float = ARTICLE_REPROBE_TIMEOUT_S) -> dict:
     """gemini 부르기 *전에* 한 번: 옛 escalation 의 정보 수집을 "N회 실패 후 escalate" 대신 "사전 준비"로.
 
       (a) probe 가 잡은 첫 글 페이지(_best_article_url)를 Playwright+HAR 로 re-probe → article_candidates.json(본문 JSON API 후보)
@@ -1311,7 +1432,7 @@ def _preflight(slug: str, url: Optional[str], digest: dict, *, no_escalate: bool
     if art_ok:
         print(f"[register] preflight: 첫 글 페이지를 render+HAR 로 re-probe → {art}")
         _set_first_article_url(slug, art)          # digest 의 article_sample.url 이 우리가 re-probe 한 URL 과 일치하도록(_best_article_url 이 first_article_url 과 다른 후보를 골랐을 수 있음)
-        n_api = _reprobe_article(slug, art)        # playwright 없으면 article_candidates.json=[] 쓰고 0 반환(조용)
+        n_api = _reprobe_article(slug, art, timeout_s=article_timeout_s)  # playwright 없으면 article_candidates.json=[] 쓰고 0 반환(조용)
         # _reprobe_article 이 article.html(렌더 DOM) / article_candidates.json 을 갱신했을 수 있으니 digest 재구성.
         # (playwright 미설치라 아무것도 못 바꿨어도 결과는 동일 — 무해.)
         digest = build_digest(slug=slug, url=url)
@@ -1464,7 +1585,21 @@ def _main_inner(argv) -> int:
                         "비용 0 보장 (probe 새 실행 X · 네트워크 re-probe X · gemini X). "
                         "rc=2/3 = 게이트 잡힘 (REJECTED + cleanup 그대로) · rc=6 = no gate match · "
                         "rc=7 = probe artifact 없음. post-fix-cleanup 의 호출 자리.")
+    p.add_argument("--wall-timeout", type=float, default=DEFAULT_WALL_TIMEOUT_S,
+                   help=argparse.SUPPRESS)
+    p.add_argument("--_reprobe-article-slug", help=argparse.SUPPRESS)
+    p.add_argument("--_reprobe-article-url", help=argparse.SUPPRESS)
     args = p.parse_args(argv)
+
+    if args._reprobe_article_slug or args._reprobe_article_url:
+        if not (args._reprobe_article_slug and args._reprobe_article_url):
+            print("[register reprobe child] slug/url 둘 다 필요", file=sys.stderr)
+            return 4
+        return 0 if _reprobe_article_inprocess(args._reprobe_article_slug, args._reprobe_article_url) >= 0 else 1
+
+    wall_deadline: Optional[float] = None
+    if args.wall_timeout and args.wall_timeout > 0:
+        wall_deadline = time.monotonic() + float(args.wall_timeout)
 
     if args.unlearn:
         pid = args.unlearn.strip().lower()
@@ -1568,10 +1703,28 @@ def _main_inner(argv) -> int:
                     return rc
         out_dir = output_dir(slug)
         if not (args.reuse_probe and out_dir.exists() and (out_dir / "diagnosis.json").exists()):
-            _run_probe(url, lite=not args.full_probe)
+            try:
+                _run_probe(
+                    url,
+                    lite=not args.full_probe,
+                    timeout_s=min(PROBE_TIMEOUT_S, _remaining_budget(wall_deadline, reserve_s=60.0)),
+                )
+            except RegisterTimeoutError as e:
+                fp = _save_failed(slug, url, f"register probe timeout: {e}",
+                                  last_config=None,
+                                  last_feedback=f"[FAIL] probe_timeout: {e}")
+                print(f"[register] ❌ 자동 처리 불가 — probe timeout. → {fp}")
+                return 1
 
     print("[PHASE] digest", flush=True)
     print(f"[register] digest 구성: slug={slug}")
+    try:
+        _ensure_budget(wall_deadline, slug=slug, url=url or "", phase="digest")
+    except RegisterTimeoutError as e:
+        fp = _save_failed(slug, url or "", f"register wall timeout: {e}",
+                          last_config=None, last_feedback=f"[FAIL] register_timeout: {e}")
+        print(f"[register] ❌ 자동 처리 불가 — wall timeout. → {fp}")
+        return 1
     tr = current_trace()
     with tr.span("build_digest", attrs={"slug": slug}):
         digest = build_digest(slug=slug, url=url)
@@ -1810,16 +1963,30 @@ def _main_inner(argv) -> int:
                               attrs={"slug": slug,
                                      "article_url_hint": bool(article_url_hint),
                                      "no_escalate": bool(args.no_escalate)}):
-        if article_url_hint:
-            print(f"[register] --article-url 힌트: {article_url_hint} — first_article_url 교정 + 그 글페이지 render+HAR re-probe")
-            _set_first_article_url(slug, article_url_hint)
-            n_api = _reprobe_article(slug, article_url_hint)
-            digest = build_digest(slug=slug, url=url)
-            hint = _article_hint_text(article_url_hint, n_api)
-            lh = _list_strategy_hint(digest)        # 목록이 JS-gated 면 httpx_json/playwright_html 전환 hint 도 함께
-            digest["escalation_hint"] = (hint + "\n\n" + lh) if lh else hint
-        else:
-            digest = _preflight(slug, url, digest, no_escalate=args.no_escalate)
+        try:
+            _ensure_budget(wall_deadline, slug=slug, url=url, phase="preflight")
+            article_timeout = min(ARTICLE_REPROBE_TIMEOUT_S, _remaining_budget(wall_deadline, reserve_s=60.0))
+            if article_url_hint:
+                print(f"[register] --article-url 힌트: {article_url_hint} — first_article_url 교정 + 그 글페이지 render+HAR re-probe")
+                _set_first_article_url(slug, article_url_hint)
+                n_api = _reprobe_article(slug, article_url_hint, timeout_s=article_timeout)
+                digest = build_digest(slug=slug, url=url)
+                hint = _article_hint_text(article_url_hint, n_api)
+                lh = _list_strategy_hint(digest)        # 목록이 JS-gated 면 httpx_json/playwright_html 전환 hint 도 함께
+                digest["escalation_hint"] = (hint + "\n\n" + lh) if lh else hint
+            else:
+                digest = _preflight(
+                    slug,
+                    url,
+                    digest,
+                    no_escalate=args.no_escalate,
+                    article_timeout_s=article_timeout,
+                )
+        except RegisterTimeoutError as e:
+            fp = _save_failed(slug, url, f"register preflight timeout: {e}",
+                              last_config=None, last_feedback=f"[FAIL] register_timeout: {e}")
+            print(f"[register] ❌ 자동 처리 불가 — preflight timeout. → {fp}")
+            return 1
 
     out_path = Path(args.out) if args.out else (CONFIGS_DIR / f"{slug}.json")
     if out_path.exists() and not args.force:
@@ -1836,6 +2003,13 @@ def _main_inner(argv) -> int:
         _model_label = f"{_eff_model_init} → {_eff_model_retry}"
     print(f"[PHASE] generate max={args.max_attempts}", flush=True)
     print(f"[register] gemini 생성+검증 (모델={_model_label}, 최대 {args.max_attempts}회):")
+    try:
+        _ensure_budget(wall_deadline, slug=slug, url=url, phase="generate")
+    except RegisterTimeoutError as e:
+        fp = _save_failed(slug, url, f"register generate skipped by timeout: {e}",
+                          last_config=None, last_feedback=f"[FAIL] register_timeout: {e}")
+        print(f"[register] ❌ 자동 처리 불가 — generate timeout. → {fp}")
+        return 1
     gem_span_cm = current_trace().span("gemini_gen_validate",
                                         attrs={"slug": slug,
                                                "model_attempt1": _eff_model_init,
