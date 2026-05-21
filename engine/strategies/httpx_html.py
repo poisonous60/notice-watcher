@@ -44,10 +44,19 @@ async def _get(adapter, url: str) -> httpx.Response:
         return await c.get(url)
 
 
+def _decode(adapter, r: httpx.Response) -> str:
+    """cfg.encoding 명시 시 raw bytes 를 그 charset 으로 디코드 (euc-kr/cp949 한국 사이트 — httpx 의
+    charset 자동검출이 meta-only euc-kr 을 utf-8 로 오판해 mojibake 나는 걸 방지). 없으면 r.text."""
+    enc = (getattr(adapter, "cfg", None) or {}).get("encoding")
+    if enc:
+        return r.content.decode(enc, errors="replace")
+    return r.text
+
+
 async def _get_text(adapter, url: str) -> str:
     r = await _get(adapter, url)
     r.raise_for_status()
-    return r.text
+    return _decode(adapter, r)
 
 
 # ---------- 공유 파서 (playwright_html 도 사용) ----------
@@ -187,4 +196,4 @@ async def fetch_article(adapter, post: NoticePost) -> NoticePost:
     if r.status_code in skip:
         return _copy_post(post, content_html=None, url=url, raw_note={"fetch_status": r.status_code, "fetch_note": "skipped status"})
     r.raise_for_status()
-    return parse_article_html(adapter, r.text, post=post, url=url)
+    return parse_article_html(adapter, _decode(adapter, r), post=post, url=url)

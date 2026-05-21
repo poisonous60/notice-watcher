@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "site": "www.fredmiranda.com",
+  "board": "board-41",
+  "strategy": "playwright_html",
+  "nav_timeout_ms": 30000,
+  "idle_timeout_ms": 14000,
+  "headers": {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"},
+  "list": {
+    "url_template": "https://www.fredmiranda.com/forum/board/41/",
+    "pagination": {"kind": "none"},
+    "wait_selector": "a.topictitle[href*='/forum/topic/']",
+    "row_selector": "a.topictitle[href*='/forum/topic/']",
+    "include_notices": true,
+    "fields": {
+      "post_id": [{"from": "attr", "attr": "href", "transform": [["regex_extract", "/forum/topic/(\\d+)"]]}],
+      "title": [{"from": "css", "text": true, "transform": [["collapse_ws"]]}],
+      "url": [{"from": "attr", "attr": "href", "transform": [["urljoin", "https://www.fredmiranda.com/"]]}]
+    }
+  },
+  "article": {"fetch_kind": "html", "content": [], "body_empty_acceptable": true},
+  "_source_url": "https://www.fredmiranda.com/forum/",
+  "_note": "Fred Miranda 포럼 board/41(첫 글 probe 가 가리킨 보드) — Cloudflare anti-bot 라 httpx 차단(Just a moment). 헤드리스+stealth 가 CF JS 챌린지 통과 → playwright_html. forum root 는 virtualized 하이브리드 DOM 이라 추출 불안정 → 보드 페이지의 깔끔한 a.topictitle 사용. row=a.topictitle 자기참조, post_id=topic id."
+}

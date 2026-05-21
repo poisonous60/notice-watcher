@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "site": "www.eevblog.com",
+  "board": "forum",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+  },
+  "list": {
+    "url_template": "https://www.eevblog.com/forum/index.php?action=.xml;type=rss2;limit=30",
+    "pagination": {"kind": "none"},
+    "row_selector": "channel > item",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {"from": "css", "selector": "link", "text": true,
+         "transform": [["collapse_ws"], ["strip"], ["regex_extract", "msg(\\d+)"]]}
+      ],
+      "title": [
+        {"from": "css", "selector": "title", "text": true, "transform": [["collapse_ws"]]}
+      ],
+      "url": [
+        {"from": "css", "selector": "link", "text": true, "transform": [["collapse_ws"], ["strip"]]}
+      ],
+      "published_at": [
+        {"from": "css", "selector": "pubDate", "text": true,
+         "transform": [["collapse_ws"], ["iso8601", ["%a, %d %b %Y %H:%M:%S %Z"]]]}
+      ],
+      "category": [
+        {"from": "css", "selector": "category", "text": true, "transform": [["collapse_ws"]]}
+      ]
+    }
+  },
+  "article": {"fetch_kind": "html", "content": [], "body_empty_acceptable": true},
+  "_source_url": "https://www.eevblog.com/forum/",
+  "_note": "SMF(Simple Machines Forum) 전역 RSS — index.php?action=.xml;type=rss2;limit=30 (최근 글 30건). 글 목록 페이지는 SMF 보드 카테고리 인덱스라 thread 행이 root 에 없음 → RSS 로 최근 글 수집. guid/link 의 msg ID 가 post_id."
+}

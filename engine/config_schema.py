@@ -73,6 +73,7 @@ CONFIG_JSON_SCHEMA: dict = {
         "strategy": {"enum": ["httpx_html", "httpx_json", "playwright_html", "handwritten"]},
         "headers": {"type": "object"},
         "timeout": {"type": "number"},
+        "encoding": {"type": "string"},
         "proxy_url": {"type": ["string", "null"]},
         "polite_sleep": {
             "type": "object",

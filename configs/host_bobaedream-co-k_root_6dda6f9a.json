@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "site": "www.bobaedream.co.kr",
+  "board": "best",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+  },
+  "list": {
+    "url_template": "https://www.bobaedream.co.kr/list?code=best",
+    "pagination": {"kind": "none"},
+    "row_selector": "tr",
+    "row_required_selector": "a[href*='view?code=']",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {"from": "attr", "selector": "a[href*='view?code=']", "attr": "href",
+         "transform": [["regex_extract", "No=(\\d+)"]]}
+      ],
+      "title": [
+        {"from": "css", "selector": "a[href*='view?code=']", "text": true, "transform": [["collapse_ws"]]}
+      ],
+      "url": [
+        {"from": "attr", "selector": "a[href*='view?code=']", "attr": "href",
+         "transform": [["urljoin", "https://www.bobaedream.co.kr/"]]}
+      ]
+    }
+  },
+  "article": {"fetch_kind": "html", "content": [], "body_empty_acceptable": true},
+  "_source_url": "https://www.bobaedream.co.kr/",
+  "_note": "보배드림 베스트 게시판(code=best, 전 게시판 인기글) — root www.bobaedream.co.kr 은 포털 홈페이지(자동차 매물 위젯 등 혼합)라 board 행 없음. 사이트 전반 인기글 feed 로 베스트 게시판 선택. euc-kr. row=tr+view 링크 필터, post_id=No."
+}

@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "site": "www.etoland.co.kr",
+  "board": "etohumor07",
+  "strategy": "playwright_html",
+  "nav_timeout_ms": 30000,
+  "idle_timeout_ms": 14000,
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+  },
+  "list": {
+    "url_template": "https://www.etoland.co.kr/b/etohumor07",
+    "pagination": {"kind": "none"},
+    "wait_selector": "li.flex.items-start.gap-1\\.5 a[href*='/view/']",
+    "row_selector": "li.flex.items-start.gap-1\\.5",
+    "row_required_selector": "a[href*='/view/']",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {"from": "attr", "selector": "a[href*='/view/']", "attr": "href",
+         "transform": [["regex_extract", "-(\\d+)(?:[/?#]|$)"]]}
+      ],
+      "title": [
+        {"from": "css", "selector": "a[href*='/view/']", "text": true, "transform": [["collapse_ws"]]}
+      ],
+      "url": [
+        {"from": "attr", "selector": "a[href*='/view/']", "attr": "href",
+         "transform": [["urljoin", "https://www.etoland.co.kr/"]]}
+      ]
+    }
+  },
+  "article": {"fetch_kind": "html", "content": [], "body_empty_acceptable": true},
+  "_source_url": "https://www.etoland.co.kr/",
+  "_note": "이토랜드 유머 게시판(/b/etohumor07) — root www.etoland.co.kr 은 React app-router SPA 홈페이지(위젯 혼합, 정적 anchor 없음). 보드 페이지도 client-render(정적 0 anchor, __NEXT_DATA__/RSS/API 없음) → playwright_html 렌더 필요. row=li.flex.items-start.gap-1\\.5 (Tailwind 클래스 escape), post_id=/view/ slug 끝 번호."
+}

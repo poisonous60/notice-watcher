@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "site": "www.techpowerup.com",
+  "board": "whats-new",
+  "strategy": "playwright_html",
+  "nav_timeout_ms": 30000,
+  "idle_timeout_ms": 14000,
+  "headers": {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"},
+  "list": {
+    "url_template": "https://www.techpowerup.com/forums/whats-new/posts/",
+    "pagination": {"kind": "none"},
+    "wait_selector": "div.structItem-title a[href*='/threads/']",
+    "row_selector": "div.structItem-title",
+    "row_required_selector": "a[href*='/threads/']",
+    "include_notices": true,
+    "fields": {
+      "post_id": [{"from": "attr", "selector": "a[href*='/threads/']", "attr": "href", "transform": [["regex_extract", "threads/[^.]*\\.(\\d+)"]]}],
+      "title": [{"from": "css", "selector": "a[href*='/threads/']", "text": true, "transform": [["collapse_ws"]]}],
+      "url": [{"from": "attr", "selector": "a[href*='/threads/']", "attr": "href", "transform": [["urljoin", "https://www.techpowerup.com/"]]}]
+    }
+  },
+  "article": {"fetch_kind": "html", "content": [], "body_empty_acceptable": true},
+  "_source_url": "https://www.techpowerup.com/forums/",
+  "_note": "TechPowerUp 포럼(XenForo) — Anubis PoW anti-bot 라 httpx 차단(probe BLOCKED_BOT). 헤드리스 브라우저는 Anubis JS PoW 를 실행해 통과 → playwright_html. /whats-new/posts/ 최근 글, row=div.structItem-title."
+}

@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "site": "forums.debian.net",
+  "board": "index-lastposts",
+  "strategy": "playwright_html",
+  "nav_timeout_ms": 30000,
+  "idle_timeout_ms": 14000,
+  "headers": {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"},
+  "list": {
+    "url_template": "https://forums.debian.net/",
+    "pagination": {"kind": "none"},
+    "wait_selector": "dd.lastpost a[href*='viewtopic.php']",
+    "row_selector": "dd.lastpost",
+    "row_required_selector": "a[href*='viewtopic.php']",
+    "include_notices": true,
+    "fields": {
+      "post_id": [{"from": "attr", "selector": "a[href*='viewtopic.php'][title]", "attr": "href", "transform": [["regex_extract", "p=(\\d+)"]]}],
+      "title": [
+        {"from": "attr", "selector": "a[href*='viewtopic.php'][title]", "attr": "title", "transform": [["collapse_ws"]]},
+        {"from": "css", "selector": "a[href*='viewtopic.php'][title]", "text": true, "transform": [["collapse_ws"]]}
+      ],
+      "url": [{"from": "attr", "selector": "a[href*='viewtopic.php'][title]", "attr": "href", "transform": [["urljoin", "https://forums.debian.net/"]]}]
+    }
+  },
+  "article": {"fetch_kind": "html", "content": [], "body_empty_acceptable": true},
+  "_source_url": "https://forums.debian.net/",
+  "_note": "Debian User Forums(phpBB) — Anubis PoW anti-bot 라 httpx 차단. 헤드리스 브라우저가 PoW 통과 → playwright_html. phpBB index 의 각 보드 최신글(dd.lastpost) = 사이트 전반 최근 활동. post_id=p(고유 post id)."
+}
