@@ -2,13 +2,14 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 189 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 190 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
 | [`xenforo_subpath_install_2026-05-21`](xenforo_subpath_install_2026-05-21.md) | ✅ 자동 등록 (XenForo recognizer 서브폴더 설치 install path 보존 — /community/forums/-/index.rss) | 2026-05-21 | F | posts_nonempty | https://xenforo.com/community/ |
 | [`ruliweb-recognizer`](ruliweb-recognizer.md) | ✅ recognizer 승급 (Ruliweb bbs cluster 4건 → engine/recognizers/ruliweb.py) | 2026-05-21 |  |  | https://bbs.ruliweb.com/mobile/board/1004/rss |
 | [`ppomppu-recognizer`](ppomppu-recognizer.md) | ✅ recognizer 승급 (cluster 3건 → engine/recognizers/ppomppu.py) | 2026-05-21 |  | posts_nonempty | https://www.ppomppu.co.kr/zboard/zboard.php?id=ppomppu |
+| [`mediawiki-recognizer`](mediawiki-recognizer.md) | ✅ recognizer 승급 (MediaWiki RecentChanges cluster 8건 → engine/recognizers/mediawiki.py) | 2026-05-21 |  | posts_nonempty | https://en.wikipedia.org/wiki/Special:RecentChanges |
 | [`infra_selector_compile_validate_2026-05-21`](infra_selector_compile_validate_2026-05-21.md) | ✅ E-게이트 — 미escape CSS 선택자(Tailwind `.1.5`)를 validate 시점에 거부 → 런타임 SelectorSyntaxError 크래시(rc=1) 봉합, retry feedback 회수 | 2026-05-21 | E | fetch_list | https://www.etoland.co.kr/ |
 | [`infra_root_marketing_loosen_2026-05-21`](infra_root_marketing_loosen_2026-05-21.md) | ✅ 게이트 완화 — root_marketing 이 same-host self-article 있는 board 를 오거부하던 것 차단 | 2026-05-21 | C | gate_reject_root_marketing | https://community.nodebb.org/ |
 | [`infra_discourse_root_form_2026-05-21`](infra_discourse_root_form_2026-05-21.md) | ✅ 자동 등록 (probe generator-meta 신호 → DiscourseAdapter dispatch — root-form 봉합) | 2026-05-21 | C | posts_nonempty, article_body_len | https://forum.openwrt.org/ |
@@ -50,7 +51,7 @@
 | [`host_microsoft-com_en-us_000c6d5a`](host_microsoft-com_en-us_000c6d5a.md) | 🔧 손 config (작동중, baseline 30, httpx_json) | 2026-05-21 |  | published_at_iso, article_body_len, nav_only_same_host | https://www.microsoft.com/en-us/microsoft-365/roadmap |
 | [`host_medium-com_feed_19419ab9`](host_medium-com_feed_19419ab9.md) | ✅ 등록 완료 (Medium tag RSS — httpx_html XML config + Medium recognizer) | 2026-05-21 | F | posts_nonempty, feed_candidates | https://medium.com/feed/tag/programming |
 | [`host_medium-com_airbnb-engineering_2931b5a3`](host_medium-com_airbnb-engineering_2931b5a3.md) | ✅ 등록 완료 (Medium publication → RSS config + recognizer) | 2026-05-21 | F | posts_nonempty, feed_candidates | https://medium.com/airbnb-engineering |
-| [`host_mdpi-com_journal_df52afcc`](host_mdpi-com_journal_df52afcc.md) | solved (global RSS fallback) | 2026-05-21 | E | capability_blocked, rss_fallback | https://www.mdpi.com/journal/rss |
+| [`host_mdpi-com_journal_df52afcc`](host_mdpi-com_journal_df52afcc.md) | ❌ capability_blocked (N100 production host cloudflare 403) | 2026-05-21 | none | capability_blocked, rss_fallback | https://www.mdpi.com/journal/rss |
 | [`host_link-springer-c_search_461b97e6`](host_link-springer-c_search_461b97e6.md) | ✅ playwright_html journal A-Z directory registered via linked journal-list URL | 2026-05-21 | F | board_shape_check, posts_nonempty | https://link.springer.com/search |
 | [`host_lens-org_lens_fbd1435c`](host_lens-org_lens_fbd1435c.md) | ⚪ no_change — Lens URL은 앱/검색 랜딩이며 반복 신규 항목 목록 아님 | 2026-05-21 | none | not_a_board, search_landing, nav_links_only | https://www.lens.org/lens/ |
 | [`host_lemmy-ml_root_9bc876aa`](host_lemmy-ml_root_9bc876aa.md) | ✅ 자동 등록 가능 (Lemmy recognizer + LemmyAdapter 신규 — API v3 직접 호출) | 2026-05-21 | F | posts_nonempty, article_body_len | https://lemmy.ml/ |
@@ -202,19 +203,19 @@
 
 | layer | count |
 |---|---|
-| (미기재) | 34 |
+| (미기재) | 35 |
 | C | 13 |
 | C+A | 1 |
 | C+D | 2 |
 | C+F | 2 |
 | C+F+A | 1 |
-| E | 6 |
+| E | 5 |
 | E+A+C+D | 1 |
 | F | 78 |
 | F+A | 1 |
 | F+C | 3 |
 | adapter | 1 |
-| none | 46 |
+| none | 47 |
 
 ### config_strategy 분포
 
@@ -225,11 +226,11 @@
 | httpx_html | 56 |
 | httpx_json | 15 |
 | mixed | 1 |
-| none | 28 |
+| none | 29 |
 | playwright_html | 20 |
 | rejected | 1 |
 
 ### 최근 90일 (≥ 2026-02-20)
 
-케이스 189 건.
+케이스 190 건.
 
