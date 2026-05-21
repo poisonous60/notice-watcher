@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "site": "www.salesforce.com",
+  "board": "release_readiness_live",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.salesforce.com/"
+  },
+  "timeout": 20.0,
+  "list": {
+    "url_template": "https://www.salesforce.com/releases/",
+    "pagination": {"kind": "none"},
+    "row_selector": "[data-module-type='card_resource']",
+    "row_required_selector": "a[href]",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {"from": "attr", "selector": ":self", "attr": "data-module-id", "transform": [["collapse_ws"]]},
+        {"from": "attr", "selector": "a[href]", "attr": "href", "transform": [["strip_query_fragment"], ["regex_extract", "/([^/?#]+)/?$"]]}
+      ],
+      "title": [
+        {"from": "attr", "selector": ":self", "attr": "data-module-name", "transform": [["collapse_ws"]]},
+        {"from": "css", "selector": "a[href]", "text": true, "transform": [["collapse_ws"]]}
+      ],
+      "url": [
+        {"from": "attr", "selector": "a[href]", "attr": "href", "transform": [["strip_query_fragment"], ["urljoin", "https://www.salesforce.com/"]]}
+      ],
+      "summary": [
+        {"from": "css", "selector": "p", "text": true, "transform": [["collapse_ws"]]}
+      ],
+      "category": [
+        {"from": "css", "selector": ".badge", "text": true, "transform": [["collapse_ws"]]}
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [],
+    "body_empty_acceptable": true
+  },
+  "_source_url": "https://www.salesforce.com/releases/",
+  "_note": "Salesforce releases landing page. Fresh dev-box fetch redirects to /products/innovation/releases/ and exposes Release Readiness resource cards in static HTML. Use data-module-type=card_resource rows as list items; body is intentionally list-only because linked resources can be Salesforce+/Trailhead/external pages."
+}
