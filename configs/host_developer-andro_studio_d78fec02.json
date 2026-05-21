@@ -1,0 +1,118 @@
+{
+  "version": 1,
+  "site": "developer.android.com",
+  "board": "studio",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://developer.android.com/"
+  },
+  "timeout": 20.0,
+  "polite_sleep": {
+    "min": 5.0,
+    "max": 8.0
+  },
+  "list": {
+    "url_template": "https://developer.android.com/studio/releases",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "article.devsite-article",
+    "row_required_selector": "h1.devsite-page-title",
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a[href*=\"/studio/releases/fixed-bugs/studio/\"]",
+          "attr": "href",
+          "transform": [
+            [
+              "strip_query_fragment"
+            ],
+            [
+              "regex_extract",
+              "/studio/releases/fixed-bugs/studio/([0-9.]+)"
+            ]
+          ]
+        },
+        {
+          "from": "css",
+          "selector": "h1.devsite-page-title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "regex_extract",
+              "^(Android (?:Studio|스튜디오) [^|]+?)(?: Stay organized| 컬렉션을 사용해|$)"
+            ],
+            [
+              "lower"
+            ],
+            [
+              "replace",
+              " ",
+              "-"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "h1.devsite-page-title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "regex_extract",
+              "^(Android (?:Studio|스튜디오) [^|]+?)(?: Stay organized| 컬렉션을 사용해|$)"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "const",
+          "value": "https://developer.android.com/studio/releases"
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "div.devsite-article-body > p",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "const",
+          "value": "Android Studio release"
+        }
+      ]
+    }
+  },
+  "article": {
+    "url_template": "https://developer.android.com/studio/releases",
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "div.devsite-article-body",
+        "html": true
+      }
+    ]
+  },
+  "_source_url": "https://developer.android.com/studio/releases",
+  "_note": "Android Studio release notes page. Automatic register gate misclassified the devsite page as a single article because schema.org/Article is present and probe picked a global nav link as first_article_url. Static HTML contains the current Studio release page, so this config treats the article itself as one latest-release row; post_id comes from the fixed-bugs release version link."
+}
