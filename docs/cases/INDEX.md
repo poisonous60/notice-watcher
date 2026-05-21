@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 134 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 135 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -23,6 +23,7 @@
 | [`host_producthunt-com_feed_51ccf15a`](host_producthunt-com_feed_51ccf15a.md) | ✅ 등록 (Product Hunt Atom feed 사용, 본문은 list-only) | 2026-05-21 | none | posts_nonempty, rss_feed_available, atom_feed, body_empty_acceptable | https://www.producthunt.com/feed |
 | [`host_posthog-com_changelog_7d58ef58`](host_posthog-com_changelog_7d58ef58.md) | 🧩 손어댑터 — Gatsby page-data JSON 을 최신순으로 뒤집어 changelog baseline 30건 등록 | 2026-05-21 | F | title_nonempty, wrong_first_article_url, gatsby_page_data_oldest_first | https://www.posthog.com/changelog |
 | [`host_politico-com_root_0e7b5678`](host_politico-com_root_0e7b5678.md) | 🔧 손 config 등록 (baseline 25건, playwright_html; article body may be empty behind Cloudflare) | 2026-05-21 | F | article_body_len, fetch_list | https://www.politico.com/ |
+| [`host_platform-openai_docs_c642ce68`](host_platform-openai_docs_c642ce68.md) | 🔧 손 config (httpx_html) — OpenAI docs changelog row selector/post_id 수동 고정 | 2026-05-21 | none | post_id_unique, static_docs_changelog, cloudflare_challenge_static_header_replay, body_empty_acceptable | https://platform.openai.com/docs/changelog |
 | [`host_paulgraham-com_articles.html_7910744b`](host_paulgraham-com_articles.html_7910744b.md) | ✅ 수동 config 등록 (httpx_html, baseline 30건) | 2026-05-21 | F | posts_nonempty | https://paulgraham.com/articles.html |
 | [`host_namu-wiki_RecentChanges_2370318a`](host_namu-wiki_RecentChanges_2370318a.md) | ✅ 기존 손 config 동작 확인 — RecentChanges 목록 30건 baseline, 본문은 body_empty_acceptable | 2026-05-21 | none | post_id_stable_shape, matches_probe_first_article | https://namu.wiki/RecentChanges |
 | [`host_medium-com_feed_19419ab9`](host_medium-com_feed_19419ab9.md) | ✅ 등록 완료 (Medium tag RSS — httpx_html XML config + Medium recognizer) | 2026-05-21 | F | posts_nonempty, feed_candidates | https://medium.com/feed/tag/programming |
@@ -158,7 +159,7 @@
 | F | 63 |
 | F+A | 1 |
 | F+C | 3 |
-| none | 22 |
+| none | 23 |
 
 ### config_strategy 분포
 
@@ -166,7 +167,7 @@
 |---|---|
 | (미기재) | 31 |
 | handwritten | 20 |
-| httpx_html | 32 |
+| httpx_html | 33 |
 | httpx_json | 13 |
 | mixed | 1 |
 | none | 26 |
@@ -175,5 +176,5 @@
 
 ### 최근 90일 (≥ 2026-02-20)
 
-케이스 134 건.
+케이스 135 건.
 
