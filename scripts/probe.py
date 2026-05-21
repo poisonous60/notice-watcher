@@ -330,7 +330,7 @@ def _run(args: argparse.Namespace, url: str, slug: str) -> int:
     # discover_feeds(6 path 동시 GET) + read_robots — 양쪽 모두 HTTP 라 1~3s.
     # Phase 7~9b 와 결과 의존성 없음 (Phase 10 diagnose 만 소비). 백그라운드로 띄우고 Phase 10 직전 join.
     page_html = ""
-    if headless is not None and headless.body_path:
+    if headless is not None and headless.classification == Classification.OK and headless.body_path:
         page_html = Path(headless.body_path).read_text(encoding="utf-8", errors="replace")
     elif static_results:
         for r in static_results:
