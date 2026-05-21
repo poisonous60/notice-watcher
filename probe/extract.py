@@ -934,6 +934,53 @@ def detect_xenforo_platform(html: str, base_url: str) -> Optional[dict]:
     return {"is_xenforo": True, "base_url": f"{scheme}://{host}{install}"}
 
 
+_LEMMY_MARKERS = (
+    "window.isoData",
+    '"site_res"',
+    '"local_site"',
+    '"default_post_listing_type"',
+    "join-lemmy.org",
+    "/api/v3/",
+)
+
+
+@heuristic
+def detect_lemmy_platform(html: str, base_url: str) -> Optional[dict]:
+    """Lemmy SSR/app-shell marker 로 Lemmy instance 판정.
+
+    Root URL 은 URL 만으론 판정할 수 없어 recognizer 가 직접 잡지 않는다. probe 후
+    `window.isoData` + `site_res.local_site`, join-lemmy 링크, `/api/v3` 같은 Lemmy 고유
+    마커를 확인해 LemmyAdapter 등록으로 넘긴다.
+    """
+    from urllib.parse import urlsplit
+    if not html or not base_url:
+        return None
+    try:
+        parts = urlsplit(base_url)
+        host = (parts.netloc or "").strip().lower()
+        scheme = parts.scheme or "https"
+    except (ValueError, AttributeError):
+        return None
+    if not host or "." not in host:
+        return None
+
+    low = html.lower()
+    strong = "window.isodata" in low and '"site_res"' in low and '"local_site"' in low
+    weak_hits = sum(1 for marker in _LEMMY_MARKERS if marker.lower() in low)
+    og_lemmy = bool(re.search(
+        r'<meta[^>]+(?:property|name)=["\'](?:og:title|description)["\'][^>]+content=["\']lemmy\s+-\s+a community\b',
+        html,
+        re.I,
+    ))
+    if not (strong or weak_hits >= 3 or og_lemmy):
+        return None
+    out = {"is_lemmy": True, "base_url": f"{scheme}://{host}"}
+    m = re.match(r"^/c/([^/?#]+)/*$", parts.path or "", re.I)
+    if m is not None:
+        out["community_name"] = m.group(1)
+    return out
+
+
 @heuristic
 def root_marketing_homepage(
     *,
@@ -1274,6 +1321,7 @@ def write_list_candidates(
     article_meta_signals: Optional[dict] = None,
     discourse_platform: Optional[dict] = None,
     xenforo_platform: Optional[dict] = None,
+    lemmy_platform: Optional[dict] = None,
 ) -> None:
     # body_empty_likely summary — 본문이 본질적으로 없는 사이트 신호.
     # row_external_host (검색결과/aggregator) OR row_interactive_action (게임/투표/SPA) 중 하나라도 true 면 박힘.
@@ -1330,6 +1378,7 @@ def write_list_candidates(
         # config 만들어 등록 시도 (fetch_list 빈 목록이면 일반 파이프라인 폴백).
         "discourse_platform": discourse_platform,
         "xenforo_platform": xenforo_platform,
+        "lemmy_platform": lemmy_platform,
     }
     validate_payload("list_candidates.json", payload, allow_extra=False)
     (out_dir / "list_candidates.json").write_text(

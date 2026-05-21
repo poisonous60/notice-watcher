@@ -32,6 +32,7 @@ from probe.extract import (
     write_list_candidates,
     detect_discourse_platform,
     detect_xenforo_platform,
+    detect_lemmy_platform,
 )
 from probe.external import try_crawl4ai, try_firecrawl, try_jina
 from probe.fetch_headful import (
@@ -397,6 +398,7 @@ def _run(args: argparse.Namespace, url: str, slug: str) -> int:
             meta_signals = article_meta_signals(html=page_html or "")
             discourse_platform = detect_discourse_platform(html=page_html or "", base_url=url)
             xenforo_platform = detect_xenforo_platform(html=page_html or "", base_url=url)
+            lemmy_platform = detect_lemmy_platform(html=page_html or "", base_url=url)
             write_list_candidates(
                 out_dir,
                 base_url=url,
@@ -412,6 +414,7 @@ def _run(args: argparse.Namespace, url: str, slug: str) -> int:
                 article_meta_signals=meta_signals,
                 discourse_platform=discourse_platform,
                 xenforo_platform=xenforo_platform,
+                lemmy_platform=lemmy_platform,
             )
         print(f"  HTML 반복 패턴: {len(html_lists)}건")
         print(f"  JSON API 후보: {len(json_api_lists)}건 (관련도순)")

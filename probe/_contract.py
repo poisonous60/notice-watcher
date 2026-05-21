@@ -182,6 +182,11 @@ _ARTIFACTS: dict[str, ArtifactContract] = {
                                 "None=XenForo 아님. dict={is_xenforo, base_url}. "
                                 "scripts/register.py 가 is_xenforo=true 면 LLM 호출 *전* `engine/recognizers/xenforo.build_config` 로 "
                                 "`<base>/forums/-/index.rss` 전역 RSS httpx_html config 만들어 등록 시도 (fetch_list 빈 목록=RSS 404/빈/차단이면 일반 파이프라인 폴백)."),
+            _ContractField("lemmy_platform", type_hint="dict|null", required=False,
+                           note="Lemmy SSR/app-shell marker(`window.isoData`, `site_res.local_site`, join-lemmy 링크 등) 로 Lemmy instance 판정 — "
+                                "detect_lemmy_platform 산출. None=Lemmy 아님. dict={is_lemmy, base_url, community_name?}. "
+                                "scripts/register.py 가 is_lemmy=true 면 LLM 호출 *전* `engine/recognizers/lemmy.build_config` 로 "
+                                "LemmyAdapter config 를 만들어 `/api/v3/post/list?sort=New&type_=Local` 공개 JSON API 등록을 시도."),
         ),
     ),
 

@@ -1577,6 +1577,23 @@ def _main_inner(argv) -> int:
                     return rc
                 print("[register] XenForo RSS 폴백 (RSS 빈/차단) — 일반 파이프라인 계속.")
 
+    # Lemmy 포지티브 검출 — probe 가 SSR/app-shell marker(window.isoData/site_res/local_site 등)로 판정.
+    # root URL 은 URL 만으론 false-positive 가 커서 recognizer 가 직접 잡지 않고, 이 probe 신호로만 봉합한다.
+    # HTML UI 가 Anubis/Cloudflare 로 막혀도 public `/api/v3/post/list` 가 열려 있으면 LemmyAdapter 로 등록.
+    if not args.gate_only:
+        lem = ((digest.get("list_candidates") or {}).get("lemmy_platform") or {})
+        if lem.get("is_lemmy") and lem.get("base_url"):
+            from engine.recognizers.lemmy import build_config as _lemmy_build
+            lcfg = _lemmy_build(lem["base_url"], community_name=lem.get("community_name"))
+            if lcfg is not None:
+                lcfg["_recognized_platform"] = "lemmy (probe SSR marker -> API v3)"
+                print("[PHASE] lemmy_detect", flush=True)
+                print(f"[register] 🔎 Lemmy 마커 검출 — LemmyAdapter 등록 시도 (base={lem['base_url']})")
+                rc = _register_built_config(lcfg, slug, url, out=args.out, force=args.force)
+                if rc is not None:
+                    return rc
+                print("[register] LemmyAdapter 폴백 (API 빈/차단) — 일반 파이프라인 계속.")
+
     # single-article nav-only 게이트 — board_shape 가 nav 안 사이드바 메뉴를 same-host 신호로 false-positive
     # 통과시키는 걸 차단. holocaustexplained 같은 *unknown host* 단일 article 페이지가 여기서 잡힌다.
     # 인식기 PATTERNS_REJECT 가 *호스트 명시* fast-path 라면 이건 구조 기반 fallback.
