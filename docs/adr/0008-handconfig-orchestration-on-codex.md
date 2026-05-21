@@ -76,7 +76,7 @@
 
 **진행 모델**: 첫 batch 는 *관측-우선*(1-2 청크 띄워 codex 품질 확인) → 신뢰되면 *file-isolated 청크 다발 병렬*. fedi 검증 후 다음 batch 부터 **병렬이 기본**(SKILL §0c).
 
-**무제한 병렬의 정답 = worktree 격리** — 공유 파일 직렬화(register/extract)를 없애려면 codex 세션마다 git worktree(codex_run.ps1 per-worktree cd) → 후 merge. 또는 detect-dispatch 를 auto-discovery 로 refactor(각 플랫폼=새 파일 1개, 공유 파일 0). 둘 다 *미구현* — 현재는 disjoint-allow-list + 직렬화로 충분. 고볼륨에서 직렬화가 병목되면 박는다.
+**무제한 병렬의 정답 = worktree 격리** — ✅ **구현됨** (commit 7c5a7f2, ↓ 미해결 절 참조): `codex_run.ps1 -Worktree` 가 codex 세션마다 분리 worktree+branch 생성 → edit 물리 격리 → 공유 파일 직렬화 불요, same-tree race 0. Claude 가 branch review 후 merge. **다음 batch·다중 세션 동시 작업 시 `--worktree` 가 기본**. (detect-dispatch auto-discovery refactor 는 별개 — 미구현.)
 
 **속도 노브** (commit 66806cf): `codex_handoff.py --profile light`(gpt-5.4-mini+low) / `--reasoning low|minimal`. **default = gpt-5.5 medium 유지** — hand-config/batch 위임은 품질 위해 gpt-5.5 medium 그대로(2026-05-21 사용자 결정). 속도 노브는 *순수 기계적 청크*(템플릿 복제)에만 opt-in.
 
@@ -86,4 +86,5 @@
 - ✅ end-to-end 검증 완료 (2026-05-21): `community.cloudflare.com`(Discourse, gen_fail) 을 codex CLI 직접으로 end-to-end 처리 → commit 4479f22 배포. 190k 토큰 전부 OpenAI(Claude orch 0). 위임 하네스(↑)로 codify.
 - ✅ 병렬 위임 검증 완료 (2026-05-21-fedi): 6 청크 병렬/직렬, same-file race 0(disjoint 배정), diff-review 게이트로 enforcement. ↑ "병렬 위임" 절로 codify.
 - batch 청크 동시 실행 cap(`codex_batch.py --max`)은 현재 안내용 — 실제 cap(작업 큐) 미구현. 고볼륨 시 OpenAI throttle 관측 후 결정.
-- worktree 격리 / detect-dispatch auto-discovery refactor — 무제한 병렬용. 직렬화가 병목될 때 구현.
+- ✅ worktree 격리 구현 (2026-05-21, commit 7c5a7f2): `codex_run.ps1 -Worktree` / `codex_handoff.py --worktree` — codex 가 HEAD 분리 worktree+branch(`codex-wt/<tag>-<stamp>`)에서 실행, edit 물리 격리, rc=0 시 변경을 branch 에 transport-commit. Claude 가 `git diff main..codex-wt/<b>` review → `git merge --no-ff` → `git worktree remove`. **다중 세션(다른 창 codex/Claude 동시)일 때 필수** — 같은-트리 충돌로 파일 유실 관측(fedi 후속 triage). 단 *top-level 세션* 자체 격리는 각 세션이 별도 worktree 에서 띄워야(수동 `git worktree add`); `--worktree` 는 *위임 codex* 격리.
+- detect-dispatch auto-discovery refactor — register.py if-chain → discovered platform loop. 미구현(직렬화 병목 시).

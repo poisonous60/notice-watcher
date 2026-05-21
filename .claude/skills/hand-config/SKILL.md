@@ -106,13 +106,13 @@ dashboard `/triage` 의 "FAILED 큐 codex 위임 처리" 프롬프트를 붙여�
    - **probe-detect 플랫폼**(lemmy/peertube/mbin 등 root-URL) → 두 공유 파일 편집 → **한 청크만 소유, 나머지 직렬**.
    - **수동 config / RSS recognizer**(configs/*.json, 새 recognizer 파일) → 격리 → 병렬 안전.
    - 파일 소유 기록: `output/codex_file_claims.json`(추적·감사).
-3. **codex 위임 — ALLOW-LIST 박아서 병렬 launch**: 각 codex 프롬프트(`codex_handoff.py generic --task-file <f> --launch` 또는 `handconfig`)에 **"이 파일만 편집, 나머지 금지" ALLOW-LIST 제약**을 박는다(2번의 소유 집합). file-isolated 청크(path-match·config)는 **동시 다발 launch**. 공유 파일(register/extract) 청크는 **소유자 1개만, 나머지는 그 commit 후 직렬**.
+3. **codex 위임 — `--worktree` 로 격리 병렬 launch** (권장, same-tree race 구조적 차단): `codex_handoff.py generic --task-file <f> --launch --worktree`. 각 codex 가 HEAD 에서 분리된 git worktree+branch(`codex-wt/<tag>-<stamp>`)에서 실행 → edit 가 main + 다른 codex/세션과 **물리 격리** → 파일 유실·race 0. rc=0 시 변경이 그 branch 에 transport-commit. **다중 세션(다른 창에서 codex/Claude 동시)일 때 특히 필수** — 2026-05-21 같은-트리 충돌로 case 파일 유실 관측. (worktree 미사용 시: ALLOW-LIST 프롬프트 제약 = soft, file-isolated 청크만 다발·공유파일 청크 직렬 — diff-review 가 유일 enforcement.)
    - 첫 batch / codex 품질 미관측이면 *관측-우선*(1-2 청크 먼저 검토) 후 다발로 확대.
    - **모델 = gpt-5.5 medium(default) 유지** — `--profile`/`--reasoning` 속도노브는 *순수 기계적 청크*에만 opt-in (hand-config/batch 는 그대로).
    - codex 가 ALLOW-LIST 밖 파일이 필요하면 → **STOP + 보고**(escape hatch). Claude 가 중재(직접 wiring / 재배정).
 4. 청크별 `python scripts/codex_watch.py <result_file> --loop` (백그라운드) — 완료/타임아웃 감지 (창은 사용자 view, result 파일은 Claude 완료신호).
-5. **각 청크 검토 게이트 = 진짜 enforcement** (ALLOW-LIST 는 soft prompt 제약, 파일시스템 강제 아님): `git diff <청크 파일>` + result 읽기. (a) HARD-STOP 지켰나(commit 안 함), (b) 진단/fix 가 §2 분기 타당한가, (c) **파일셋이 ALLOW-LIST 내인가**(over-edit/제약위반/타 청크 파일 침범), (d) **auto-discovery semantic 충돌**(새 recognizer PATTERNS 가 타 플랫폼 URL 가로채 기존 테스트 깸 — `probe_smoke --stage 5` 로 검출). 문제면 revert/재위임.
-6. **공유 인덱스·배포는 Claude 직렬** (병렬 codex 가 건드리면 레이스): settled 트리에서 `python scripts/probe_smoke.py --stage 3 --stage 5` exit 0 확인 → `python scripts/cases_index.py --backfill-db output/cases.sqlite3` → **청크별 commit (`git add <청크 파일만>`, `-A` 금지 — 타 청크 미완성 작업 stage 방지)** → push(hook) → N100 배포 → 청크별 `case_log log`(commit 후).
+5. **각 청크 검토 게이트**: worktree 모드면 `git diff main..codex-wt/<branch>` + result (worktree 가 격리 → diff 가 그 청크 변경만, 파일셋 침범 걱정 X). 미사용이면 `git diff <청크 파일>` (ALLOW-LIST 는 soft → 파일셋 직접 확인). 검토: (a) HARD-STOP/진단 §2 타당, (b) **auto-discovery semantic 충돌**(새 recognizer PATTERNS 가 타 플랫폼 URL 가로채 기존 테스트 깸 — `probe_smoke --stage 5`), (c) over-edit. 문제면 worktree 버림(merge X)/revert/재위임.
+6. **merge·인덱스·배포는 Claude 직렬**: worktree 모드 — 통과 청크 `git merge --no-ff codex-wt/<branch>` 직렬 → `git worktree remove <path>; git branch -D codex-wt/<branch>`. 그 후 `probe_smoke --stage 3 --stage 5` exit 0 → `cases_index --backfill-db` → push(hook) → N100 배포 → `case_log log`(commit 후). (worktree 미사용이면 settled 트리서 **청크별 `git add <청크 파일만>`, `-A` 금지** 후 동일.)
 7. **batch 후 `python scripts/triage.py prune-orphans --execute`** — recognizer 추가가 url_to_slug 를 바꿔 옛 host_ FAILED/triage_queue 마커가 orphan 으로 남음 (hash 매칭으로 prune).
 
 단건이거나 codex 위임이 과한 경우 (단순 selector 한 줄)엔 Claude 가 직접 §1~§5 해도 됨 — 위임은 *큐가 크거나 quota 절약 필요할 때* 의 도구. **무제한 병렬**(공유 파일 직렬화 제거)이 필요하면 worktree 격리 또는 detect-dispatch auto-discovery refactor — ADR 0008 §병렬 위임(미구현, 직렬화 병목 시). 하네스 상세 = ADR 0008, AGENTS.md §6.
