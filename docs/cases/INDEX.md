@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 146 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 147 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -37,6 +37,7 @@
 | [`host_medium-com_airbnb-engineering_2931b5a3`](host_medium-com_airbnb-engineering_2931b5a3.md) | ✅ 등록 완료 (Medium publication → RSS config + recognizer) | 2026-05-21 | F | posts_nonempty, feed_candidates | https://medium.com/airbnb-engineering |
 | [`host_lemmy-ml_root_9bc876aa`](host_lemmy-ml_root_9bc876aa.md) | ✅ 자동 등록 가능 (Lemmy recognizer + LemmyAdapter 신규 — API v3 직접 호출) | 2026-05-21 | F | posts_nonempty, article_body_len | https://lemmy.ml/ |
 | [`host_indiehackers-co_root_e4490db0`](host_indiehackers-co_root_e4490db0.md) | 🔧 손 config 추가 — 정적 Ember HTML의 story 카드에서 홈 피드 30건 baseline | 2026-05-21 | none | posts_nonempty, first_article_url_missing, static_variant_rows_not_promoted | https://www.indiehackers.com/ |
+| [`host_hubspot-com_product-updates_33c05b99`](host_hubspot-com_product-updates_33c05b99.md) | 🔧 수동 config — HubSpot Releases and Updates JSON API 로 baseline 30건 등록 | 2026-05-21 | none | posts_nonempty, khoros_resources_api | https://www.hubspot.com/product-updates |
 | [`host_grafana-com_blog_d681aff2`](host_grafana-com_blog_d681aff2.md) | ✅ 수동 config 등록 (httpx_html, baseline 30건) | 2026-05-21 | F | posts_nonempty | https://grafana.com/blog/ |
 | [`host_france24-com_en_a8047c17`](host_france24-com_en_a8047c17.md) | 🚫 보류 (anti-bot 403 capability_blocked; stealth 우회 구현 안 함) | 2026-05-21 | none | capability_blocked, fetch_list | https://www.france24.com/en/ |
 | [`host_fedia-io_root_1f0bc0d6`](host_fedia-io_root_1f0bc0d6.md) | ⛔ capability_blocked — root/combined가 login으로 redirect, mbin API는 현재 401; rc=5 Mbin rescue path 추가 | 2026-05-21 | F | capability_blocked, login_redirect, mbin_api_unauthorized, fediverse_api_rescue | https://fedia.io/ |
@@ -170,7 +171,7 @@
 | F | 69 |
 | F+A | 1 |
 | F+C | 3 |
-| none | 27 |
+| none | 28 |
 
 ### config_strategy 분포
 
@@ -179,7 +180,7 @@
 | (미기재) | 31 |
 | handwritten | 21 |
 | httpx_html | 41 |
-| httpx_json | 14 |
+| httpx_json | 15 |
 | mixed | 1 |
 | none | 27 |
 | playwright_html | 10 |
@@ -187,5 +188,5 @@
 
 ### 최근 90일 (≥ 2026-02-20)
 
-케이스 146 건.
+케이스 147 건.
 
