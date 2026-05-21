@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "site": "dataverse.harvard.edu",
+  "board": "harvard",
+  "strategy": "playwright_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept-Language": "en-US,en;q=0.9"
+  },
+  "timeout": 30,
+  "nav_timeout_ms": 40000,
+  "idle_timeout_ms": 12000,
+  "quiet_ms": 800,
+  "list": {
+    "url_template": "https://dataverse.harvard.edu/dataverse/harvard",
+    "pagination": {"kind": "none"},
+    "wait_selector": "tr:has(div.datasetResult)",
+    "row_selector": "tr:has(div.datasetResult)",
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "div.card-title-icon-block a[href*=\"dataset.xhtml?persistentId=\"]",
+          "attr": "href",
+          "transform": [["regex_extract", "persistentId=([^&;]+)"], ["collapse_ws"]]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "div.card-title-icon-block a span",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "div.card-title-icon-block a[href*=\"dataset.xhtml?persistentId=\"]",
+          "attr": "href",
+          "transform": [["urljoin", "https://dataverse.harvard.edu"]]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "span.text-muted",
+          "text": true,
+          "pick": "first_matching",
+          "match": "^[A-Z][a-z]{2} \\d{1,2}, \\d{4}$",
+          "transform": [["iso8601", ["%b %d, %Y"], "Z"]]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "div.datasetResult",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "wait_selector": "body",
+    "content": [
+      {"from": "css", "selector": "#datasetForm, #content, body", "html": true}
+    ]
+  },
+  "_source_url": "https://dataverse.harvard.edu/dataverse/harvard",
+  "_note": "Harvard Dataverse search results are rendered into datasetResult rows. The route is a real dataset board sorted by date; playwright_html is used to wait for the rendered result table."
+}

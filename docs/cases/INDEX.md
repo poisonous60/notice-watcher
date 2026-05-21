@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 161 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 167 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -32,6 +32,7 @@
 | [`host_sigmod-org_root_486a8db8`](host_sigmod-org_root_486a8db8.md) | 🧩 수동 config — WordPress RSS feed 로 baseline 가능 | 2026-05-21 | none | posts_nonempty, rss_feed_available | https://sigmod.org/ |
 | [`host_shopify-enginee_root_25b7d4e3`](host_shopify-enginee_root_25b7d4e3.md) | ✅ 수동 config 등록 (static article cards, baseline 16건) | 2026-05-21 | F | register_subprocess_timeout, posts_nonempty | https://shopify.engineering/ |
 | [`host_salesforce-com_releases_bf785b04`](host_salesforce-com_releases_bf785b04.md) | ✅ 등록 (Salesforce release resources card list) | 2026-05-21 | none | capability_blocked, fetch_list_403, salesforce_releases | https://www.salesforce.com/releases/ |
+| [`host_protocols-io_root_153de208`](host_protocols-io_root_153de208.md) | 🔧 손 config 등록 후보 — public protocol search 목록 playwright_html 10건 검증 | 2026-05-21 | none | spa_render_required, root_landing_page, carousel_duplicates | https://www.protocols.io/ |
 | [`host_producthunt-com_feed_51ccf15a`](host_producthunt-com_feed_51ccf15a.md) | ✅ 등록 (Product Hunt Atom feed 사용, 본문은 list-only) | 2026-05-21 | none | posts_nonempty, rss_feed_available, atom_feed, body_empty_acceptable | https://www.producthunt.com/feed |
 | [`host_posthog-com_changelog_7d58ef58`](host_posthog-com_changelog_7d58ef58.md) | 🧩 손어댑터 — Gatsby page-data JSON 을 최신순으로 뒤집어 changelog baseline 30건 등록 | 2026-05-21 | F | title_nonempty, wrong_first_article_url, gatsby_page_data_oldest_first | https://www.posthog.com/changelog |
 | [`host_popl26-sigplan-_root_cc2798a1`](sigplan-conf.md) | ✅ 해결 (SIGPLAN/researchr Conf recognizer 추가) | 2026-05-21 | F | post_id_unique | https://popl26.sigplan.org/ |
@@ -43,8 +44,12 @@
 | [`host_microsoft-com_en-us_000c6d5a`](host_microsoft-com_en-us_000c6d5a.md) | 🔧 손 config (작동중, baseline 30, httpx_json) | 2026-05-21 |  | published_at_iso, article_body_len, nav_only_same_host | https://www.microsoft.com/en-us/microsoft-365/roadmap |
 | [`host_medium-com_feed_19419ab9`](host_medium-com_feed_19419ab9.md) | ✅ 등록 완료 (Medium tag RSS — httpx_html XML config + Medium recognizer) | 2026-05-21 | F | posts_nonempty, feed_candidates | https://medium.com/feed/tag/programming |
 | [`host_medium-com_airbnb-engineering_2931b5a3`](host_medium-com_airbnb-engineering_2931b5a3.md) | ✅ 등록 완료 (Medium publication → RSS config + recognizer) | 2026-05-21 | F | posts_nonempty, feed_candidates | https://medium.com/airbnb-engineering |
+| [`host_lens-org_lens_fbd1435c`](host_lens-org_lens_fbd1435c.md) | ⚪ no_change — Lens URL은 앱/검색 랜딩이며 반복 신규 항목 목록 아님 | 2026-05-21 | none | not_a_board, search_landing, nav_links_only | https://www.lens.org/lens/ |
 | [`host_lemmy-ml_root_9bc876aa`](host_lemmy-ml_root_9bc876aa.md) | ✅ 자동 등록 가능 (Lemmy recognizer + LemmyAdapter 신규 — API v3 직접 호출) | 2026-05-21 | F | posts_nonempty, article_body_len | https://lemmy.ml/ |
+| [`host_kaggle-com_datasets_30f39835`](host_kaggle-com_datasets_30f39835.md) | ⚪ no_change — Kaggle datasets page renders reCAPTCHA challenge only in headless | 2026-05-21 | none | captcha, capability_blocked, no_board_rows | https://www.kaggle.com/datasets |
+| [`host_jstage-jst-go-j_browse_b0d95528`](host_jstage-jst-go-j_browse_b0d95528.md) | 🔧 손 config 등록 후보 — J-STAGE latest issue rows playwright_html 10건 검증 | 2026-05-21 | none | spa_render_required, issue_rows | https://www.jstage.jst.go.jp/browse/-char/en |
 | [`host_indiehackers-co_root_e4490db0`](host_indiehackers-co_root_e4490db0.md) | 🔧 손 config 추가 — 정적 Ember HTML의 story 카드에서 홈 피드 30건 baseline | 2026-05-21 | none | posts_nonempty, first_article_url_missing, static_variant_rows_not_promoted | https://www.indiehackers.com/ |
+| [`host_icpsr-umich-edu_web_7ddcbb54`](host_icpsr-umich-edu_web_7ddcbb54.md) | ⚪ no_change — 입력 URL은 ICPSR home/marketing page 로 redirect | 2026-05-21 | none | not_a_board, root_landing_page, redirected_home | https://www.icpsr.umich.edu/web/pages/ |
 | [`host_hubspot-com_product-updates_33c05b99`](host_hubspot-com_product-updates_33c05b99.md) | 🔧 수동 config — HubSpot Releases and Updates JSON API 로 baseline 30건 등록 | 2026-05-21 | none | posts_nonempty, khoros_resources_api | https://www.hubspot.com/product-updates |
 | [`host_grafana-com_blog_d681aff2`](host_grafana-com_blog_d681aff2.md) | ✅ 수동 config 등록 (httpx_html, baseline 30건) | 2026-05-21 | F | posts_nonempty | https://grafana.com/blog/ |
 | [`host_france24-com_en_a8047c17`](host_france24-com_en_a8047c17.md) | 🚫 보류 (anti-bot 403 capability_blocked; stealth 우회 구현 안 함) | 2026-05-21 | none | capability_blocked, fetch_list | https://www.france24.com/en/ |
@@ -58,6 +63,7 @@
 | [`host_diode-zone_root_531d9bcb`](host_diode-zone_root_531d9bcb.md) | ✅ 자동 등록 가능 (PeerTube recognizer + PeerTubeAdapter 신규 — API v1 직접 호출) | 2026-05-21 | F | posts_nonempty, article_body_len | https://diode.zone/ |
 | [`host_df-nexon-com_community_cae73546`](host_df-nexon-com_community_cae73546.md) | ✅ 수동 config (작동중, baseline 21, httpx_html) | 2026-05-21 | none | posts_nonempty | https://df.nexon.com/community/news/notice/list |
 | [`host_dblp-org_db_e427dd1d`](host_dblp-org_db_e427dd1d.md) | 🧩 수동 config — DBLP new issues/volumes RSS 사용 | 2026-05-21 | none | posts_nonempty, rss_feed_available | https://dblp.org/db/conf/ |
+| [`host_dataverse-harva_dataverse_5133678a`](host_dataverse-harva_dataverse_5133678a.md) | 🔧 손 config 등록 후보 — Harvard Dataverse datasetResult rows playwright_html 9건 검증 | 2026-05-21 | none | spa_render_required, dataset_rows | https://dataverse.harvard.edu/dataverse/harvard |
 | [`host_datadoghq-com_blog_447ffb34`](host_datadoghq-com_blog_447ffb34.md) | ✅ 수동 config 등록 (httpx_html, baseline 6건) | 2026-05-21 | F | posts_nonempty | https://www.datadoghq.com/blog/ |
 | [`host_community-cloud_root_e65f04ea`](host_community-cloud_root_e65f04ea.md) | ✅ 수동 config (Playwright /latest 목록, 본문은 challenge-gated라 제목·URL 알림) | 2026-05-21 | none | article_body_len, fetch_list_403, discourse_json_challenge | https://community.cloudflare.com/ |
 | [`host_cloud-google-co_release-notes_68689125`](host_cloud-google-co_release-notes_68689125.md) | ✅ 해결 (Google Cloud release notes 공식 Atom feed recognizer + adapter) | 2026-05-21 | F | probe_timeout, static_docs_changelog, official_feed_available | https://cloud.google.com/release-notes |
@@ -185,7 +191,7 @@
 | F | 72 |
 | F+A | 1 |
 | F+C | 3 |
-| none | 35 |
+| none | 41 |
 
 ### config_strategy 분포
 
@@ -197,10 +203,10 @@
 | httpx_json | 15 |
 | mixed | 1 |
 | none | 27 |
-| playwright_html | 10 |
+| playwright_html | 16 |
 | rejected | 1 |
 
 ### 최근 90일 (≥ 2026-02-20)
 
-케이스 161 건.
+케이스 167 건.
 
