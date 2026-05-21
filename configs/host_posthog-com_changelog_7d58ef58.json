@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "site": "posthog.com",
+  "board": "changelog",
+  "strategy": "handwritten",
+  "adapter": "PostHogChangelogAdapter",
+  "kwargs": {
+    "url": "https://posthog.com/page-data/changelog/page-data.json",
+    "timeout": 15.0
+  },
+  "_slug_board": "changelog",
+  "_source_url": "https://www.posthog.com/changelog",
+  "_note": "PostHog changelog is rendered from Gatsby page-data. Probe found page-data/changelog/page-data.json, but the allRoadmap.nodes array is oldest-first and HTML repeating patterns are navigation/timeline buttons, causing title selector failures. Handwritten adapter reverses the JSON nodes so polling sees newest changelog items first. robots.txt only disallows markdown files for named bots; no Crawl-Delay. Adapter uses a conservative 5-8s polite sleep."
+}
