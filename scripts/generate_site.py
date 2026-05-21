@@ -286,7 +286,7 @@ def _power_iteration(matrix: list[list[float]], start_index: int) -> tuple[list[
     return vector, eigenvalue
 
 
-CONT_FEATURE_NAMES = ["activity", "age", "instability", "baseline", "empty body"]
+CONT_FEATURE_NAMES = ["activity", "age", "glitches", "post count", "empty posts"]
 
 
 class SiteProjection(NamedTuple):
@@ -436,21 +436,13 @@ def svg_pca_scatter(sites: list[dict], now: datetime, color_map: dict) -> str:
         return height - pad - (value - min_y) * plot_h / span_y
 
     circles = []
-    centroids = {}
     for point in points:
         posts = len(point.get("seen_post_ids") or [])
-        radius = 4 + (8 * posts / max_posts if max_posts else 0)
+        radius = 3 + (5 * posts / max_posts if max_posts else 0)
         title = f"{point['host']} · {point['platform']} · {point.get('last_status') or 'unknown'}"
-        px = sx(point["x"])
-        py = sy(point["y"])
-        platform = str(point["platform"])
-        bucket = centroids.setdefault(platform, [0.0, 0.0, 0])
-        bucket[0] += px
-        bucket[1] += py
-        bucket[2] += 1
         circles.append(
-            f'<circle cx="{px:.1f}" cy="{py:.1f}" r="{radius:.1f}" '
-            f'fill="{color_map.get(point["platform"], PALETTE[0])}" opacity="0.82">'
+            f'<circle cx="{sx(point["x"]):.1f}" cy="{sy(point["y"]):.1f}" r="{radius:.1f}" '
+            f'fill="{color_map.get(point["platform"], PALETTE[0])}" opacity="0.58">'
             f"<title>{esc(title)}</title></circle>"
         )
 
@@ -488,15 +480,6 @@ def svg_pca_scatter(sites: list[dict], now: datetime, color_map: dict) -> str:
                 f'<text x="{label_x:.1f}" y="{label_y:.1f}" text-anchor="{anchor}" class="svg-label loading-label">{esc(name)}</text>'
             )
 
-    cluster_labels = []
-    for platform, (total_x, total_y, count) in centroids.items():
-        if count <= 0:
-            continue
-        cluster_labels.append(
-            f'<text x="{total_x / count:.1f}" y="{(total_y / count) - 10:.1f}" text-anchor="middle" '
-            f'class="cluster-label" fill="{color_map.get(platform, PALETTE[0])}">{esc(platform)}</text>'
-        )
-
     variance_note = ""
     if projection.pca_ready and projection.total_variance > 0:
         pc1 = round(100 * projection.lambda1 / projection.total_variance)
@@ -511,9 +494,8 @@ def svg_pca_scatter(sites: list[dict], now: datetime, color_map: dict) -> str:
         f'<rect x="0" y="0" width="{width}" height="{height}" class="scatter-bg"></rect>'
         f'<rect x="{pad}" y="{pad}" width="{plot_w}" height="{plot_h}" class="scatter-frame"></rect>'
         f"{note}"
-        + "".join(loading_arrows)
         + "".join(circles)
-        + "".join(cluster_labels)
+        + "".join(loading_arrows)
         + variance_note
         + "</svg>"
     )
@@ -690,10 +672,16 @@ def render_html(configs: dict, poll: dict, jobs: dict, generated_at: datetime) -
     .svg-value {{ fill: var(--ink); font-weight: 700; }}
     .scatter-bg {{ fill: var(--panel); }}
     .scatter-frame {{ fill: none; stroke: var(--muted); stroke-width: 1; }}
-    .loading-arrow {{ stroke: var(--ink); stroke-width: 1; opacity: 0.7; }}
-    .loading-head {{ fill: var(--ink); opacity: 0.7; }}
-    .loading-label {{ fill: var(--ink); opacity: 0.72; }}
-    .cluster-label {{ font: 600 12px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
+    .loading-arrow {{ stroke: var(--ink); stroke-width: 1.2; opacity: 0.85; }}
+    .loading-head {{ fill: var(--ink); opacity: 0.85; }}
+    .loading-label {{
+      fill: var(--ink);
+      font-weight: 600;
+      paint-order: stroke;
+      stroke: var(--panel);
+      stroke-width: 3.5px;
+      stroke-linejoin: round;
+    }}
     ol, ul {{ padding-left: 22px; }}
     .legend {{
       list-style: none;
@@ -806,7 +794,7 @@ def render_html(configs: dict, poll: dict, jobs: dict, generated_at: datetime) -
     <figure>
       {scatter_chart}
       <ul class="legend">{legend_html}</ul>
-      <figcaption>Figure 1. Biplot of watched sites. Each point is one site, positioned so that nearby sites are similar across platform, activity, age, and health; color encodes platform and clusters are labeled. Arrows show how the underlying features align with the two principal directions (a point further along an arrow scores higher on that feature). PC1/PC2 capture the listed share of total variation. Hover a point for its domain.</figcaption>
+      <figcaption>Figure 1. A map of every site we watch. Each dot is one site — its <strong>color</strong> is the platform (see legend below) and its <strong>size</strong> shows how busy it is. We describe each site by a few simple traits (how active it is, how long we've watched it, how often its updates glitch) and lay them on a flat map so that <strong>similar sites land close together</strong>. Same-colored dots clump, and the overall spread shows how varied our coverage is. The gray arrows point toward higher values of each trait — dots near the “age” arrow are older, near “activity” are busier. Hover any dot to see its domain.</figcaption>
     </figure>
   </section>
 
