@@ -43,7 +43,9 @@ description: >-
 
 3. **capability_blocked (rc=5, `.FAILED.json`)** — captcha/anti-bot/cloudflare 차단 = **능력 부족(정책 아님)**. `register.py` 가 자동으로 rc=5+FAILED 박음 (2026-05-21 policy_reject 에서 split). stealth/anti-detection 어댑터로 재도전 (§2e + docs/크롤링 지침.md §6 stealth 허용). `policy_reject`(rc=2 LOGIN_REQUIRED)·`url_dead`(rc=4 죽은 URL)와 **구분** — 이 둘은 의도된 거부, 작업 X.
 
-4. **gen_fail (rc=1, `.FAILED.json`)** — 기존 hand-config §1~§5 그대로 (진단 → 수동 config 또는 probe/prompt 개선).
+4. **gen_fail (rc=1, `.FAILED.json`)** — 기존 hand-config §1~§5 그대로 (진단 → 수동 config 또는 probe/prompt 개선). SPA(정적 HTML 에 목록 없음, struct 신호 "SPA"/"JS 실행 필요") 잔여 → **render(playwright_html) 트랙 자동 진행**.
+
+> **자동 진행 (묻지 X) — 2026-05-21 사용자 결정.** batch 가 cap_blocked(rc=5)·SPA(render 필요) 잔여를 남겨도 **사용자에게 "stealth/render 투자할까?" 물어보지 말 것**. clean win(recognizer·RSS·수동 selector) 다 처리한 뒤 **stealth(cap_blocked)·render(SPA) 트랙을 알아서 이어서 시도**한다. 어휘는 [[feedback-batch-fail-priority]] 그대로 (bug>gate_reject>capability_blocked>gen_fail). stealth/render 도 실패하면 그제서야 그 사이트만 "root-cause = 능력 한계" 로 case 기록 + 종료. **gate_reject(content 판정)·url_dead·policy_reject 는 여전히 작업 X** (정상 거부). 묻는 건 *정책상 회색지대*(우회 금지선·LOGIN 등)일 때만.
 
 `policy_reject`(rc=2)·`url_dead`(rc=4) = 작업 대상 아님 (정상 거부). 분포 확인은 `python scripts/triage.py list` + dashboard.
 
