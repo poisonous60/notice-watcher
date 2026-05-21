@@ -43,7 +43,7 @@ description: >-
 
 3. **capability_blocked (rc=5, `.FAILED.json`)** — captcha/anti-bot/cloudflare 차단 = **능력 부족(정책 아님)**. `register.py` 가 자동으로 rc=5+FAILED 박음 (2026-05-21 policy_reject 에서 split). stealth/anti-detection 어댑터로 재도전 (§2e + docs/크롤링 지침.md §6 stealth 허용). `policy_reject`(rc=2 LOGIN_REQUIRED)·`url_dead`(rc=4 죽은 URL)와 **구분** — 이 둘은 의도된 거부, 작업 X.
 
-4. **gen_fail (rc=1, `.FAILED.json`)** — 기존 hand-config §1~§5 그대로 (진단 → 수동 config 또는 probe/prompt 개선). SPA(정적 HTML 에 목록 없음, struct 신호 "SPA"/"JS 실행 필요") 잔여 → **render(playwright_html) 트랙 자동 진행**.
+4. **gen_fail (rc=1, `.FAILED.json`)** — **먼저 §0b-2 screen-out** (content-as-list 오탐·soft-404 미검출 골라내 영구 게이트로 봉합 + 거부 — 진짜 게시판 아님). 통과한 잔여만 기존 hand-config §1~§5 (진단 → 수동 config 또는 probe/prompt 개선). SPA(정적 HTML 에 목록 없음, struct 신호 "SPA"/"JS 실행 필요") 잔여 → **render(playwright_html) 트랙 자동 진행**.
 
 > **자동 진행 (묻지 X) — 2026-05-21 사용자 결정.** batch 가 cap_blocked(rc=5)·SPA(render 필요) 잔여를 남겨도 **사용자에게 "stealth/render 투자할까?" 물어보지 말 것**. clean win(recognizer·RSS·수동 selector) 다 처리한 뒤 **stealth(cap_blocked)·render(SPA) 트랙을 알아서 이어서 시도**한다. 어휘는 [[feedback-batch-fail-priority]] 그대로 (bug>gate_reject>capability_blocked>gen_fail). stealth/render 도 실패하면 그제서야 그 사이트만 "root-cause = 능력 한계" 로 case 기록 + 종료. **gate_reject(content 판정)·url_dead·policy_reject 는 여전히 작업 X** (정상 거부). 묻는 건 *정책상 회색지대*(우회 금지선·LOGIN 등)일 때만.
 
@@ -88,6 +88,24 @@ git status --short -- prompts/ engine/ probe/ generate/ engine/recognizers/
 ### (a)+(b) 모두 fail 시 → §1 진단 정상 진입
 
 본 preflight 결과는 §2 진입 전 강제 인용 6번 으로 인용 (skim 방지). 형식 = `preflight: <a-hit|b-hit|miss> — <slug> [<commit-sha-if-b-hit>]`.
+
+---
+
+## 0b-2. gen_fail screen-out — "진짜 게시판 아님" 2종 먼저 (content-as-list 오탐 · soft-404 미검출)
+
+gen_fail(rc=1) 큐로 *새는* false-negative 2종. 둘 다 진짜 게시판이 아니라 **수동 config 작성 X** — 영구 게이트로 봉합(CLAUDE.md §8a) + 그 slug 거부. §1 진단 진입 *전* 각 gen_fail slug 에 먼저 분류. (gate_reject(rc=3 분류기 content)·soft-404 *검출됨*(rc=4)은 이미 자동 거부 → 큐에 없음. 여기 대상은 게이트를 *빠져나가* gen_fail 로 떨어진 것.)
+
+### (P1) content-as-list 오탐 — 단일 글인데 index(목록)로 통과
+- **왜 샘**: classify(ADR 0007)는 false-reject(게시판→content 오거부)를 가장 싫어해 index 편향 (`prompts/classify.system.txt` 11줄; accept-path content-reject 는 conf≥0.7 만 = `register.py:_CLASSIFY_REJECT_MIN_CONF`). 단일 글이 content conf<0.7 또는 index 판정으로 통과 → fetch_list 0~1행 → `[FAIL] posts_nonempty`/`article_body_len` → gen_fail.
+- **신호**: `list_candidates.json` 반복 same-host 글-링크 행 0~소수 + `article.html` 가 한 편 긴 본문(목록이면 행 여럿). (classify 결과 자체는 FAILED.json 미영속 — stdout `[register] 🔴/🔵` 로깅만 — 이 신호로 재판단.)
+- **fix (영구 게이트 = A-layer)**: `prompts/classify.system.txt` 의 *content 측 판별* 보강 — 이 유형이 content 로 안 갈린 이유를 1줄 룰로 (예: 반복 글-링크 행 ~0 + 단일 본문 = content). **게이트 휴리스틱 추가 X** (분류기 layer 의 일, [[project-llm-veto-reject-gates]]). 그 뒤 `register.py --reuse-probe "<URL>"` 로 분류기가 이제 content 거부하는지 확인 → 거부되면 slug `rejected`. outcome=`improved`(분류기 generic 개선).
+
+### (P2) soft-404 미검출 — not-found shell 인데 패턴 미스
+- **왜 샘**: `probe/extract.py:detect_soft_404` 의 `_SOFT_404_PATTERNS` 가 그 언어/문구를 못 잡아 verdict 가 soft_404 안 됨 → 정상 board 로 보고 진행 → 0행 → gen_fail.
+- **신호**: `list.html`/`article.html` 의 title/h1 이 "없는 페이지"/"삭제됨"/"404"/타 언어 not-found 인데 `diagnosis.json` verdict ≠ soft_404.
+- **fix (영구 게이트 = C-layer)**: `_SOFT_404_PATTERNS` 에 그 문구 패턴 추가 + `tests/probe_heuristics/test_detect_soft_404.py` 케이스 (§4 휴리스틱 규칙). 그 뒤 `register.py --reuse-probe` → verdict=soft_404 → rc=4 자동 거부 확인 → slug `rejected`. outcome=`improved`.
+
+둘 다 매칭 0 → 정상 gen_fail → §1 진단 정상 진입. P1/P2 매칭이면 §1 수동 config 트랙 skip — 거부 + 게이트 1줄이 결과물. §2 진입 전 강제 인용 대신 case body 에 `screen-out: P1|P2 — <신호 1줄>` 명시.
 
 ---
 
