@@ -33,6 +33,7 @@ HARD_STOP = """\
 - N100 ssh / systemctl / git pull / 배포 금지.
 - 변경은 working tree 에 남겨둬라. commit·배포는 검토 후 Claude 가 한다.
 - triage 큐(output/triage_queue.*)·이미 등록된 configs/·poll_state/ 는 작업 대상 외엔 건드리지 마라.
+- `scripts/cases_index.py` 실행 / `--backfill-db output/cases.sqlite3` / `docs/cases/INDEX.md` 갱신 **금지** — 공유 인덱스·DB 는 Claude 가 청크 수집 후 *직렬* backfill 한다. 병렬 codex 가 동시에 backfill 하면 SQLite lock race 로 case_runs row 가 유실된다. 너는 `docs/cases/<slug>.md` 파일만 만든다 (INDEX·DB 는 Claude 몫).
 
 ## 마무리 (이 블록을 마지막 메시지로)
 - 무엇을 진단/수정했나 (root-cause 1-2줄)
@@ -73,7 +74,7 @@ def build_handconfig(slug: str, url: str, board: str | None, note: str | None) -
 1. preflight (§0b) — 이미 고쳐졌나 / 옆 작업이 큐 stale 화했나.
 2. §1~§2 진단 (강제 인용 6개) → 추론 개선(probe/schema/prompt) 1순위, 안 되면 수동 config(단일/플랫폼)·손어댑터.
 3. config 작성 + 검증: `python scripts/probe_smoke.py` 또는 make_adapter 스모크로 posts_nonempty 통과.
-4. `docs/cases/{slug}.md` 작성 + `python scripts/cases_index.py` + `--backfill-db output/cases.sqlite3`.
+4. `docs/cases/{slug}.md` 작성 (그 파일만 — `cases_index.py`/`--backfill-db`/INDEX.md 는 돌리지 마라, Claude 직렬).
 5. robots/polite_sleep 정책 준수 (docs/크롤링 지침.md).
 
 {HARD_STOP}"""
@@ -104,7 +105,7 @@ def build_handconfig_batch(members: list[dict], group_key: str) -> str:
 2. 공유 수정(추론 개선 1순위: probe/schema/prompt/recognizer)을 *한 번* 박고, 나머지 멤버는 그 수정으로 재검증.
 3. 멤버별 `configs/<slug>.json` (필요 시) + `docs/cases/<slug>.md`.
 4. 검증: `python scripts/probe_smoke.py --stage 3 --stage 5` PASS + 각 멤버 make_adapter 스모크 posts_nonempty.
-5. `python scripts/cases_index.py` + `--backfill-db output/cases.sqlite3`.
+5. 거기까지만 — `cases_index.py`/`--backfill-db`/INDEX.md 는 돌리지 마라 (병렬 backfill = SQLite lock race, row 유실). Claude 가 청크 수집 후 직렬 backfill 한다.
 
 {HARD_STOP}
 - **공유 인덱스(INDEX.md·cases.sqlite3·사이트별 기록.md)·git commit 은 Claude 가 직렬 처리** — 너는 청크 멤버 파일만 만들고 STOP. (병렬 세션 레이스 방지)"""
