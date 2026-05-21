@@ -66,4 +66,25 @@ def run() -> list[tuple[str, bool, str]]:
         f"view_id={s_view_id}",
     ))
 
+    # 10. XenForo 프로필 페이지 < thread (2026-05-21-forums: avsforum `/members/<slug>.<id>/` 가
+    #     `/threads/<slug>.<id>/` 와 동률 7~8 로 first_article 오인 → gen_fail).
+    s_member = _article_url_score("https://www.avsforum.com/members/ralph-potts.31795/", "www.avsforum.com")
+    s_thread = _article_url_score("https://www.avsforum.com/threads/some-topic.123456/", "www.avsforum.com")
+    cases.append(("xenforo_member_lower_than_thread", s_member < s_thread, f"member={s_member} thread={s_thread}"))
+
+    # 11. 서브포럼/카테고리 listing < thread (hardforum `/forums/<slug>.<id>/`, fredmiranda `/forum/board/41/`).
+    s_forums_cat = _article_url_score("https://hardforum.com/forums/pc-gaming-hardware.113/", "hardforum.com")
+    s_board_cat = _article_url_score("https://www.fredmiranda.com/forum/board/41/", "www.fredmiranda.com")
+    cases.append(("forums_category_lower_than_thread", s_forums_cat < s_thread, f"forums_cat={s_forums_cat} thread={s_thread}"))
+    cases.append(("board_id_category_penalized", s_board_cat <= 4, f"board_cat={s_board_cat}"))
+
+    # 12. 프로필 query (?u=) 페널티 (eevblog `/forum/profile/?u=115313`).
+    s_profile_q = _article_url_score("https://www.eevblog.com/forum/profile/?u=115313", "www.eevblog.com")
+    cases.append(("profile_query_penalized", s_profile_q <= 4, f"profile_q={s_profile_q}"))
+
+    # 13. 회귀: 한국형 본문 URL (`/board/<cat>/read.html?...number=`) 은 /board/ 단수라도 안 깎임
+    #     (humoruniv — read 동사 + number= → 진짜 글).
+    s_kr_article = _article_url_score("https://www.humoruniv.com/board/humor/read.html?table=pds&number=1410805", "www.humoruniv.com")
+    cases.append(("kr_read_article_still_high", s_kr_article >= 7, f"kr_article={s_kr_article}"))
+
     return cases

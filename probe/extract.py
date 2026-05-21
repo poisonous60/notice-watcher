@@ -494,6 +494,18 @@ def _article_url_score(u: Optional[str], base_host: str) -> int:
     path_l = (sp.path or "").lower()
     if re.search(r"/(search|list|index|all|category|tag|sort|filter)(?:/|$|\?)", path_l):
         s -= 2
+    # 페널티: 프로필/유저 페이지 — 글 본문이 아님. XenForo `/members/<slug>.<id>/` 가 thread
+    #   `/threads/<slug>.<id>/` 와 같은 모양이라 same_host+id 로 동률(둘 다 7~8) → first_article 로 오인
+    #   (avsforum members/eevblog ?u= 누적, 2026-05-21-forums batch). -3 으로 글 후보에서 밀어낸다.
+    if re.search(r"/(members?|profiles?|users?)(?:/|$)", path_l):
+        s -= 3
+    if re.search(r"(?:^|&)(u|user|userid|member)=", q):
+        s -= 3
+    # 페널티: 카테고리/서브포럼 listing — forums/boards 복수형, 또는 board/forum/node/category 뒤 bare 숫자 id
+    #   (XenForo `/forums/<slug>.<id>/`, fredmiranda `/forum/board/41/`, hardforum). 글 목록이지 글이 아님.
+    if (re.search(r"/(forums|boards|categories)(?:/|$)", path_l)
+            or re.search(r"/(board|forum|node|category)/\d+/?$", path_l)):
+        s -= 2
     # 보너스: path-only 깨끗한 URL (machine-name 패턴, query 없음)
     if not sp.query and re.search(r"/[a-z0-9][a-z0-9_\-]{4,}/?$", path_l):
         s += 1
