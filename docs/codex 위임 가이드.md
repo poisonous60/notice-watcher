@@ -79,6 +79,8 @@ HARD-STOP 프롬프트가 이걸 박지만 — **prompt 제약(soft)** 이라 �
 - **여러 codex 세션 = 같은 working tree 공유** (codex_run.ps1 `Set-Location $repo`, 격리 X). 같은 파일 동시 편집 = 디스크 레이스. 일반 작업은 보통 1 세션이라 무관하나, 동시 띄우면 disjoint 파일 배정(ADR 0008 §병렬 위임 규율).
 - **PowerShell `Tee-Object`/`2>&1` 금지** — Tee 는 버퍼링+UTF-16 로 live 모니터 깨짐, `2>&1` 은 native stderr 를 ErrorRecord 로 감싸 전부 빨강. 완료는 `-o` 결과파일로만.
 - **codex-companion broker(`codex:rescue`) 경로 회피** — Claude in-loop(토큰 목표 위배) + Windows stdout-heavy probe 에서 IPC deadlock(#330). 확정 경로 = codex CLI 직접(codex_run.ps1).
+- **worktree 검토 diff 는 three-dot `main...branch` (two-dot 아님)** — 2026-05-21 오진. 병렬 세션이 worktree 생성 *후* main 을 advance 시키면(다른 batch 가 커밋), worktree base 가 main 보다 뒤처짐. 이때 `git diff main..branch` (**two-dot**) 는 *main 이 새로 추가한 커밋들* 을 branch 입장에서 "삭제"로 표시 → codex 가 무관 파일 12개 지운 것처럼 보임(실제론 안 건드림). 올바른 검토 = `git diff main...branch` (**three-dot** = merge-base 기준 = codex 실제 변경만). **merge 는 안전** — `git merge` 는 merge-base 기준 3-way 라 disjoint 변경이면 양쪽 다 보존(삭제 0). 충돌은 공유 파일(INDEX.md 등 양쪽 regen)뿐 → `cases_index.py --backfill-db` 로 재생성 해결. 판정 전 `git merge-tree <base> main branch | grep -i conflict` 로 실제 충돌 파일만 확인.
+- **병렬 세션 = 같은 로컬 repo·같은 main 공유** (별도 clone 아님) — 두 Claude/codex 세션이 동시에 *같은* 로컬 main 에 커밋. git index lock 이 merge 를 순차화(레이스 시 transient `.git/index.lock` → 재시도). push 는 같은 local main 의 fast-forward 라 안전. 즉 **worktree 동시 작업은 설계대로 정상** — edit 격리(worktree) + merge 직렬화(index lock) + push ff. 위 two-dot 오진만 피하면 됨.
 
 ## 8. 관련
 
