@@ -1,0 +1,140 @@
+{
+  "version": 1,
+  "site": "techradar.com",
+  "board": "root",
+  "strategy": "httpx_html",
+  "_source_url": "https://www.techradar.com/",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9"
+  },
+  "timeout": 25,
+  "list": {
+    "url_template": "https://www.techradar.com/",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "li.wdn-listv2-item:has(a.wdn-listv2-item-link[href*='techradar.com/'])",
+    "exclude_selector": "[data-analytics-id='trending-bar'], [data-nav-link]",
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a.wdn-listv2-item-link[href*='techradar.com/']",
+          "attr": "href",
+          "transform": [
+            [
+              "strip_query_fragment"
+            ],
+            [
+              "regex_extract",
+              "techradar\\.com/(.+)$"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": ".wdn-listv2-item-content-title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a.wdn-listv2-item-link[href*='techradar.com/']",
+          "attr": "href",
+          "transform": [
+            [
+              "strip_query_fragment"
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": ".wdn-listv2-item-content-strapline",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "cover_image": [
+        {
+          "from": "attr",
+          "selector": "img",
+          "attr": "data-original-mos",
+          "transform": [
+            [
+              "strip"
+            ]
+          ]
+        },
+        {
+          "from": "attr",
+          "selector": "img",
+          "attr": "src",
+          "transform": [
+            [
+              "strip"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "div#article-body",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "article",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "h1",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "author": [
+        {
+          "from": "css",
+          "selector": "[rel='author'], .byline__author-name",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "_note": "handcrafted after register timeout bug fix: local probe artifact was absent, but direct httpx returned the static homepage with WDN list cards. No anti-bot marker observed; if future runs return 403/challenge, mark capability_blocked instead of bypassing.",
+  "_recognized_platform": "host_techradar-com"
+}

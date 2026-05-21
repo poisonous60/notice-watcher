@@ -1,0 +1,158 @@
+{
+  "version": 1,
+  "site": "shopify.engineering",
+  "board": "root",
+  "strategy": "httpx_html",
+  "_source_url": "https://shopify.engineering/",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9"
+  },
+  "timeout": 20,
+  "list": {
+    "url_template": "https://shopify.engineering/",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "article.article--index:has(.blogPost a[href^='/']:not([href^='/topics/']):not([href^='/authors/']))",
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": ".blogPost a[href^='/']:not([href^='/topics/']):not([href^='/authors/'])",
+          "attr": "href",
+          "transform": [
+            [
+              "regex_extract",
+              "^/([^/?#]+)"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": ".blogPost a[href^='/']:not([href^='/topics/']):not([href^='/authors/'])",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": ".blogPost a[href^='/']:not([href^='/topics/']):not([href^='/authors/'])",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://shopify.engineering/"
+            ],
+            [
+              "strip_query_fragment"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": ".richtext",
+          "text": true,
+          "transform": [
+            [
+              "iso8601",
+              [
+                "%b %d, %Y"
+              ],
+              "Z"
+            ]
+          ]
+        }
+      ],
+      "author": [
+        {
+          "from": "css",
+          "selector": "[itemprop='author'] [itemprop='name']",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "css",
+          "selector": ".uppercase a[href^='/topics/']",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "p.richtext",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "cover_image": [
+        {
+          "from": "attr",
+          "selector": "img",
+          "attr": "src",
+          "transform": [
+            [
+              "strip"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "div[itemprop='articleBody']",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "main article",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "h1",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "_note": "handcrafted after register timeout bug fix: homepage is JS-heavy but contains static article cards and articleBody HTML; httpx_html is sufficient and avoids Playwright timeout risk.",
+  "_recognized_platform": "host_shopify-enginee"
+}

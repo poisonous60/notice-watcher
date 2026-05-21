@@ -1,0 +1,145 @@
+{
+  "version": 1,
+  "site": "velog.io",
+  "board": "@teo",
+  "strategy": "httpx_html",
+  "_slug_board": "teo",
+  "_source_url": "https://velog.io/@teo",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+    "Referer": "https://velog.io/@teo"
+  },
+  "timeout": 20,
+  "list": {
+    "url_template": "https://v2.velog.io/rss/{board}",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "channel > item",
+    "fields": {
+      "post_id": [
+        {
+          "from": "css",
+          "selector": "link",
+          "text": true,
+          "transform": [
+            [
+              "regex_extract",
+              "/@[^/]+/([^/?#]+)"
+            ]
+          ]
+        },
+        {
+          "from": "css",
+          "selector": "guid",
+          "text": true,
+          "transform": [
+            [
+              "regex_extract",
+              "/@[^/]+/([^/?#]+)"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "css",
+          "selector": "link",
+          "text": true,
+          "transform": [
+            [
+              "strip"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "pubDate",
+          "text": true,
+          "transform": [
+            [
+              "iso8601",
+              [
+                "%a, %d %b %Y %H:%M:%S GMT"
+              ],
+              "Z"
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "description",
+          "text": true,
+          "transform": [
+            [
+              "html_unescape"
+            ],
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "cover_image": [
+        {
+          "from": "css",
+          "selector": "description",
+          "text": true,
+          "transform": [
+            [
+              "html_unescape"
+            ],
+            [
+              "regex_extract",
+              "<img[^>]+src=[\"']([^\"']+)"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "body",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "meta[property='og:title']",
+          "attr": "content",
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "_note": "handcrafted after register timeout bug fix: Velog profile is a React SPA but v2.velog.io exposes RSS; parse channel > item through httpx_html and fetch article body statically. Track B: feed source discovery for Velog should become a recognizer/vocab extension later.",
+  "_recognized_platform": "host_velog-io"
+}

@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 134 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 138 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -14,12 +14,15 @@
 | [`host_watchuseek-com_root_7f9f4699`](host_watchuseek-com_root_7f9f4699.md) | ⛔ capability_blocked — dev box 에서 root/RSS 모두 timeout, XenForo RSS 경량 경로도 edge/IP 차단 | 2026-05-21 | none | baseline_blocked, capability_blocked, page_goto_timeout, rss_timeout, xenforo_rss, subprocess_signal, sigbus, headless_dom_pressure | https://www.watchuseek.com/ |
 | [`host_vox-com_root_09734e9c`](host_vox-com_root_09734e9c.md) | ✅ 수동 config 등록 (httpx_html, baseline 7건) | 2026-05-21 | F | posts_nonempty | https://www.vox.com/ |
 | [`host_venturebeat-com_root_b5f7c603`](host_venturebeat-com_root_b5f7c603.md) | ✅ preflight b-hit 회복 + config 등록 (baseline 8건, httpx_html) | 2026-05-21 | F | post_id_unique | https://venturebeat.com/ |
+| [`host_velog-io_teo_0a627fc6`](host_velog-io_teo_0a627fc6.md) | ✅ 수동 config 등록 (Velog RSS, baseline 20건) | 2026-05-21 | F | register_subprocess_timeout, posts_nonempty | https://velog.io/@teo |
+| [`host_techradar-com_root_8baaf5b7`](host_techradar-com_root_8baaf5b7.md) | ✅ 수동 config 등록 (static WDN list cards, baseline 30건) | 2026-05-21 | F | register_subprocess_timeout, posts_nonempty | https://www.techradar.com/ |
 | [`host_techhub-social_about_fbf89ae2`](host_techhub-social_about_fbf89ae2.md) | social platform detect-reject | 2026-05-21 | C | posts_nonempty, article_body_len | https://techhub.social/about |
 | [`host_tailscale-com_blog_07031656`](host_tailscale-com_blog_07031656.md) | ✅ 등록 완료 (static HTML httpx_html config; Playwright timeout 우회) | 2026-05-21 | none | probe_timeout | https://tailscale.com/blog/ |
 | [`host_t-me_s_ce7a5d31`](host_t-me_s_ce7a5d31.md) | ✅ 등록 (Telegram public channel list-only) | 2026-05-21 | none | article_body_len, body_empty_acceptable, list_only | https://t.me/s/durov |
 | [`host_status-deno-com_root_5aa73944`](host_status-deno-com_root_5aa73944.md) | ✅ 등록 (Statuspage.io Atom history feed 사용) | 2026-05-21 | F | posts_nonempty, rss_feed_available, statuspage_history_atom | https://status.deno.com/ |
 | [`host_stackoverflow-c_questions_71c08aad`](host_stackoverflow-c_questions_71c08aad.md) | ✅ 자동 등록 경로 추가 (StackExchange /questions → official API) | 2026-05-21 | F | fetch_list_403, posts_nonempty, capability_blocked | https://stackoverflow.com/questions |
 | [`host_slashdot-org_root_778af9dd`](host_slashdot-org_root_778af9dd.md) | ✅ 등록 (Slashdot RSS 사용) | 2026-05-21 | none | posts_nonempty, rss_feed_available | https://slashdot.org/ |
+| [`host_shopify-enginee_root_25b7d4e3`](host_shopify-enginee_root_25b7d4e3.md) | ✅ 수동 config 등록 (static article cards, baseline 16건) | 2026-05-21 | F | register_subprocess_timeout, posts_nonempty | https://shopify.engineering/ |
 | [`host_producthunt-com_feed_51ccf15a`](host_producthunt-com_feed_51ccf15a.md) | ✅ 등록 (Product Hunt Atom feed 사용, 본문은 list-only) | 2026-05-21 | none | posts_nonempty, rss_feed_available, atom_feed, body_empty_acceptable | https://www.producthunt.com/feed |
 | [`host_posthog-com_changelog_7d58ef58`](host_posthog-com_changelog_7d58ef58.md) | 🧩 손어댑터 — Gatsby page-data JSON 을 최신순으로 뒤집어 changelog baseline 30건 등록 | 2026-05-21 | F | title_nonempty, wrong_first_article_url, gatsby_page_data_oldest_first | https://www.posthog.com/changelog |
 | [`host_politico-com_root_0e7b5678`](host_politico-com_root_0e7b5678.md) | 🔧 손 config 등록 (baseline 25건, playwright_html; article body may be empty behind Cloudflare) | 2026-05-21 | F | article_body_len, fetch_list | https://www.politico.com/ |
@@ -38,6 +41,7 @@
 | [`host_df-nexon-com_community_cae73546`](host_df-nexon-com_community_cae73546.md) | ✅ 수동 config (작동중, baseline 21, httpx_html) | 2026-05-21 | none | posts_nonempty | https://df.nexon.com/community/news/notice/list |
 | [`host_datadoghq-com_blog_447ffb34`](host_datadoghq-com_blog_447ffb34.md) | ✅ 수동 config 등록 (httpx_html, baseline 6건) | 2026-05-21 | F | posts_nonempty | https://www.datadoghq.com/blog/ |
 | [`host_community-cloud_root_e65f04ea`](host_community-cloud_root_e65f04ea.md) | ✅ 수동 config (Playwright /latest 목록, 본문은 challenge-gated라 제목·URL 알림) | 2026-05-21 | none | article_body_len, fetch_list_403, discourse_json_challenge | https://community.cloudflare.com/ |
+| [`host_brunch-co-kr_springboot_58aa9ddd`](host_brunch-co-kr_springboot_58aa9ddd.md) | ✅ 수동 config 등록 (Brunch RSS, baseline 20건) | 2026-05-21 | F | register_subprocess_timeout, posts_nonempty | https://brunch.co.kr/@springboot |
 | [`host_blog-unity-com_root_9fe1176b`](host_blog-unity-com_root_9fe1176b.md) | ✅ 수동 config 등록 (RSS 목록, baseline 30건; 본문 비움 허용) | 2026-05-21 | F | posts_nonempty | https://blog.unity.com/ |
 | [`host_aussie-zone_root_a8115780`](host_aussie-zone_root_a8115780.md) | rc=5 capability_blocked — Lemmy root HTML anti-bot; dev box API CF-403, 미등록 (rescue 인프라 일반화) | 2026-05-21 | F | capability_blocked, fediverse_api_rescue, lemmy_api_rescue | https://aussie.zone/ |
 | [`host_apnews-com_root_5ee5ebc1`](host_apnews-com_root_5ee5ebc1.md) | 🔧 손 config 등록 (baseline 30건, httpx_html) | 2026-05-21 | F | title_nonempty, posts_nonempty, article_body_len | https://apnews.com/ |
@@ -155,7 +159,7 @@
 | C+F+A | 1 |
 | E | 4 |
 | E+A+C+D | 1 |
-| F | 63 |
+| F | 67 |
 | F+A | 1 |
 | F+C | 3 |
 | none | 22 |
@@ -166,7 +170,7 @@
 |---|---|
 | (미기재) | 31 |
 | handwritten | 20 |
-| httpx_html | 32 |
+| httpx_html | 36 |
 | httpx_json | 13 |
 | mixed | 1 |
 | none | 26 |
@@ -175,5 +179,5 @@
 
 ### 최근 90일 (≥ 2026-02-20)
 
-케이스 134 건.
+케이스 138 건.
 
