@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "site": "indiehackers.com",
+  "board": "home",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9"
+  },
+  "timeout": 20,
+  "polite_sleep": {"min": 5, "max": 5},
+  "list": {
+    "url_template": "https://www.indiehackers.com/",
+    "pagination": {"kind": "none"},
+    "row_selector": "div.story.homepage-post",
+    "row_required_selector": "a.story__text-link[href]",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a.story__text-link[href*='post=']",
+          "attr": "href",
+          "transform": [["regex_extract", "[?&]post=([^&#]+)"]]
+        },
+        {
+          "from": "attr",
+          "selector": "a.story__text-link[href^='/post/']",
+          "attr": "href",
+          "transform": [["regex_extract", "^/post/(?:[^/?#]+/)?([^/?#]+)"]]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "a.story__text-link h3.story__title",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a.story__text-link[href]",
+          "attr": "href",
+          "transform": [["urljoin", "https://www.indiehackers.com"], ["strip_query_fragment"]]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "a.story__text-link p.story__summary",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "body_empty_acceptable": true,
+    "content": []
+  }
+}

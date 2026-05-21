@@ -1,59 +1,43 @@
-﻿---
+---
 slug: host_namu-wiki_RecentChanges_2370318a
 url: https://namu.wiki/RecentChanges
-status: ✅ 수동 config (playwright_html + a[href^=/w/] row, 30건 baseline)
-outcome: improved
-date: 2026-05-19
-fix_layer: F
-failure_keys: [gen_fail_unknown, spa_obfuscated_classes, vue-ssr-3kb-shell]
+status: "✅ 기존 손 config 동작 확인 — RecentChanges 목록 30건 baseline, 본문은 body_empty_acceptable"
+outcome: handcrafted
+date: 2026-05-21
+requested_by: batch
+failure_keys: [post_id_stable_shape, matches_probe_first_article]
+fix_layer: none
 config_strategy: playwright_html
 adapters_changed: []
 engine_files_touched: []
-tags: [namuwiki, recent-changes, vue, obfuscated-classes, playwright-html, body-empty-acceptable]
-requested_by: poisonous60
+tags: [namu-wiki, recentchanges, spa, body-empty-acceptable, preflight-a-hit]
 ---
 
 ## 무엇이 일어났나
+`https://namu.wiki/RecentChanges` 자동 생성은 마지막 검증에서 `[FAIL] post_id_stable_shape` 로 실패했다. 자동 생성 config 가 `/w/<문서명>` URL-encoded 문서명을 `post_id` 로 쓰면서 공백/괄호가 포함된 문서명까지 안정 ID로 취급해 검증에 걸렸다.
 
-catalog batch run 2026-05-19 에서 gen_fail (subkind 분류 미스). namu.wiki HTML 직접 fetch 시 3608 bytes SSR shell — content 0. Vue 클라이언트 렌더로 RecentChanges 표 생성.
+probe digest 는 `verdict=캡처 헤더 주입 시 정적 가능` 이라고 했지만 notes 에서는 정적 응답이 빈 shell 이고 Playwright DOM 에서만 row-like 요소가 잡힌다고 보고했다. RecentChanges 는 위키 문서 diff/feed 성격이라 글 본문 알림보다 제목/URL 변화 감지가 목적이다.
 
-Playwright headless 로 렌더 후 220KB DOM. 하지만 클래스명이 의도적으로 obfuscated build-hash 형태 (`DpfUxXyh`, `qXQSihpq`, `g1g9baIZ` 등) — `tr`/`tbody`/`table[role=row]` 표준 selector 모두 매칭 X.
+## 처리
+preflight `a-hit`: `configs/host_namu-wiki_RecentChanges_2370318a.json` 가 이미 존재했다. 새 probe 없이 `python scripts/register.py --config configs/host_namu-wiki_RecentChanges_2370318a.json` 를 실행했고 baseline 30건으로 등록 성공했다.
 
-## 픽스
+현재 config 는:
+- `strategy=playwright_html`
+- `row_selector: a[href^='/w/']`
+- `post_id`: `/w/` 제거 + query/fragment 제거
+- `article.body_empty_acceptable=true`
 
-stable selector 만: `a[href^='/w/']` — wiki page link 187개 안정 (의도적 obfuscation 도 link 자체는 함수). 각 anchor = 한 row 의 wiki page 링크. URL-encoded UTF-8 path (`/w/%EC%82%AC%EC%9A%A9%EC%9E%90:LAVINA`).
+본문 추출은 일부 문서에서 실패할 수 있으나 RecentChanges 알림은 제목/URL 기준으로 동작한다.
 
-handwritten config:
-- strategy=`playwright_html` (SSR shell 만으로 부족)
-- wait_selector=`a[href^='/w/']` (renderer 가 link 박은 후 row 잡음)
-- row_selector=`a[href^='/w/']`
-- post_id = `remove_prefix /w/` + `strip_query_fragment` (URL-encoded segment)
-- title = `:self` text (anchor 내부)
-- url = `urljoin https://namu.wiki` + `strip_query_fragment`
-- published_at 추출 X — RecentChanges 의 timestamp 가 obfuscated 별도 column. body_empty_acceptable=true.
+## 트랙 B
+- 2a 인식기: X. namu.wiki RecentChanges 단일 특수 페이지라 플랫폼 recognizer 로 넓힐 근거가 부족하다.
+- 2b `--article-url`: X. 첫 글 URL 오인 경고가 있었지만 본질은 `post_id` 안정성/본문 무관 알림이다.
+- 2c probe 휴리스틱: X. 이번 작업은 이미 있는 단건 config 검증이다. `post_id_stable_shape` 누적은 많지만 대부분 article/root reject 계열이고, 이 케이스에 맞는 generic 휴리스틱은 allow-list 밖 코드 변경이 필요하다.
+- 2d probe 오작동: X. `first_article_url` 과 실제 추출 행이 달라지는 SPA timing 문제는 보였지만 config 동작에는 영향 없음.
 
-## 한계
+일반화 안 하는 이유: namu RecentChanges 는 위키 문서명 자체가 알림 키라 숫자형 게시글 ID를 요구하는 일반 게시판 모델과 다르다. 단건 config 로 제한하는 쪽이 안전하다.
 
-- published_at 없어 polling 시 ordering 가능성 — slug 기반 dedupe 만으로 충분 (post_id = URL-encoded page name, immutable).
-- 본문 추출 X (`article`/`main` selector 도 obfuscated). body_empty_acceptable=true 라 알림은 title + URL 만 발송.
-- 의도적 obfuscation 사이트 = 크롤링 적대적. namu rebuild 시 anchor href 패턴 변하면 깨질 위험 (하지만 `/w/<page>` 는 wiki URL convention 이라 매우 안정적).
+## 검증
+- `python scripts/register.py --config configs/host_namu-wiki_RecentChanges_2370318a.json` → exit 0, baseline 30건.
+- 회귀 영향: config-only 확인, engine/probe/prompt 변경 없음.
 
-상세: `infra_catalog_batch_rev4_2026-05-19.md`.
-
-## 2026-05-21 SIGBUS 재점검
-
-`2026-05-21-fedi` batch 에서 같은 URL 이 `register.py` subprocess `rc=-7` 로 보고됐다.
-Linux `-7` 은 `SIGBUS` 이므로, 이건 namu selector/config 실패가 아니라 headless subprocess
-비정상 종료다.
-
-기존 수동 config 자체는 여전히 동작한다. dev box 에서 `configs/host_namu-wiki_RecentChanges_2370318a.json`
-을 직접 adapter 로 읽어 `fetch_list(page_size=5)` 실행 시 5건을 반환했다.
-
-이번 fix 는 config 변경이 아니라 공통 방어다.
-- `probe/fetch_headless.py`: 큰 SPA DOM 전체를 `page.content()` 로 무제한 직렬화하지 않고
-  bounded capture 를 사용한다.
-- `bot/site_ops.py`: signal death (`proc.wait() < 0`, 예: `SIGBUS`) 를 gen_fail/triage 로
-  흘리지 않고 BUG 경로로 들어가게 rc 를 `-3` 으로 정규화한다.
-
-남은 한계: namu.wiki 는 의도적 obfuscation + SPA 이므로 headless 비용이 높은 편이다. 기존
-`a[href^='/w/']` config 는 현재도 가장 안정적인 selector 로 보인다.
