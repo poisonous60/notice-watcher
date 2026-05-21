@@ -1531,6 +1531,24 @@ def _main_inner(argv) -> int:
                     return rc
                 print("[register] DiscourseAdapter 폴백 — 일반 파이프라인 계속.")
 
+    # XenForo 포지티브 검출 — probe 가 렌더 HTML 의 `<html id=XF>`/`XF.config` 마커로 판정 (detect_xenforo_platform).
+    # XenForo 글 목록(/whats-new/, 서브포럼)은 Cloudflare/JS 라 LLM 이 httpx_html posts_nonempty:0 / playwright 운빨로
+    # 실패하는데, 전역 RSS `<base>/forums/-/index.rss` 는 Cloudflare 가 허용하는 경우가 많아 httpx 로 안정 수집.
+    # discourse 와 같은 게이트 위치 (정책 후 · board-shape 전). RSS 404/빈/차단이면 fetch_list 0 → 일반 파이프라인 폴백.
+    if not args.gate_only:
+        xf = ((digest.get("list_candidates") or {}).get("xenforo_platform") or {})
+        if xf.get("is_xenforo") and xf.get("base_url"):
+            from engine.recognizers.xenforo import build_config as _xf_build
+            xcfg = _xf_build(xf["base_url"])
+            if xcfg is not None:
+                xcfg["_recognized_platform"] = "xenforo (probe XF marker → 전역 RSS)"
+                print("[PHASE] xenforo_detect", flush=True)
+                print(f"[register] 🔎 XenForo 마커 검출 — 전역 RSS config 등록 시도 (base={xf['base_url']})")
+                rc = _register_built_config(xcfg, slug, url, out=args.out, force=args.force)
+                if rc is not None:
+                    return rc
+                print("[register] XenForo RSS 폴백 (RSS 빈/차단) — 일반 파이프라인 계속.")
+
     # single-article nav-only 게이트 — board_shape 가 nav 안 사이드바 메뉴를 same-host 신호로 false-positive
     # 통과시키는 걸 차단. holocaustexplained 같은 *unknown host* 단일 article 페이지가 여기서 잡힌다.
     # 인식기 PATTERNS_REJECT 가 *호스트 명시* fast-path 라면 이건 구조 기반 fallback.

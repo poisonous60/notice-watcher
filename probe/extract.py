@@ -898,6 +898,39 @@ def detect_discourse_platform(html: str, base_url: str) -> Optional[dict]:
     }
 
 
+# XenForo: 모든 public 페이지가 `<html id="XF" ... data-app="public">` + `XF.config` JS 를 박는다.
+# generator meta 는 없지만 이 두 마커는 false-positive ~0 (XenForo 외 사이트 안 씀). Discourse 와 같은 이유로
+# root URL 만으론 URL-recognizer 가 못 잡아 → probe 후 이 휴리스틱이 봉합.
+_XENFORO_MARKER_RE = re.compile(r'<html[^>]+\bid=["\']XF["\']|XF\.config\s*=', re.I)
+
+
+def detect_xenforo_platform(html: str, base_url: str) -> Optional[dict]:
+    """렌더된 HTML 의 `<html id="XF">` / `XF.config` 마커로 XenForo 포럼 판정.
+
+    XenForo 는 `<base>/forums/-/index.rss` 전역 RSS(최근 thread 50건; guid=thread id, title,
+    link, pubDate, content:encoded 본문)를 제공 — Cloudflare 가 root 는 막아도 RSS 는 허용하는
+    경우가 많아(wordreference·hardforum 확인) httpx 로 안정 수집된다. register.py 가 이 신호 보면
+    LLM 전 `engine/recognizers/xenforo.build_config` 로 RSS config 등록 시도 → fetch_list 빈
+    목록(RSS 404/빈/차단)이면 일반 파이프라인 폴백(안전망).
+
+    출력: None | {is_xenforo: True, base_url: "<scheme>://<host>"}.
+    """
+    from urllib.parse import urlsplit
+    if not html or not base_url:
+        return None
+    if _XENFORO_MARKER_RE.search(html) is None:
+        return None
+    try:
+        parts = urlsplit(base_url)
+        host = (parts.netloc or "").strip().lower()
+        scheme = parts.scheme or "https"
+    except (ValueError, AttributeError):
+        return None
+    if not host or "." not in host:
+        return None
+    return {"is_xenforo": True, "base_url": f"{scheme}://{host}"}
+
+
 @heuristic
 def root_marketing_homepage(
     *,
@@ -1237,6 +1270,7 @@ def write_list_candidates(
     nav_only_same_host: Optional[dict] = None,
     article_meta_signals: Optional[dict] = None,
     discourse_platform: Optional[dict] = None,
+    xenforo_platform: Optional[dict] = None,
 ) -> None:
     # body_empty_likely summary — 본문이 본질적으로 없는 사이트 신호.
     # row_external_host (검색결과/aggregator) OR row_interactive_action (게임/투표/SPA) 중 하나라도 true 면 박힘.
@@ -1292,6 +1326,7 @@ def write_list_candidates(
         # dict={is_discourse, base_url, version}. register.py 가 이 신호 보면 LLM 전 DiscourseAdapter
         # config 만들어 등록 시도 (fetch_list 빈 목록이면 일반 파이프라인 폴백).
         "discourse_platform": discourse_platform,
+        "xenforo_platform": xenforo_platform,
     }
     validate_payload("list_candidates.json", payload, allow_extra=False)
     (out_dir / "list_candidates.json").write_text(
