@@ -1,0 +1,149 @@
+{
+  "version": 1,
+  "site": "www.microsoft.com",
+  "board": "microsoft-365-roadmap",
+  "strategy": "httpx_json",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.microsoft.com/en-us/microsoft-365/roadmap"
+  },
+  "timeout": 20,
+  "polite_sleep": {
+    "min": 5,
+    "max": 6
+  },
+  "list": {
+    "url_template": "https://www.microsoft.com/releasecommunications/api/v2/m365?$count=true&includeFacets=true&top=50&skip=0&$orderby=created%20desc",
+    "pagination": {
+      "kind": "none"
+    },
+    "page_size_max": 50,
+    "list_path": [
+      "value"
+    ],
+    "fields": {
+      "post_id": [
+        {
+          "from": "json",
+          "path": [
+            "id"
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "json",
+          "path": [
+            "title"
+          ],
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "template",
+          "value": "https://www.microsoft.com/en-us/microsoft-365/roadmap?id={post_id}"
+        }
+      ],
+      "published_at": [
+        {
+          "from": "json",
+          "path": [
+            "created"
+          ]
+        }
+      ],
+      "author": [
+        {
+          "from": "const",
+          "value": "Microsoft"
+        }
+      ],
+      "category": [
+        {
+          "from": "json",
+          "path": [
+            "status"
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "json",
+          "path": [
+            "description"
+          ],
+          "transform": [
+            [
+              "html_unescape"
+            ],
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "url_template": "https://www.microsoft.com/releasecommunications/api/v2/m365?$filter=id%20eq%20{post_id}&top=1",
+    "fetch_kind": "json",
+    "data_path": [
+      "value",
+      0
+    ],
+    "content": [
+      {
+        "from": "json",
+        "path": [
+          "description"
+        ],
+        "transform": [
+          [
+            "html_unescape"
+          ]
+        ]
+      }
+    ],
+    "enrich": {
+      "published_at": [
+        {
+          "from": "json",
+          "path": [
+            "created"
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "json",
+          "path": [
+            "status"
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "json",
+          "path": [
+            "description"
+          ],
+          "transform": [
+            [
+              "html_unescape"
+            ],
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  }
+}
