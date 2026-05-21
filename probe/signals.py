@@ -51,6 +51,19 @@ _BOT_BODY_MARKERS_WEAK = (
     "Access denied",
     "blocked",
 )
+# JS-챌린지 인터스티셜 마커 — *raw* body 에서 검사 (스크립트/href 안에 박혀 _strip_scripts 로
+# 지워지므로 강한 마커처럼 visible_text 로 보면 놓친다). status 200 으로 정상 위장하는 anti-bot
+# 챌린지 페이지(Cloudflare / Anubis PoW)를 잡는다. 모두 인프라 고유 문자열 — 정상 서빙된 콘텐츠엔
+# 안 나옴(false-positive ~0). 2026-05-21-forums: debian/lazarus/techpowerup(Anubis)·simplemachines(CF).
+_BOT_CHALLENGE_MARKERS_RAW = (
+    "cf-chl-opt",                 # Cloudflare 챌린지 opt
+    "cdn-cgi/challenge-platform",  # Cloudflare 챌린지 플랫폼 스크립트
+    "__cf_chl",                   # Cloudflare 챌린지 토큰
+    "anubis_challenge",           # Anubis PoW (within.website) 챌린지 JSON
+    "anubis/api/make_challenge",  # Anubis 경량 redirect 변형 (debian)
+    ".within.website/x/xess",     # Anubis 스타일시트 경로
+    "making sure you're not a bot",  # Anubis 기본 타이틀
+)
 
 _GEO_BODY_MARKERS = (
     "Unavailable For Legal Reasons",
@@ -131,6 +144,16 @@ def classify(
         return Classification.BLOCKED_GEO, notable
 
     # 4) BLOCKED_BOT
+    # JS-챌린지 인터스티셜: raw body 에서 인프라 마커 검사 (status 200 위장 + 마커가 script 안).
+    raw_lc = body_text[:50000].lower()
+    for marker in _BOT_CHALLENGE_MARKERS_RAW:
+        if marker in raw_lc:
+            notable.append(f"JS-challenge interstitial marker: {marker}")
+            if baseline_blocked and status and status >= 400:
+                notable.append("baseline also blocked → IP-level")
+                return Classification.BLOCKED_IP, notable
+            return Classification.BLOCKED_BOT, notable
+
     bot_signal = False
     bad_status = status in (403, 429, 503)
     if bad_status:

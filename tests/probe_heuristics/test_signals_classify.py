@@ -7,7 +7,7 @@ is_robots_txt=True 일 때 size 임계 안 적용해야 함.
 from __future__ import annotations
 
 
-covers = ["signals_classify_robots_size"]
+covers = ["signals_classify_robots_size", "signals_classify_js_challenge"]
 
 
 def run() -> list[tuple[str, bool, str]]:
@@ -53,5 +53,34 @@ def run() -> list[tuple[str, bool, str]]:
     cases.append(("default_no_robots_flag_keeps_old_behavior",
                   cls4 == Classification.BLOCKED_BOT,
                   f"got {cls4!r}"))
+
+    # 5. JS-챌린지 인터스티셜 (status 200 위장, 마커가 script/href 안 — _strip_scripts 로 지워짐).
+    #    2026-05-21-forums: board_shape gate_reject 로 오분류되던 anti-bot 페이지를 BLOCKED_BOT 으로.
+    challenges = {
+        # Anubis PoW 풀 페이지 (lazarus/techpowerup)
+        "anubis_full": '<html><head><title>Making sure you\'re not a bot!</title>'
+                       '<link href="/.within.website/x/xess/xess.min.css">'
+                       '<script id="anubis_challenge" type="application/json">{}</script></head>'
+                       '<body>' + ("x" * 4000) + '</body></html>',
+        # Anubis 경량 redirect 변형 (debian) — title "Loading...", 마커는 noscript+script
+        "anubis_redirect": '<html><head><title>Loading...</title></head><body>Loading'
+                           '<noscript><a href="/app.php/anubis/api/make_challenge">Click</a></noscript>'
+                           '<script>setTimeout(goto,500)</script></body></html>',
+        # Cloudflare 인터스티셜 (simplemachines) — 마커 cdn-cgi/challenge-platform·__cf_chl 가 script 안
+        "cloudflare": '<html><head><title>잠시만 기다리십시오…</title></head><body>'
+                      '<script src="/cdn-cgi/challenge-platform/h/g/orchestrate/__cf_chl/v1"></script>'
+                      + ("y" * 25000) + '</body></html>',
+    }
+    for nm, body in challenges.items():
+        cls, notable = classify(status=200, body=body, headers={})
+        cases.append((f"js_challenge_{nm}_blocked", cls == Classification.BLOCKED_BOT,
+                      f"got {cls!r} notable={notable[:1]}"))
+
+    # 6. 정상 포럼 (챌린지 마커 없음, 본문 충분) → OK (false-positive 회귀 차단).
+    normal = ('<html><head><title>Debian User Forums</title></head><body>'
+              + ('<div class="topic"><a href="/viewtopic.php?t=1">글</a></div>' * 60)
+              + '</body></html>')
+    cls_n, _ = classify(status=200, body=normal, headers={})
+    cases.append(("normal_forum_not_blocked", cls_n == Classification.OK, f"got {cls_n!r}"))
 
     return cases
