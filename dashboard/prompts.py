@@ -64,12 +64,14 @@ def hand_config_triage_queue(*, failed_slugs: list[str]) -> str:
         "전체 절차 = SKILL.md \"§0c codex 위임 모드\". 요약:",
         "",
         "1. `python scripts/triage.py pull --skip-later`  (FAILED + probe 받기)",
-        "2. `python scripts/codex_batch.py plan`  (플랫폼/host 비중첩 청크 확인 — slug별 X)",
-        "3. `python scripts/codex_batch.py launch`  (기본 1청크=관측-우선; 검토·commit 후 재호출=다음 청크)",
-        "4. 청크별 `python scripts/codex_watch.py <result_file> --loop`  (완료 대기)",
-        "5. **각 청크 git diff + result 검토 게이트** — codex HARD-STOP 지켰나/진단 타당한가/"
-        "over-edit 없나. codex 결과 맹신 X. 문제면 revert·재위임.",
-        "6. 공유 인덱스(`cases_index --backfill-db`) 직렬 → probe_smoke → commit → push → N100 배포.",
+        "2. **disjoint 파일소유 청크 분할** (`codex_batch.py plan` 은 단서). 공유 충돌파일=`scripts/register.py`(detect dispatch)+`probe/extract.py`(detect_*): "
+        "path-match recognizer·수동 config=공유파일 0=병렬안전, probe-detect 플랫폼(root-URL)=한 청크만 소유·나머지 직렬. 소유 기록 output/codex_file_claims.json.",
+        "3. **병렬 launch (ALLOW-LIST 박아서)** — 각 codex 프롬프트(`codex_handoff.py generic --task-file`)에 '이 파일만 편집, 나머지 금지' 제약. "
+        "file-isolated 청크는 **다발 동시 launch**, 공유파일 청크는 소유자 1개+나머지 직렬. 첫 batch/품질 미관측이면 관측-우선(1-2청크) 후 확대. 모델=gpt-5.5 medium 유지(속도노브 opt-in).",
+        "4. 청크별 `python scripts/codex_watch.py <result_file> --loop` (백그라운드)  (완료 대기)",
+        "5. **각 청크 git diff + result 검토 게이트 = 진짜 enforcement** (ALLOW-LIST 는 soft) — codex HARD-STOP 지켰나/진단 타당한가/"
+        "파일셋이 ALLOW-LIST 내인가(over-edit·타청크 침범)/auto-discovery semantic 충돌(probe_smoke --stage 5). 문제면 revert·재위임.",
+        "6. settled 트리 probe_smoke(--stage 3 --stage 5) → `cases_index --backfill-db` 직렬 → **청크별 commit(`git add <청크 파일만>`, -A 금지)** → push → N100 배포 → batch 후 `triage.py prune-orphans --execute`.",
         "",
         "대상 slug:",
     ]
@@ -133,10 +135,10 @@ def catalog_run_and_fix(*, catalog_name: str,
     lines.append("   3) **capability_blocked** (rc=5, `.FAILED.json`): captcha/anti-bot/cloudflare 차단 = *능력 부족(정책 아님)*. stealth/anti-detection 어댑터로 재도전 (§2e + `docs/크롤링 지침.md` §6 stealth 허용).")
     lines.append("   4) **gen_fail** (rc=1, `.FAILED.json`): hand-config 진단 → 수동 config 또는 probe/prompt 개선 (두 트랙 동시).")
     lines.append("   - **policy_reject** (rc=2, LOGIN_REQUIRED) · **url_dead** (rc=4, 404/cert·dns 깨짐) = 작업 X (정상 거부, `docs/크롤링 지침.md`). 우회 X.")
-    lines.append("   - **실행 = codex 위임** (SKILL §0c): bug·gen_fail·capability_blocked 의 진단·fix 는 "
-                 "`python scripts/codex_batch.py plan/launch` (gen_fail 큐) 또는 `codex_handoff.py {bugfix|handconfig} --launch` "
-                 "로 codex 보이는 창에 위임 (기본 1청크=관측-우선). 청크별 `codex_watch.py <result> --loop` 완료 대기 → "
-                 "**git diff + result 검토 게이트** (codex HARD-STOP 지켰나/타당한가/over-edit 없나) → 공유 인덱스 직렬 → commit → 배포.")
+    lines.append("   - **실행 = codex 위임** (SKILL §0c): bug·gen_fail·capability_blocked 의 진단·fix 는 codex 보이는 창에 위임 "
+                 "(`codex_handoff.py generic --task-file --launch`, ALLOW-LIST 박음). **disjoint 파일소유로 병렬** — "
+                 "path-match recognizer·수동 config=병렬안전, probe-detect 플랫폼(register.py+extract.py 공유)=직렬. 첫 batch 관측-우선(1-2청크) 후 확대. 모델=gpt-5.5 medium. "
+                 "청크별 `codex_watch.py <result> --loop` 완료 → **git diff+result 검토 게이트(파일셋 ALLOW-LIST 내·HARD-STOP·semantic 충돌)** → 직렬 commit(청크별 git add) → 배포.")
     lines.append(f"5. 재시도: `python scripts/remote.py batch-register --catalog={catalog_name} --failed` (rc∈{{1,5,-1,-2,-3,-99}} — capability_blocked 포함).")
     lines.append("6. registered 100% 또는 root-cause 못 잡는 사이트만 남을 때까지 반복.")
     lines.append("")
