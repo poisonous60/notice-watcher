@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "site": "www.tandfonline.com",
+  "board": "journals",
+  "strategy": "playwright_html",
+  "nav_timeout_ms": 30000,
+  "idle_timeout_ms": 14000,
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+  },
+  "list": {
+    "url_template": "https://www.tandfonline.com/action/showPublications?pubType=journal&ejf=on",
+    "pagination": {"kind": "none"},
+    "wait_selector": "li.searchResultItem.browse-result a.ref[href^='/journals/']",
+    "row_selector": "li.searchResultItem.browse-result",
+    "row_required_selector": "a.ref[href^='/journals/']",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a.ref[href^='/journals/']",
+          "attr": "href",
+          "transform": [["regex_extract", "/journals/([^/?#]+)"]]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "a.ref[href^='/journals/']",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a.ref[href^='/journals/']",
+          "attr": "href",
+          "transform": [["urljoin", "https://www.tandfonline.com"]]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": ".shortDesc",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ]
+    }
+  },
+  "article": {"fetch_kind": "html", "content": [], "body_empty_acceptable": true},
+  "_source_url": "https://www.tandfonline.com/action/showPublications",
+  "_note": "Taylor & Francis all-journals directory. The bare action URL redirects to the home page; adding pubType=journal&ejf=on reaches the journal A-Z rows."
+}

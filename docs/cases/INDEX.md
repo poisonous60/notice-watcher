@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 161 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 168 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -20,6 +20,7 @@
 | [`host_velog-io_teo_0a627fc6`](host_velog-io_teo_0a627fc6.md) | ✅ 수동 config 등록 (Velog RSS, baseline 20건) | 2026-05-21 | F | register_subprocess_timeout, posts_nonempty | https://velog.io/@teo |
 | [`host_techradar-com_root_8baaf5b7`](host_techradar-com_root_8baaf5b7.md) | ✅ 수동 config 등록 (static WDN list cards, baseline 30건) | 2026-05-21 | F | register_subprocess_timeout, posts_nonempty | https://www.techradar.com/ |
 | [`host_techhub-social_about_fbf89ae2`](host_techhub-social_about_fbf89ae2.md) | social platform detect-reject | 2026-05-21 | C | posts_nonempty, article_body_len | https://techhub.social/about |
+| [`host_tandfonline-com_action_50531308`](host_tandfonline-com_action_50531308.md) | ✅ playwright_html all-journals directory registered | 2026-05-21 | F | posts_nonempty, board_shape_check | https://www.tandfonline.com/action/showPublications |
 | [`host_tailscale-com_blog_07031656`](host_tailscale-com_blog_07031656.md) | ✅ 등록 완료 (static HTML httpx_html config; Playwright timeout 우회) | 2026-05-21 | none | probe_timeout | https://tailscale.com/blog/ |
 | [`host_t-me_s_ce7a5d31`](host_t-me_s_ce7a5d31.md) | ✅ 등록 (Telegram public channel list-only) | 2026-05-21 | none | article_body_len, body_empty_acceptable, list_only | https://t.me/s/durov |
 | [`host_support-google-_a_f31fe093`](host_support-google-_a_f31fe093.md) | 🚫 거부 (Google Support 도움말 table/article hub — same-host 반복 링크가 전부 nav 안에만 있어 게시판 아님) | 2026-05-21 | none | posts_nonempty, not_a_board, nav_only_same_host | https://support.google.com/a/table/7539891 |
@@ -32,6 +33,7 @@
 | [`host_sigmod-org_root_486a8db8`](host_sigmod-org_root_486a8db8.md) | 🧩 수동 config — WordPress RSS feed 로 baseline 가능 | 2026-05-21 | none | posts_nonempty, rss_feed_available | https://sigmod.org/ |
 | [`host_shopify-enginee_root_25b7d4e3`](host_shopify-enginee_root_25b7d4e3.md) | ✅ 수동 config 등록 (static article cards, baseline 16건) | 2026-05-21 | F | register_subprocess_timeout, posts_nonempty | https://shopify.engineering/ |
 | [`host_salesforce-com_releases_bf785b04`](host_salesforce-com_releases_bf785b04.md) | ✅ 등록 (Salesforce release resources card list) | 2026-05-21 | none | capability_blocked, fetch_list_403, salesforce_releases | https://www.salesforce.com/releases/ |
+| [`host_royalsocietypub_toc_08d7ac06`](host_royalsocietypub_toc_08d7ac06.md) | ⚪ no change — Cloudflare managed challenge blocks current TOC | 2026-05-21 | none | capability_blocked, anti_bot_challenge | https://royalsocietypublishing.org/toc/rsta/current |
 | [`host_producthunt-com_feed_51ccf15a`](host_producthunt-com_feed_51ccf15a.md) | ✅ 등록 (Product Hunt Atom feed 사용, 본문은 list-only) | 2026-05-21 | none | posts_nonempty, rss_feed_available, atom_feed, body_empty_acceptable | https://www.producthunt.com/feed |
 | [`host_posthog-com_changelog_7d58ef58`](host_posthog-com_changelog_7d58ef58.md) | 🧩 손어댑터 — Gatsby page-data JSON 을 최신순으로 뒤집어 changelog baseline 30건 등록 | 2026-05-21 | F | title_nonempty, wrong_first_article_url, gatsby_page_data_oldest_first | https://www.posthog.com/changelog |
 | [`host_popl26-sigplan-_root_cc2798a1`](sigplan-conf.md) | ✅ 해결 (SIGPLAN/researchr Conf recognizer 추가) | 2026-05-21 | F | post_id_unique | https://popl26.sigplan.org/ |
@@ -43,7 +45,9 @@
 | [`host_microsoft-com_en-us_000c6d5a`](host_microsoft-com_en-us_000c6d5a.md) | 🔧 손 config (작동중, baseline 30, httpx_json) | 2026-05-21 |  | published_at_iso, article_body_len, nav_only_same_host | https://www.microsoft.com/en-us/microsoft-365/roadmap |
 | [`host_medium-com_feed_19419ab9`](host_medium-com_feed_19419ab9.md) | ✅ 등록 완료 (Medium tag RSS — httpx_html XML config + Medium recognizer) | 2026-05-21 | F | posts_nonempty, feed_candidates | https://medium.com/feed/tag/programming |
 | [`host_medium-com_airbnb-engineering_2931b5a3`](host_medium-com_airbnb-engineering_2931b5a3.md) | ✅ 등록 완료 (Medium publication → RSS config + recognizer) | 2026-05-21 | F | posts_nonempty, feed_candidates | https://medium.com/airbnb-engineering |
+| [`host_link-springer-c_search_461b97e6`](host_link-springer-c_search_461b97e6.md) | ✅ playwright_html journal A-Z directory registered via linked journal-list URL | 2026-05-21 | F | board_shape_check, posts_nonempty | https://link.springer.com/search |
 | [`host_lemmy-ml_root_9bc876aa`](host_lemmy-ml_root_9bc876aa.md) | ✅ 자동 등록 가능 (Lemmy recognizer + LemmyAdapter 신규 — API v3 직접 호출) | 2026-05-21 | F | posts_nonempty, article_body_len | https://lemmy.ml/ |
+| [`host_journals-sagepu_action_5a296461`](host_journals-sagepu_action_5a296461.md) | ⚪ no change — Cloudflare managed challenge blocks playwright_html | 2026-05-21 | none | capability_blocked, anti_bot_challenge | https://journals.sagepub.com/action/showPublications |
 | [`host_indiehackers-co_root_e4490db0`](host_indiehackers-co_root_e4490db0.md) | 🔧 손 config 추가 — 정적 Ember HTML의 story 카드에서 홈 피드 30건 baseline | 2026-05-21 | none | posts_nonempty, first_article_url_missing, static_variant_rows_not_promoted | https://www.indiehackers.com/ |
 | [`host_hubspot-com_product-updates_33c05b99`](host_hubspot-com_product-updates_33c05b99.md) | 🔧 수동 config — HubSpot Releases and Updates JSON API 로 baseline 30건 등록 | 2026-05-21 | none | posts_nonempty, khoros_resources_api | https://www.hubspot.com/product-updates |
 | [`host_grafana-com_blog_d681aff2`](host_grafana-com_blog_d681aff2.md) | ✅ 수동 config 등록 (httpx_html, baseline 30건) | 2026-05-21 | F | posts_nonempty | https://grafana.com/blog/ |
@@ -60,14 +64,17 @@
 | [`host_dblp-org_db_e427dd1d`](host_dblp-org_db_e427dd1d.md) | 🧩 수동 config — DBLP new issues/volumes RSS 사용 | 2026-05-21 | none | posts_nonempty, rss_feed_available | https://dblp.org/db/conf/ |
 | [`host_datadoghq-com_blog_447ffb34`](host_datadoghq-com_blog_447ffb34.md) | ✅ 수동 config 등록 (httpx_html, baseline 6건) | 2026-05-21 | F | posts_nonempty | https://www.datadoghq.com/blog/ |
 | [`host_community-cloud_root_e65f04ea`](host_community-cloud_root_e65f04ea.md) | ✅ 수동 config (Playwright /latest 목록, 본문은 challenge-gated라 제목·URL 알림) | 2026-05-21 | none | article_body_len, fetch_list_403, discourse_json_challenge | https://community.cloudflare.com/ |
+| [`host_cochranelibrary_root_7dafdb29`](host_cochranelibrary_root_7dafdb29.md) | ✅ playwright_html featured reviews registered from root | 2026-05-21 | F | posts_nonempty | https://www.cochranelibrary.com/ |
 | [`host_cloud-google-co_release-notes_68689125`](host_cloud-google-co_release-notes_68689125.md) | ✅ 해결 (Google Cloud release notes 공식 Atom feed recognizer + adapter) | 2026-05-21 | F | probe_timeout, static_docs_changelog, official_feed_available | https://cloud.google.com/release-notes |
 | [`host_circleci-com_changelog_5a868561`](host_circleci-com_changelog_5a868561.md) | 🧩 수동 config — CircleCI changelog RSS feed 로 baseline 30건 등록 | 2026-05-21 | none | posts_nonempty, row_selector_too_narrow, rss_feed_available | https://circleci.com/changelog/ |
+| [`host_cambridge-org_core_9f561f6b`](host_cambridge-org_core_9f561f6b.md) | ✅ playwright_html journal directory registered | 2026-05-21 | F | capability_blocked, posts_nonempty | https://www.cambridge.org/core/what-we-publish/journals |
 | [`host_brunch-co-kr_springboot_58aa9ddd`](host_brunch-co-kr_springboot_58aa9ddd.md) | ✅ 수동 config 등록 (Brunch RSS, baseline 20건) | 2026-05-21 | F | register_subprocess_timeout, posts_nonempty | https://brunch.co.kr/@springboot |
 | [`host_blog-unity-com_root_9fe1176b`](host_blog-unity-com_root_9fe1176b.md) | ✅ 수동 config 등록 (RSS 목록, baseline 30건; 본문 비움 허용) | 2026-05-21 | F | posts_nonempty | https://blog.unity.com/ |
 | [`host_aussie-zone_root_a8115780`](host_aussie-zone_root_a8115780.md) | rc=5 capability_blocked — Lemmy root HTML anti-bot; dev box API CF-403, 미등록 (rescue 인프라 일반화) | 2026-05-21 | F | capability_blocked, fediverse_api_rescue, lemmy_api_rescue | https://aussie.zone/ |
 | [`host_apnews-com_root_5ee5ebc1`](host_apnews-com_root_5ee5ebc1.md) | 🔧 손 config 등록 (baseline 30건, httpx_html) | 2026-05-21 | F | title_nonempty, posts_nonempty, article_body_len | https://apnews.com/ |
 | [`host_aljazeera-com_root_2ac8d25a`](host_aljazeera-com_root_2ac8d25a.md) | ✅ preflight b-hit 회복 + config 등록 (baseline 25건, httpx_html RSS) | 2026-05-21 | F | posts_nonempty, title_nonempty, post_id_unique | https://www.aljazeera.com/ |
 | [`host_airtable-com_whatsnew_6412a843`](host_airtable-com_whatsnew_6412a843.md) | 🧩 손어댑터 — /whatsnew 빈 마케팅 셸 대신 Newsroom page-data 를 최신순으로 읽어 baseline 30건 등록 | 2026-05-21 | F | posts_nonempty, wrong_first_article_url, marketing_shell_no_rows, next_page_data_reordered | https://www.airtable.com/whatsnew |
+| [`host_academic-oup-co_journals_dfaf2baf`](host_academic-oup-co_journals_dfaf2baf.md) | ⚪ no change — Cloudflare managed challenge blocks playwright_html | 2026-05-21 | none | capability_blocked, anti_bot_challenge | https://academic.oup.com/journals |
 | [`host_404media-co_root_9e71a06a`](host_404media-co_root_9e71a06a.md) | Mastodon false-positive detector narrowed; 404media/WordPress/Tailscale social-link pages no longer match fresh detection | 2026-05-21 | C | mastodon_platform_false_positive, social_link_mastodon, stale_probe_artifact | https://www.404media.co/ |
 | [`clien-recognizer`](clien-recognizer.md) | ✅ recognizer 승급 (cluster 4건 → engine/recognizers/clien.py) | 2026-05-21 |  |  | https://www.clien.net/service/board/lecture |
 | [`batch_forums_genfail_boardurl_2026-05-21`](batch_forums_genfail_boardurl_2026-05-21.md) | ✅ 4 사이트 hand-config (포털/board-root → 실제 board URL) + engine encoding 옵션 | 2026-05-21 | F | posts_nonempty, matches_probe_first_article | https://www.humoruniv.com/ |
@@ -182,25 +189,25 @@
 | C+F+A | 1 |
 | E | 4 |
 | E+A+C+D | 1 |
-| F | 72 |
+| F | 76 |
 | F+A | 1 |
 | F+C | 3 |
-| none | 35 |
+| none | 38 |
 
 ### config_strategy 분포
 
 | strategy | count |
 |---|---|
-| (미기재) | 32 |
+| (미기재) | 35 |
 | handwritten | 22 |
 | httpx_html | 53 |
 | httpx_json | 15 |
 | mixed | 1 |
 | none | 27 |
-| playwright_html | 10 |
+| playwright_html | 14 |
 | rejected | 1 |
 
 ### 최근 90일 (≥ 2026-02-20)
 
-케이스 161 건.
+케이스 168 건.
 
