@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 186 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 187 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -74,6 +74,7 @@
 | [`host_dl-acm-org_action_18500797`](host_dl-acm-org_action_18500797.md) | no_change (not_board) | 2026-05-21 |  | not_a_board, publication_directory | https://dl.acm.org/action/showPublications |
 | [`host_diode-zone_root_531d9bcb`](host_diode-zone_root_531d9bcb.md) | ✅ 자동 등록 가능 (PeerTube recognizer + PeerTubeAdapter 신규 — API v1 직접 호출) | 2026-05-21 | F | posts_nonempty, article_body_len | https://diode.zone/ |
 | [`host_df-nexon-com_community_cae73546`](host_df-nexon-com_community_cae73546.md) | ✅ 수동 config (작동중, baseline 21, httpx_html) | 2026-05-21 | none | posts_nonempty | https://df.nexon.com/community/news/notice/list |
+| [`host_developer-andro_studio_d78fec02`](host_developer-andro_studio_d78fec02.md) | ✅ 등록 (Android Studio latest release page, static Devsite HTML) | 2026-05-21 | none | gate_reject, meta_diverging, single_article_page, devsite_static_release_page | https://developer.android.com/studio/releases |
 | [`host_dblp-org_db_e427dd1d`](host_dblp-org_db_e427dd1d.md) | 🧩 수동 config — DBLP new issues/volumes RSS 사용 | 2026-05-21 | none | posts_nonempty, rss_feed_available | https://dblp.org/db/conf/ |
 | [`host_dataverse-harva_dataverse_5133678a`](host_dataverse-harva_dataverse_5133678a.md) | 🔧 손 config 등록 후보 — Harvard Dataverse datasetResult rows playwright_html 9건 검증 | 2026-05-21 | none | spa_render_required, dataset_rows | https://dataverse.harvard.edu/dataverse/harvard |
 | [`host_datadoghq-com_blog_447ffb34`](host_datadoghq-com_blog_447ffb34.md) | ✅ 수동 config 등록 (httpx_html, baseline 6건) | 2026-05-21 | F | posts_nonempty | https://www.datadoghq.com/blog/ |
@@ -211,7 +212,7 @@
 | F+A | 1 |
 | F+C | 3 |
 | adapter | 1 |
-| none | 44 |
+| none | 45 |
 
 ### config_strategy 분포
 
@@ -219,7 +220,7 @@
 |---|---|
 | (미기재) | 43 |
 | handwritten | 24 |
-| httpx_html | 55 |
+| httpx_html | 56 |
 | httpx_json | 15 |
 | mixed | 1 |
 | none | 27 |
@@ -228,5 +229,5 @@
 
 ### 최근 90일 (≥ 2026-02-20)
 
-케이스 186 건.
+케이스 187 건.
 
