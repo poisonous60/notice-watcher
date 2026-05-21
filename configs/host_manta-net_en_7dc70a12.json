@@ -1,0 +1,91 @@
+{
+  "version": 1,
+  "site": "help.manta.net",
+  "board": "notice",
+  "strategy": "httpx_json",
+  "_source_url": "https://www.manta.net/en/notice",
+  "_note": "Submitted URL now returns HTTP 404 on manta.net. The current notice board lives on Manta Comics Support (Zendesk) at /hc/en-us/categories/1500001609621-Notice; the HTML pages are Cloudflare-challenged for httpx, but the public Zendesk Help Center API exposes the notice section without login. Keep html_url as the user-facing article link and tolerate empty fetched bodies when article HTML returns 403.",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/json,text/plain,*/*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://help.manta.net/hc/en-us/categories/1500001609621-Notice"
+  },
+  "timeout": 20,
+  "polite_sleep": {
+    "min": 5,
+    "max": 8
+  },
+  "list": {
+    "url_template": "https://help.manta.net/api/v2/help_center/en-us/sections/1500002504202/articles.json?per_page=100&sort_by=updated_at&sort_order=desc",
+    "pagination": {
+      "kind": "none"
+    },
+    "list_path": [
+      "articles"
+    ],
+    "fields": {
+      "post_id": [
+        {
+          "from": "json",
+          "path": [
+            "id"
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "json",
+          "path": [
+            "title"
+          ],
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "json",
+          "path": [
+            "html_url"
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "json",
+          "path": [
+            "updated_at"
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "json",
+          "path": [
+            "body"
+          ],
+          "transform": [
+            [
+              "html_unescape"
+            ],
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "json",
+    "skip_status": [
+      403
+    ],
+    "content": [],
+    "body_empty_acceptable": true
+  }
+}

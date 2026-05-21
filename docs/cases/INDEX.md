@@ -2,10 +2,29 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 216 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 231 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
+| [`host_toranoana-jp_news_84973d13`](host_toranoana-jp_news_84973d13.md) | ✅ 수동 config (입력 URL은 404, 공식 news.toranoana.jp로 remap) | 2026-05-22 | none | target_not_found, posts_nonempty, url_remap | https://www.toranoana.jp/news/ |
+| [`host_tappytoon-com_en_3c39ed9e`](host_tappytoon-com_en_3c39ed9e.md) | ✅ remap 후 손 config 등록 (Freshdesk Notices & News, baseline 10건) | 2026-05-22 | none | probe_timeout, target_not_found, url_remap | https://www.tappytoon.com/en/notice |
+| [`host_support-google-_a_f31fe093`](host_support-google-_a_f31fe093.md) | 🚫 거부 (legacy Google Support table URL 이 단일 도움말 article 로 remap — 게시판 아님) | 2026-05-22 | none | posts_nonempty, not_a_board, nav_only_same_host, legacy_table_remap, content_as_list | https://support.google.com/a/table/7539891 |
+| [`host_store-crunchyro_blogs_233f56ce`](host_store-crunchyro_blogs_233f56ce.md) | rejected (url_dead) | 2026-05-22 |  | probe_timeout, url_dead, store_blog_404 | https://store.crunchyroll.com/blogs/news |
+| [`host_rightstufanime-_post_97e1a227`](host_rightstufanime-_post_97e1a227.md) | 🚫 거부 — Right Stuf legacy URL 이 Crunchyroll Store 홈으로 remap | 2026-05-22 | none | probe_timeout, url_remapped, non_board_homepage, nav_only_candidates | https://www.rightstufanime.com/post |
+| [`host_manta-net_en_7dc70a12`](host_manta-net_en_7dc70a12.md) | 🧩 수동 config — 죽은 manta.net URL을 Manta Comics Support Zendesk API로 remap | 2026-05-22 | none | probe_timeout, target_not_found, remap_to_api, cloudflare_challenge | https://www.manta.net/en/notice |
+| [`host_mangaupdates-co_news.html_f4a7e1b6`](host_mangaupdates-co_news.html_f4a7e1b6.md) | fixed (url remapped to root news rows) | 2026-05-22 | config | fetch_list, url_dead, remap_root_news | https://www.mangaupdates.com/news.html |
+| [`host_mangaplus-shuei_updates_28a3a423`](host_mangaplus-shuei_updates_28a3a423.md) | 🚫 거부 — updates SPA shell 은 열리지만 공개 목록 payload 를 얻지 못함 | 2026-05-22 | none | posts_nonempty, wrong_first_article, nav_only_candidates, protobuf_api_empty, article_click_403 | https://mangaplus.shueisha.co.jp/updates |
+| [`host_manga-news-com_index.php_ad12e6cc`](host_manga-news-com_index.php_ad12e6cc.md) | ✅ 수동 config 등록 (httpx_html, public RSS feed) | 2026-05-22 | none | posts_nonempty, fetch_list | https://www.manga-news.com/index.php/actus |
+| [`host_kitsu-app_explore_ddcc83f3`](host_kitsu-app_explore_ddcc83f3.md) | 🔧 손 config (httpx_json) — Kitsu public edge API 사용 | 2026-05-22 | none | posts_nonempty | https://kitsu.app/explore/anime |
+| [`host_ijcai-org_root_dd66bb09`](host_ijcai-org_root_dd66bb09.md) | 🧩 수동 config — root homepage 본문 공지 링크 4건 등록 | 2026-05-22 | none | post_id_unique, nav_only_candidates, empty_rss, homepage_body_links | https://ijcai.org/ |
+| [`host_goodsmileracing_news_f0c534c5`](host_goodsmileracing_news_f0c534c5.md) | ✅ preflight b-hit 회복 + config 등록 (baseline 10건, httpx_html RSS) | 2026-05-22 | F | posts_nonempty, blocked_bot | https://www.goodsmileracing.com/news/ |
+| [`host_funimation-com_blog_65f137c9`](host_funimation-com_blog_65f137c9.md) | 🔧 손 config (httpx_json) — Funimation blog remap to Crunchyroll News API | 2026-05-22 | none | posts_nonempty | https://www.funimation.com/blog/ |
+| [`host_france24-com_en_a8047c17`](host_france24-com_en_a8047c17.md) | ✅ 등록 완료 (preflight b-hit; reuse-probe 자동 생성 playwright_html config) | 2026-05-22 | none | fetch_list, post_id_unique | https://www.france24.com/en/ |
+| [`host_crunchyroll-com_news_02fd4569`](host_crunchyroll-com_news_02fd4569.md) | 🔧 손 config (httpx_json) — Crunchyroll News 공개 JSON API 사용 | 2026-05-22 | none | posts_nonempty | https://www.crunchyroll.com/news |
+| [`host_call-for-papers_root_90032f22`](host_call-for-papers_root_90032f22.md) | 🧩 수동 config — root landing 을 all recent posts 목록으로 remap | 2026-05-22 | none | posts_nonempty, wrong_first_article, nav_only_candidates, empty_rss | https://call-for-papers.sas.upenn.edu/ |
+| [`host_booth-pm_announcements_b96f82ef`](host_booth-pm_announcements_b96f82ef.md) | ✅ 손 config 등록 (baseline 20건, httpx_html) | 2026-05-22 | none | probe_timeout | https://booth.pm/announcements |
+| [`host_animate-onlines_contents_ba74459f`](host_animate-onlines_contents_ba74459f.md) | 🚫 거부 (입력 URL은 404, 공식 공지 remap 후보도 현재 공개 목록 0건) | 2026-05-22 | none | target_not_found, posts_nonempty, empty_official_notice_list | https://www.animate-onlineshop.jp/contents/news/ |
+| [`host_amiami-com_eng_f0c7cc0e`](host_amiami-com_eng_f0c7cc0e.md) | ✅ 수동 config 등록 (playwright_html, list-only accordion) | 2026-05-22 | none | posts_nonempty, post_id_stable_shape, matches_probe_first_article | https://www.amiami.com/eng/news/ |
 | [`xenforo_subpath_install_2026-05-21`](xenforo_subpath_install_2026-05-21.md) | ✅ 자동 등록 (XenForo recognizer 서브폴더 설치 install path 보존 — /community/forums/-/index.rss) | 2026-05-21 | F | posts_nonempty | https://xenforo.com/community/ |
 | [`ruliweb-recognizer`](ruliweb-recognizer.md) | ✅ recognizer 승급 (Ruliweb bbs cluster 4건 → engine/recognizers/ruliweb.py) | 2026-05-21 |  |  | https://bbs.ruliweb.com/mobile/board/1004/rss |
 | [`ppomppu-recognizer`](ppomppu-recognizer.md) | ✅ recognizer 승급 (cluster 3건 → engine/recognizers/ppomppu.py) | 2026-05-21 |  | posts_nonempty | https://www.ppomppu.co.kr/zboard/zboard.php?id=ppomppu |
@@ -29,7 +48,6 @@
 | [`host_tandfonline-com_action_50531308`](host_tandfonline-com_action_50531308.md) | ✅ playwright_html all-journals directory registered | 2026-05-21 | F | posts_nonempty, board_shape_check | https://www.tandfonline.com/action/showPublications |
 | [`host_tailscale-com_blog_07031656`](host_tailscale-com_blog_07031656.md) | ✅ 등록 완료 (static HTML httpx_html config; Playwright timeout 우회) | 2026-05-21 | none | probe_timeout | https://tailscale.com/blog/ |
 | [`host_t-me_s_ce7a5d31`](host_t-me_s_ce7a5d31.md) | ✅ 등록 (Telegram public channel list-only) | 2026-05-21 | none | article_body_len, body_empty_acceptable, list_only | https://t.me/s/durov |
-| [`host_support-google-_a_f31fe093`](host_support-google-_a_f31fe093.md) | 🚫 거부 (Google Support 도움말 table/article hub — same-host 반복 링크가 전부 nav 안에만 있어 게시판 아님) | 2026-05-21 | none | posts_nonempty, not_a_board, nav_only_same_host | https://support.google.com/a/table/7539891 |
 | [`host_sunrise-inc-co-_news_5275d937`](host_sunrise-inc-co-_news_5275d937.md) | ✅ 수동 config 등록 (SUNRISE root news block, baseline 5건) | 2026-05-21 | none | schema_invalid, selector_leading_combinator, wrong_relative_article_url | https://www.sunrise-inc.co.jp/news/ |
 | [`host_storybook-js-or_releases_84da88aa`](host_storybook-js-or_releases_84da88aa.md) | ✅ 손작성 config (작동중, baseline 10, GitHub Releases Atom feed) | 2026-05-21 | none | posts_nonempty, board_shape, redirect_to_release_detail | https://storybook.js.org/releases/ |
 | [`host_status-deno-com_root_5aa73944`](host_status-deno-com_root_5aa73944.md) | ✅ 등록 (Statuspage.io Atom history feed 사용) | 2026-05-21 | F | posts_nonempty, rss_feed_available, statuspage_history_atom | https://status.deno.com/ |
@@ -71,14 +89,12 @@
 | [`host_jstage-jst-go-j_browse_b0d95528`](host_jstage-jst-go-j_browse_b0d95528.md) | 🔧 손 config 등록 후보 — J-STAGE latest issue rows playwright_html 10건 검증 | 2026-05-21 | none | spa_render_required, issue_rows | https://www.jstage.jst.go.jp/browse/-char/en |
 | [`host_journals-sagepu_action_5a296461`](host_journals-sagepu_action_5a296461.md) | ⚪ no change — Cloudflare managed challenge blocks playwright_html | 2026-05-21 | none | capability_blocked, anti_bot_challenge | https://journals.sagepub.com/action/showPublications |
 | [`host_indiehackers-co_root_e4490db0`](host_indiehackers-co_root_e4490db0.md) | 🔧 손 config 추가 — 정적 Ember HTML의 story 카드에서 홈 피드 30건 baseline | 2026-05-21 | none | posts_nonempty, first_article_url_missing, static_variant_rows_not_promoted | https://www.indiehackers.com/ |
-| [`host_ijcai-org_root_dd66bb09`](host_ijcai-org_root_dd66bb09.md) | 🚫 거부 (root landing/nav 링크 묶음 — chronological news/CFP board 아님) | 2026-05-21 | none | post_id_unique, nav_links, root_landing | https://ijcai.org/ |
 | [`host_icse2026-github_root_cd78a66a`](host_icse2026-github_root_cd78a66a.md) | no_change (url_dead) | 2026-05-21 |  | url_dead, github_pages_404 | https://icse2026.github.io/ |
 | [`host_icpsr-umich-edu_web_7ddcbb54`](host_icpsr-umich-edu_web_7ddcbb54.md) | ⚪ no_change — 입력 URL은 ICPSR home/marketing page 로 redirect | 2026-05-21 | none | not_a_board, root_landing_page, redirected_home | https://www.icpsr.umich.edu/web/pages/ |
 | [`host_hubspot-com_product-updates_33c05b99`](host_hubspot-com_product-updates_33c05b99.md) | 🔧 수동 config — HubSpot Releases and Updates JSON API 로 baseline 30건 등록 | 2026-05-21 | none | posts_nonempty, khoros_resources_api | https://www.hubspot.com/product-updates |
 | [`host_historians-org_annual-meeting_aae80fef`](host_historians-org_annual-meeting_aae80fef.md) | ✅ 해결 (Annual Meeting 관련 article 링크 4건 list-only config) | 2026-05-21 | none | fetch_list_403, article_body_len, cloudflare_protected | https://www.historians.org/annual-meeting |
 | [`host_grafana-com_blog_d681aff2`](host_grafana-com_blog_d681aff2.md) | ✅ 수동 config 등록 (httpx_html, baseline 30건) | 2026-05-21 | F | posts_nonempty | https://grafana.com/blog/ |
 | [`host_gkids-com_news_9f98bf89`](host_gkids-com_news_9f98bf89.md) | 🔧 손 config (httpx_json, baseline 20건) — WordPress REST posts API 사용 | 2026-05-21 | none | article_body_len | https://www.gkids.com/news/ |
-| [`host_france24-com_en_a8047c17`](host_france24-com_en_a8047c17.md) | 🚫 보류 (anti-bot 403 capability_blocked; stealth 우회 구현 안 함) | 2026-05-21 | none | capability_blocked, fetch_list | https://www.france24.com/en/ |
 | [`host_firebase-google_support_1f0ed638`](host_firebase-google_support_1f0ed638.md) | ⏸ deferred — 앵커-glob 단일페이지 (가치 낮음) | 2026-05-21 |  | meta_diverging, posts_nonempty | https://firebase.google.com/support/releases |
 | [`host_fedia-io_root_1f0bc0d6`](host_fedia-io_root_1f0bc0d6.md) | ⛔ capability_blocked — root/combined가 login으로 redirect, mbin API는 현재 401; rc=5 Mbin rescue path 추가 | 2026-05-21 | F | capability_blocked, login_redirect, mbin_api_unauthorized, fediverse_api_rescue | https://fedia.io/ |
 | [`host_feddit-de_root_584f7d0f`](host_feddit-de_root_584f7d0f.md) | rc=5 capability_blocked — Lemmy root; dev box API 404, 미등록 (rescue 인프라 일반화) | 2026-05-21 | F | capability_blocked, fediverse_api_rescue, lemmy_api_rescue | https://feddit.de/ |
@@ -106,7 +122,6 @@
 | [`host_cdjapan-co-jp_feature_ba56403b`](host_cdjapan-co-jp_feature_ba56403b.md) | ✅ 손 config (작동중, baseline 23, httpx_html) | 2026-05-21 | config | post_id_unique, title_nonempty, post_id_stable_shape | https://www.cdjapan.co.jp/feature/ |
 | [`host_canva-com_whats-new_1e430553`](host_canva-com_whats-new_1e430553.md) | ✅ 등록 (Canva public newsroom whats-new articles) | 2026-05-21 | F | capability_blocked, cloudflare, login_redirect, canva_whats_new | https://www.canva.com/whats-new/ |
 | [`host_cambridge-org_core_9f561f6b`](host_cambridge-org_core_9f561f6b.md) | ✅ playwright_html journal directory registered | 2026-05-21 | F | capability_blocked, posts_nonempty | https://www.cambridge.org/core/what-we-publish/journals |
-| [`host_call-for-papers_root_90032f22`](host_call-for-papers_root_90032f22.md) | 🚫 거부 (root는 안내 페이지 + 카테고리 메뉴, RSS는 빈 channel — 실제 CFP 목록 없음) | 2026-05-21 | none | posts_nonempty, matches_probe_first_article, empty_feed, nav_category_menu | https://call-for-papers.sas.upenn.edu/ |
 | [`host_brunch-co-kr_springboot_58aa9ddd`](host_brunch-co-kr_springboot_58aa9ddd.md) | ✅ 수동 config 등록 (Brunch RSS, baseline 20건) | 2026-05-21 | F | register_subprocess_timeout, posts_nonempty | https://brunch.co.kr/@springboot |
 | [`host_box-com_blog_de163a6a`](host_box-com_blog_de163a6a.md) | ⛔ capability_blocked — original URL is Cloudflare-challenged for static fetch and 404 under Playwright; moved Box Blog category is also CF managed-challenge at runtime | 2026-05-21 | none | capability_blocked, cloudflare_challenge, original_url_404, moved_blog_category, playwright_runtime_blocked | https://box.com/blog/category/product-news |
 | [`host_blog-unity-com_root_9fe1176b`](host_blog-unity-com_root_9fe1176b.md) | ✅ 수동 config 등록 (RSS 목록, baseline 30건; 본문 비움 허용) | 2026-05-21 | F | posts_nonempty | https://blog.unity.com/ |
@@ -229,7 +244,7 @@
 
 | layer | count |
 |---|---|
-| (미기재) | 35 |
+| (미기재) | 36 |
 | B | 1 |
 | C | 16 |
 | C+A | 1 |
@@ -239,28 +254,28 @@
 | C+config | 2 |
 | E | 5 |
 | E+A+C+D | 1 |
-| F | 81 |
+| F | 82 |
 | F+A | 1 |
 | F+C | 3 |
 | adapter | 1 |
-| config | 1 |
-| none | 63 |
+| config | 2 |
+| none | 75 |
 
 ### config_strategy 분포
 
 | strategy | count |
 |---|---|
-| (미기재) | 44 |
+| (미기재) | 45 |
 | handwritten | 27 |
-| httpx_html | 69 |
-| httpx_json | 17 |
+| httpx_html | 77 |
+| httpx_json | 21 |
 | httpx_json (미적용 — 콘텐츠 0) | 1 |
 | mixed | 1 |
 | none | 33 |
-| playwright_html | 23 |
+| playwright_html | 25 |
 | rejected | 1 |
 
 ### 최근 90일 (≥ 2026-02-20)
 
-케이스 216 건.
+케이스 231 건.
 

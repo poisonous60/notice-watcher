@@ -1,0 +1,166 @@
+{
+  "version": 1,
+  "site": "call-for-papers.sas.upenn.edu",
+  "board": "all",
+  "strategy": "httpx_html",
+  "_source_url": "https://call-for-papers.sas.upenn.edu/",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+    "Upgrade-Insecure-Requests": "1",
+    "Referer": "https://call-for-papers.sas.upenn.edu/"
+  },
+  "timeout": 15,
+  "polite_sleep": {
+    "min": 60,
+    "max": 65
+  },
+  "list": {
+    "url_template": "https://call-for-papers.sas.upenn.edu/category/{board}",
+    "pagination": {
+      "kind": "query_param",
+      "page_param": "page"
+    },
+    "row_selector": "div.view-content div.views-row > article.node-cfp",
+    "row_required_selector": "h2.node-title a",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": ":self",
+          "attr": "class",
+          "transform": [
+            [
+              "regex_extract",
+              "(?:^|\\s)node-(\\d+)(?:\\s|$)"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "h2.node-title a",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "h2.node-title a",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://call-for-papers.sas.upenn.edu"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "div.field-name-field-cfp-updated .date-display-single",
+          "text": true,
+          "transform": [
+            [
+              "iso8601",
+              [
+                "%A, %B %d, %Y - %I:%M%p"
+              ],
+              "+09:00"
+            ]
+          ]
+        }
+      ],
+      "author": [
+        {
+          "from": "css",
+          "selector": "div.field-name-field-cfp-contact-name .field-item",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "const",
+          "value": "all"
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "div.field-name-field-cfp-content .field-item",
+          "html": true
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "div.field-name-field-cfp-content .field-item",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "article.node-cfp div.field-name-field-cfp-content .field-item",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "h1#page-title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        },
+        {
+          "from": "css",
+          "selector": "h2.node-title a",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "div.field-name-field-cfp-updated .date-display-single",
+          "text": true,
+          "transform": [
+            [
+              "iso8601",
+              [
+                "%A, %B %d, %Y - %I:%M%p"
+              ],
+              "+09:00"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "_note": "Root page is a Drupal landing page with category navigation and no post rows; the stable all-posts list is /category/all. /rss.xml is present but empty, so this config polls the all recent posts category while preserving the submitted root URL."
+}

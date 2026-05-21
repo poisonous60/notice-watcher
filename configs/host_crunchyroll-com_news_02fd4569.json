@@ -1,0 +1,119 @@
+{
+  "version": 1,
+  "site": "crunchyroll.com",
+  "board": "news",
+  "strategy": "httpx_json",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Origin": "https://www.crunchyroll.com",
+    "Referer": "https://www.crunchyroll.com/news"
+  },
+  "timeout": 20,
+  "polite_sleep": {
+    "min": 5,
+    "max": 8
+  },
+  "list": {
+    "url_template": "https://cr-news-api-service.prd.crunchyrollsvc.com/v1/en-US/stories/search?order_by=newest",
+    "pagination": {
+      "kind": "query_param",
+      "page_param": "page",
+      "size_param": "page_size"
+    },
+    "page_size_max": 20,
+    "list_path": ["stories"],
+    "fields": {
+      "post_id": [
+        {
+          "from": "json",
+          "path": ["slug"],
+          "transform": [["collapse_ws"]]
+        }
+      ],
+      "title": [
+        {
+          "from": "json",
+          "path": ["content", "headline"],
+          "transform": [["collapse_ws"]]
+        }
+      ],
+      "url": [
+        {
+          "from": "template",
+          "value": "https://www.crunchyroll.com/news/{post_id}"
+        }
+      ],
+      "published_at": [
+        {
+          "from": "json",
+          "path": ["content", "created_at"],
+          "transform": [["collapse_ws"]]
+        }
+      ],
+      "category": [
+        {
+          "from": "json",
+          "path": ["content", "category"],
+          "transform": [["collapse_ws"]]
+        }
+      ],
+      "summary": [
+        {
+          "from": "json",
+          "path": ["content", "lead"],
+          "transform": [["collapse_ws"]]
+        }
+      ],
+      "cover_image": [
+        {
+          "from": "json",
+          "path": ["content", "thumbnail", "filename"],
+          "transform": [["strip_query_fragment"]]
+        }
+      ]
+    }
+  },
+  "article": {
+    "url_template": "https://cr-news-api-service.prd.crunchyrollsvc.com/v1/en-US/stories?slug={post_id}",
+    "fetch_kind": "json",
+    "data_path": ["story"],
+    "content": [
+      {
+        "from": "json",
+        "path": ["content", "seo", "description"]
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "json",
+          "path": ["content", "seo", "title"],
+          "transform": [["collapse_ws"]]
+        },
+        {
+          "from": "json",
+          "path": ["content", "headline"],
+          "transform": [["collapse_ws"]]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "json",
+          "path": ["content", "created_at"],
+          "transform": [["collapse_ws"]]
+        }
+      ],
+      "summary": [
+        {
+          "from": "json",
+          "path": ["content", "lead"],
+          "transform": [["collapse_ws"]]
+        }
+      ]
+    }
+  },
+  "_source_url": "https://www.crunchyroll.com/news",
+  "_note": "Crunchyroll News renders a Next.js shell and calls the public cr-news API. The generic probe saw only empty rendered selectors and a misleading /rss feed for videos; this config polls the news search API directly."
+}

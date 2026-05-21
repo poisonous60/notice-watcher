@@ -1,0 +1,147 @@
+{
+  "version": 1,
+  "site": "kitsu.app",
+  "board": "explore/anime",
+  "strategy": "httpx_json",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/vnd.api+json, application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://kitsu.app/explore/anime"
+  },
+  "timeout": 20,
+  "polite_sleep": {
+    "min": 5,
+    "max": 8
+  },
+  "list": {
+    "url_template": "https://kitsu.app/api/edge/trending/anime?limit=20",
+    "pagination": {
+      "kind": "none"
+    },
+    "list_path": [
+      "data"
+    ],
+    "fields": {
+      "post_id": [
+        {
+          "from": "json",
+          "path": [
+            "id"
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "json",
+          "path": [
+            "attributes",
+            "canonicalTitle"
+          ],
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "template",
+          "value": "https://kitsu.app/anime/{post_id}"
+        }
+      ],
+      "published_at": [
+        {
+          "from": "json",
+          "path": [
+            "attributes",
+            "updatedAt"
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "json",
+          "path": [
+            "attributes",
+            "synopsis"
+          ],
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "cover_image": [
+        {
+          "from": "json",
+          "path": [
+            "attributes",
+            "posterImage",
+            "medium"
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "url_template": "https://kitsu.app/api/edge/anime/{post_id}",
+    "fetch_kind": "json",
+    "data_path": [
+      "data"
+    ],
+    "content": [
+      {
+        "from": "json",
+        "path": [
+          "attributes",
+          "synopsis"
+        ]
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "json",
+          "path": [
+            "attributes",
+            "canonicalTitle"
+          ],
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "json",
+          "path": [
+            "attributes",
+            "synopsis"
+          ],
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "cover_image": [
+        {
+          "from": "json",
+          "path": [
+            "attributes",
+            "posterImage",
+            "medium"
+          ]
+        }
+      ]
+    }
+  },
+  "_source_url": "https://kitsu.app/explore/anime",
+  "_note": "Kitsu explore/anime is an Ember app shell. Probe/HAR showed the page renders anime sections from the public Kitsu edge API; HTML selectors produced posts_nonempty=0. This config polls the trending anime API directly with one list call and one article JSON call per new item. robots.txt disallows /api/ on kitsu.app/kitsu.io; project policy treats this as a warning, so this config keeps the call volume low and polite_sleep at 5-8s."
+}

@@ -178,6 +178,8 @@ bash scripts/setup-hooks.sh   # 또는 pwsh scripts/setup-hooks.ps1
 
 이 룰 자체가 2026-05-19 사용자 feedback 으로 박힘 — 이전 다수 turn 에서 같은 패턴 반복 관찰.
 
+**범위 = 사이트 등록 gap 뿐 아니라 *오케스트레이션·하네스·process 실수*도 포함** (2026-05-22 사용자 feedback). 자가개선 인프라(§6/ADR 0003)는 등록 품질(probe/prompt/recognizer) 대상이지만, *Claude 가 batch 를 모는 방식*의 실수 — watcher 를 shell `&` 로 띄워 알림 유실, two-dot diff 오진, URL 과도 remap, 남의 파일 stage 등 — 도 같은 룰을 받는다. **그런 실수를 잡으면 "재시도하고 넘어감"으로 끝내지 말고, 그 자리에서 durable layer 에 게이트를 박아라**: SKILL.md(§0c 등)·CLAUDE.md(§9 등)·해당 스크립트 docstring·`feedback-*` memory 중 맞는 곳. 게이트 박기가 한 줄이면 *이번 turn 에 같이* 박는다 (별도 follow-up 으로 미루기 X). "내가 알아챘으면 즉시 영구화" 가 기본 반사. (예: 2026-05-22 shell `&` watcher 유실 → `codex_watch.py` 멀티파일+docstring 경고 + SKILL §0c step 4 + 이 줄.)
+
 ## 9. 동시 dev 세션 — 병렬 git etiquette
 
 여러 Claude/codex 세션이 *같은 dev box·같은 로컬 repo·같은 main* 에서 동시 작업 가능 (별도 clone 아님). 흔함 — 한 세션이 batch A, 다른 세션이 batch B. 핵심: **git 상태가 내 것만이 아님**. 2026-05-21 동시 batch 중 오진·혼란으로 박힘.

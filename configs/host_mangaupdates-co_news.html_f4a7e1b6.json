@@ -1,0 +1,142 @@
+{
+  "version": 1,
+  "site": "www.mangaupdates.com",
+  "board": "news",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+    "Referer": "https://www.mangaupdates.com/"
+  },
+  "timeout": 20,
+  "polite_sleep": {
+    "min": 8,
+    "max": 12
+  },
+  "list": {
+    "url_template": "https://www.mangaupdates.com/",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "div.news-row-module__pHUmoa__news_container",
+    "row_required_selector": "div.news-row-module__pHUmoa__news_comments a[href*='/topic/']",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "div.news-row-module__pHUmoa__news_comments a[href*='/topic/']:not([href$='/reply?source=news'])",
+          "attr": "href",
+          "transform": [
+            [
+              "regex_extract",
+              "/topic/([^/]+)/"
+            ]
+          ]
+        },
+        {
+          "from": "attr",
+          "selector": "div.news-row-module__pHUmoa__news_comments a[href*='/topic/']",
+          "attr": "href",
+          "transform": [
+            [
+              "regex_extract",
+              "/topic/([^/]+)/"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "div.news-row-module__pHUmoa__news_title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "div.news-row-module__pHUmoa__news_comments a[href*='/topic/']:not([href$='/reply?source=news'])",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://www.mangaupdates.com"
+            ],
+            [
+              "strip_query_fragment"
+            ]
+          ]
+        },
+        {
+          "from": "attr",
+          "selector": "div.news-row-module__pHUmoa__news_comments a[href*='/topic/']",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://www.mangaupdates.com"
+            ],
+            [
+              "strip_query_fragment"
+            ]
+          ]
+        }
+      ],
+      "author": [
+        {
+          "from": "css",
+          "selector": "span.news-row-module__pHUmoa__newsname",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "const",
+          "value": "news"
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "div.news-row-module__pHUmoa__news_content",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "main#mu-main",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "body",
+        "html": true
+      }
+    ],
+    "body_empty_acceptable": true
+  },
+  "_source_url": "https://www.mangaupdates.com/news.html",
+  "_note": "handcrafted: submitted /news.html returns HTTP 404/TARGET_NOT_FOUND, but the same News rows are served from site root and the page exposes /rss. Poll the root News section; avoid query pagination because ?page=1 returns 404."
+}

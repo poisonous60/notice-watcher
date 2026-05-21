@@ -1,0 +1,117 @@
+{
+  "version": 1,
+  "site": "manga-news.com",
+  "board": "actus",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8",
+    "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
+    "Referer": "https://www.manga-news.com/"
+  },
+  "timeout": 20,
+  "polite_sleep": {
+    "min": 5,
+    "max": 8
+  },
+  "list": {
+    "url_template": "https://www.manga-news.com/index.php/feed/news",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "item",
+    "row_required_selector": "title",
+    "fields": {
+      "post_id": [
+        {
+          "from": "css",
+          "selector": "link",
+          "text": true,
+          "transform": [
+            ["collapse_ws"],
+            ["regex_extract", "/index\\.php/actus/(\\d{4}/\\d{2}/\\d{2}/[^?#]+)"]
+          ]
+        },
+        {
+          "from": "css",
+          "selector": "guid",
+          "text": true,
+          "transform": [
+            ["collapse_ws"],
+            ["remove_prefix", "urn:md5:"]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "title",
+          "text": true,
+          "transform": [["collapse_ws"], ["html_unescape"]]
+        }
+      ],
+      "url": [
+        {
+          "from": "css",
+          "selector": "link",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "pubDate",
+          "text": true,
+          "transform": [
+            ["collapse_ws"],
+            ["iso8601", ["%a, %d %b %Y %H:%M:%S %z"]]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "description",
+          "text": true,
+          "transform": [["collapse_ws"], ["html_unescape"]]
+        }
+      ],
+      "category": [
+        {
+          "from": "const",
+          "value": "news"
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "skip_status": [403],
+    "content": [
+      {
+        "from": "css",
+        "selector": "div.actu-content.bigsize",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "div.actu-content",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "h1.entryTitle",
+          "text": true,
+          "transform": [["collapse_ws"], ["html_unescape"]]
+        }
+      ]
+    },
+    "body_empty_acceptable": true
+  },
+  "_source_url": "https://www.manga-news.com/index.php/actus",
+  "_note": "The requested /index.php/actus URL returns an error shell, but the page advertises the live public RSS feed /index.php/feed/news. Poll the feed for list data; direct article pages may be Cloudflare-blocked from dev and are skipped with body_empty_acceptable while RSS summaries remain available."
+}

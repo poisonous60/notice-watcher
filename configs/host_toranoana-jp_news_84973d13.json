@@ -1,0 +1,150 @@
+{
+  "version": 1,
+  "site": "toranoana.jp",
+  "board": "news",
+  "strategy": "httpx_html",
+  "_source_url": "https://www.toranoana.jp/news/",
+  "_note": "Original URL is a 404 legacy path; remapped to the official news.toranoana.jp information index.",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ja,en;q=0.8,ko;q=0.6"
+  },
+  "timeout": 15,
+  "polite_sleep": {
+    "min": 5,
+    "max": 5
+  },
+  "list": {
+    "url_template": "https://news.toranoana.jp/",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "div.posts > div.post[id^='post-id-']",
+    "row_required_selector": "h2.post-title a[href^='https://news.toranoana.jp/']",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": ":self",
+          "attr": "id",
+          "transform": [
+            [
+              "regex_extract",
+              "post-id-(\\d+)"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "h2.post-title a",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "h2.post-title a",
+          "attr": "href",
+          "transform": [
+            [
+              "strip_query_fragment"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "div.post-date span",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "iso8601",
+              [
+                "%Y.%m.%d"
+              ],
+              "+09:00"
+            ]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "css",
+          "selector": "div.post-cats span",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "p.post-excerpt",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "cover_image": [
+        {
+          "from": "attr",
+          "selector": "img.post-thumbnail",
+          "attr": "data-src",
+          "transform": [
+            [
+              "strip_query_fragment"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "div.post-contents",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "div.post-content",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "h1.post-title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  }
+}

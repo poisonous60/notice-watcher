@@ -1,0 +1,157 @@
+{
+  "version": 1,
+  "site": "ijcai.org",
+  "board": "root",
+  "_note": "Submitted root URL is a Drupal homepage, not a dedicated board. /rss.xml exists but has no item entries, and the nav menu is not a polling target. Poll only the announcement-style links in the homepage body paragraph while keeping list.url_template on the submitted root URL.",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+    "Referer": "https://ijcai.org/"
+  },
+  "timeout": 15,
+  "polite_sleep": {
+    "min": 10,
+    "max": 12
+  },
+  "list": {
+    "url_template": "https://ijcai.org/",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "div.field-item.even[property='content:encoded'] > p:nth-of-type(5) > a[href]",
+    "fields": {
+      "post_id": [
+        {
+          "from": "concat",
+          "parts": [
+            {
+              "from": "attr",
+              "selector": ":self",
+              "attr": "href",
+              "transform": [
+                [
+                  "strip_query_fragment"
+                ],
+                [
+                  "replace",
+                  "https://",
+                  ""
+                ],
+                [
+                  "replace",
+                  "http://",
+                  ""
+                ],
+                [
+                  "replace",
+                  "/",
+                  "_"
+                ]
+              ]
+            },
+            {
+              "const": "__"
+            },
+            {
+              "from": "css",
+              "selector": ":self",
+              "text": true,
+              "transform": [
+                [
+                  "collapse_ws"
+                ],
+                [
+                  "replace",
+                  " ",
+                  "_"
+                ],
+                [
+                  "replace",
+                  ":",
+                  ""
+                ]
+              ]
+            }
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": ":self",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": ":self",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://ijcai.org"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "body_empty_acceptable": true,
+    "content": [
+      {
+        "from": "css",
+        "selector": "div.field-item.even[property='content:encoded']",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "div.field-name-body",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "main",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "body",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "h1.page-title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        },
+        {
+          "from": "css",
+          "selector": "title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  }
+}

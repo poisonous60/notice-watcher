@@ -1,0 +1,165 @@
+{
+  "version": 1,
+  "site": "BOOTH",
+  "board": "announcements",
+  "strategy": "httpx_html",
+  "_source_url": "https://booth.pm/announcements",
+  "_note": "손작성: register probe timed out, but the captured static HTML has complete announcement rows and static article bodies.",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ja,en;q=0.8",
+    "Referer": "https://booth.pm/announcements"
+  },
+  "timeout": 20,
+  "list": {
+    "url_template": "https://booth.pm/announcements",
+    "pagination": {
+      "kind": "query_param",
+      "page_param": "page"
+    },
+    "row_selector": "div.list > a.legacy-list-item.nav[href^='/announcements/']",
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "attr": "href",
+          "transform": [
+            [
+              "regex_extract",
+              "/announcements/(\\d+)"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": ".u-mt-sp-200",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://booth.pm"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": ".l-annoucements-date .date",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "replace",
+              "年",
+              "-"
+            ],
+            [
+              "replace",
+              "月",
+              "-"
+            ],
+            [
+              "replace",
+              "日",
+              ""
+            ],
+            [
+              "iso8601",
+              [
+                "%Y-%m-%d"
+              ],
+              "+09:00"
+            ]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "css",
+          "selector": ".announcement_type",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": ".l-announcement-body",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "main h1",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "main h1 + div",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "replace",
+              "年",
+              "-"
+            ],
+            [
+              "replace",
+              "月",
+              "-"
+            ],
+            [
+              "replace",
+              "日",
+              ""
+            ],
+            [
+              "iso8601",
+              [
+                "%Y-%m-%d"
+              ],
+              "+09:00"
+            ]
+          ]
+        }
+      ]
+    }
+  }
+}
