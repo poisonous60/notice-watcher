@@ -439,11 +439,12 @@ def svg_pca_scatter(sites: list[dict], now: datetime, color_map: dict) -> str:
     for point in points:
         posts = len(point.get("seen_post_ids") or [])
         radius = 3 + (5 * posts / max_posts if max_posts else 0)
-        title = f"{point['host']} · {point['platform']} · {point.get('last_status') or 'unknown'}"
+        platform = str(point["platform"])
         circles.append(
-            f'<circle cx="{sx(point["x"]):.1f}" cy="{sy(point["y"]):.1f}" r="{radius:.1f}" '
-            f'fill="{color_map.get(point["platform"], PALETTE[0])}" opacity="0.58">'
-            f"<title>{esc(title)}</title></circle>"
+            f'<circle class="dot" cx="{sx(point["x"]):.1f}" cy="{sy(point["y"]):.1f}" r="{radius:.1f}" '
+            f'fill="{color_map.get(platform, PALETTE[0])}" '
+            f'data-pf="{esc(platform)}" data-domain="{esc(point["host"])}" '
+            f'data-status="{esc(point.get("last_status") or "unknown")}"></circle>'
         )
 
     center_x = pad + plot_w / 2
@@ -501,7 +502,7 @@ def svg_pca_scatter(sites: list[dict], now: datetime, color_map: dict) -> str:
         )
     note = "" if projection.pca_ready else f'<text x="{pad}" y="{pad - 14}" class="svg-label">Fallback layout: not enough varied data for PCA</text>'
     return (
-        f'<svg viewBox="0 0 {width} {height}" role="img" aria-label="Watched site projection scatter">'
+        f'<svg id="siteScatter" viewBox="0 0 {width} {height}" role="img" aria-label="Watched site projection scatter">'
         f'<rect x="0" y="0" width="{width}" height="{height}" class="scatter-bg"></rect>'
         f'<rect x="{pad}" y="{pad}" width="{plot_w}" height="{plot_h}" class="scatter-frame"></rect>'
         f"{note}"
@@ -693,6 +694,24 @@ def render_html(configs: dict, poll: dict, jobs: dict, generated_at: datetime) -
       stroke-width: 3.5px;
       stroke-linejoin: round;
     }}
+    .dot {{ opacity: 0.58; cursor: pointer; transition: opacity 0.12s ease; }}
+    #siteScatter.dimmed .dot {{ opacity: 0.08; }}
+    #siteScatter.dimmed .dot.hl {{ opacity: 0.95; }}
+    .dot-tip {{
+      position: fixed;
+      z-index: 30;
+      pointer-events: none;
+      background: var(--ink);
+      color: var(--panel);
+      padding: 7px 11px;
+      border-radius: 5px;
+      font-size: 0.82rem;
+      line-height: 1.35;
+      box-shadow: 0 3px 12px rgba(31, 37, 40, 0.28);
+      max-width: 300px;
+    }}
+    .dot-tip b {{ display: block; }}
+    .dot-tip span {{ color: var(--line); font-size: 0.76rem; }}
     ol, ul {{ padding-left: 22px; }}
     .legend {{
       list-style: none;
@@ -805,8 +824,43 @@ def render_html(configs: dict, poll: dict, jobs: dict, generated_at: datetime) -
     <figure>
       {scatter_chart}
       <ul class="legend">{legend_html}</ul>
-      <figcaption>Figure 1. A map of every site we watch. Each dot is one site — its <strong>color</strong> is the platform (see legend below) and its <strong>size</strong> shows how busy it is. We describe each site by a few simple traits (how active it is, how long we've watched it, how often its updates glitch) and lay them on a flat map so that <strong>similar sites land close together</strong>. Same-colored dots clump, and the overall spread shows how varied our coverage is. The gray arrows point toward higher values of each trait — dots near the “age” arrow are older, near “activity” are busier. Hover any dot to see its domain.</figcaption>
+      <div id="dotTip" class="dot-tip" hidden></div>
+      <figcaption>Figure 1. Arrow directions —
+        <b>activity</b>: new posts recently seen ·
+        <b>age</b>: days since we started watching ·
+        <b>glitches</b>: consecutive failed update checks ·
+        <b>post count</b>: posts captured at first scan ·
+        <b>empty posts</b>: posts that arrived with no body.</figcaption>
     </figure>
+    <script>
+      (function () {{
+        var svg = document.getElementById('siteScatter');
+        var tip = document.getElementById('dotTip');
+        if (!svg || !tip) return;
+        function clear() {{
+          svg.classList.remove('dimmed');
+          svg.querySelectorAll('.dot.hl').forEach(function (d) {{ d.classList.remove('hl'); }});
+          tip.hidden = true;
+        }}
+        svg.addEventListener('mouseover', function (e) {{
+          var c = e.target.closest ? e.target.closest('.dot') : null;
+          if (!c) {{ clear(); return; }}
+          var pf = c.getAttribute('data-pf');
+          svg.classList.add('dimmed');
+          svg.querySelectorAll('.dot').forEach(function (d) {{
+            d.classList.toggle('hl', d.getAttribute('data-pf') === pf);
+          }});
+          tip.innerHTML = '<b>' + c.getAttribute('data-domain') + '</b>'
+            + '<span>' + pf + ' · ' + c.getAttribute('data-status') + '</span>';
+          tip.hidden = false;
+        }});
+        svg.addEventListener('mousemove', function (e) {{
+          tip.style.left = (e.clientX + 14) + 'px';
+          tip.style.top = (e.clientY + 14) + 'px';
+        }});
+        svg.addEventListener('mouseleave', clear);
+      }})();
+    </script>
   </section>
 
   <section aria-labelledby="sources">
