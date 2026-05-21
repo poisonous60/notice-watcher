@@ -42,6 +42,21 @@ def run() -> list[tuple[str, bool, str]]:
                   r is not None and r.get("adapter") == "DCInsideMGalleryAdapter",
                   f"got {None if r is None else (r.get('adapter') or r.get('strategy'))}"))
 
+    # 6b. 미니갤 전체글 — exception_mode 없음 → kwargs 에 없고 slug 무접미사
+    r = recognize("https://gall.dcinside.com/mgallery/board/lists/?id=thesingularity")
+    ok = (r is not None and "exception_mode" not in (r.get("kwargs") or {})
+          and r.get("_slug_board") == "thesingularity")
+    cases.append(("mgallery_full_no_exc", ok,
+                  f"got kwargs={None if r is None else r.get('kwargs')} slug={None if r is None else r.get('_slug_board')}"))
+
+    # 6c. 미니갤 개념글(recommend) 탭 — exception_mode 보존 → adapter kwargs + slug 분리
+    r = recognize("https://gall.dcinside.com/mgallery/board/lists/?id=thesingularity&exception_mode=recommend")
+    ok = (r is not None
+          and (r.get("kwargs") or {}).get("exception_mode") == "recommend"
+          and r.get("_slug_board") == "thesingularity_recommend")
+    cases.append(("mgallery_recommend_preserved", ok,
+                  f"got kwargs={None if r is None else r.get('kwargs')} slug={None if r is None else r.get('_slug_board')}"))
+
     # 7. action path `/board/lists` (board 이름 아님) — 미인식
     r = recognize("https://m.dcinside.com/board/lists?id=stock")
     cases.append(("mobile_lists_action_passes", r is None or r.get("site") != "m.dcinside.com",
