@@ -75,7 +75,7 @@ def hand_config_triage_queue(*, failed_slugs: list[str]) -> str:
         "",
         "**gen_fail(rc=1) 은 §0b-2 screen-out 먼저** — '진짜 게시판 아님' 2종을 골라내 수동 config 낭비 차단: "
         "(P1) content-as-list 오탐(단일 글이 index 로 통과 — `list_candidates` 반복 행 0~소수+단일 본문 → `prompts/classify.system.txt` content 측 보강), "
-        "(P2) soft-404 미검출(title/h1 not-found 인데 verdict≠soft_404 → `probe/extract.py:_SOFT_404_PATTERNS` 확장). "
+        "(P2) not-found shell 미분류(title/h1 not-found 인데 등록 진행 → 분류기 not_found 보강 `prompts/classify.system.txt`; 옛 _SOFT_404_PATTERNS regex 제거됨 ADR 0007 §확장). "
         "둘 다 영구 게이트 봉합(§8a)+slug 거부, outcome=improved. 통과한 잔여만 hand-config 진단.",
         "",
         "대상 slug:",
@@ -138,7 +138,7 @@ def catalog_run_and_fix(*, catalog_name: str,
     lines.append("   1) **bug** (rc=-1/-2/-3/-5/-99, `.BUG.json`): *무조건 fix*, 최우선. traceback → bot/scripts/engine 코드 수정 (bug-fix workflow). `register.py 실행 시간 초과(300s)` 류 timeout 도 여기 — root-cause.")
     lines.append("   2) **gate_reject** (rc=3): board_shape/nav_only/single-article 게이트 거부 + LLM index/content 분류기(veto)도 content 판정(ADR 0007). 게시판/비게시판 false-reject 봉합은 *분류기 layer 의 일* — 임의로 '의도된 거부'라 신뢰 X. **사용자에게 분포·샘플 보고하고 확인 대기**, 받으면 fix 순서 = ① `prompts/classify.system.txt`/모델 보강 (게이트 휴리스틱 추가 X) → ② SPA(정적 HTML 에 목록 없음)면 render 트랙. SKILL.md §0a-2.")
     lines.append("   3) **capability_blocked** (rc=5, `.FAILED.json`): captcha/anti-bot/cloudflare 차단 = *능력 부족(정책 아님)*. stealth/anti-detection 어댑터로 재도전 (§2e + `docs/크롤링 지침.md` §6 stealth 허용).")
-    lines.append("   4) **gen_fail** (rc=1, `.FAILED.json`): **§0b-2 screen-out 먼저** — (P1) content-as-list 오탐(단일 글이 index 로 통과 → `prompts/classify.system.txt` content 측 보강) · (P2) soft-404 미검출(title/h1 not-found 인데 verdict≠soft_404 → `probe/extract.py:_SOFT_404_PATTERNS` 확장): 둘 다 영구 게이트 봉합+거부(진짜 게시판 아님). 통과한 잔여만 hand-config 진단 → 수동 config 또는 probe/prompt 개선 (두 트랙 동시).")
+    lines.append("   4) **gen_fail** (rc=1, `.FAILED.json`): **§0b-2 screen-out 먼저** — (P1) content-as-list 오탐(단일 글이 index 로 통과 → `prompts/classify.system.txt` content 측 보강) · (P2) not-found shell 미분류(title/h1 not-found 인데 등록 진행 → 분류기 not_found 보강 `prompts/classify.system.txt`; 옛 _SOFT_404_PATTERNS regex 제거 ADR 0007 §확장): 둘 다 영구 게이트 봉합+거부(진짜 게시판 아님). 통과한 잔여만 hand-config 진단 → 수동 config 또는 probe/prompt 개선 (두 트랙 동시).")
     lines.append("   - **policy_reject** (rc=2, LOGIN_REQUIRED) · **url_dead** (rc=4, 404/cert·dns 깨짐) = 작업 X (정상 거부, `docs/크롤링 지침.md`). 우회 X.")
     lines.append("   - **실행 = codex 위임** (SKILL §0c): bug·gen_fail·capability_blocked 의 진단·fix 는 codex 보이는 창에 위임 "
                  "(`codex_handoff.py generic --task-file --launch`, ALLOW-LIST 박음). **disjoint 파일소유로 병렬** — "

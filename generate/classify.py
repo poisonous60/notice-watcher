@@ -1,6 +1,8 @@
-"""LLM index(게시판)/content(단일 글) 분류기 — register 게이트의 false-reject veto 용.
+"""LLM page-type 분류기 — register 게이트의 false-reject veto + soft 신호 arbiter.
 
+출력 클래스: index(게시판) / content(단일 글) / not_found(not-found shell) / login(로그인 게이트).
 게이트(`_board_shape_check` 등)가 거부하려 할 때 호출. 결과 'index' 면 거부 취소.
+not_found/login 은 퍼지 본문-휴리스틱(옛 soft-404 regex / login 본문-마커)을 대체하는 arbiter (ADR 0007 §확장 2026-05-22).
 근거: arXiv 2505.06972 (LLM index/content 분류 F1 0.89 / precision 0.98) +
 PoC 실측 (board recall 0.905, article precision 1.000, gemini-2.5-flash).
 설계: `docs/plans/llm-index-content-classifier.md`.
@@ -84,11 +86,14 @@ def _struct_hint(digest: dict, url: str) -> str:
     return "; ".join(parts)
 
 
+_PAGE_TYPES = ("index", "content", "not_found", "login")
+
+
 def _parse(text: str) -> dict:
     try:
         d = json.loads(text)
         cls = d.get("class")
-        if cls in ("index", "content"):
+        if cls in _PAGE_TYPES:
             return {"class": cls,
                     "confidence": float(d.get("confidence", 0.0) or 0.0),
                     "reason": str(d.get("reason", ""))[:200]}
@@ -100,10 +105,11 @@ def _parse(text: str) -> dict:
 def classify_index_content(*, url: str, digest: dict,
                            client: Optional[LLMClient] = None,
                            slug: Optional[str] = None) -> dict:
-    """페이지가 index(게시판) 인지 content(단일 글) 인지 분류.
+    """페이지 타입 분류 — index(게시판) / content(단일 글) / not_found(없음 shell) / login(로그인 게이트).
 
-    반환: {"class": "index"|"content"|"?", "confidence": float, "reason": str}.
-    LLM 실패/parse 실패/HTML 부재 → class='?' (caller 가 거부 유지 = fail-safe).
+    반환: {"class": "index"|"content"|"not_found"|"login"|"?", "confidence": float, "reason": str}.
+    LLM 실패/parse 실패/HTML 부재 → class='?' (caller 가 status-quo 유지 = fail-safe).
+    not_found→url_dead(rc4), login→policy_reject(rc2), content→gate_reject(rc3) 매핑은 register 가 함 (ADR 0007 §확장).
     """
     html = _read_list_html(digest)
     title, body = _extract_title_body(html, url)

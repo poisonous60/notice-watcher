@@ -72,6 +72,18 @@ def run() -> list[tuple[str, bool, str]]:
     r = classify_index_content(url="https://x.org/post/1", digest=_digest_with_html(_ARTICLE_HTML), client=fc)
     cases.append(("content_parse", r["class"] == "content", f"got {r}"))
 
+    # 2b. not_found / login 4-class 파싱 (ADR 0007 §확장)
+    fc = _FakeClient('{"class":"not_found","confidence":0.85,"reason":"없는 페이지"}')
+    r = classify_index_content(url="https://x.org/x", digest=_digest_with_html(_ARTICLE_HTML), client=fc)
+    cases.append(("not_found_parse", r["class"] == "not_found" and r["confidence"] == 0.85, f"got {r}"))
+    fc = _FakeClient('{"class":"login","confidence":0.9,"reason":"로그인 게이트"}')
+    r = classify_index_content(url="https://x.org/x", digest=_digest_with_html(_ARTICLE_HTML), client=fc)
+    cases.append(("login_parse", r["class"] == "login", f"got {r}"))
+    # 미지원 class 는 '?' 로 (어휘 밖)
+    fc = _FakeClient('{"class":"paywall","confidence":0.9,"reason":"x"}')
+    r = classify_index_content(url="https://x.org/x", digest=_digest_with_html(_ARTICLE_HTML), client=fc)
+    cases.append(("unknown_class_to_qmark", r["class"] == "?", f"got {r}"))
+
     # 3. temperature=0 + json_mode 전달 확인
     fc = _FakeClient()
     classify_index_content(url="https://x.org/latest", digest=_digest_with_html(_BOARD_HTML), client=fc)
@@ -131,6 +143,15 @@ def run() -> list[tuple[str, bool, str]]:
     cases.append(("override_none", reg._veto_override(None) is False, ""))
     cases.append(("override_unknown", reg._veto_override({"class": "?", "confidence": 0.0}) is False, ""))
 
+    # _classify_decisive_rc: content→3 / not_found→4 / login→2 (모두 ≥0.7), index/?/저신뢰 → None
+    cases.append(("decisive_content", reg._classify_decisive_rc({"class": "content", "confidence": 0.8}) == 3, ""))
+    cases.append(("decisive_not_found", reg._classify_decisive_rc({"class": "not_found", "confidence": 0.8}) == 4, ""))
+    cases.append(("decisive_login", reg._classify_decisive_rc({"class": "login", "confidence": 0.8}) == 2, ""))
+    cases.append(("decisive_index_none", reg._classify_decisive_rc({"class": "index", "confidence": 0.99}) is None, ""))
+    cases.append(("decisive_low_conf_none", reg._classify_decisive_rc({"class": "content", "confidence": 0.6}) is None, ""))
+    cases.append(("decisive_unknown_none", reg._classify_decisive_rc({"class": "?", "confidence": 0.0}) is None, ""))
+    cases.append(("decisive_nil_none", reg._classify_decisive_rc(None) is None, ""))
+
     # gate_only=True → 분류 skip (None)
     cases.append(("gate_only_skip", reg._classify_veto({}, "u", "s", True) is None, ""))
 
@@ -188,6 +209,34 @@ def run() -> list[tuple[str, bool, str]]:
         # gate_only → classify skip → 수락 (None, cheap 모드 보존)
         saved.clear()
         cases.append(("accept_gate_only_skip", reg._accept_path_content_reject({}, "ue", "se", True) is None and len(saved) == 0, ""))
+
+        # accept-path multi-class (ADR 0007 §확장): not_found→rc4, login→rc2 (learn=False, note 클래스별)
+        saved.clear()
+        classify_mod.classify_index_content = lambda *, url, digest, slug=None: {"class": "not_found", "confidence": 0.85, "reason": "없음"}
+        out_nf = reg._accept_path_content_reject({}, "unf", "snf", False)
+        cases.append(("accept_reject_not_found", out_nf == 4 and len(saved) == 1
+                      and saved[0][1].get("note") == "classifier: accept_path_not_found"
+                      and saved[0][1].get("learn") is False, f"out={out_nf} saved={saved}"))
+        saved.clear()
+        classify_mod.classify_index_content = lambda *, url, digest, slug=None: {"class": "login", "confidence": 0.9, "reason": "로그인"}
+        out_lg = reg._accept_path_content_reject({}, "ulg", "slg", False)
+        cases.append(("accept_reject_login", out_lg == 2 and len(saved) == 1
+                      and saved[0][1].get("note") == "classifier: accept_path_login", f"out={out_lg} saved={saved}"))
+
+        # gate reclassify (ADR 0007 §확장): 게이트 거부를 분류기가 login/not_found 로 재분류 → rc 바뀜
+        saved.clear()
+        classify_mod.classify_index_content = lambda *, url, digest, slug=None: {"class": "not_found", "confidence": 0.85, "reason": "없음"}
+        out_gnf = reg._gate_reject_or_veto({}, "ug", "sg", False, reason="rsn", note="gate: x", learn=False)
+        cases.append(("gate_reclassify_not_found", out_gnf == 4 and len(saved) == 1, f"out={out_gnf} saved={len(saved)}"))
+        saved.clear()
+        classify_mod.classify_index_content = lambda *, url, digest, slug=None: {"class": "login", "confidence": 0.9, "reason": "로그인"}
+        out_glg = reg._gate_reject_or_veto({}, "ug2", "sg2", False, reason="rsn", note="gate: x", learn=False)
+        cases.append(("gate_reclassify_login", out_glg == 2 and len(saved) == 1, f"out={out_glg} saved={len(saved)}"))
+        # content 재분류는 게이트 rc(3)와 동일 → 공통 경로 유지
+        saved.clear()
+        classify_mod.classify_index_content = lambda *, url, digest, slug=None: {"class": "content", "confidence": 0.9, "reason": "글"}
+        out_gct = reg._gate_reject_or_veto({}, "ug3", "sg3", False, reason="rsn", note="gate: x", learn=False)
+        cases.append(("gate_content_stays_3", out_gct == 3 and len(saved) == 1, f"out={out_gct}"))
     finally:
         reg._save_rejected = orig_save
         classify_mod.classify_index_content = orig

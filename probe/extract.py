@@ -946,61 +946,6 @@ def detect_wordpress_platform(html: str, base_url: str) -> Optional[dict]:
     }
 
 
-_SOFT_404_PATTERNS = (
-    re.compile(r"\b404\b", re.I),
-    re.compile(r"\bnot\s+found\b", re.I),
-    re.compile(r"\bpage\s+not\s+found\b", re.I),
-    re.compile(r"ページが見つかりません", re.I),
-    re.compile(r"お探しのページ.*見つかりません", re.I),
-    re.compile(r"存在しないページ", re.I),
-    re.compile(r"ページは存在しません", re.I),
-    re.compile(r"찾을 수 없", re.I),
-)
-
-
-@heuristic
-def detect_soft_404(html: str, base_url: str) -> Optional[dict]:
-    """HTTP 200 이지만 title/h1 이 not-found shell 인 페이지 감지.
-
-    probe.diagnose 가 HTTP status 만 보면 "정적 HTTP로 충분"이라고 볼 수 있는 케이스를
-    SOFT_404 verdict 로 바꾸기 위한 신호다. 목록 row 가 충분한 정상 board 의 "404" 문구
-    false-positive 를 피하려고 title/h1 신호와 nav 밖 row 후보 0~3개 조건을 같이 본다.
-    """
-    if not html or not base_url:
-        return None
-    soup = BeautifulSoup(html, "lxml")
-    texts: list[tuple[str, str]] = []
-    title = soup.find("title")
-    if title is not None:
-        texts.append(("title", title.get_text(" ", strip=True)))
-    for h in soup.find_all(["h1", "h2"], limit=4):
-        texts.append((h.name or "heading", h.get_text(" ", strip=True)))
-    signal = None
-    for source, text in texts:
-        if not text:
-            continue
-        for pat in _SOFT_404_PATTERNS:
-            if pat.search(text):
-                signal = f"{source}: {text[:120]}"
-                break
-        if signal:
-            break
-    if not signal:
-        return None
-    try:
-        candidates = html_repeating_patterns(html, base_url, min_children=5)
-        nav_summary = all_same_host_patterns_in_nav(html=html, html_candidates=candidates, base_url=base_url)
-        if nav_summary is not None:
-            row_count = int(nav_summary.get("outside_nav") or 0)
-        else:
-            row_count = 0
-    except Exception:  # noqa: BLE001
-        row_count = 0
-    if row_count > 3:
-        return None
-    return {"is_soft_404": True, "signal": signal, "row_count": row_count}
-
-
 @heuristic
 def detect_discourse_platform(html: str, base_url: str) -> Optional[dict]:
     """정적 HTML 의 `<meta name="generator" content="Discourse ...">` 로 Discourse 포럼 판정.
@@ -1605,7 +1550,6 @@ def write_list_candidates(
     row_interactive_action: Optional[dict] = None,
     nav_only_same_host: Optional[dict] = None,
     article_meta_signals: Optional[dict] = None,
-    soft_404: Optional[dict] = None,
     wordpress_platform: Optional[dict] = None,
     discourse_platform: Optional[dict] = None,
     xenforo_platform: Optional[dict] = None,
@@ -1661,9 +1605,6 @@ def write_list_candidates(
         # register.py `_meta_article_diverging_check` 가 is_article_page=true AND first_article_url 의 path-prefix 가
         # input URL 과 *다르면* 거부 — 보드가 article 마크업 *우연히* 박은 사이트(omate 등)는 first_article 이 같은 path-prefix 라 통과.
         "article_meta_signals": article_meta_signals,
-        # HTTP 200 이지만 title/h1 이 not-found shell 이고 row 후보가 0~2개인 soft-404.
-        # probe.diagnose 가 이 신호를 SOFT_404 verdict 로 승격하고 register.py 가 rc=4 url_dead 로 종료한다.
-        "soft_404": soft_404,
         # root 도메인 마케팅 랜딩/허브 페이지 검출 — board 정의 자체 X.
         # None=조건 미충족. dict={is_root_marketing_homepage, marketing_hits, marketing_selectors, total_same_host, body_empty_likely}.
         # 트리거: path='/' AND html_repeating_patterns top7 의 nav/footer/dropdown/carousel/swiper/menu 키워드 ≥ 2 AND same-host article rows ≤ 15.

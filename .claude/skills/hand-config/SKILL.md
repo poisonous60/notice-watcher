@@ -100,10 +100,10 @@ gen_fail(rc=1) 큐로 *새는* false-negative 2종. 둘 다 진짜 게시판이 
 - **신호**: `list_candidates.json` 반복 same-host 글-링크 행 0~소수 + `article.html` 가 한 편 긴 본문(목록이면 행 여럿). (classify 결과 자체는 FAILED.json 미영속 — stdout `[register] 🔴/🔵` 로깅만 — 이 신호로 재판단.)
 - **fix (영구 게이트 = A-layer)**: `prompts/classify.system.txt` 의 *content 측 판별* 보강 — 이 유형이 content 로 안 갈린 이유를 1줄 룰로 (예: 반복 글-링크 행 ~0 + 단일 본문 = content). **게이트 휴리스틱 추가 X** (분류기 layer 의 일, [[project-llm-veto-reject-gates]]). 그 뒤 `register.py --reuse-probe "<URL>"` 로 분류기가 이제 content 거부하는지 확인 → 거부되면 slug `rejected`. outcome=`improved`(분류기 generic 개선).
 
-### (P2) soft-404 미검출 — not-found shell 인데 패턴 미스
-- **왜 샘**: `probe/extract.py:detect_soft_404` 의 `_SOFT_404_PATTERNS` 가 그 언어/문구를 못 잡아 verdict 가 soft_404 안 됨 → 정상 board 로 보고 진행 → 0행 → gen_fail.
-- **신호**: `list.html`/`article.html` 의 title/h1 이 "없는 페이지"/"삭제됨"/"404"/타 언어 not-found 인데 `diagnosis.json` verdict ≠ soft_404.
-- **fix (영구 게이트 = C-layer)**: `_SOFT_404_PATTERNS` 에 그 문구 패턴 추가 + `tests/probe_heuristics/test_detect_soft_404.py` 케이스 (§4 휴리스틱 규칙). 그 뒤 `register.py --reuse-probe` → verdict=soft_404 → rc=4 자동 거부 확인 → slug `rejected`. outcome=`improved`.
+### (P2) not-found shell 미분류 — not-found 인데 classifier 가 not_found 안 줌
+- **왜 샘**: not-found shell 은 이제 분류기 `not_found` 클래스가 arbiter (ADR 0007 §확장 — 옛 `_SOFT_404_PATTERNS` regex·`detect_soft_404` 는 *제거됨*). 분류기가 not-found shell 을 `not_found` conf≥0.7 로 안 주고 index/저신뢰로 흘리면 진행 → 0행 → gen_fail. (정상이면 accept-path 가 rc=4 로 미리 거부해 여기 안 옴.)
+- **신호**: `list.html`/`article.html` 의 title/h1 이 "없는 페이지"/"삭제됨"/"404"/타 언어 not-found 인데 등록 진행/gen_fail. (classify 결과는 FAILED.json 미영속 — stdout `[register] 🔴 not_found`/없으면 미분류.)
+- **fix (영구 게이트 = A-layer)**: `prompts/classify.system.txt` 의 *not_found 측 판별* 보강 — 이 유형이 not_found 로 안 갈린 이유를 1줄 룰로. **게이트 휴리스틱/regex 추가 X** (분류기 layer 의 일, [[project-llm-veto-reject-gates]]). 그 뒤 `register.py --reuse-probe "<URL>"` → 분류기가 not_found→rc=4 거부 확인 → slug `rejected`. outcome=`improved`(분류기 generic 개선).
 
 둘 다 매칭 0 → 정상 gen_fail → §1 진단 정상 진입. P1/P2 매칭이면 §1 수동 config 트랙 skip — 거부 + 게이트 1줄이 결과물. §2 진입 전 강제 인용 대신 case body 에 `screen-out: P1|P2 — <신호 1줄>` 명시.
 

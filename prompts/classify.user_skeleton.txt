@@ -5,4 +5,4 @@ URL: {{url}}
 ---
 {{body}}
 ---
-이 페이지는 index 인가 content 인가? JSON 으로만 답하라.
+이 페이지는 index / content / not_found / login 중 무엇인가? JSON 으로만 답하라.

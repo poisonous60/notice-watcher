@@ -157,7 +157,6 @@ def diagnose(
 
     list_summary = "n/a"
     list_lookup_failed = False
-    soft_404: Optional[dict] = None
     html_n = api_n = hyd_n = 0
     if list_candidates_path.exists():
         try:
@@ -165,7 +164,6 @@ def diagnose(
             html_n = len(payload.get("html_repeating_patterns") or [])
             api_n = len(payload.get("traffic_json_api_candidates") or [])
             hyd_n = len(payload.get("hydration_list_candidates") or [])
-            soft_404 = payload.get("soft_404") if isinstance(payload.get("soft_404"), dict) else None
             first = payload.get("first_article_url") or "(none)"
             list_summary = f"HTML {html_n}건, JSON API {api_n}건, hydration {hyd_n}건. 첫 글: {first}"
             # 글 목록 컨테이너는 잡혔는데 첫 글 URL이 None → 클라이언트 JS 라우팅 의심
@@ -193,11 +191,26 @@ def diagnose(
             recommended_headers_summary = "n/a (Playwright)"
 
     verdict_parts = []
-    if soft_404 and soft_404.get("is_soft_404"):
-        verdict_parts.append("SOFT_404")
+    # login 게이트 우선 — list 진입이 LOGIN_REQUIRED 인데 OK 진입이 하나도 없으면 로그인 벽.
+    # notable 로 hard(redirect, 서버가 /login 으로 튕김) vs soft(본문 마커/form, 목록 가릴 수도 안 가릴 수도)
+    # 구분 → register 가 hard 면 즉시 rc=2, soft 면 분류기로 board 여부 판정 (ADR 0007 §확장 2026-05-22).
+    # (구) soft_404 regex 분기는 제거됨 — not-found 200 shell 은 register 의 분류기(not_found)가 arbiter.
+    login_target_results: list[Result] = list(static_results)
+    if headless is not None:
+        login_target_results.append(headless)
+    if captured_retry is not None:
+        login_target_results.append(captured_retry)
+    if s1l is not None:
+        login_target_results.append(s1l)
+    login_results = [r for r in login_target_results if r.classification == Classification.LOGIN_REQUIRED]
+    ok_list_results = [r for r in login_target_results if r.classification == Classification.OK]
+    if login_results and not ok_list_results:
+        redirect = any("redirected to login" in n for r in login_results for n in (r.notable or []))
+        verdict_parts.append("LOGIN_REDIRECT" if redirect else "LOGIN_MARKER")
         notes.append(
-            "HTTP 200 이지만 not-found shell 로 보임 — "
-            f"{soft_404.get('signal')} (row_count={soft_404.get('row_count')})."
+            "list 진입이 로그인 게이트로 분류됨 — "
+            + ("서버가 /login 으로 redirect (hard 거부)." if redirect
+               else "본문 로그인 마커/form 감지 (soft — register 분류기가 board 여부 판정).")
         )
     else:
         if baseline_bot_only:

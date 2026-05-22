@@ -228,15 +228,16 @@ def _policy_check(digest: dict, url: str) -> tuple[bool, list[str]]:
     """(등록 가능?, 메시지들). 차단/로그인이면 False. robots Disallow 면 경고만(True 유지)."""
     msgs: list[str] = []
     verdict = (digest.get("verdict") or "").lower()
-    if "login" in verdict:
-        return False, [f"로그인 필요 사이트 (verdict={digest.get('verdict')!r}) — 자동 등록 미지원. "
-                       "로그인은 사용자가 한 번 수동으로(Playwright headful) 해야 하며 이번 단계 범위 밖."]
-    if "soft_404" in verdict:
-        sig = (((digest.get("list_candidates") or {}).get("soft_404") or {}).get("signal") or "")
-        detail = f" ({sig})" if sig else ""
-        return False, [f"입력 URL 이 HTTP 200 으로 응답하지만 not-found shell 로 보임{detail} "
-                       f"(verdict={digest.get('verdict')!r}). URL 이 잘못됐거나 글/목록이 삭제된 것 — "
-                       "게시판 목록 URL 또는 다른 URL 로 재시도."]
+    # login redirect (hard) — 서버가 /login 으로 튕김, 목록 미서빙. 분류기 안 봄 (결정적). rc=2.
+    if "login_redirect" in verdict:
+        return False, [f"입력 URL 이 로그인 페이지로 redirect 됨 (verdict={digest.get('verdict')!r}) — 서버가 "
+                       "목록을 안 서빙. 자동 등록 미지원 (로그인은 사용자가 Playwright headful 로 한 번 수동, 범위 밖)."]
+    # login 본문 마커/form (soft, 퍼지) — 목록을 가릴 수도 안 가릴 수도. reject 블록이 분류기로 arbiter
+    # (ADR 0007 §확장). 여기선 False 만 돌려 reject 블록으로 보낸다.
+    if "login_marker" in verdict:
+        return False, [f"로그인 본문 마커/form 감지 (퍼지, verdict={digest.get('verdict')!r}) — 목록을 실제로 "
+                       "가리는지 LLM 분류기로 판정 (board 면 구출)."]
+    # (구) soft_404 verdict 분기 제거 — not-found 200 shell 은 분류기 not_found 가 arbiter (ADR 0007 §확장).
     if not _entry_matrix_has_ok_list(digest):
         # HTML 진입은 다 막혔지만(BLOCKED 등) fetch-검증된 공개 RSS 피드가 있으면 피드로 등록 진행.
         # cert_or_dns_broken/target_not_found 는 피드도 못 받았을 것 (검증 통과 못 함) → 자연 제외.
@@ -656,6 +657,24 @@ def _veto_override(res: Optional[dict]) -> bool:
                 and res.get("confidence", 0.0) >= _CLASSIFY_OVERRIDE_MIN_CONF)
 
 
+# page-type class → 거부 rc (ADR 0007 §확장 multi-class). index/?/저신뢰 → None.
+# content→gate_reject(3) / not_found→url_dead(4) / login→policy_reject(2). 모두 거부 임계 0.7 (비대칭).
+_CLASS_REJECT_RC = {"content": 3, "not_found": 4, "login": 2}
+
+
+def _classify_decisive_rc(res: Optional[dict]) -> Optional[int]:
+    """분류기 결과 → *확신 있는* 비-index 거부 rc. index / '?' / 저신뢰(<0.7) → None.
+
+    ADR 0007 §확장: 비대칭 임계 — 거부(content/not_found/login)는 conf≥_CLASSIFY_REJECT_MIN_CONF(0.7),
+    index 구출은 0.5(_veto_override). not_found/login false-reject 가 content 만큼 비싸 보수적 0.7.
+    """
+    if not res:
+        return None
+    if (res.get("confidence", 0.0) or 0.0) < _CLASSIFY_REJECT_MIN_CONF:
+        return None
+    return _CLASS_REJECT_RC.get(res.get("class"))
+
+
 def _gate_reject_or_veto(digest: dict, url: str, slug: str, gate_only: bool, *,
                          reason: str, note: str, learn: bool = False) -> Optional[int]:
     """게이트 거부 시점 공통 처리. 분류기가 board(index) 판단하면 None(거부 취소 → 계속),
@@ -665,6 +684,20 @@ def _gate_reject_or_veto(digest: dict, url: str, slug: str, gate_only: bool, *,
         print(f"[register] 🔵 '{note}' 거부를 LLM 분류기가 board(index)로 판단 — 거부 취소 "
               f"(conf={res.get('confidence')}, {res.get('reason', '')[:80]})")
         return None
+    # 분류기가 login/not_found 로 *재분류* (ADR 0007 §확장) — 게이트의 rc=3(gate_reject) 대신 그 rc.
+    # learn=False — page-specific (분류기는 그 페이지 판정). content(rc=3) 는 게이트 rc 와 같아 아래 공통 경로로.
+    rc_re = _classify_decisive_rc(res)
+    if rc_re in (2, 4):
+        cls = res.get("class")
+        cnote = f" [classifier={cls} conf={res.get('confidence')}: {res.get('reason', '')[:80]}]"
+        kind = {2: "policy_reject(login)", 4: "url_dead(not_found)"}[rc_re]
+        print(f"[register] 🔁 '{note}' 게이트 거부를 분류기가 {cls} 로 재분류 → rc={rc_re} ({kind})")
+        try:
+            _save_rejected(slug, url, f"{reason} → 분류기 {cls} 재분류 ({kind})" + cnote,
+                           note=f"classifier reclassify {cls} (from {note})", learn=False)
+        except Exception as e:  # noqa: BLE001
+            print(f"[register] ⚠ REJECTED 마커 저장 실패 (rc={rc_re}): {e}", file=sys.stderr)
+        return rc_re
     if res:
         cnote = f" [classifier={res.get('class')} conf={res.get('confidence')}: {res.get('reason', '')[:80]}]"
     else:
@@ -677,28 +710,31 @@ def _gate_reject_or_veto(digest: dict, url: str, slug: str, gate_only: bool, *,
 
 
 def _accept_path_content_reject(digest: dict, url: str, slug: str, gate_only: bool) -> Optional[int]:
-    """모든 구조 게이트 *통과* 후 마지막 분류기 체크 — 분류기가 'content'(단일 글/비-게시판) 를
-    conf≥_CLASSIFY_REJECT_MIN_CONF 로 판단하면 거부(rc=3). 게이트가 놓친 false-accept(비-게시판이
-    게이트 다 뚫고 등록되어 폴링 junk/generation 헛돔) 차단. ADR 0007 의 reject-veto 와 대칭 —
-    같은 분류기를 수락 경로에도 적용 (등록당 1콜 memoize 공유).
+    """모든 구조 게이트 *통과* 후 마지막 분류기 체크 — 분류기가 비-게시판(content/not_found/login)을
+    conf≥_CLASSIFY_REJECT_MIN_CONF 로 판단하면 거부. 게이트가 놓친 false-accept(비-게시판이 게이트
+    다 뚫고 등록되어 폴링 junk/generation 헛돔) 차단. ADR 0007 의 reject-veto 와 대칭 — 같은 분류기를
+    수락 경로에도 적용 (등록당 1콜 memoize 공유).
 
+    ADR 0007 §확장(multi-class): content→rc3(gate_reject) / not_found→rc4(url_dead) / login→rc2(policy_reject).
+    apa-org 류 JS-렌더 not-found shell(옛 soft_404 regex miss)이 여기서 not_found→rc4 로 잡힌다.
     'index'/'?'/저신뢰 → None(계속, 수락) = recall 우선 유지. gate_only → _classify_veto 가 None
     (LLM skip) → 항상 None (cheap 모드 보존). 알려진 플랫폼(discourse/xenforo)은 이 함수 도달 전
     early-return 이라 영향 없음."""
     res = _classify_veto(digest, url, slug, gate_only)
-    if not (res and res.get("class") == "content"
-            and res.get("confidence", 0.0) >= _CLASSIFY_REJECT_MIN_CONF):
+    rc = _classify_decisive_rc(res)
+    if rc is None:
         return None
-    cnote = f" [classifier=content conf={res.get('confidence')}: {res.get('reason', '')[:80]}]"
-    print(f"[register] 🔴 모든 게이트 통과했으나 LLM 분류기가 content(비-게시판)로 판단 — 등록 거부 "
+    cls = res.get("class")
+    cnote = f" [classifier={cls} conf={res.get('confidence')}: {res.get('reason', '')[:80]}]"
+    print(f"[register] 🔴 모든 게이트 통과했으나 LLM 분류기가 {cls}(비-게시판)로 판단 — 등록 거부 rc={rc} "
           f"(conf={res.get('confidence')}, {res.get('reason', '')[:80]})")
     try:
         # learn=False — page-specific (같은 host 의 다른 path 는 진짜 게시판 가능). board_shape 와 동일.
-        _save_rejected(slug, url, "accept_path content 거부 (게이트 통과 + 분류기 content)" + cnote,
-                       note="classifier: accept_path_content", learn=False)
+        _save_rejected(slug, url, f"accept_path {cls} 거부 (게이트 통과 + 분류기 {cls})" + cnote,
+                       note=f"classifier: accept_path_{cls}", learn=False)
     except Exception as e:  # noqa: BLE001
-        print(f"[register] ⚠ REJECTED 마커 저장 실패 (rc=3): {e}", file=sys.stderr)
-    return 3
+        print(f"[register] ⚠ REJECTED 마커 저장 실패 (rc={rc}): {e}", file=sys.stderr)
+    return rc
 
 
 def _save_state(slug: str, url: str, config_path: Path, post_ids: list[str],
@@ -1779,45 +1815,71 @@ def _main_inner(argv) -> int:
     if not ok_policy:
         print("[register] ❌ 등록 거부 (위 사유).")
         # 거부 kind 는 verdict 로 갈림 (2026-05-21 capability_blocked split — rc=5):
-        #   - rc=2 (policy_reject): LOGIN_REQUIRED — 사이트 *정책상* 미지원 (로그인 필요). REJECTED + 학습.
-        #     진짜 정책 거부 = 우리가 *안* 하는 것 (능력 문제 아님).
-        #   - rc=4 (url_dead): target_not_found / cert_or_dns_broken / soft_404 — 카탈로그 URL 편집이 답. REJECTED.
+        #   - rc=2 (policy_reject): login_redirect (hard) — 서버가 /login 으로 튕김. REJECTED + 학습.
+        #   - rc=4 (url_dead): target_not_found / cert_or_dns_broken — 카탈로그 URL 편집이 답. REJECTED.
         #   - rc=5 (capability_blocked): anti-bot/captcha/cloudflare 차단 — *능력 부족* (정책 아님).
         #     2026-05-21 사용자 결정: "captcha 못 들어가는 건 능력 부족이지 정책 거부 아님". FAILED.json
         #     (재시도 가능, learned_blacklist X) → batch --failed 재집음 + hand-config 가 stealth/
         #     storage_state 어댑터로 재도전. docs/크롤링 지침.md: captcha 사이트 stealth 허용으로 정책 변경.
         verdict = (digest.get("verdict") or "").lower()
-        is_login = "login" in verdict
-        is_url_dead = ("target_not_found" in verdict) or ("cert_or_dns_broken" in verdict) or ("soft_404" in verdict)
-        if is_url_dead:
-            rc_out = 4
-        elif is_login:
-            rc_out = 2
-        else:
-            rc_out = 5  # anti-bot/captcha/blocked = 능력 부족 (정책 아님)
-        if rc_out == 5:
-            if not args.gate_only:
-                rc = _try_fediverse_api_rescue(url, slug, out=args.out, force=args.force)
-                if rc is not None:
-                    return rc
-            try:
-                _save_failed(slug, url,
-                             reason=f"capability_blocked (anti-bot/captcha): {'; '.join(msgs)[:200]}",
-                             last_config=None,
-                             last_feedback=(f"[BLOCKED] verdict={verdict} — 정적·headless 진입 차단 "
-                                            "(능력 부족, 정책 아님). stealth/storage_state 어댑터 재도전 대상."))
-            except Exception as e:  # noqa: BLE001
-                print(f"[register] ⚠ FAILED 마커 저장 실패 (rc=5): {e}", file=sys.stderr)
-        else:
-            host_wide = _policy_reject_is_host_wide(verdict)
-            try:
-                _save_rejected(slug, url,
-                               reason=f"policy_check 거부: {'; '.join(msgs)[:200]}",
-                               note=f"policy_check rc={rc_out} verdict={verdict!r}",
-                               learn=host_wide)
-            except Exception as e:  # noqa: BLE001
-                print(f"[register] ⚠ REJECTED 마커 저장 실패 (rc={rc_out}): {e}", file=sys.stderr)
-        return rc_out
+        # 퍼지 login (본문 마커/form) — 즉시 거부 X. 분류기가 arbiter (ADR 0007 §확장):
+        #   index 구출(≥0.5) → 정책 거부 취소·일반 파이프라인 계속 / login·content·not_found(≥0.7) → 해당 rc
+        #   ?·저신뢰 → fail-safe 진행(recall 우선). gate_only 면 분류기 skip → 아래 hard 경로에서 login(rc=2) 취급.
+        soft_login_handled = False
+        if "login_marker" in verdict and not args.gate_only:
+            res = _classify_veto(digest, url, slug, args.gate_only)
+            if _veto_override(res):
+                print(f"[register] 🔵 'login_marker'(퍼지) 거부를 분류기가 board(index)로 판단 — 정책 거부 "
+                      f"취소·진행 (conf={res.get('confidence')}, {res.get('reason', '')[:80]})")
+                soft_login_handled = True
+            else:
+                rc_soft = _classify_decisive_rc(res)
+                if rc_soft is not None:
+                    cls = res.get("class")
+                    cnote = f" [classifier={cls} conf={res.get('confidence')}: {res.get('reason', '')[:80]}]"
+                    print(f"[register] 🔁 soft-login(login_marker) → 분류기 {cls} → rc={rc_soft}")
+                    try:
+                        _save_rejected(slug, url, f"soft-login 분류기 {cls} 거부" + cnote,
+                                       note=f"classifier soft-login {cls}", learn=False)
+                    except Exception as e:  # noqa: BLE001
+                        print(f"[register] ⚠ REJECTED 마커 저장 실패 (rc={rc_soft}): {e}", file=sys.stderr)
+                    return rc_soft
+                print(f"[register] login_marker + 분류기 {res.get('class')}(저신뢰/?) — fail-safe 진행 (recall 우선)")
+                soft_login_handled = True
+        if not soft_login_handled:
+            # hard 결정적 거부 경로 — 분류기 안 봄. gate_only 의 login_marker 도 여기서 login(rc=2) 취급.
+            is_login = ("login_redirect" in verdict) or ("login_marker" in verdict)
+            is_url_dead = ("target_not_found" in verdict) or ("cert_or_dns_broken" in verdict)
+            if is_url_dead:
+                rc_out = 4
+            elif is_login:
+                rc_out = 2
+            else:
+                rc_out = 5  # anti-bot/captcha/blocked = 능력 부족 (정책 아님)
+            if rc_out == 5:
+                if not args.gate_only:
+                    rc = _try_fediverse_api_rescue(url, slug, out=args.out, force=args.force)
+                    if rc is not None:
+                        return rc
+                try:
+                    _save_failed(slug, url,
+                                 reason=f"capability_blocked (anti-bot/captcha): {'; '.join(msgs)[:200]}",
+                                 last_config=None,
+                                 last_feedback=(f"[BLOCKED] verdict={verdict} — 정적·headless 진입 차단 "
+                                                "(능력 부족, 정책 아님). stealth/storage_state 어댑터 재도전 대상."))
+                except Exception as e:  # noqa: BLE001
+                    print(f"[register] ⚠ FAILED 마커 저장 실패 (rc=5): {e}", file=sys.stderr)
+            else:
+                host_wide = _policy_reject_is_host_wide(verdict)
+                try:
+                    _save_rejected(slug, url,
+                                   reason=f"policy_check 거부: {'; '.join(msgs)[:200]}",
+                                   note=f"policy_check rc={rc_out} verdict={verdict!r}",
+                                   learn=host_wide)
+                except Exception as e:  # noqa: BLE001
+                    print(f"[register] ⚠ REJECTED 마커 저장 실패 (rc={rc_out}): {e}", file=sys.stderr)
+            return rc_out
+        # soft_login_handled (구출/fail-safe) → 정책 거부 취소, 일반 파이프라인 계속.
 
     # WordPress 포지티브 검출 — probe 가 REST discovery link/generator/wp-content marker 로 판정.
     # URL root/news 만으론 false-positive 가 커서 recognizer 가 직접 잡지 않고, 이 probe 신호로만 봉합한다.
