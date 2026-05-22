@@ -78,6 +78,11 @@ def hand_config_triage_queue(*, failed_slugs: list[str]) -> str:
         "(P2) not-found shell 미분류(title/h1 not-found 인데 등록 진행 → 분류기 not_found 보강 `prompts/classify.system.txt`; 옛 _SOFT_404_PATTERNS regex 제거됨 ADR 0007 §확장). "
         "둘 다 영구 게이트 봉합(§8a)+slug 거부, outcome=improved. 통과한 잔여만 hand-config 진단.",
         "",
+        "**비-게시판인데 분류기가 이번 batch 에 자동거부 못 하면(classify `?`/미신뢰) → per-site 손-거부 X → "
+        "`python scripts/triage.py park-gate-fail <slug> --reason=…`** (gate-fail 버킷, **Later 아님**). "
+        "분류기/게이트 다음 개선 때 `sweep-gate-fail --execute` 로 일괄 재판정. "
+        "Later 는 capability(cap_blocked·SPA·timeout) 전용 — 두 버킷 섞지 X (SKILL.md §1 표).",
+        "",
         "대상 slug:",
     ]
     for s in failed_slugs:

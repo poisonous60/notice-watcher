@@ -26,7 +26,7 @@ from dashboard import cases_view
 from dashboard import learned_view
 from dashboard import vocab_deferred_view
 from dashboard import clustering
-from dashboard import prompts, state, triage_later
+from dashboard import prompts, state, triage_later, triage_gate_failed
 from dashboard import cluster_dismiss
 from dashboard import usage_view
 from dashboard import user_view
@@ -227,7 +227,9 @@ async def triage_page(request: Request, conn=Depends(get_conn)):
     summary = inspector.triage_summary(conn, paths)
     rows = inspector.recent_jobs(conn, limit=15)
     later = triage_later.load()
-    active_failed = [s for s in summary["failed_slugs"] if s not in later]
+    gate_failed = triage_gate_failed.load()
+    parked = later | gate_failed
+    active_failed = [s for s in summary["failed_slugs"] if s not in parked]
     later_failed = [s for s in summary["failed_slugs"] if s in later]
     quick_prompts = {
         "report_triage_bulk": prompts.report_triage_bulk(
@@ -252,8 +254,10 @@ async def triage_failed_page(request: Request):
     '나중에' 토글된 slug 는 별도 섹션 (dashboard view 만 분리 — N100 영향 X).
     """
     later = triage_later.load()
+    gate_failed = triage_gate_failed.load()
     active: list[dict] = []
     later_items: list[dict] = []
+    gate_failed_items: list[dict] = []
     for slug in state.failed_slugs():
         d = state.failed_payload(slug) or {}
         lines = [ln.strip() for ln in (d.get("last_feedback") or "").splitlines() if ln.strip()]
@@ -265,11 +269,17 @@ async def triage_failed_page(request: Request):
             "reason": d.get("reason") or "",
             "first_fail": first_fail,
         }
-        (later_items if slug in later else active).append(row)
-    active.sort(key=lambda r: r["failed_at"], reverse=True)
-    later_items.sort(key=lambda r: r["failed_at"], reverse=True)
+        if slug in gate_failed:
+            gate_failed_items.append(row)
+        elif slug in later:
+            later_items.append(row)
+        else:
+            active.append(row)
+    for lst in (active, later_items, gate_failed_items):
+        lst.sort(key=lambda r: r["failed_at"], reverse=True)
     return _render("triage_failed.html", request,
-                   items=active, later_items=later_items, active="triage")
+                   items=active, later_items=later_items,
+                   gate_failed_items=gate_failed_items, active="triage")
 
 
 @app.post("/triage/failed/later", response_class=HTMLResponse)
@@ -292,6 +302,29 @@ async def triage_failed_later(request: Request):
             triage_later.add_many(slugs)
         else:
             triage_later.remove_many(slugs)
+    return RedirectResponse(url="/triage/failed", status_code=303)
+
+
+@app.post("/triage/failed/gate-fail", response_class=HTMLResponse)
+async def triage_failed_gate_fail(request: Request):
+    """체크박스 일괄 토글 — **gate-fail 버킷** (Later 와 별개). action=add → 게이트-실패 섹션, remove → 활성 복귀.
+
+    게이트/분류 *오판* 으로 gen_fail 로 샌 것(비-게시판인데 분류기·게이트가 못 잡음)을 치워둠.
+    `scripts/triage.py park-gate-fail`/`sweep-gate-fail` 와 같은 `triage_gate_failed.json` 공유.
+    """
+    form = await request.form()
+    action = (form.get("action") or "").strip()
+    if action not in ("add", "remove"):
+        raise HTTPException(status_code=400, detail="invalid action")
+    slugs = [s for s in form.getlist("slugs") if isinstance(s, str)]
+    if not all(state.safe_slug(s) for s in slugs):
+        raise HTTPException(status_code=400, detail="invalid slug")
+    if slugs:
+        if action == "add":
+            payloads = [(s, (state.failed_payload(s) or {}).get("url") or "") for s in slugs]
+            triage_gate_failed.add_many(payloads)
+        else:
+            triage_gate_failed.remove_many(slugs)
     return RedirectResponse(url="/triage/failed", status_code=303)
 
 

@@ -3,22 +3,26 @@
 {% block body %}
 
 <p><a href="/">← Triage</a></p>
-<h2>🛠 자동등록 실패 (FAILED) — 활성 {{ items | length }}건 · 나중에 {{ later_items | length }}건</h2>
+<h2>🛠 자동등록 실패 (FAILED) — 활성 {{ items | length }}건 · 나중에 {{ later_items | length }}건 · 게이트실패 {{ gate_failed_items | length }}건</h2>
 <p class="muted">
   봇·polling 이 자동 등록 시도 실패 → <code>output/poll_state/&lt;slug&gt;.FAILED.json</code> 으로 쌓인 큐.
   처리: hand-config 스킬 모드 B (probe 진단 → 수동 config / 손 adapter → <code>register --config</code> → N100 배포).
-  바로 못 할 항목은 체크 후 <b>→ 나중에</b>로 내려두면 일괄 hand-config 프롬프트에서도 빠짐 (N100 polling 영향 X).
+  바로 못 할 항목은 체크 후 두 버킷 중 하나로 내려둠 (둘 다 hand-config 프롬프트서 빠짐, N100 polling 영향 X):
+  <b>→ 나중에</b> = capability(anti-bot/SPA/timeout — 능력 생기면 재시도) ·
+  <b>→ 게이트실패</b> = 분류 오판(비-게시판인데 분류기·게이트가 못 잡아 gen_fail — 분류기/게이트 개선 후 <code>triage.py sweep-gate-fail</code> 로 일괄 재판정).
 </p>
 
-{% macro queue_table(rows, action, button_label) -%}
-<form method="post" action="/triage/failed/later">
-  <input type="hidden" name="action" value="{{ action }}">
+{# buttons = [(endpoint, action, label), ...] — 각 버튼이 formaction 으로 다른 엔드포인트 제출 #}
+{% macro queue_table(rows, buttons) -%}
+<form method="post">
   <div class="row" style="margin:.4em 0;gap:.6em;align-items:center;">
     <label class="muted">
       <input type="checkbox" onclick="for(const c of this.closest('form').querySelectorAll('input[name=slugs]')) c.checked=this.checked;">
       전체
     </label>
-    <button class="secondary" type="submit">{{ button_label }}</button>
+    {% for ep, act, label in buttons %}
+    <button class="secondary" type="submit" formaction="{{ ep }}" name="action" value="{{ act }}">{{ label }}</button>
+    {% endfor %}
   </div>
   <table class="compact striped">
     <thead>
@@ -60,13 +64,20 @@
 {% if not items %}
 <p class="muted">활성 FAILED 큐 비어 있음. ✨</p>
 {% else %}
-{{ queue_table(items, "add", "→ 나중에") }}
+{{ queue_table(items, [("/triage/failed/later", "add", "→ 나중에"), ("/triage/failed/gate-fail", "add", "→ 게이트실패")]) }}
 {% endif %}
 
 {% if later_items %}
 <details {% if not items %}open{% endif %} style="margin-top:1.5em;">
-  <summary><b>나중에</b> ({{ later_items | length }}건) — 후순위, hand-config 프롬프트에서 제외됨</summary>
-  {{ queue_table(later_items, "remove", "← 활성으로 복귀") }}
+  <summary><b>나중에</b> ({{ later_items | length }}건) — capability 보류, hand-config 프롬프트에서 제외됨</summary>
+  {{ queue_table(later_items, [("/triage/failed/later", "remove", "← 활성으로 복귀")]) }}
+</details>
+{% endif %}
+
+{% if gate_failed_items %}
+<details {% if not items %}open{% endif %} style="margin-top:1.5em;">
+  <summary><b>게이트실패</b> ({{ gate_failed_items | length }}건) — 분류 오판 보류, hand-config 프롬프트에서 제외됨. 분류기/게이트 개선 후 <code>triage.py sweep-gate-fail --execute</code> 로 일괄 재판정.</summary>
+  {{ queue_table(gate_failed_items, [("/triage/failed/gate-fail", "remove", "← 활성으로 복귀")]) }}
 </details>
 {% endif %}
 
