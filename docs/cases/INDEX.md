@@ -21,7 +21,7 @@
 | [`host_goodsmileracing_news_f0c534c5`](host_goodsmileracing_news_f0c534c5.md) | ✅ preflight b-hit 회복 + config 등록 (baseline 10건, httpx_html RSS) | 2026-05-22 | F | posts_nonempty, blocked_bot | https://www.goodsmileracing.com/news/ |
 | [`host_funimation-com_blog_65f137c9`](host_funimation-com_blog_65f137c9.md) | 🔧 손 config (httpx_json) — Funimation blog remap to Crunchyroll News API | 2026-05-22 | none | posts_nonempty | https://www.funimation.com/blog/ |
 | [`host_france24-com_en_a8047c17`](host_france24-com_en_a8047c17.md) | ✅ 등록 완료 (preflight b-hit; reuse-probe 자동 생성 playwright_html config) | 2026-05-22 | none | fetch_list, post_id_unique | https://www.france24.com/en/ |
-| [`host_fantia-jp_posts_fd55ceac`](host_fantia-jp_posts_fd55ceac.md) | 🚫 거부 + probe generic 개선 (hard login redirect는 headless 생략) | 2026-05-22 | C | probe_timeout, headless_wallclock, login_required, policy_reject | https://fantia.jp/posts |
+| [`host_fantia-jp_posts_fd55ceac`](host_fantia-jp_posts_fd55ceac.md) | 🚫 거부 + probe generic 개선 (hard login redirect는 headless 생략) | 2026-05-22 | F | probe_timeout, headless_wallclock, login_required, policy_reject | https://fantia.jp/posts |
 | [`host_crunchyroll-com_news_02fd4569`](host_crunchyroll-com_news_02fd4569.md) | 🔧 손 config (httpx_json) — Crunchyroll News 공개 JSON API 사용 | 2026-05-22 | none | posts_nonempty | https://www.crunchyroll.com/news |
 | [`host_call-for-papers_root_90032f22`](host_call-for-papers_root_90032f22.md) | 🧩 수동 config — root landing 을 all recent posts 목록으로 remap | 2026-05-22 | none | posts_nonempty, wrong_first_article, nav_only_candidates, empty_rss | https://call-for-papers.sas.upenn.edu/ |
 | [`host_booth-pm_announcements_b96f82ef`](host_booth-pm_announcements_b96f82ef.md) | ✅ 손 config 등록 (baseline 20건, httpx_html) | 2026-05-22 | none | probe_timeout | https://booth.pm/announcements |
@@ -248,7 +248,7 @@
 |---|---|
 | (미기재) | 36 |
 | B | 1 |
-| C | 18 |
+| C | 17 |
 | C+A | 1 |
 | C+D | 2 |
 | C+F | 2 |
@@ -256,7 +256,7 @@
 | C+config | 2 |
 | E | 5 |
 | E+A+C+D | 1 |
-| F | 82 |
+| F | 83 |
 | F+A | 1 |
 | F+C | 3 |
 | adapter | 1 |

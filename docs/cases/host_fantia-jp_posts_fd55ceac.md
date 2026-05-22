@@ -4,7 +4,7 @@ url: https://fantia.jp/posts
 status: "🚫 거부 + probe generic 개선 (hard login redirect는 headless 생략)"
 outcome: improved
 date: 2026-05-22
-fix_layer: C
+fix_layer: F
 failure_keys: [probe_timeout, headless_wallclock, login_required, policy_reject]
 config_strategy: none
 adapters_changed: []
