@@ -4,7 +4,8 @@
 표시. 외부 의존성 0 (OpenTelemetry 안 씀 — 우리 규모엔 과함).
 
 활성화:
-  env TRACE_ENABLED=1 일 때만 파일 IO 발생. 끄면 모든 span 호출이 no-op (zero-cost).
+  기본 on — 파일 IO 발생. `TRACE_ENABLED=0`(또는 false/no/off) 으로 명시적으로 끄면
+  모든 span 호출이 no-op (zero-cost).
 
 데이터 모델:
   - 한 trace = 한 워크플로우 run. trace_id = `YYYYMMDDHHMMSS_<6hex>` (21자, 시간순 정렬).
@@ -85,7 +86,8 @@ _TRACE_ID_VALID_CHARS = set(
 
 
 def is_enabled() -> bool:
-    return os.environ.get(ENV_FLAG, "").strip().lower() in ("1", "true", "yes", "on")
+    # 기본 on — 명시적으로 끌 때(`TRACE_ENABLED=0/false/no/off`)만 no-op.
+    return os.environ.get(ENV_FLAG, "1").strip().lower() not in ("0", "false", "no", "off")
 
 
 def valid_trace_id(s: str) -> bool:
