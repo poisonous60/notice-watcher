@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "site": "forums.whonix.org",
+  "board": "c/news/21",
+  "strategy": "handwritten",
+  "adapter": "DiscourseAdapter",
+  "kwargs": {
+    "base_url": "https://forums.whonix.org",
+    "category_slug": "news",
+    "category_id": 21
+  },
+  "_source_url": "https://www.whonix.org/blog/",
+  "_note": "Whonix /blog/ is a Discourse category alias served on www.whonix.org, but topic/article JSON APIs live on forums.whonix.org. Poll the News category via DiscourseAdapter."
+}

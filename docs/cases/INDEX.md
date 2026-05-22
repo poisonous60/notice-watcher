@@ -2,11 +2,12 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 238 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 242 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
 | [`infra_headless_browser_profile_2026-05-22`](infra_headless_browser_profile_2026-05-22.md) | ✅ probe generic 개선 — real Chrome 우선 + CF interstitial 대기 + fingerprint 통일로 anti-bot 오분류 줄이고 target 404/entry blocked 정확히 분류 (S4-first reorder 는 review 에서 revert) | 2026-05-22 | C | capability_blocked, baseline_blocked, entry_blocked, target_not_found | https://www.livechart.me/news |
+| [`host_whonix-org_blog_93c1f6f7`](host_whonix-org_blog_93c1f6f7.md) | ✅ 수동 config (Whonix Discourse News category — forums.whonix.org JSON API) | 2026-05-22 | none | posts_nonempty, article_body_len, discourse_alias_host_mismatch | https://www.whonix.org/blog/ |
 | [`host_toranoana-jp_news_84973d13`](host_toranoana-jp_news_84973d13.md) | ✅ 수동 config (입력 URL은 404, 공식 news.toranoana.jp로 remap) | 2026-05-22 | none | target_not_found, posts_nonempty, url_remap | https://www.toranoana.jp/news/ |
 | [`host_tappytoon-com_en_3c39ed9e`](host_tappytoon-com_en_3c39ed9e.md) | ✅ remap 후 손 config 등록 (Freshdesk Notices & News, baseline 10건) | 2026-05-22 | none | probe_timeout, target_not_found, url_remap | https://www.tappytoon.com/en/notice |
 | [`host_swift-org_blog_d48fd749`](host_swift-org_blog_d48fd749.md) | ✅ 수동 config (Atom feed + httpx_html XML, 20건 baseline) | 2026-05-22 | E | posts_nonempty, static_vs_headless, inline_json_available, feed_available | https://www.swift.org/blog/ |
@@ -14,6 +15,7 @@
 | [`host_store-crunchyro_blogs_233f56ce`](host_store-crunchyro_blogs_233f56ce.md) | rejected (url_dead) | 2026-05-22 |  | probe_timeout, url_dead, store_blog_404 | https://store.crunchyroll.com/blogs/news |
 | [`host_scala-lang-org_news_f1e5bb22`](host_scala-lang-org_news_f1e5bb22.md) | 🧩 수동 config — Scala official Atom feed 로 baseline 20건 등록 | 2026-05-22 | none | posts_nonempty, matches_probe_first_article, count_ballpark, feed_available, atom_feed_selector | https://www.scala-lang.org/news/ |
 | [`host_rightstufanime-_post_97e1a227`](host_rightstufanime-_post_97e1a227.md) | 🚫 거부 — Right Stuf legacy URL 이 Crunchyroll Store 홈으로 remap | 2026-05-22 | none | probe_timeout, url_remapped, non_board_homepage, nav_only_candidates | https://www.rightstufanime.com/post |
+| [`host_maven-apache-or_root_ed082572`](host_maven-apache-or_root_ed082572.md) | 거부 (Maven root는 최신 글 목록이 아니라 Maven 소개/문서 홈) | 2026-05-22 | none | title_nonempty, posts_nonempty, content_not_board, stale_failed_queue | https://maven.apache.org/ |
 | [`host_manta-net_en_7dc70a12`](host_manta-net_en_7dc70a12.md) | 🧩 수동 config — 죽은 manta.net URL을 Manta Comics Support Zendesk API로 remap | 2026-05-22 | none | probe_timeout, target_not_found, remap_to_api, cloudflare_challenge | https://www.manta.net/en/notice |
 | [`host_mangaupdates-co_news.html_f4a7e1b6`](host_mangaupdates-co_news.html_f4a7e1b6.md) | fixed (url remapped to root news rows) | 2026-05-22 | config | fetch_list, url_dead, remap_root_news | https://www.mangaupdates.com/news.html |
 | [`host_mangaplus-shuei_updates_28a3a423`](host_mangaplus-shuei_updates_28a3a423.md) | 🚫 거부 — updates SPA shell 은 열리지만 공개 목록 payload 를 얻지 못함 | 2026-05-22 | none | posts_nonempty, wrong_first_article, nav_only_candidates, protobuf_api_empty, article_click_403 | https://mangaplus.shueisha.co.jp/updates |
@@ -27,8 +29,10 @@
 | [`host_debian-org_News_3133808a`](host_debian-org_News_3133808a.md) | ✅ config 등록 (baseline 14, httpx_html) | 2026-05-22 | none | posts_nonempty, matches_probe_first_article, count_ballpark | https://www.debian.org/News/ |
 | [`host_dart-dev_root_c80283e8`](host_dart-dev_root_c80283e8.md) | 거부 (Dart 문서 홈은 최신 글 목록이 아니라 언어/제품 소개 페이지) | 2026-05-22 | none | posts_nonempty, content_not_board, stale_failed_queue | https://dart.dev/ |
 | [`host_crunchyroll-com_news_02fd4569`](host_crunchyroll-com_news_02fd4569.md) | 🔧 손 config (httpx_json) — Crunchyroll News 공개 JSON API 사용 | 2026-05-22 | none | posts_nonempty | https://www.crunchyroll.com/news |
+| [`host_codeberg-org_forgejo_11a2b6a8`](host_codeberg-org_forgejo_11a2b6a8.md) | ✅ 손작성 config (Codeberg release list-only) | 2026-05-22 | none | article_body_len, list_only, body_empty_acceptable | https://codeberg.org/forgejo/forgejo/releases |
 | [`host_call-for-papers_root_90032f22`](host_call-for-papers_root_90032f22.md) | 🧩 수동 config — root landing 을 all recent posts 목록으로 remap | 2026-05-22 | none | posts_nonempty, wrong_first_article, nav_only_candidates, empty_rss | https://call-for-papers.sas.upenn.edu/ |
 | [`host_booth-pm_announcements_b96f82ef`](host_booth-pm_announcements_b96f82ef.md) | ✅ 손 config 등록 (baseline 20건, httpx_html) | 2026-05-22 | none | probe_timeout | https://booth.pm/announcements |
+| [`host_archlinux-org_feeds_df19e96b`](host_archlinux-org_feeds_df19e96b.md) | ✅ 등록 완료 (Arch Linux RSS feed, reuse-probe 자동 재생성) | 2026-05-22 | D | posts_nonempty, feed_candidates, article_body_len | https://archlinux.org/feeds/news/ |
 | [`host_ansible-com_blog_566480f4`](host_ansible-com_blog_566480f4.md) | 🧩 수동 config — Red Hat blog channel teaser rows 로 baseline 가능 | 2026-05-22 | none | posts_nonempty, feed_candidate_unusable, first_article_misidentified | https://www.ansible.com/blog |
 | [`host_animate-onlines_contents_ba74459f`](host_animate-onlines_contents_ba74459f.md) | 🚫 거부 (입력 URL은 404, 공식 공지 remap 후보도 현재 공개 목록 0건) | 2026-05-22 | none | target_not_found, posts_nonempty, empty_official_notice_list | https://www.animate-onlineshop.jp/contents/news/ |
 | [`host_amiami-com_eng_f0c7cc0e`](host_amiami-com_eng_f0c7cc0e.md) | ✅ 수동 config 등록 (playwright_html, list-only accordion) | 2026-05-22 | none | posts_nonempty, post_id_stable_shape, matches_probe_first_article | https://www.amiami.com/eng/news/ |
@@ -259,6 +263,7 @@
 | C+F | 2 |
 | C+F+A | 1 |
 | C+config | 2 |
+| D | 1 |
 | E | 6 |
 | E+A+C+D | 1 |
 | F | 83 |
@@ -266,23 +271,23 @@
 | F+C | 3 |
 | adapter | 1 |
 | config | 2 |
-| none | 79 |
+| none | 82 |
 
 ### config_strategy 분포
 
 | strategy | count |
 |---|---|
 | (미기재) | 45 |
-| handwritten | 27 |
-| httpx_html | 80 |
+| handwritten | 28 |
+| httpx_html | 82 |
 | httpx_json | 21 |
 | httpx_json (미적용 — 콘텐츠 0) | 1 |
 | mixed | 1 |
-| none | 36 |
+| none | 37 |
 | playwright_html | 26 |
 | rejected | 1 |
 
 ### 최근 90일 (≥ 2026-02-21)
 
-케이스 238 건.
+케이스 242 건.
 
