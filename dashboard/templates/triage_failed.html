@@ -69,8 +69,23 @@
 
 {% if later_items %}
 <details {% if not items %}open{% endif %} style="margin-top:1.5em;">
-  <summary><b>나중에</b> ({{ later_items | length }}건) — capability 보류, hand-config 프롬프트에서 제외됨</summary>
+  <summary><b>나중에</b> ({{ later_items | length }}건) — capability·IP/망 도달불가·render 보류, hand-config 프롬프트에서 제외됨</summary>
   {{ queue_table(later_items, [("/triage/failed/later", "remove", "← 활성으로 복귀")]) }}
+  <table style="margin-top:.6em; font-size:.92em;">
+    <thead><tr><th>slug</th><th>memo (왜 나중으로 — IP/망·capability·render…)</th><th></th></tr></thead>
+    <tbody>
+      {% for it in later_items %}
+      <tr>
+        <td class="mono nowrap">{{ it.slug }}</td>
+        <td><form method="post" action="/triage/failed/later-reason" style="display:flex; gap:.4em;">
+          <input type="hidden" name="slug" value="{{ it.slug }}">
+          <input type="text" name="reason" value="{{ it.later_memo }}" placeholder="memo 입력…" style="flex:1; min-width:18em;">
+          <button type="submit">저장</button>
+        </form></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
 </details>
 {% endif %}
 

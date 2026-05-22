@@ -253,7 +253,8 @@ async def triage_failed_page(request: Request):
     한 행만; last_feedback / last_config 원문은 `/subs/<slug>` 상세에서 본다.
     '나중에' 토글된 slug 는 별도 섹션 (dashboard view 만 분리 — N100 영향 X).
     """
-    later = triage_later.load()
+    later_meta = triage_later.load_items()
+    later = set(later_meta.keys())
     gate_failed = triage_gate_failed.load()
     active: list[dict] = []
     later_items: list[dict] = []
@@ -272,6 +273,11 @@ async def triage_failed_page(request: Request):
         if slug in gate_failed:
             gate_failed_items.append(row)
         elif slug in later:
+            # Later memo (사용자 편집) 를 reason 으로 노출 — 없으면 FAILED reason 유지.
+            memo = (later_meta.get(slug) or {}).get("reason") or ""
+            row["later_memo"] = memo
+            if memo:
+                row["reason"] = memo
             later_items.append(row)
         else:
             active.append(row)
@@ -302,6 +308,21 @@ async def triage_failed_later(request: Request):
             triage_later.add_many(slugs)
         else:
             triage_later.remove_many(slugs)
+    return RedirectResponse(url="/triage/failed", status_code=303)
+
+
+@app.post("/triage/failed/later-reason", response_class=HTMLResponse)
+async def triage_failed_later_reason(request: Request):
+    """Later memo 편집 — '왜 나중으로 미뤘나'(capability / IP·망 도달불가 / render 필요 등).
+
+    Form fields: slug (1개), reason (자유 텍스트). 없는 slug 면 Later 에 추가하며 memo 설정.
+    """
+    form = await request.form()
+    slug = (form.get("slug") or "").strip()
+    reason = (form.get("reason") or "").strip()
+    if not state.safe_slug(slug):
+        raise HTTPException(status_code=400, detail="invalid slug")
+    triage_later.set_reason(slug, reason)
     return RedirectResponse(url="/triage/failed", status_code=303)
 
 

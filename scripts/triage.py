@@ -64,11 +64,30 @@ def _load_later() -> set[str]:
     return {str(s) for s in (d.get("later") or []) if s}
 
 
-def _save_later(slugs: set[str]) -> None:
-    """`triage_later.json` 에 slug 들을 merge 저장 (dashboard 토글과 같은 파일)."""
-    merged = sorted(_load_later() | {str(s) for s in slugs if s})
+def _save_later(slugs: set[str], reason: str = "capability_blocked (rc=5 anti-bot/captcha/cloudflare)") -> None:
+    """`triage_later.json` 에 slug merge 저장 (dashboard 토글과 같은 dict+reason 포맷).
+
+    dict {slug: {reason, parked_at}} 유지 — 기존 reason/parked_at 보존, 새 slug 만 default reason.
+    구 list 포맷 파일도 dict 로 마이그 (다음 save).
+    """
+    from datetime import datetime, timezone
+    cur: dict = {}
+    if LATER_STORE.exists():
+        try:
+            raw = (json.loads(LATER_STORE.read_text(encoding="utf-8")) or {}).get("later")
+            if isinstance(raw, dict):
+                cur = {str(k): (v if isinstance(v, dict) else {}) for k, v in raw.items() if k}
+            elif isinstance(raw, list):
+                cur = {str(s): {} for s in raw if s}
+        except (OSError, json.JSONDecodeError):
+            cur = {}
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    for s in slugs:
+        s = str(s)
+        if s and s not in cur:
+            cur[s] = {"reason": reason, "parked_at": now}
     LATER_STORE.parent.mkdir(parents=True, exist_ok=True)
-    LATER_STORE.write_text(json.dumps({"later": merged}, ensure_ascii=False, indent=2),
+    LATER_STORE.write_text(json.dumps({"later": dict(sorted(cur.items()))}, ensure_ascii=False, indent=2),
                            encoding="utf-8")
 
 
