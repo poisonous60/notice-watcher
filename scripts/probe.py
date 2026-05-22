@@ -7,8 +7,13 @@ from __future__ import annotations
 
 import argparse
 import contextvars as _cv
+import multiprocessing as mp
+import os
+import queue
 import re
+import subprocess
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -61,6 +66,118 @@ from probe.polite import polite_sleep
 from probe.replay import replay_all
 from probe.report import write_summary
 from probe.types import Classification, Result
+
+HEADLESS_JOIN_CAP_S = float(os.environ.get("PROBE_HEADLESS_JOIN_CAP_S", "45"))
+
+
+def _headless_timeout_result(*, url: str, target: str, started: float, cap_s: float) -> Result:
+    strategy = "S4.click" if target == "article_click" else ("S4" if target == "list" else "S4.article")
+    return Result(
+        strategy=strategy,
+        target="article" if target == "article_click" else target,
+        url=url,
+        duration_ms=int((time.perf_counter() - started) * 1000),
+        classification=Classification.UNKNOWN_ERROR,
+        notable=[f"headless wall-clock cap exceeded ({cap_s:g}s); degraded"],
+        error=f"headless_timeout: {cap_s:g}s",
+    )
+
+
+def _headless_error_result(*, url: str, target: str, started: float, error: str) -> Result:
+    strategy = "S4.click" if target == "article_click" else ("S4" if target == "list" else "S4.article")
+    return Result(
+        strategy=strategy,
+        target="article" if target == "article_click" else target,
+        url=url,
+        duration_ms=int((time.perf_counter() - started) * 1000),
+        classification=Classification.UNKNOWN_ERROR,
+        notable=["headless probe failed"],
+        error=error,
+    )
+
+
+def _headless_child(kind: str, kwargs: dict, out_q) -> None:
+    try:
+        if kind == "capture":
+            out_q.put(("ok", fetch_with_capture(**kwargs)))
+        elif kind == "click":
+            out_q.put(("ok", fetch_article_by_click(**kwargs)))
+        else:
+            out_q.put(("err", f"unknown headless child kind: {kind}"))
+    except BaseException as e:  # noqa: BLE001
+        out_q.put(("err", f"{type(e).__name__}: {e}"))
+
+
+def _terminate_process_tree(proc) -> None:
+    if os.name == "nt":
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+            return
+        except Exception:  # noqa: BLE001
+            pass
+    proc.terminate()
+
+
+def _run_headless_child(kind: str, kwargs: dict, *, cap_s: float, target: str) -> Result | tuple[Result, dict]:
+    started = time.perf_counter()
+    url = str(kwargs.get("url") or kwargs.get("list_url") or "")
+    if cap_s <= 0:
+        if kind == "capture":
+            return fetch_with_capture(**kwargs)
+        return fetch_article_by_click(**kwargs)
+
+    ctx = mp.get_context("spawn")
+    out_q = ctx.Queue(maxsize=1)
+    proc = ctx.Process(target=_headless_child, args=(kind, kwargs, out_q), daemon=True)
+    proc.start()
+    proc.join(cap_s)
+    if proc.is_alive():
+        _terminate_process_tree(proc)
+        proc.join(3)
+        timeout_result = _headless_timeout_result(url=url, target=target, started=started, cap_s=cap_s)
+        if kind == "click":
+            return timeout_result, {"requested_url": url, "resolved_url": None, "status": None,
+                                    "clicked_text": None, "clicked_href": None,
+                                    "note": timeout_result.error}
+        return timeout_result
+
+    try:
+        status, payload = out_q.get_nowait()
+    except queue.Empty:
+        err = f"headless child exited without result (exitcode={proc.exitcode})"
+        error_result = _headless_error_result(url=url, target=target, started=started, error=err)
+        if kind == "click":
+            return error_result, {"requested_url": url, "resolved_url": None, "status": None,
+                                  "clicked_text": None, "clicked_href": None, "note": err}
+        return error_result
+    if status == "ok":
+        return payload
+    error_result = _headless_error_result(url=url, target=target, started=started, error=str(payload))
+    if kind == "click":
+        return error_result, {"requested_url": url, "resolved_url": None, "status": None,
+                              "clicked_text": None, "clicked_href": None, "note": str(payload)}
+    return error_result
+
+
+def _bounded_fetch_with_capture(**kwargs) -> Result:
+    return _run_headless_child("capture", kwargs, cap_s=HEADLESS_JOIN_CAP_S, target=str(kwargs.get("target") or "list"))  # type: ignore[return-value]
+
+
+def _bounded_fetch_article_by_click(**kwargs) -> tuple[Result, dict]:
+    return _run_headless_child("click", kwargs, cap_s=HEADLESS_JOIN_CAP_S, target="article_click")  # type: ignore[return-value]
+
+
+def _static_results_are_hard_login(static_results: list[Result]) -> bool:
+    return (
+        bool(static_results)
+        and all(r.classification == Classification.LOGIN_REQUIRED for r in static_results)
+        and any("redirected to login" in n for r in static_results for n in (r.notable or []))
+    )
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -139,30 +256,7 @@ def _run(args: argparse.Namespace, url: str, slug: str) -> int:
     presets = all_presets(url)
     if args.lite:
         presets = {k: v for k, v in presets.items() if k in ("H2", "H3", "H4")}
-    # Phase 2 (Playwright headless) 는 Phase 1 과 결과 의존성 없음 — 동시 시작해 wall-clock 단축.
-    # Phase 3+ 부터가 Phase 2 산출물(captured_headers / traffic.har / page_html) 의존이라 그 전에 join.
-    _phase2_ex: ThreadPoolExecutor | None = None
-    _phase2_future = None
     _do_headless = not args.no_headless and headless_available()
-    if _do_headless:
-        print("\n[Phase 2] Playwright headless w/ HAR capture ... (Phase 1 과 병렬 시작)")
-        _phase2_ex = ThreadPoolExecutor(max_workers=1)
-
-        def _traced_phase2():
-            with current_trace().span("phase2_headless_har_capture", attrs={"target": "list"}):
-                return fetch_with_capture(
-                    url=url,
-                    out_dir=out_dir,
-                    target="list",
-                    headless=not args.headful_debug,
-                    baseline_blocked=blocked,
-                )
-
-        _phase2_future = _phase2_ex.submit(_cv.copy_context().run, _traced_phase2)
-    elif args.no_headless:
-        print("\n[Phase 2] skipped — --no-headless")
-    elif not headless_available():
-        print("\n[Phase 2] skipped — playwright not installed")
 
     print(f"\n[Phase 1] static GET ({'/'.join(presets)}) ...")
     # 같은 URL 을 헤더만 바꿔 N번 두드리는 거라 순차 실행 + sleep 의 가치가 낮음 → 병렬.
@@ -210,22 +304,30 @@ def _run(args: argparse.Namespace, url: str, slug: str) -> int:
 
     all_results.extend(static_results)
 
-    # ---- Phase 2 join: 위에서 병렬로 띄운 headless 결과 회수. lite 모드도 headless 는 항상 돈다 ----
+    # ---- Phase 2: Playwright headless. lite 모드도 headless 는 돈다 ----
     # (HAR 가 JSON API 발견·렌더 DOM·통과헤더 확보의 핵심. lite 의 "경량"은 외부·유료·login 스킵임)
-    # try/finally 로 shutdown 보장 — Phase 1 raise 해도 워커 누출 X.
+    # 단, 정적 진입이 전부 hard login redirect 면 headless 로 얻을 추가 신호가 없고 heavy login SPA 에서
+    # process exit 이 지연될 수 있어 fail-fast 한다.
     headless: Result | None = None
-    try:
-        if _phase2_future is not None:
-            try:
-                headless = _phase2_future.result()
-            except Exception as _e_p2:  # noqa: BLE001
-                print(f"\n[Phase 2 result] fail: {type(_e_p2).__name__}: {_e_p2}")
-            else:
-                print(f"\n[Phase 2 result] S4 {headless.status} {headless.classification.value}  {' '.join(headless.notable[:3])}")
-                all_results.append(headless)
-    finally:
-        if _phase2_ex is not None:
-            _phase2_ex.shutdown(wait=True)
+    static_hard_login = _static_results_are_hard_login(static_results)
+    if static_hard_login:
+        print("\n[Phase 2] skipped — Phase 1 hard LOGIN_REQUIRED redirect (headless would hit login SPA)")
+    elif _do_headless:
+        print(f"\n[Phase 2] Playwright headless w/ HAR capture ... (cap={HEADLESS_JOIN_CAP_S:g}s)")
+        with tr.span("phase2_headless_har_capture", attrs={"target": "list", "cap_s": HEADLESS_JOIN_CAP_S}):
+            headless = _bounded_fetch_with_capture(
+                url=url,
+                out_dir=out_dir,
+                target="list",
+                headless=not args.headful_debug,
+                baseline_blocked=blocked,
+            )
+        print(f"\n[Phase 2 result] S4 {headless.status} {headless.classification.value}  {' '.join(headless.notable[:3])}")
+        all_results.append(headless)
+    elif args.no_headless:
+        print("\n[Phase 2] skipped — --no-headless")
+    elif not headless_available():
+        print("\n[Phase 2] skipped — playwright not installed")
 
     # ---- Phase 3: S1.Hcap (캡처 헤더로 정적 재시도) ----
     captured_retry: Result | None = None
@@ -469,7 +571,7 @@ def _run(args: argparse.Namespace, url: str, slug: str) -> int:
                         baseline_blocked=blocked,
                     )
                 elif headless is not None and headless_available():
-                    article_result = fetch_with_capture(
+                    article_result = _bounded_fetch_with_capture(
                         url=first_article_url,
                         out_dir=out_dir,
                         target="article",
@@ -500,7 +602,7 @@ def _run(args: argparse.Namespace, url: str, slug: str) -> int:
             print("\n[Phase 9b] article-by-click probe (목록에서 글 링크 클릭 → 최종 페이지/URL/HAR 캡처) ...")
             with tr.span("phase9b_article_by_click"):
                 try:
-                    click_result, click_meta = fetch_article_by_click(
+                    click_result, click_meta = _bounded_fetch_article_by_click(
                         list_url=url, out_dir=out_dir,
                         headless=not args.headful_debug, baseline_blocked=blocked,
                     )
@@ -524,18 +626,28 @@ def _run(args: argparse.Namespace, url: str, slug: str) -> int:
                 print(f"  [Phase 6 robots] fail: {type(_e_robots).__name__}: {_e_robots}")
                 robots_info = {"url": "", "status": None, "crawl_delay": None, "disallow": [], "sitemaps": []}
         # sitemap fetch (robots 의 Sitemap: 라인 + 표준 경로 폴백) — robots 결과 의존이라 sequential.
-        # 사용자 URL 이 board root 아닐 때 후보 회복 — config_writer 가 i==1 부터 참조.
-        with tr.span("phase6_fetch_sitemaps"):
-            try:
-                sitemap_info = fetch_sitemaps(
-                    page_url=url,
-                    robots_sitemaps=robots_info.get("sitemaps") or [],
-                    out_dir=out_dir,
-                )
-            except Exception as _e_sm:  # noqa: BLE001
-                print(f"  [Phase 6 sitemap] fail: {type(_e_sm).__name__}: {_e_sm}")
-                sitemap_info = {"page_url": url, "sitemap_urls_tried": [], "candidates": [],
-                                "stats": {"sitemap_count": 0, "fetched": 0, "errors": 0, "out_total": 0}}
+        # hard login redirect 는 policy reject 로 끝나는 입력이라 sitemap 후보 회복이 의미 없고,
+        # 일부 login SPA 의 sitemap 엔드포인트가 느리게 매달려 register timeout 을 잡아먹는다.
+        if static_hard_login:
+            sitemap_info = {"page_url": url, "sitemap_urls_tried": [], "candidates": [],
+                            "stats": {"sitemap_count": 0, "fetched": 0, "errors": 0, "out_total": 0}}
+            (out_dir / "sitemap.json").write_text(
+                __import__("json").dumps(sitemap_info, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        else:
+            # 사용자 URL 이 board root 아닐 때 후보 회복 — config_writer 가 i==1 부터 참조.
+            with tr.span("phase6_fetch_sitemaps"):
+                try:
+                    sitemap_info = fetch_sitemaps(
+                        page_url=url,
+                        robots_sitemaps=robots_info.get("sitemaps") or [],
+                        out_dir=out_dir,
+                    )
+                except Exception as _e_sm:  # noqa: BLE001
+                    print(f"  [Phase 6 sitemap] fail: {type(_e_sm).__name__}: {_e_sm}")
+                    sitemap_info = {"page_url": url, "sitemap_urls_tried": [], "candidates": [],
+                                    "stats": {"sitemap_count": 0, "fetched": 0, "errors": 0, "out_total": 0}}
         print(f"\n[Phase 6 result] feeds: {len(feeds.get('candidates') or [])} candidates · "
               f"robots: status={robots_info.get('status')} crawl_delay={robots_info.get('crawl_delay')} "
               f"sitemaps={len(robots_info.get('sitemaps') or [])} · "
