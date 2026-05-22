@@ -150,6 +150,19 @@ python scripts/triage.py show <slug>         # 그 slug 의 .FAILED.json + 요�
 
 `--skip-later` 가 제외하는 slug 는 dashboard `/triage/failed` 의 '나중에' 토글로 결정 (`output/triage_later.json`, dev box only). 후순위로 미뤘다는 신호 — 같은 dev 박스에서 dashboard 와 동일 큐 공유. Later 라도 명시적으로 처리하고 싶으면 `show <slug>` 또는 인자 빼고 호출.
 
+### 두 보류 버킷 — Later(capability) vs gate-fail(분류) **분리** (2026-05-22)
+
+triage 에서 *지금 작업 안 하고 치워두는* 항목은 **해소 경로가 다른 두 버킷**으로 나눈다 (한 데 섞으면 "뭘 고쳐야 풀리나" 신호 소실):
+
+| 버킷 | 파일 | 담는 것 | 해소 경로 |
+|---|---|---|---|
+| **Later** | `triage_later.json` (dashboard '나중에'·rc=5 auto-defer) | **capability** — cap_blocked(anti-bot/captcha)·SPA·timeout·render 필요 | **능력** 도착 (stealth/playwright 트랙) |
+| **gate-fail** | `triage_gate_failed.json` (`triage.py park-gate-fail`) | **분류 오판** — 사실 비-게시판(not_found/단일글/login)인데 분류기·게이트가 못 잡아 gen_fail 로 샌 것. classifier `?`(미판정)/미신뢰 잔여 | **판단** 개선 (분류기/게이트 — ADR 0007 multi-class 등) 후 `sweep-gate-fail` 일괄 재판정 |
+
+- **언제 gate-fail park**: §0b-2 screen-out 으로 "이건 비-게시판" 이라 판정했는데 분류기가 자동거부(rc=2/3/4) 안 하고 흘릴 때 (classifier `?`/저신뢰). **per-site 손-거부(.REJECTED 수동) 대신** `python scripts/triage.py park-gate-fail <slug> --reason="<왜 비-게시판>"`. 활성 `list` 서 숨고, 다음 분류기 개선 때 `sweep-gate-fail --execute` 한 방으로 일괄 재판정 (해소되면 자동 거부 마커 + 목록서 제거).
+- **capability(cap_blocked·SPA·timeout)는 gate-fail 에 넣지 X** — 그건 Later/render·stealth. **진짜 게시판인데 config 필요한 건 둘 다 X** — hand-config 작업 대상.
+- 분류기가 *대부분의* gate-failure 를 이미 자동 거부하므로(ADR 0007 multi-class) gate-fail 버킷은 보통 거의 빔 — 분류기가 못 가른 잔여만.
+
 호스트는 Tailscale MagicDNS `<user>@<host>` (LAN/외부 모두 동작). LAN IP `aaaa@<lan-ip>` 도 집에서는 OK. 다른 호스트 필요시 `DEPLOY_HOST=aaaa@<…>` 환경변수.
 
 `show` 출력의 `last_feedback`(=`[FAIL] <체크>`), `last_config`(자동 생성된 마지막 시도 — selector/path 한두 개만 고치면 될 때도 많음), `output/probe/<slug>/` 의 `summary.txt`·`list_candidates.json`·`article_candidates.json`·`traffic.har`·`diagnosis.json` 을 본다. `docs/config 자동생성 실패 케이스.md` 의 §번호에 매칭해 원인 분류.
