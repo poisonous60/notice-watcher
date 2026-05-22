@@ -102,7 +102,7 @@
   </colgroup>
   <thead>
     <tr>
-      <th>ts</th>
+      <th>ts (KST)</th>
       <th>slug</th>
       <th>skill</th>
       <th>outcome</th>
@@ -115,7 +115,7 @@
   <tbody>
     {% for r in rows %}
     <tr class="cases-row">
-      <td class="mono nowrap">{{ r.ts[:16] if r.ts else '' }}</td>
+      <td class="mono nowrap">{{ r.ts_disp }}</td>
       <td class="cases-slug-cell">
         <span class="cases-slug-text"><code>{{ r.slug }}</code></span>
         {% if r.url and is_http_url(r.url) %}<a class="cases-slug-link" href="{{ r.url }}" target="_blank" rel="noopener noreferrer">↗</a>{% endif %}

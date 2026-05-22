@@ -8,8 +8,24 @@ dev box 전용. N100 안 봄. `docs/case_runs DB 계획.md` rev 2 구현.
 """
 from __future__ import annotations
 
+import datetime as _dt
 import json
 from typing import Any, Optional
+
+_KST = _dt.timezone(_dt.timedelta(hours=9))
+
+
+def _ts_kst(ts: Optional[str]) -> str:
+    """case_runs.ts 는 UTC ISO('...Z'). dashboard 는 KST 로 표시 (UTC 그대로 보이면 ~9h 어긋나 혼동)."""
+    if not ts:
+        return ""
+    try:
+        d = _dt.datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=_dt.timezone.utc)
+        return d.astimezone(_KST).strftime("%Y-%m-%d %H:%M")
+    except (ValueError, TypeError):
+        return ts[:16]
 
 from fastapi import HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
@@ -45,6 +61,7 @@ def _row_to_view(row) -> dict[str, Any]:
         else:
             d[jcol] = []
     d["outcome_label"] = OUTCOME_LABELS.get(d.get("outcome") or "", d.get("outcome") or "")
+    d["ts_disp"] = _ts_kst(d.get("ts"))
     reason = d.get("reason") or ""
     d["reason_short"] = (reason[:120] + "…") if len(reason) > 120 else reason
     # case .md 는 관례상 docs/cases/<slug>.md → case_md_slug 미기록(null) row 는 slug 로 폴백.
