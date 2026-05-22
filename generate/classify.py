@@ -86,7 +86,7 @@ def _struct_hint(digest: dict, url: str) -> str:
     return "; ".join(parts)
 
 
-_PAGE_TYPES = ("index", "content", "not_found", "login")
+_PAGE_TYPES = ("index", "content", "catalog", "not_found", "login")
 
 
 def _parse(text: str) -> dict:

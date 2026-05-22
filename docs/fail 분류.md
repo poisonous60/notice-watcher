@@ -76,6 +76,7 @@
 | `multi_host_hub` | multi-host hub root | 외부 host 여러 곳으로 발산하는 hub root. |
 | `root_marketing_homepage` | root 마케팅 랜딩 | 메이저 미디어/플랫폼 root 도메인 — board 아님. 카테고리 URL 권장. |
 | `board_shape` | 게시판 형식 아님 | post 리스트 구조 인식 실패. |
+| `classifier_reject` | 분류기 비-게시판 판정 | LLM page-type 분류기가 content/catalog 등 비-게시판으로 판정해 거부 (ADR 0007 accept-path / ADR 0011 catalog=아티팩트·비최신순 listing). 수동 config 는 허용. |
 
 ### bug
 

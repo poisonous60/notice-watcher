@@ -79,6 +79,10 @@ def run() -> list[tuple[str, bool, str]]:
     fc = _FakeClient('{"class":"login","confidence":0.9,"reason":"로그인 게이트"}')
     r = classify_index_content(url="https://x.org/x", digest=_digest_with_html(_ARTICLE_HTML), client=fc)
     cases.append(("login_parse", r["class"] == "login", f"got {r}"))
+    # 2c. catalog 파싱 (ADR 0011 — 아티팩트/비최신순 listing)
+    fc = _FakeClient('{"class":"catalog","confidence":0.9,"reason":"패키지 레지스트리"}')
+    r = classify_index_content(url="https://crates.io/", digest=_digest_with_html(_BOARD_HTML), client=fc)
+    cases.append(("catalog_parse", r["class"] == "catalog" and r["confidence"] == 0.9, f"got {r}"))
     # 미지원 class 는 '?' 로 (어휘 밖)
     fc = _FakeClient('{"class":"paywall","confidence":0.9,"reason":"x"}')
     r = classify_index_content(url="https://x.org/x", digest=_digest_with_html(_ARTICLE_HTML), client=fc)
@@ -145,6 +149,8 @@ def run() -> list[tuple[str, bool, str]]:
 
     # _classify_decisive_rc: content→3 / not_found→4 / login→2 (모두 ≥0.7), index/?/저신뢰 → None
     cases.append(("decisive_content", reg._classify_decisive_rc({"class": "content", "confidence": 0.8}) == 3, ""))
+    cases.append(("decisive_catalog", reg._classify_decisive_rc({"class": "catalog", "confidence": 0.8}) == 3, ""))
+    cases.append(("decisive_catalog_low_conf_none", reg._classify_decisive_rc({"class": "catalog", "confidence": 0.6}) is None, ""))
     cases.append(("decisive_not_found", reg._classify_decisive_rc({"class": "not_found", "confidence": 0.8}) == 4, ""))
     cases.append(("decisive_login", reg._classify_decisive_rc({"class": "login", "confidence": 0.8}) == 2, ""))
     cases.append(("decisive_index_none", reg._classify_decisive_rc({"class": "index", "confidence": 0.99}) is None, ""))

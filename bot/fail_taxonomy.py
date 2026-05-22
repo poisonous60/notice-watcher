@@ -292,6 +292,10 @@ FAIL_CATALOG: tuple[FailKind, ...] = (
             Subkind("board_shape", "게시판 형식 아님",
                     "post 리스트 구조 인식 실패.",
                     _has_any("게시판 형식 아님", name="board_shape")),
+            Subkind("classifier_reject", "분류기 비-게시판 판정",
+                    "LLM page-type 분류기가 content/catalog 등 비-게시판으로 판정해 거부 "
+                    "(ADR 0007 accept-path / ADR 0011 catalog=아티팩트·비최신순 listing). 수동 config 는 허용.",
+                    _has_any("accept_path", "분류기", name="classifier_reject")),
         ),
     ),
     FailKind(

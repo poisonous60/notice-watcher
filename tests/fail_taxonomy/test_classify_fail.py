@@ -110,6 +110,12 @@ CASES: list[tuple[str, tuple[Optional[str], Optional[int], Optional[str]], str, 
     ("gate_board_shape",
      ("failed", 3, "[register] ❌ 등록 거부 — 게시판 형식 아님."),
      "gate_reject", "board_shape"),
+    ("gate_classifier_catalog",
+     ("failed", 3, "accept_path catalog 거부 (게이트 통과 + 분류기 catalog) [classifier=catalog conf=0.98: 패키지 레지스트리]"),
+     "gate_reject", "classifier_reject"),
+    ("gate_classifier_content",
+     ("failed", 3, "accept_path content 거부 (게이트 통과 + 분류기 content) [classifier=content conf=0.9: 단일 글]"),
+     "gate_reject", "classifier_reject"),
     ("gate_no_match", ("failed", 3, "something"), "gate_reject", None),
 
     # unknown rc ----

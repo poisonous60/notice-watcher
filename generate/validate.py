@@ -22,6 +22,32 @@ from engine.tracing import current_trace
 _STABLE_ID_RE = re.compile(r"^[\w\-./:%]{1,200}$")  # 공백 없는 정수/문자열 ID. 'title with spaces' 같은 실수 차단.
 # 200 cap = 메이저 뉴스미디어의 date+title-slug URL path 패턴 수용 (CNN/NYT/WaPo/Reuters 류, ≤130자 관측). 64 cap 은 URL-slug-as-id 정상 케이스를 차단했다.
 
+# row_selector 가 네비게이션/메뉴 chrome 을 지목 — 글 목록 아님(nav junk) 신호 (ADR 0011 fix A).
+# 정밀 토큰만: <nav> 단독 태그, menubar/navbar/p-menubar/breadcrumb, [role=navigation].
+# 'menu' 단독은 과매칭(.dropdown-menu 등)이라 제외. 단독 사용 X — 항상 conjunction(날짜0+숫자0)과 함께.
+_NAV_SELECTOR_RE = re.compile(
+    r"(?:^|[\s>~+])nav(?=[\s>~+.:#\[]|$)"      # <nav> 요소 (태그 경계)
+    r"|menubar|navbar|p-menubar|breadcrumb"     # 메뉴바/브레드크럼 컴포넌트
+    r"|role\s*=\s*['\"]?navigation",            # [role=navigation]
+    re.I,
+)
+
+
+def _is_nav_junk_rows(row_selector: str, post_ids: list[str], any_dated: bool) -> bool:
+    """row_selector 가 nav/메뉴 chrome 을 가리키고 항목에 날짜·숫자가 전혀 없으면 nav junk (글 목록 아님).
+    conjunction 으로 false-reject 방지: clojure(`nav.w-nav-menu` 인데 dated 뉴스 — id 에 숫자) ·
+    version-board(bun-v1.3.14 — nav-token 없음) 는 면제."""
+    if not post_ids or not _NAV_SELECTOR_RE.search(row_selector or ""):
+        return False
+    if any_dated:
+        return False
+    return not any(any(c.isdigit() for c in i) for i in post_ids)
+
+
+def _is_year_archive(post_ids: list[str]) -> bool:
+    """post_id 가 전부 4자리 연도뿐 → 연도 아카이브 인덱스(개별 글 아님). netbsd 2025/2024/2023 류."""
+    return bool(post_ids) and all(re.fullmatch(r"\s*\d{4}\s*", i) for i in post_ids)
+
 
 @dataclass
 class Check:
@@ -226,6 +252,21 @@ async def validate_built_config(
     bad_dates = [d for d in dated if not _parse_iso(d)]
     rep.add("published_at_iso", not bad_dates, hard=True,
             detail=f"ISO8601 파싱 실패: {bad_dates[:3]}" if bad_dates else (f"{len(dated)}/{len(posts)} 글에 날짜 있음" if dated else "날짜 추출된 글 없음(허용)"))
+
+    # 층위 1b — nav/연도-아카이브 *오추출* false-accept 차단 (ADR 0011 직교 트랙).
+    # 글-board 인데 row_selector 가 nav/메뉴 chrome 을 가리키거나(openbsd `nav>ul>li`·garuda
+    # `p-menubar-item`) 항목이 연도 인덱스(netbsd 2025/2024/2023)면 폴링해도 nav junk·연도링크만 잡음.
+    # hard fail → retry feedback 으로 LLM 이 진짜 글 목록 재선택 기회 (없으면 gen_fail → hand-config).
+    # nav 는 conjunction(nav-selector AND 날짜 0 AND post_id 숫자 0) 으로 좁혀 false-reject 방지:
+    #   clojure(`nav.w-nav-menu` 인데 dated 뉴스 — id 에 2026 숫자) · version-board(bun-v1.3.14 — nav-token 없음) 면제.
+    row_sel = str((cfg.get("list") or {}).get("row_selector") or "")
+    nav_junk = _is_nav_junk_rows(row_sel, ids, any(p.published_at for p in posts))
+    nav_sel = _NAV_SELECTOR_RE.search(row_sel)
+    rep.add("row_selector_not_nav", not nav_junk, hard=True,
+            detail=(f"row_selector 가 nav/메뉴 chrome 지목({nav_sel.group(0)!r}) + 항목 날짜·숫자 0 → 글 목록 아닌 nav junk: {ids[:5]} (진짜 글 목록의 row_selector 를 다시 찾아라)" if nav_junk else ""))
+    year_only = _is_year_archive(ids)
+    rep.add("post_id_not_year_archive", not year_only, hard=True,
+            detail=(f"post_id 전부 연도뿐 → 연도 아카이브 인덱스(글 아님): {ids[:5]} (개별 글 행을 가리키는 row_selector 로 바꿔라)" if year_only else ""))
 
     # 층위 2 — probe 교차검증 (소프트)
     if digest:
