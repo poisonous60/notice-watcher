@@ -1,0 +1,174 @@
+{
+  "version": 1,
+  "site": "www.ansible.com",
+  "board": "open-source-communities",
+  "strategy": "playwright_html",
+  "_source_url": "https://www.ansible.com/blog",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+    "Referer": "https://www.ansible.com/blog"
+  },
+  "timeout": 20,
+  "list": {
+    "url_template": "https://www.redhat.com/en/blog/channel/{board}",
+    "pagination": {
+      "kind": "query_param",
+      "page_param": "page"
+    },
+    "row_selector": "div.pf-l-stack.pf-m-gutter > div.pf-l-stack__item",
+    "row_required_selector": "h3.rh-article-teaser-headline a.rh-article-teaser-summary-link",
+    "wait_selector": "h3.rh-article-teaser-headline a.rh-article-teaser-summary-link",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "h3.rh-article-teaser-headline a.rh-article-teaser-summary-link",
+          "attr": "data-doc-id",
+          "transform": [
+            [
+              "regex_extract",
+              "node/(\\d+)"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "attr",
+          "selector": "h3.rh-article-teaser-headline a.rh-article-teaser-summary-link",
+          "attr": "data-title",
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        },
+        {
+          "from": "css",
+          "selector": "h3.rh-article-teaser-headline a.rh-article-teaser-summary-link",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "h3.rh-article-teaser-headline a.rh-article-teaser-summary-link",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://www.redhat.com"
+            ],
+            [
+              "strip_query_fragment"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "span.rh-article-teaser-date",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "replace",
+              ",",
+              ""
+            ],
+            [
+              "iso8601",
+              [
+                "%B %d %Y"
+              ],
+              "+09:00"
+            ]
+          ]
+        }
+      ],
+      "author": [
+        {
+          "from": "css",
+          "selector": "span.rh-article-teaser-author a",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "attr",
+          "selector": "h3.rh-article-teaser-headline a.rh-article-teaser-summary-link",
+          "attr": "data-description",
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        },
+        {
+          "from": "css",
+          "selector": "div.rh-article-teaser-summary",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "cover_image": [
+        {
+          "from": "attr",
+          "selector": "div.rh-image-embed--component img",
+          "attr": "src",
+          "transform": [
+            [
+              "urljoin",
+              "https://www.redhat.com"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "article",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "h1",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "_note": "Ansible /blog redirects to the Red Hat open-source-communities blog channel. The advertised RSS alternate currently redirects to non-feed HTML, and the channel teasers are rendered client-side, so this config waits for the rendered teaser rows."
+}

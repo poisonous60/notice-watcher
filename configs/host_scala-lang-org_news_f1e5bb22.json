@@ -1,0 +1,202 @@
+{
+  "version": 1,
+  "site": "www.scala-lang.org",
+  "board": "news",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+    "Accept": "application/atom+xml,application/xml;q=0.9,text/xml;q=0.8,*/*;q=0.7",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+    "Referer": "https://www.scala-lang.org/news/"
+  },
+  "timeout": 15,
+  "polite_sleep": {
+    "min": 3,
+    "max": 5
+  },
+  "list": {
+    "url_template": "https://www.scala-lang.org/feed/index.xml",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "feed > entry",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "css",
+          "selector": "id",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "strip_query_fragment"
+            ],
+            [
+              "strip",
+              "/"
+            ],
+            [
+              "remove_prefix",
+              "https://www.scala-lang.org/"
+            ],
+            [
+              "regex_extract",
+              "^(.*?)(?:\\.html)?$"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "html_unescape"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "link",
+          "attr": "href",
+          "transform": [
+            [
+              "strip_query_fragment"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "updated",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "iso8601",
+              [
+                "%Y-%m-%dT%H:%M:%S%z"
+              ]
+            ]
+          ]
+        }
+      ],
+      "author": [
+        {
+          "from": "css",
+          "selector": "author > name",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "content",
+          "text": true,
+          "transform": [
+            [
+              "html_unescape"
+            ],
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "main#inner-main section.content div.content-primary div.inner-box",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "main#inner-main .content-primary .inner-box",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "main#inner-main",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "section.title-page h1",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "div.blog-detail-head time",
+          "attr": "datetime",
+          "transform": [
+            [
+              "iso8601",
+              [
+                "%Y-%m-%d %H:%M:%S %z"
+              ]
+            ]
+          ]
+        },
+        {
+          "from": "css",
+          "selector": "div.blog-detail-head time",
+          "text": true,
+          "transform": [
+            [
+              "iso8601",
+              [
+                "%A %d %B %Y"
+              ]
+            ]
+          ]
+        }
+      ],
+      "author": [
+        {
+          "from": "css",
+          "selector": "div.blog-detail-head p",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "_source_url": "https://www.scala-lang.org/news/",
+  "_note": "The submitted /news/ page exposes the official Atom feed. The failed generated config followed the feed but used RSS channel/item selectors against an Atom document, yielding posts_nonempty=0. Poll feed > entry and fetch article pages statically."
+}

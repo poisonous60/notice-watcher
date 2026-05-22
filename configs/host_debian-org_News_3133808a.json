@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "site": "www.debian.org",
+  "board": "News",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+    "Accept-Language": "ko-KR",
+    "Upgrade-Insecure-Requests": "1",
+    "Referer": "https://www.debian.org/News/"
+  },
+  "timeout": 15,
+  "list": {
+    "url_template": "https://www.debian.org/News/",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "#content > p > strong",
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a",
+          "attr": "href",
+          "transform": [
+            [
+              "regex_extract",
+              "^(?:\\d{4}/)?(\\d{8,})$"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "a",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://www.debian.org/News/"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "#content",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "#content h1",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  }
+}

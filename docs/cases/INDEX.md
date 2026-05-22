@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 234 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 238 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -12,6 +12,7 @@
 | [`host_swift-org_blog_d48fd749`](host_swift-org_blog_d48fd749.md) | ✅ 수동 config (Atom feed + httpx_html XML, 20건 baseline) | 2026-05-22 | E | posts_nonempty, static_vs_headless, inline_json_available, feed_available | https://www.swift.org/blog/ |
 | [`host_support-google-_a_f31fe093`](host_support-google-_a_f31fe093.md) | 🚫 거부 (legacy Google Support table URL 이 단일 도움말 article 로 remap — 게시판 아님) | 2026-05-22 | none | posts_nonempty, not_a_board, nav_only_same_host, legacy_table_remap, content_as_list | https://support.google.com/a/table/7539891 |
 | [`host_store-crunchyro_blogs_233f56ce`](host_store-crunchyro_blogs_233f56ce.md) | rejected (url_dead) | 2026-05-22 |  | probe_timeout, url_dead, store_blog_404 | https://store.crunchyroll.com/blogs/news |
+| [`host_scala-lang-org_news_f1e5bb22`](host_scala-lang-org_news_f1e5bb22.md) | 🧩 수동 config — Scala official Atom feed 로 baseline 20건 등록 | 2026-05-22 | none | posts_nonempty, matches_probe_first_article, count_ballpark, feed_available, atom_feed_selector | https://www.scala-lang.org/news/ |
 | [`host_rightstufanime-_post_97e1a227`](host_rightstufanime-_post_97e1a227.md) | 🚫 거부 — Right Stuf legacy URL 이 Crunchyroll Store 홈으로 remap | 2026-05-22 | none | probe_timeout, url_remapped, non_board_homepage, nav_only_candidates | https://www.rightstufanime.com/post |
 | [`host_manta-net_en_7dc70a12`](host_manta-net_en_7dc70a12.md) | 🧩 수동 config — 죽은 manta.net URL을 Manta Comics Support Zendesk API로 remap | 2026-05-22 | none | probe_timeout, target_not_found, remap_to_api, cloudflare_challenge | https://www.manta.net/en/notice |
 | [`host_mangaupdates-co_news.html_f4a7e1b6`](host_mangaupdates-co_news.html_f4a7e1b6.md) | fixed (url remapped to root news rows) | 2026-05-22 | config | fetch_list, url_dead, remap_root_news | https://www.mangaupdates.com/news.html |
@@ -23,9 +24,12 @@
 | [`host_funimation-com_blog_65f137c9`](host_funimation-com_blog_65f137c9.md) | 🔧 손 config (httpx_json) — Funimation blog remap to Crunchyroll News API | 2026-05-22 | none | posts_nonempty | https://www.funimation.com/blog/ |
 | [`host_france24-com_en_a8047c17`](host_france24-com_en_a8047c17.md) | ✅ 등록 완료 (preflight b-hit; reuse-probe 자동 생성 playwright_html config) | 2026-05-22 | none | fetch_list, post_id_unique | https://www.france24.com/en/ |
 | [`host_fantia-jp_posts_fd55ceac`](host_fantia-jp_posts_fd55ceac.md) | 🚫 거부 + probe generic 개선 (hard login redirect는 headless 생략) | 2026-05-22 | F | probe_timeout, headless_wallclock, login_required, policy_reject | https://fantia.jp/posts |
+| [`host_debian-org_News_3133808a`](host_debian-org_News_3133808a.md) | ✅ config 등록 (baseline 14, httpx_html) | 2026-05-22 | none | posts_nonempty, matches_probe_first_article, count_ballpark | https://www.debian.org/News/ |
+| [`host_dart-dev_root_c80283e8`](host_dart-dev_root_c80283e8.md) | 거부 (Dart 문서 홈은 최신 글 목록이 아니라 언어/제품 소개 페이지) | 2026-05-22 | none | posts_nonempty, content_not_board, stale_failed_queue | https://dart.dev/ |
 | [`host_crunchyroll-com_news_02fd4569`](host_crunchyroll-com_news_02fd4569.md) | 🔧 손 config (httpx_json) — Crunchyroll News 공개 JSON API 사용 | 2026-05-22 | none | posts_nonempty | https://www.crunchyroll.com/news |
 | [`host_call-for-papers_root_90032f22`](host_call-for-papers_root_90032f22.md) | 🧩 수동 config — root landing 을 all recent posts 목록으로 remap | 2026-05-22 | none | posts_nonempty, wrong_first_article, nav_only_candidates, empty_rss | https://call-for-papers.sas.upenn.edu/ |
 | [`host_booth-pm_announcements_b96f82ef`](host_booth-pm_announcements_b96f82ef.md) | ✅ 손 config 등록 (baseline 20건, httpx_html) | 2026-05-22 | none | probe_timeout | https://booth.pm/announcements |
+| [`host_ansible-com_blog_566480f4`](host_ansible-com_blog_566480f4.md) | 🧩 수동 config — Red Hat blog channel teaser rows 로 baseline 가능 | 2026-05-22 | none | posts_nonempty, feed_candidate_unusable, first_article_misidentified | https://www.ansible.com/blog |
 | [`host_animate-onlines_contents_ba74459f`](host_animate-onlines_contents_ba74459f.md) | 🚫 거부 (입력 URL은 404, 공식 공지 remap 후보도 현재 공개 목록 0건) | 2026-05-22 | none | target_not_found, posts_nonempty, empty_official_notice_list | https://www.animate-onlineshop.jp/contents/news/ |
 | [`host_amiami-com_eng_f0c7cc0e`](host_amiami-com_eng_f0c7cc0e.md) | ✅ 수동 config 등록 (playwright_html, list-only accordion) | 2026-05-22 | none | posts_nonempty, post_id_stable_shape, matches_probe_first_article | https://www.amiami.com/eng/news/ |
 | [`xenforo_subpath_install_2026-05-21`](xenforo_subpath_install_2026-05-21.md) | ✅ 자동 등록 (XenForo recognizer 서브폴더 설치 install path 보존 — /community/forums/-/index.rss) | 2026-05-21 | F | posts_nonempty | https://xenforo.com/community/ |
@@ -262,7 +266,7 @@
 | F+C | 3 |
 | adapter | 1 |
 | config | 2 |
-| none | 75 |
+| none | 79 |
 
 ### config_strategy 분포
 
@@ -270,15 +274,15 @@
 |---|---|
 | (미기재) | 45 |
 | handwritten | 27 |
-| httpx_html | 78 |
+| httpx_html | 80 |
 | httpx_json | 21 |
 | httpx_json (미적용 — 콘텐츠 0) | 1 |
 | mixed | 1 |
-| none | 35 |
-| playwright_html | 25 |
+| none | 36 |
+| playwright_html | 26 |
 | rejected | 1 |
 
 ### 최근 90일 (≥ 2026-02-21)
 
-케이스 234 건.
+케이스 238 건.
 
