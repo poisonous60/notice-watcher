@@ -2,13 +2,14 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 233 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 234 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
 | [`infra_headless_browser_profile_2026-05-22`](infra_headless_browser_profile_2026-05-22.md) | ✅ probe generic 개선 — real Chrome 우선 + CF interstitial 대기 + fingerprint 통일로 anti-bot 오분류 줄이고 target 404/entry blocked 정확히 분류 (S4-first reorder 는 review 에서 revert) | 2026-05-22 | C | capability_blocked, baseline_blocked, entry_blocked, target_not_found | https://www.livechart.me/news |
 | [`host_toranoana-jp_news_84973d13`](host_toranoana-jp_news_84973d13.md) | ✅ 수동 config (입력 URL은 404, 공식 news.toranoana.jp로 remap) | 2026-05-22 | none | target_not_found, posts_nonempty, url_remap | https://www.toranoana.jp/news/ |
 | [`host_tappytoon-com_en_3c39ed9e`](host_tappytoon-com_en_3c39ed9e.md) | ✅ remap 후 손 config 등록 (Freshdesk Notices & News, baseline 10건) | 2026-05-22 | none | probe_timeout, target_not_found, url_remap | https://www.tappytoon.com/en/notice |
+| [`host_swift-org_blog_d48fd749`](host_swift-org_blog_d48fd749.md) | ✅ 수동 config (Atom feed + httpx_html XML, 20건 baseline) | 2026-05-22 | E | posts_nonempty, static_vs_headless, inline_json_available, feed_available | https://www.swift.org/blog/ |
 | [`host_support-google-_a_f31fe093`](host_support-google-_a_f31fe093.md) | 🚫 거부 (legacy Google Support table URL 이 단일 도움말 article 로 remap — 게시판 아님) | 2026-05-22 | none | posts_nonempty, not_a_board, nav_only_same_host, legacy_table_remap, content_as_list | https://support.google.com/a/table/7539891 |
 | [`host_store-crunchyro_blogs_233f56ce`](host_store-crunchyro_blogs_233f56ce.md) | rejected (url_dead) | 2026-05-22 |  | probe_timeout, url_dead, store_blog_404 | https://store.crunchyroll.com/blogs/news |
 | [`host_rightstufanime-_post_97e1a227`](host_rightstufanime-_post_97e1a227.md) | 🚫 거부 — Right Stuf legacy URL 이 Crunchyroll Store 홈으로 remap | 2026-05-22 | none | probe_timeout, url_remapped, non_board_homepage, nav_only_candidates | https://www.rightstufanime.com/post |
@@ -254,7 +255,7 @@
 | C+F | 2 |
 | C+F+A | 1 |
 | C+config | 2 |
-| E | 5 |
+| E | 6 |
 | E+A+C+D | 1 |
 | F | 83 |
 | F+A | 1 |
@@ -269,7 +270,7 @@
 |---|---|
 | (미기재) | 45 |
 | handwritten | 27 |
-| httpx_html | 77 |
+| httpx_html | 78 |
 | httpx_json | 21 |
 | httpx_json (미적용 — 콘텐츠 0) | 1 |
 | mixed | 1 |
@@ -279,5 +280,5 @@
 
 ### 최근 90일 (≥ 2026-02-21)
 
-케이스 233 건.
+케이스 234 건.
 
