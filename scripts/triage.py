@@ -18,6 +18,12 @@
                   `triage_later.json` 에 누적 → dashboard 에도 반영. 명시 `show <slug>` 는 통과(작업 가능).
                   show <slug> 는 명시 호출이라 Later 라도 통과.
 
+게이트/분류 실패 전용 파킹 (`Later` 와 *분리* 버킷 — `triage_gate_failed.json`, dev box only):
+  python scripts/triage.py park-gate-fail <slug>... [--reason=<text>]   # 게이트/분류 실패만 파킹 (활성 list 서 숨김)
+  python scripts/triage.py sweep-gate-fail [--execute] [--host=<host>]  # 분류기/게이트 개선 후 N100 full re-register → 해소 시 목록서 제거
+  *언제 park*: gate_reject 가 놓쳐 gen_fail 로 샌 것·분류기 '?'/미신뢰 = *분류 계층* 실패. capability(cap_blocked·SPA·timeout)는 X — 그건 Later/render·stealth 트랙.
+  *해소*: 분류기/게이트(ADR 0007 multi-class 등) 개선 → `sweep-gate-fail --execute` 한 방으로 일괄 재판정. per-site 손-거부 대신 쓰는 체계적 경로.
+
 N100 호스트: 환경변수 `DEPLOY_HOST`(기본 `<user>@<host>` — Tailscale MagicDNS) / `DEPLOY_PATH`(기본 `~/notice-watcher`).
   Tailscale 이 LAN/외부 양쪽에서 라우팅 — IP 변동 무관. LAN IP `aaaa@<lan-ip>` 도 집에서는 OK.
   ※ ssh/scp 가 PATH 에 있어야 함(Windows 10+ 기본 포함).
@@ -26,9 +32,11 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -37,6 +45,7 @@ STATE_DIR = OUTPUT / "poll_state"
 QUEUE = OUTPUT / "triage_queue.jsonl"
 PROBE_DIR = OUTPUT / "probe"
 LATER_STORE = OUTPUT / "triage_later.json"  # dashboard `/triage/failed` 의 '나중에' 토글 (dev box only, gitignored)
+GATE_FAILED_STORE = OUTPUT / "triage_gate_failed.json"  # 게이트/분류 실패 전용 파킹 (dev box only, gitignored) — Later 와 분리
 
 DEPLOY_HOST = os.environ.get("DEPLOY_HOST", "<user>@<host>")
 DEPLOY_PATH = os.environ.get("DEPLOY_PATH", "~/notice-watcher")
@@ -61,6 +70,29 @@ def _save_later(slugs: set[str]) -> None:
     LATER_STORE.parent.mkdir(parents=True, exist_ok=True)
     LATER_STORE.write_text(json.dumps({"later": merged}, ensure_ascii=False, indent=2),
                            encoding="utf-8")
+
+
+def _load_gate_failed() -> dict[str, dict]:
+    """`triage_gate_failed.json` 파킹 목록. {slug: {url, reason, parked_at}}. 부재 OK.
+
+    Later(capability/render 보류)와 *분리* — 여기는 게이트/분류 계층 실패만(gate_reject 가 놓쳐
+    gen_fail 로 샌 것·분류기 '?'/미신뢰). 해소 경로 = 분류기/게이트 개선 후 `sweep-gate-fail`.
+    """
+    if not GATE_FAILED_STORE.exists():
+        return {}
+    try:
+        d = json.loads(GATE_FAILED_STORE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    items = d.get("gate_failed") or {}
+    return {str(k): (v if isinstance(v, dict) else {}) for k, v in items.items()} if isinstance(items, dict) else {}
+
+
+def _save_gate_failed(items: dict[str, dict]) -> None:
+    GATE_FAILED_STORE.parent.mkdir(parents=True, exist_ok=True)
+    GATE_FAILED_STORE.write_text(
+        json.dumps({"gate_failed": dict(sorted(items.items()))}, ensure_ascii=False, indent=2),
+        encoding="utf-8")
 
 
 def _is_capability_blocked(slug: str) -> bool:
@@ -364,6 +396,13 @@ def cmd_list(skip_later: bool = False) -> int:
         before = len(all_slugs)
         all_slugs = [s for s in all_slugs if s not in later]
         later_skipped = before - len(all_slugs)
+    # 게이트/분류 실패 파킹은 *항상* 활성 목록서 제외 (Later 와 별개 버킷 — sweep-gate-fail 로 해소).
+    gate_parked = _load_gate_failed()
+    gate_skipped = 0
+    if gate_parked:
+        before = len(all_slugs)
+        all_slugs = [s for s in all_slugs if s not in gate_parked]
+        gate_skipped = before - len(all_slugs)
     if not all_slugs:
         print("처리할 실패 등록 없음. (먼저 `python scripts/triage.py pull` — N100 에서 가져오기)")
         return 0
@@ -386,6 +425,8 @@ def cmd_list(skip_later: bool = False) -> int:
     print(f"\n  F=y → 로컬에 <slug>.FAILED.json 있음(상세 진단 가능). F=- → triage_queue 에만 있음(`pull` 다시 하거나 직접 probe).")
     if later_skipped:
         print(f"  Later 제외: {later_skipped}건 숨김 (dashboard `/triage/failed` 의 '나중에' 토글).")
+    if gate_skipped:
+        print(f"  게이트-실패 파킹 제외: {gate_skipped}건 숨김 (`triage_gate_failed.json` — 분류기/게이트 개선 후 `sweep-gate-fail`).")
     print(f"  자세히: python scripts/triage.py show <slug>")
     print(f"  처리:   hand-config 스킬 모드 B  (사이트별로: 진단 → probe 수정 or 손 config/손어댑터 → register --config → N100 배포)")
     return 0
@@ -627,6 +668,70 @@ def cmd_prune_orphans(execute: bool = False) -> int:
     return 0
 
 
+def cmd_park_gate_fail(slugs: list[str], reason: str = "") -> int:
+    """게이트/분류 실패 slug 를 `triage_gate_failed.json` 으로 파킹 (Later 와 분리 버킷).
+
+    *언제*: gate_reject 가 놓쳐 gen_fail 로 샌 것·분류기 '?'/미신뢰 — *분류 계층* 실패만.
+    capability(cap_blocked·SPA·timeout) 는 여기 X (그건 Later/render·stealth 트랙).
+    해소: 분류기/게이트 개선 후 `sweep-gate-fail --execute`.
+    """
+    if not slugs:
+        print("usage: python scripts/triage.py park-gate-fail <slug> [<slug> ...] [--reason=<text>]")
+        return 2
+    parked = _load_gate_failed()
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    added = 0
+    for slug in slugs:
+        d = _load_failed(slug)
+        url = d.get("url") or ""
+        parked[slug] = {"url": url, "reason": reason or _first_fail_line(d.get("last_feedback", "")) or "gate/classify fallthrough",
+                        "parked_at": now}
+        added += 1
+    _save_gate_failed(parked)
+    print(f"[park-gate-fail] {added} slug 파킹 → 총 {len(parked)}건 ({GATE_FAILED_STORE.name}). `list` 활성서 숨김.")
+    for s in slugs:
+        print(f"  + {s}  {parked[s].get('url','')}")
+    return 0
+
+
+def cmd_sweep_gate_fail(execute: bool = False, host: Optional[str] = None) -> int:
+    """파킹된 게이트-실패 slug 를 N100 에서 full re-register (분류기 active) — 분류기/게이트 개선 후.
+
+    rc=0(등록) 또는 rc=2/3/4(거부=분류기/게이트가 이제 잡음) → 해소 → 목록서 제거.
+    rc=1(여전히 gen_fail)·rc=5(cap) → 유지. dry-run(--execute 없이) = 목록만 표시.
+    """
+    parked = _load_gate_failed()
+    if not parked:
+        print(f"[sweep-gate-fail] 파킹된 게이트-실패 없음 ({GATE_FAILED_STORE.name}).")
+        return 0
+    if not execute:
+        print(f"[sweep-gate-fail] dry-run — 파킹 {len(parked)}건 (실제 sweep: --execute):\n")
+        for slug, meta in sorted(parked.items()):
+            print(f"  {slug}  {meta.get('url','')}  ({meta.get('reason','')[:50]})")
+        print(f"\n  실행: python scripts/triage.py sweep-gate-fail --execute  (각 url N100 full re-register → 해소 시 목록서 제거)")
+        return 0
+    target_host = host or DEPLOY_HOST
+    resolved: list[str] = []
+    kept: list[tuple[str, int]] = []
+    for slug, meta in sorted(parked.items()):
+        url = meta.get("url") or ""
+        if not url:
+            kept.append((slug, -1)); continue
+        rc, out = _run(["ssh", target_host, f"cd {DEPLOY_PATH} && .venv/bin/python scripts/register.py {shlex.quote(url)}"])
+        tail = (out.splitlines() or [""])[-1][:80]
+        if rc == 1 or rc == 5:
+            kept.append((slug, rc))
+            print(f"  유지 rc={rc}  {slug}  {tail}")
+        else:
+            resolved.append(slug)
+            print(f"  해소 rc={rc}  {slug}  {tail}")
+    for slug in resolved:
+        parked.pop(slug, None)
+    _save_gate_failed(parked)
+    print(f"\n[sweep-gate-fail --execute] 해소 {len(resolved)} · 유지 {len(kept)} → 남은 파킹 {len(parked)}건.")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     if not argv or argv[0] in ("-h", "--help", "help"):
         print(__doc__)
@@ -658,7 +763,23 @@ def main(argv: list[str]) -> int:
         return cmd_post_fix_cleanup(execute=execute, host=host)
     if cmd == "prune-orphans":
         return cmd_prune_orphans(execute="--execute" in rest)
-    print(f"알 수 없는 명령: {cmd!r}  (pull | list | show <slug> | post-fix-cleanup [--execute] [--host=<host>] | prune-orphans [--execute])  [--skip-later]")
+    if cmd == "park-gate-fail":
+        reason = ""
+        pos = []
+        for a in rest:
+            if a.startswith("--reason="):
+                reason = a.split("=", 1)[1]
+            else:
+                pos.append(a)
+        return cmd_park_gate_fail(pos, reason=reason)
+    if cmd == "sweep-gate-fail":
+        host = None
+        for a in rest:
+            if a.startswith("--host="):
+                host = a.split("=", 1)[1]
+        return cmd_sweep_gate_fail(execute="--execute" in rest, host=host)
+    print(f"알 수 없는 명령: {cmd!r}  (pull | list | show <slug> | post-fix-cleanup [--execute] [--host=<host>] | "
+          f"prune-orphans [--execute] | park-gate-fail <slug>... [--reason=<text>] | sweep-gate-fail [--execute] [--host=<host>])  [--skip-later]")
     return 2
 
 
