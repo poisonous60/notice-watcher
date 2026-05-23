@@ -411,15 +411,31 @@ def svg_grouped_scatter(sites: list[dict], color_map: dict) -> str:
 
     dots: list[str] = []
 
-    # ring 1 — sunflower spiral (active boards), color = strategy
+    # ring 1 — host-clustered sunflower (boards on the same host pack together),
+    # color = fetch strategy. Hosts are placed by golden-angle spiral, then each
+    # host expands into a mini-spiral so its boards visibly group.
+    from collections import OrderedDict as _OD
     board_sorted = sorted(board, key=lambda s: (str(s.get("color_key")), str(s["host"]), str(s["slug"])))
-    n_board = len(board_sorted)
-    for i, site in enumerate(board_sorted):
-        r = r_core * math.sqrt((i + 0.5) / max(n_board, 1))
-        theta = i * GOLDEN_ANGLE
-        x = cx + r * math.cos(theta)
-        y = cy + r * math.sin(theta)
-        dots.append(_dot_svg(site, x, y, 4.2, color_map))
+    host_groups: "OrderedDict[str, list[dict]]" = _OD()
+    for s in board_sorted:
+        host_groups.setdefault(str(s["host"]), []).append(s)
+    n_hosts = len(host_groups)
+    for h_idx, (_host, items) in enumerate(host_groups.items()):
+        r_anchor = r_core * math.sqrt((h_idx + 0.5) / max(n_hosts, 1))
+        theta_anchor = h_idx * GOLDEN_ANGLE
+        ax = cx + r_anchor * math.cos(theta_anchor)
+        ay = cy + r_anchor * math.sin(theta_anchor)
+        n_sub = len(items)
+        cluster_r = 3.0 + 2.6 * math.sqrt(max(n_sub - 1, 0))
+        for j, site in enumerate(items):
+            if n_sub == 1:
+                x, y = ax, ay
+            else:
+                sub_r = cluster_r * math.sqrt((j + 0.5) / n_sub)
+                sub_theta = j * GOLDEN_ANGLE
+                x = ax + sub_r * math.cos(sub_theta)
+                y = ay + sub_r * math.sin(sub_theta)
+            dots.append(_dot_svg(site, x, y, 4.2, color_map))
 
     def necklace(items: list[dict], radius: float, dot_r: float, phase_salt: str) -> None:
         items_sorted = sorted(items, key=lambda s: (str(s["host"]), str(s["slug"])))
