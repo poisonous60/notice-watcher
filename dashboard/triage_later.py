@@ -5,8 +5,8 @@
 N100 영향 0 — `<slug>.FAILED.json` 자체는 그대로 두고 dashboard view 만 분리.
 수동 unsnooze only — 만료 X.
 
-reason = Later 전용 memo (사용자가 dashboard 에서 편집). FAILED.json 의 reason 과 별개 —
-"왜 나중으로 미뤘나"(capability / IP·망 도달불가 / render 필요)를 사람이 적는 칸.
+reason = Later 진입 사유 (CLI auto-defer 가 적음). 사람-memo 는 `triage_memo.json`(범용, 버킷 무관)로 이전 —
+dashboard 표시는 triage_memo > 이 reason > FAILED reason 우선순위.
 
 폴링은 N100 의 FAILED.json 으로 이미 재시도 차단됨 (이 모듈은 *dashboard 표시* 만 조정).
 """
@@ -71,18 +71,6 @@ def add_many(slugs: list[str], reason: str = "") -> dict[str, dict]:
                 cur[slug]["reason"] = reason
             continue
         cur[slug] = {"reason": reason or "", "parked_at": now}
-    _atomic_save(cur)
-    return cur
-
-
-def set_reason(slug: str, reason: str) -> dict[str, dict]:
-    """Later memo 편집/설정 (dashboard). 없는 slug 면 새로 추가."""
-    cur = load_items()
-    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    if slug in cur:
-        cur[slug]["reason"] = reason
-    else:
-        cur[slug] = {"reason": reason, "parked_at": now}
     _atomic_save(cur)
     return cur
 

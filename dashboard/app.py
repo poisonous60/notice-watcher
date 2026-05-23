@@ -26,7 +26,7 @@ from dashboard import cases_view
 from dashboard import learned_view
 from dashboard import vocab_deferred_view
 from dashboard import clustering
-from dashboard import prompts, state, triage_later, triage_gate_failed
+from dashboard import prompts, state, triage_later, triage_gate_failed, triage_memo
 from dashboard import cluster_dismiss
 from dashboard import usage_view
 from dashboard import user_view
@@ -255,7 +255,9 @@ async def triage_failed_page(request: Request):
     """
     later_meta = triage_later.load_items()
     later = set(later_meta.keys())
-    gate_failed = triage_gate_failed.load()
+    gate_failed_meta = triage_gate_failed.load_items()
+    gate_failed = set(gate_failed_meta.keys())
+    memo_items = triage_memo.load_items()
     active: list[dict] = []
     later_items: list[dict] = []
     gate_failed_items: list[dict] = []
@@ -263,21 +265,24 @@ async def triage_failed_page(request: Request):
         d = state.failed_payload(slug) or {}
         lines = [ln.strip() for ln in (d.get("last_feedback") or "").splitlines() if ln.strip()]
         first_fail = next((ln for ln in lines if "[FAIL]" in ln), lines[0] if lines else "")
+        # 범용 memo 표시값 — 우선순위: triage_memo > 버킷 진입 reason(later/gate) > FAILED reason.
+        bucket_reason = (
+            (gate_failed_meta.get(slug) or {}).get("reason")
+            or (later_meta.get(slug) or {}).get("reason")
+            or ""
+        )
+        memo = memo_items.get(slug, {}).get("reason") or bucket_reason or d.get("reason") or ""
         row = {
             "slug": slug,
             "url": d.get("url") or "",
             "failed_at": (d.get("failed_at") or "")[:19],
             "reason": d.get("reason") or "",
+            "memo": memo,
             "first_fail": first_fail,
         }
         if slug in gate_failed:
             gate_failed_items.append(row)
         elif slug in later:
-            # Later memo (사용자 편집) 를 reason 으로 노출 — 없으면 FAILED reason 유지.
-            memo = (later_meta.get(slug) or {}).get("reason") or ""
-            row["later_memo"] = memo
-            if memo:
-                row["reason"] = memo
             later_items.append(row)
         else:
             active.append(row)
@@ -311,18 +316,18 @@ async def triage_failed_later(request: Request):
     return RedirectResponse(url="/triage/failed", status_code=303)
 
 
-@app.post("/triage/failed/later-reason", response_class=HTMLResponse)
-async def triage_failed_later_reason(request: Request):
-    """Later memo 편집 — '왜 나중으로 미뤘나'(capability / IP·망 도달불가 / render 필요 등).
+@app.post("/triage/failed/memo", response_class=HTMLResponse)
+async def triage_failed_memo(request: Request):
+    """범용 memo 편집 — 버킷 무관(활성·Later·게이트실패 어느 행에서나). triage_memo.json 에 저장.
 
-    Form fields: slug (1개), reason (자유 텍스트). 없는 slug 면 Later 에 추가하며 memo 설정.
+    Form fields: slug (1개), reason (자유 텍스트, 빈 값이면 memo 삭제).
     """
     form = await request.form()
     slug = (form.get("slug") or "").strip()
     reason = (form.get("reason") or "").strip()
     if not state.safe_slug(slug):
         raise HTTPException(status_code=400, detail="invalid slug")
-    triage_later.set_reason(slug, reason)
+    triage_memo.set_memo(slug, reason)
     return RedirectResponse(url="/triage/failed", status_code=303)
 
 

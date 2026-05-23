@@ -12,8 +12,10 @@
   <b>→ 게이트실패</b> = 분류 오판(비-게시판인데 분류기·게이트가 못 잡아 gen_fail — 분류기/게이트 개선 후 <code>triage.py sweep-gate-fail</code> 로 일괄 재판정).
 </p>
 
-{# buttons = [(endpoint, action, label), ...] — 각 버튼이 formaction 으로 다른 엔드포인트 제출 #}
-{% macro queue_table(rows, buttons) -%}
+{# buttons = [(endpoint, action, label), ...] — 각 버튼이 formaction 으로 다른 엔드포인트 제출.
+   editable_memo=True 면 reason 칸을 인라인 memo 편집(input+저장)으로 — bulk form 과 nested 안 되게
+   HTML5 form= 속성으로 행별 placeholder <form id="memo-{slug}"> 에 연결 (테이블 아래 렌더). #}
+{% macro queue_table(rows, buttons, editable_memo=False) -%}
 <form method="post">
   <div class="row" style="margin:.4em 0;gap:.6em;align-items:center;">
     <label class="muted">
@@ -30,7 +32,7 @@
         <th style="width:1.5em;"></th>
         <th>slug</th>
         <th>failed_at</th>
-        <th>reason</th>
+        <th>{{ 'memo' if editable_memo else 'reason' }}</th>
         <th>[FAIL] / 첫 줄</th>
         <th>url</th>
       </tr>
@@ -44,9 +46,19 @@
           {% if it.url and is_http_url(it.url) %} <a href="{{ it.url }}" target="_blank" rel="noopener noreferrer" title="원본 URL 새 탭 열기">↗</a>{% endif %}
         </td>
         <td style="white-space:nowrap;">{{ it.failed_at or '—' }}</td>
+        {% if editable_memo %}
+        <td class="memo-cell" style="max-width:22em;" onclick="nwMemoEdit(this)" title="클릭해 memo 편집">
+          <span class="memo-text{{ '' if it.memo else ' is-empty' }}" title="{{ it.memo }}">{{ it.memo or '✎ memo…' }}</span>
+          <input type="text" class="memo-inline" name="reason" form="memo-{{ it.slug }}" value="{{ it.memo }}" hidden
+                 placeholder="memo… (Enter 저장 · Esc 취소)"
+                 onkeydown="if(event.key==='Escape'){this.value=this.defaultValue;nwMemoCancel(this);}"
+                 onblur="nwMemoBlur(this)">
+        </td>
+        {% else %}
         <td style="max-width:18em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
           <span title="{{ it.reason }}">{{ it.reason or '—' }}</span>
         </td>
+        {% endif %}
         <td style="max-width:32em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
           <span title="{{ it.first_fail }}">{{ it.first_fail or '—' }}</span>
         </td>
@@ -58,42 +70,53 @@
     </tbody>
   </table>
 </form>
+{% if editable_memo %}
+  {# bulk form 밖 placeholder — 위 memo input/button 이 form= 로 연결. nested form 회피. #}
+  {% for it in rows %}
+  <form id="memo-{{ it.slug }}" method="post" action="/triage/failed/memo" hidden>
+    <input type="hidden" name="slug" value="{{ it.slug }}">
+  </form>
+  {% endfor %}
+{% endif %}
 {%- endmacro %}
 
 <h3>활성 — hand-config 대상</h3>
 {% if not items %}
 <p class="muted">활성 FAILED 큐 비어 있음. ✨</p>
 {% else %}
-{{ queue_table(items, [("/triage/failed/later", "add", "→ 나중에"), ("/triage/failed/gate-fail", "add", "→ 게이트실패")]) }}
+{{ queue_table(items, [("/triage/failed/later", "add", "→ 나중에"), ("/triage/failed/gate-fail", "add", "→ 게이트실패")], editable_memo=True) }}
 {% endif %}
 
 {% if later_items %}
 <details {% if not items %}open{% endif %} style="margin-top:1.5em;">
   <summary><b>나중에</b> ({{ later_items | length }}건) — capability·IP/망 도달불가·render 보류, hand-config 프롬프트에서 제외됨</summary>
-  {{ queue_table(later_items, [("/triage/failed/later", "remove", "← 활성으로 복귀")]) }}
-  <table style="margin-top:.6em; font-size:.92em;">
-    <thead><tr><th>slug</th><th>memo (왜 나중으로 — IP/망·capability·render…)</th><th></th></tr></thead>
-    <tbody>
-      {% for it in later_items %}
-      <tr>
-        <td class="mono nowrap">{{ it.slug }}</td>
-        <td><form method="post" action="/triage/failed/later-reason" style="display:flex; gap:.4em;">
-          <input type="hidden" name="slug" value="{{ it.slug }}">
-          <input type="text" name="reason" value="{{ it.later_memo }}" placeholder="memo 입력…" style="flex:1; min-width:18em;">
-          <button type="submit">저장</button>
-        </form></td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  {{ queue_table(later_items, [("/triage/failed/later", "remove", "← 활성으로 복귀")], editable_memo=True) }}
 </details>
 {% endif %}
 
 {% if gate_failed_items %}
 <details {% if not items %}open{% endif %} style="margin-top:1.5em;">
   <summary><b>게이트실패</b> ({{ gate_failed_items | length }}건) — 분류 오판 보류, hand-config 프롬프트에서 제외됨. 분류기/게이트 개선 후 <code>triage.py sweep-gate-fail --execute</code> 로 일괄 재판정.</summary>
-  {{ queue_table(gate_failed_items, [("/triage/failed/gate-fail", "remove", "← 활성으로 복귀")]) }}
+  {{ queue_table(gate_failed_items, [("/triage/failed/gate-fail", "remove", "← 활성으로 복귀")], editable_memo=True) }}
 </details>
 {% endif %}
+
+<script>
+// memo 클릭편집: span↔input 토글. Enter=implicit submit(placeholder form 에 text input 1개), blur=변경시 저장, Esc=취소.
+function nwMemoEdit(td){
+  const sp = td.querySelector('.memo-text'), inp = td.querySelector('.memo-inline');
+  if (!inp || inp.hidden === false) return;
+  sp.hidden = true; inp.hidden = false; inp.focus(); inp.select();
+}
+function nwMemoCancel(inp){
+  inp.hidden = true;
+  const sp = inp.closest('.memo-cell').querySelector('.memo-text');
+  sp.hidden = false; inp.blur();
+}
+function nwMemoBlur(inp){
+  if (inp.value === inp.defaultValue) { nwMemoCancel(inp); return; }  // 변경 없음 → 저장 안 함
+  (inp.form.requestSubmit ? inp.form.requestSubmit() : inp.form.submit());
+}
+</script>
 
 {% endblock %}
