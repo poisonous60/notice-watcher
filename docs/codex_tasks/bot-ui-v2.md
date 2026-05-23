@@ -37,24 +37,27 @@ ALTER TABLE subscriptions ADD COLUMN display_title TEXT
 
 `/watch` 의 *이미 등록된 사이트 즉시 add_subscription* path (`bot/main.py:202` 근처) 도 display_title 같이 넘김 — 이 경우 result 없음, 기존 `subscriptions` 행에서 *다른 사용자* 가 등록한 display_title 가져와 재사용 (`db.list_subscriptions(slug=slug)` 첫 행).
 
-## 작업 4 — /list 전면 재작성
+## 작업 4 — /list UI (RoboDanny per-row Button 패턴)
 
-`bot/main.py` 의 `@tree.command(name="list")` 를 View 기반으로 교체:
+> v1 (Select 기반) 은 discord.py issue #7284 함정에 걸려 production crash. RoboDanny paginator + per-row Button 으로 재작성. 상세는 ADR 0012 의 `/list` UI 절.
 
-- `discord.ui.View(timeout=180)`. `interaction_check` 로 본인만 조작 가능.
-- ephemeral.
-- 10 subs/page. embed 본문에 `1. <display_title or url_host_path> · 필터: <filter or "없음"> · <DM | #채널멘션>` 형식.
-- ActionRow 1: `Select(placeholder="구독 선택 (편집/해제)")` — 현 페이지 10개 옵션. label=display_title (없으면 host+path), value=slug, description=필터 한 줄 잘림.
-- ActionRow 2: `Button(label="✎ 필터 수정", disabled=True)` `Button(label="✕ 해제", style=danger, disabled=True)` — Select 콜백에서 enable.
-- ActionRow 3: `Button("◀", disabled=page==0)` `Button("▶", disabled=page==max)` — 1페이지 이하면 row 자체 omit.
+`bot/main.py` 의 `SubscriptionListView`:
+- `discord.ui.View(timeout=300)`, ephemeral, `interaction_check` 본인 only, `on_error` traceback log + ephemeral 응답.
+- **`__init__` 에서 모든 item 한 번만 add**, 이후 `_refresh()` 가 label/disabled mutate 만.
+- PAGE_SIZE=4. ActionRow 5 한계 안:
+  - row 0~3: 각 sub `[✎ <title> | <filter>][✕]` (`custom_id=sub_edit_{i}`, `sub_rem_{i}`)
+  - row 4: `[◀ 이전][다음 ▶]`
+- row 식별 = `subscriptions.id` (slug+target_kind+target_id mix 회피 — 같은 slug DM+채널 양쪽 구독 가능).
+- 모든 write callback 첫 라인 `await interaction.response.defer()` (sqlite lock 안전망).
+- Modal: `SubscriptionFilterModal(view, sub_id, current)` TextInput(paragraph, 1000 chars), submit 후 `db.update_subscription_filter(sub_id=...)` + view reload + edit_original_response.
 
-콜백:
-- Select → 선택 slug 저장 (view state), 버튼 2개 enable, message edit.
-- ✎ 필터 → `discord.ui.Modal` with `TextInput(label="필터", default=현재필터, required=False, max_length=500)`. submit → `db.update_subscription_filter(user_id, slug, new_filter)` (필요시 db.py 에 신규 함수 추가; 또는 `add_subscription` 의 upsert 동작 재사용 — check existing). 그 후 view rebuild + edit.
-- ✕ 해제 → `db.remove_subscription(user_id=…, slug=…)`. embed/options 재계산, 빈 페이지면 이전 페이지로 fallback. 비어있으면 `msg("list_empty")` 로 메시지 교체 + view 비활성.
-- ◀/▶ → page 증감, rebuild.
+`db.py` 신규 함수:
+- `remove_subscription_by_id(conn, *, user_id, sub_id)` — 단일 row 제거 (id 기준).
+- `update_subscription_filter(conn, *, user_id, sub_id, filter_prompt)` — id 기반 갱신.
 
-display_title 표시 헬퍼: `subscriptions.display_title` NULL 이면 `urllib.parse.urlparse(url).netloc + path` (긴 path 자르기).
+기존 `remove_subscription(slug)` 유지 — `/unwatch` 류 URL 일괄 해제용.
+
+display_title 표시 헬퍼: `subscriptions.display_title` NULL 이면 `urllib.parse.urlparse(url).netloc + path`.
 
 ## 작업 5 — /setting 신규
 

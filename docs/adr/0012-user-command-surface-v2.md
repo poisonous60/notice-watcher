@@ -25,17 +25,33 @@
 - `/report` 와 `/feedback` 는 의미 분리: report = URL/사이트 컨텍스트 있는 문제 신고 (등록된 slug 든 게이트 거부 URL 이든 임의 URL 이든), feedback = 사이트 무관 자유 의견.
 - `/report` 에 slug 든 url 든 *둘 중 하나는* 있어야 — 둘 다 비면 거부, `/feedback` 으로 안내.
 
-### `/list` UI — Select dropdown + 액션 버튼 (관용 패턴)
+### `/list` UI — Per-row Button + 페이지네이션 (RoboDanny 패턴)
 
-MEE6·Hydra 등 흔한 봇 패턴: embed 에 N개 목록, Select 에서 항목 고르면 액션 버튼 활성. discord.py `View(timeout=180s)`, ephemeral.
+처음 시도한 Select dropdown 패턴은 discord.py issue #7284 의 함정 — `SelectOption.default=True` 박은 항목을 사용자가 *같은 항목 재선택* 하면 `Select.values` 가 빈 list 로 callback 도착해 `int(values[0])` IndexError → silent → 무한로딩 "..." — 에 걸려 production 에서 죽었음. v2 재설계로 RoboDanny paginator 패턴 채택.
 
-- 페이지당 10개, embed 본문에 번호+`display_title`+필터+발송대상 표시.
-- Slug 노출 X — `display_title` 표시 (없으면 URL host+path).
-- ActionRow 1: Select(최대 25 옵션이나 페이지당 10) — 편집·해제할 구독 선택.
-- ActionRow 2: `[✎ 필터 수정]` `[✕ 해제]` — Select 후 활성.
-- ActionRow 3: `[◀]` `[▶]` — 페이지 nav (필요 시).
-- 필터 수정 = Modal TextInput(현재 필터 prefilled), 저장 시 DB 갱신.
-- 해제 = 즉시 `db.remove_subscription` + embed refresh.
+원칙:
+- **View item set 은 `__init__` 에서 한 번만 add**. callback 마다 `clear_items() + add_item()` 안 함 (docs 권장 위반·race 위험).
+- **`_refresh()` 가 *오로지* item.label·item.disabled mutate**. item 객체 reference 는 self 에 박혀있음.
+- **`on_error` override + `interaction_check`** 둘 다 박음 (silent 함정 회피).
+- **모든 write callback 첫 라인 `interaction.response.defer()`** — sqlite lock 시 3초 ack timeout 회피.
+- **row 식별은 `subscriptions.id`** — 같은 slug 의 DM+채널 양쪽 구독 시 ✕ 가 한 행만 지움 (slug-only DELETE 함정 회피, codex 리뷰).
+
+레이아웃 (ActionRow 5 한계 안):
+- 4 sub-row × `[✎ <title>: <filter>][✕]` = 4 sub/page
+- 1 nav row `[◀ 이전][다음 ▶]`
+- 필터 라벨 truncate 80 chars
+- 빈 자리 (sub 수 < PAGE_SIZE) = label="—" + disabled
+- 페이지 1개뿐이면 nav 둘 다 disabled
+
+필터 수정 = `[✎ <title>: <filter>]` 버튼 → `discord.ui.Modal` TextInput (현재 값 prefilled, paragraph style, 1000 chars).
+
+해제 = `[✕]` 즉시 `db.remove_subscription_by_id(sub_id)` + view reload + embed refresh.
+
+페이지 nav = ◀/▶ disabled state mutate, item 추가 X.
+
+`SubscriptionListView(timeout=300s, ephemeral=True)`. 5분 후 버튼 dead → 사용자 재 `/list`.
+
+> 결정 근거: discord.py 공식 examples/views/persistent.py + confirm.py, RoboDanny paginator (`cogs/utils/paginator.py`).
 
 ### `/setting` UI — 1화면 전체
 

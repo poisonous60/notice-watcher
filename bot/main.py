@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from logging.handlers import RotatingFileHandler
 import re
 import sys
 import time
@@ -41,7 +42,15 @@ from probe.paths import url_to_slug  # noqa: E402
 CONFIGS_DIR = site_ops.CONFIGS_DIR
 STATE_DIR = site_ops.STATE_DIR
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+# N100 systemd user journal 가 안 잡히는 환경(persistent storage 비활성)을 위해 file 도 같이.
+# output/ 은 git ignored — runtime log 자연 위치.
+_LOG_FILE = ROOT / "output" / "bot.log"
+_LOG_FILE.parent.mkdir(exist_ok=True)
+_log_fmt = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+logging.basicConfig(level=logging.INFO, format=_log_fmt, handlers=[
+    RotatingFileHandler(_LOG_FILE, maxBytes=10_000_000, backupCount=5, encoding="utf-8"),
+    logging.StreamHandler(),
+])
 log = logging.getLogger("bot")
 
 # ADR 0006 — 발송 시각은 수신처별 설정(user_settings/channel_settings, 기본 08:30 KST).
@@ -162,6 +171,8 @@ def _record_error(where: str, exc: BaseException) -> str:
     notify_empty="(선택) 켜면 폴링했는데 새 글이 없을 때도 '새 공지 없음' 한 줄을 보냄. 끄면(기본) 새 글 있을 때만.",
     article_url="(선택) 처음 등록하는 사이트가 자동 분석에 실패할 때, 그 게시판의 실제 글 하나 URL 을 같이 주면 분석 성공률이 올라갑니다.",
 )
+@app_commands.allowed_installs(guilds=True, users=True)
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def watch(interaction: discord.Interaction, url: str, filter: Optional[str] = None,
                 here: bool = False, notify_empty: bool = False,
                 article_url: Optional[str] = None):
@@ -303,161 +314,201 @@ def _short_text(text: Optional[str], limit: int) -> str:
 
 
 class SubscriptionFilterModal(discord.ui.Modal):
-    def __init__(self, view: "SubscriptionListView", slug: str, current: Optional[str]) -> None:
+    """필터 수정 Modal — RoboDanny 류 단순 패턴. row id 기준 update (같은 slug 의
+    DM+채널 양쪽 구독 시 한쪽만 바꾸기 위함)."""
+
+    def __init__(self, view: "SubscriptionListView", sub_id: int,
+                 current: Optional[str]) -> None:
         super().__init__(title="필터 수정")
         self.view_ref = view
-        self.slug = slug
+        self.sub_id = sub_id
         self.filter_input = discord.ui.TextInput(
-            label="필터",
-            default=(current or "")[:500],
+            label="필터 (자연어, 비우면 새 글 전부)",
+            default=(current or "")[:1000],
             required=False,
-            max_length=500,
+            max_length=1000,
             style=discord.TextStyle.paragraph,
+            placeholder="예: 이벤트·업데이트만",
         )
         self.add_item(self.filter_input)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
+        # 3초 ack 안전망 — sqlite lock 가능성 (codex 리뷰).
+        await interaction.response.defer()
         text = str(self.filter_input.value or "").strip() or None
-        db.update_subscription_filter(_conn, user_id=self.view_ref.user_id, slug=self.slug,
-                                      filter_prompt=text)
-        self.view_ref.selected_slug = self.slug
+        db.update_subscription_filter(_conn, user_id=self.view_ref.user_id,
+                                      sub_id=self.sub_id, filter_prompt=text)
         self.view_ref.reload()
-        await interaction.response.edit_message(embed=self.view_ref.embed(), view=self.view_ref)
+        await interaction.edit_original_response(embed=self.view_ref.embed(),
+                                                 view=self.view_ref)
 
 
 class SubscriptionListView(discord.ui.View):
-    PAGE_SIZE = 10
+    """RoboDanny-style paginator. View item set 은 __init__ 에서 한 번 고정 — 매 callback 마다
+    `_refresh()` 가 label·disabled 만 mutate (item 추가/제거 X).
+
+    구조: 4 sub-row (행마다 [✎ <title>:<filter>][✕]) + 1 nav row ([◀][▶]). ActionRow 5 한계 안.
+    Select 안 씀 — discord.py issue #7284 의 default-empty-values 함정 회피."""
+
+    PAGE_SIZE = 4
 
     def __init__(self, *, user_id: str) -> None:
-        super().__init__(timeout=180)
+        super().__init__(timeout=300)
         self.user_id = user_id
         self.page = 0
-        self.selected_slug: Optional[str] = None
-        self.rows = []
+        self.rows: list = []
+        self._edit_btns: list[discord.ui.Button] = []
+        self._remove_btns: list[discord.ui.Button] = []
+        for i in range(self.PAGE_SIZE):
+            eb = discord.ui.Button(style=discord.ButtonStyle.secondary, label="—", row=i,
+                                   custom_id=f"sub_edit_{i}")
+            rb = discord.ui.Button(style=discord.ButtonStyle.danger, label="✕", row=i,
+                                   custom_id=f"sub_rem_{i}")
+            eb.callback = self._make_edit_cb(i)
+            rb.callback = self._make_remove_cb(i)
+            self._edit_btns.append(eb)
+            self._remove_btns.append(rb)
+            self.add_item(eb)
+            self.add_item(rb)
+        self.prev_btn = discord.ui.Button(label="◀ 이전", style=discord.ButtonStyle.secondary,
+                                          row=4, custom_id="sub_prev")
+        self.next_btn = discord.ui.Button(label="다음 ▶", style=discord.ButtonStyle.secondary,
+                                          row=4, custom_id="sub_next")
+        self.prev_btn.callback = self._prev_cb
+        self.next_btn.callback = self._next_cb
+        self.add_item(self.prev_btn)
+        self.add_item(self.next_btn)
         self.reload()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if str(interaction.user.id) != self.user_id:
-            await interaction.response.send_message("이 목록은 호출한 사람만 조작할 수 있어요.", ephemeral=True)
+            await interaction.response.send_message(
+                "이 목록은 호출한 사람만 조작할 수 있어요.", ephemeral=True)
             return False
         return True
 
-    def reload(self) -> None:
-        self.rows = db.list_subscriptions(_conn, user_id=self.user_id)
-        max_page = max(0, (len(self.rows) - 1) // self.PAGE_SIZE)
-        self.page = min(self.page, max_page)
-        self._build_items()
+    async def on_error(self, interaction: discord.Interaction, error: Exception,
+                       item: discord.ui.Item) -> None:
+        """RoboDanny 패턴 — silent 함정 회피. log + ephemeral 응답."""
+        tb = "".join(traceback.format_exception(type(error), error, error.__traceback__))
+        log.error("[list view] item=%s error=%s\n%s", getattr(item, 'custom_id', '?'), error, tb)
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(
+                    f"⚠️ 오류: {type(error).__name__} — 다시 시도해 주세요.", ephemeral=True)
+            else:
+                await interaction.response.send_message(
+                    f"⚠️ 오류: {type(error).__name__} — 다시 시도해 주세요.", ephemeral=True)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _max_page(self) -> int:
+        return max(0, (len(self.rows) - 1) // self.PAGE_SIZE)
 
     def _page_rows(self):
         start = self.page * self.PAGE_SIZE
         return self.rows[start:start + self.PAGE_SIZE]
 
-    def _selected_row(self):
-        if not self.selected_slug:
-            return None
-        for row in self.rows:
-            if row["slug"] == self.selected_slug:
-                return row
-        return None
+    def reload(self) -> None:
+        self.rows = db.list_subscriptions(_conn, user_id=self.user_id)
+        self.page = min(self.page, self._max_page())
+        self._refresh()
 
-    def _build_items(self) -> None:
-        self.clear_items()
-        page_rows = self._page_rows()
-        if page_rows:
-            options = []
-            for r in page_rows:
-                where = "DM" if r["target_kind"] == "dm" else f"#{r['target_id']}"
-                options.append(discord.SelectOption(
-                    label=_short_text(_display_title(r), 100),
-                    value=str(r["id"]),
-                    description=_short_text(f"필터: {r['filter_prompt'] or '없음'} · {where}", 100),
-                    default=(r["slug"] == self.selected_slug),
-                ))
-            select = discord.ui.Select(placeholder="구독 선택 (편집/해제)", options=options, row=0)
-
-            async def select_cb(interaction: discord.Interaction) -> None:
-                selected_id = int(select.values[0])
-                self.selected_slug = next((r["slug"] for r in self.rows if int(r["id"]) == selected_id), None)
-                self._build_items()
-                await interaction.response.edit_message(embed=self.embed(), view=self)
-            select.callback = select_cb
-            self.add_item(select)
-
-        has_selected = self._selected_row() is not None
-        edit_btn = discord.ui.Button(label="✎ 필터 수정", style=discord.ButtonStyle.secondary,
-                                     disabled=not has_selected, row=1)
-        remove_btn = discord.ui.Button(label="✕ 해제", style=discord.ButtonStyle.danger,
-                                       disabled=not has_selected, row=1)
-
-        async def edit_cb(interaction: discord.Interaction) -> None:
-            row = self._selected_row()
-            if row is None:
-                await interaction.response.edit_message(embed=self.embed(), view=self)
-                return
-            await interaction.response.send_modal(
-                SubscriptionFilterModal(self, row["slug"], row["filter_prompt"]))
-
-        async def remove_cb(interaction: discord.Interaction) -> None:
-            if self.selected_slug:
-                db.remove_subscription(_conn, user_id=self.user_id, slug=self.selected_slug)
-            self.selected_slug = None
-            self.reload()
-            if not self.rows:
-                await interaction.response.edit_message(content=msg("list_empty"), embed=None, view=None)
-                return
-            await interaction.response.edit_message(embed=self.embed(), view=self)
-
-        edit_btn.callback = edit_cb
-        remove_btn.callback = remove_cb
-        self.add_item(edit_btn)
-        self.add_item(remove_btn)
-
-        max_page = max(0, (len(self.rows) - 1) // self.PAGE_SIZE)
-        if max_page > 0:
-            prev_btn = discord.ui.Button(label="◀", style=discord.ButtonStyle.secondary,
-                                         disabled=self.page == 0, row=2)
-            next_btn = discord.ui.Button(label="▶", style=discord.ButtonStyle.secondary,
-                                         disabled=self.page >= max_page, row=2)
-
-            async def prev_cb(interaction: discord.Interaction) -> None:
-                self.page = max(0, self.page - 1)
-                self.selected_slug = None
-                self._build_items()
-                await interaction.response.edit_message(embed=self.embed(), view=self)
-
-            async def next_cb(interaction: discord.Interaction) -> None:
-                self.page = min(max_page, self.page + 1)
-                self.selected_slug = None
-                self._build_items()
-                await interaction.response.edit_message(embed=self.embed(), view=self)
-
-            prev_btn.callback = prev_cb
-            next_btn.callback = next_cb
-            self.add_item(prev_btn)
-            self.add_item(next_btn)
+    def _refresh(self) -> None:
+        prs = self._page_rows()
+        for i, eb in enumerate(self._edit_btns):
+            rb = self._remove_btns[i]
+            if i < len(prs):
+                r = prs[i]
+                title = _display_title(r)
+                filt = r["filter_prompt"]
+                if filt:
+                    label = _short_text(f"✎ {title} | {filt}", 80)
+                else:
+                    label = _short_text(f"✎ {title} (필터 추가…)", 80)
+                eb.label = label
+                eb.disabled = False
+                rb.disabled = False
+            else:
+                eb.label = "—"
+                eb.disabled = True
+                rb.disabled = True
+        max_page = self._max_page()
+        self.prev_btn.disabled = (self.page <= 0)
+        self.next_btn.disabled = (self.page >= max_page)
 
     def embed(self) -> discord.Embed:
-        max_page = max(0, (len(self.rows) - 1) // self.PAGE_SIZE)
-        embed = discord.Embed(title="내 구독 목록",
-                              description=f"{len(self.rows)}개 · {self.page + 1}/{max_page + 1}페이지",
-                              color=0x5865F2)
-        lines = []
-        start = self.page * self.PAGE_SIZE
-        for i, r in enumerate(self._page_rows(), start=start + 1):
-            where = "DM" if r["target_kind"] == "dm" else f"<#{r['target_id']}>"
-            filt = _short_text(r["filter_prompt"] or "없음", 80)
-            lines.append(f"{i}. **{_display_title(r)}** · 필터: {filt} · {where}")
-        embed.description = "\n".join(lines) or "구독이 없어요."
+        embed = discord.Embed(title="📋 내 구독", color=0x5865F2)
+        if not self.rows:
+            embed.description = "구독이 없어요.\n`/watch <url>` 로 추가하세요."
+            return embed
+        max_page = self._max_page()
+        embed.set_footer(text=f"{len(self.rows)}개 구독 · {self.page + 1}/{max_page + 1}페이지")
+        embed.description = (
+            "각 행의 **✎ 버튼**으로 필터를 수정하고 **✕ 버튼**으로 해제합니다."
+        )
+        for idx, r in enumerate(self._page_rows(), start=self.page * self.PAGE_SIZE + 1):
+            where = "내 DM" if r["target_kind"] == "dm" else f"<#{r['target_id']}>"
+            filt = _short_text(r["filter_prompt"] or "없음 (새 글 전부)", 100)
+            embed.add_field(
+                name=f"{idx}. {_display_title(r)}",
+                value=f"📝 필터: {filt}\n📨 발송: {where}",
+                inline=False,
+            )
         return embed
+
+    def _make_edit_cb(self, idx: int):
+        async def cb(interaction: discord.Interaction) -> None:
+            prs = self._page_rows()
+            if idx >= len(prs):
+                await interaction.response.send_message("이 자리는 비어있어요.", ephemeral=True)
+                return
+            r = prs[idx]
+            # Modal 호출은 *반드시* interaction.response.send_modal 직접 — defer 후 modal 불가.
+            await interaction.response.send_modal(
+                SubscriptionFilterModal(self, int(r["id"]), r["filter_prompt"]))
+        return cb
+
+    def _make_remove_cb(self, idx: int):
+        async def cb(interaction: discord.Interaction) -> None:
+            # codex 리뷰 Critical 2 — sqlite lock 대비 즉시 ack.
+            await interaction.response.defer()
+            prs = self._page_rows()
+            if idx >= len(prs):
+                await interaction.followup.send("이 자리는 비어있어요.", ephemeral=True)
+                return
+            r = prs[idx]
+            # codex 리뷰 Critical 1 — row id 기준. slug 만으로 DELETE 하면 같은 board 의
+            # DM+채널 양쪽 구독 한 번에 사라지는 함정.
+            db.remove_subscription_by_id(_conn, user_id=self.user_id, sub_id=int(r["id"]))
+            self.reload()
+            await interaction.edit_original_response(embed=self.embed(), view=self)
+        return cb
+
+    async def _prev_cb(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer()
+        self.page = max(0, self.page - 1)
+        self._refresh()
+        await interaction.edit_original_response(embed=self.embed(), view=self)
+
+    async def _next_cb(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer()
+        self.page = min(self._max_page(), self.page + 1)
+        self._refresh()
+        await interaction.edit_original_response(embed=self.embed(), view=self)
 
 
 @tree.command(name="list", description="내 구독 목록과 편집 UI")
+@app_commands.allowed_installs(guilds=True, users=True)
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def list_cmd(interaction: discord.Interaction):
+    # 3초 ack 안전망 — View 생성·db 조회가 sqlite lock 시 느려질 수 있음 (Unknown interaction 10062 회피).
+    await interaction.response.defer(ephemeral=True)
     view = SubscriptionListView(user_id=str(interaction.user.id))
     if not view.rows:
-        await interaction.response.send_message(msg("list_empty"), ephemeral=True)
+        await interaction.followup.send(msg("list_empty"), ephemeral=True)
         return
-    await interaction.response.send_message(embed=view.embed(), view=view, ephemeral=True)
+    await interaction.followup.send(embed=view.embed(), view=view, ephemeral=True)
 
 
 _FEEDBACK_MAX_LEN_AT_LOAD = feedback_max_len()  # description 은 등록 시점에 고정 — restart 시 갱신
@@ -470,14 +521,18 @@ _FEEDBACK_MAX_LEN_AT_LOAD = feedback_max_len()  # description 은 등록 시점�
 @app_commands.describe(
     message=f"의견 — 자연어 자유 입력. 최대 {_FEEDBACK_MAX_LEN_AT_LOAD}자.",
 )
+@app_commands.allowed_installs(guilds=True, users=True)
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def feedback_cmd(interaction: discord.Interaction, message: str):
+    # 3초 ack 안전망.
+    await interaction.response.defer(ephemeral=True)
     max_len = feedback_max_len()
     text = (message or "").strip()
     if not text:
-        await interaction.response.send_message(msg("feedback_empty"), ephemeral=True)
+        await interaction.followup.send(msg("feedback_empty"), ephemeral=True)
         return
     if len(text) > max_len:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             msg("feedback_too_long", max_len=max_len, cur_len=len(text)),
             ephemeral=True,
         )
@@ -486,7 +541,7 @@ async def feedback_cmd(interaction: discord.Interaction, message: str):
         _conn, user_id=str(interaction.user.id),
         username=str(interaction.user), message=text,
     )
-    await interaction.response.send_message(
+    await interaction.followup.send(
         msg("feedback_received", fid=fid),
         ephemeral=True,
     )
@@ -524,10 +579,11 @@ class SettingTimeModal(discord.ui.Modal):
         self.target_kind = target_kind
         self.target_id = target_id
         self.time_input = discord.ui.TextInput(
-            label="발송 시각 (HH:MM)",
+            label="발송 시각 (HH:MM, KST 24시간)",
             default=current,
             required=True,
             max_length=5,
+            placeholder="예: 08:30",
         )
         self.add_item(self.time_input)
 
@@ -539,109 +595,166 @@ class SettingTimeModal(discord.ui.Modal):
                 ephemeral=True,
             )
             return
+        # codex 리뷰 Critical 2 — sqlite lock 대비 즉시 ack.
+        await interaction.response.defer()
         db.set_deliver_at(_conn, target_kind=self.target_kind, target_id=self.target_id,
                           deliver_at=hhmm)
         self.view_ref.refresh()
-        await interaction.response.edit_message(embed=self.view_ref.embed(), view=self.view_ref)
+        await interaction.edit_original_response(embed=self.view_ref.embed(),
+                                                 view=self.view_ref)
 
 
 class SettingView(discord.ui.View):
+    """RoboDanny 패턴 — item set 고정, refresh() 가 label/disabled 만 mutate.
+
+    레이아웃 (5 ActionRow 안):
+      Row0: [📨 DM 공지: ON/OFF]  [📣 채널 공지: ON/OFF]  ← 채널 버튼은 guild 일 때만 enable
+      Row1: [⏰ DM 시각: hh:mm ✎] [⏰ 채널 시각: hh:mm ✎]
+      Row2: [❌ 닫기]
+
+    DM(=guild 아님) 컨텍스트에선 채널 버튼 둘 다 disabled. guild 인데 Manage Channels 권한 없으면 disabled.
+    """
+
     def __init__(self, *, user_id: str, channel_id: Optional[str], manage_channels: bool) -> None:
-        super().__init__(timeout=180)
+        super().__init__(timeout=300)
         self.user_id = user_id
         self.channel_id = channel_id
         self.manage_channels = manage_channels
+        # 모든 item __init__ 에 한 번만 add — 이후 refresh() 가 label/disabled mutate
+        self.dm_btn = discord.ui.Button(style=discord.ButtonStyle.secondary, row=0,
+                                        custom_id="set_dm")
+        self.ch_btn = discord.ui.Button(style=discord.ButtonStyle.secondary, row=0,
+                                        custom_id="set_ch")
+        self.dm_time_btn = discord.ui.Button(style=discord.ButtonStyle.secondary, row=1,
+                                             custom_id="set_dm_time")
+        self.ch_time_btn = discord.ui.Button(style=discord.ButtonStyle.secondary, row=1,
+                                             custom_id="set_ch_time")
+        self.close_btn = discord.ui.Button(label="❌ 닫기", style=discord.ButtonStyle.secondary,
+                                           row=2, custom_id="set_close")
+        self.dm_btn.callback = self._dm_cb
+        self.ch_btn.callback = self._ch_cb
+        self.dm_time_btn.callback = self._dm_time_cb
+        self.ch_time_btn.callback = self._ch_time_cb
+        self.close_btn.callback = self._close_cb
+        for it in (self.dm_btn, self.ch_btn, self.dm_time_btn, self.ch_time_btn, self.close_btn):
+            self.add_item(it)
         self.refresh()
-
-    def refresh(self) -> None:
-        self.clear_items()
-        dm_off = db.get_announce_optout(_conn, "dm", self.user_id)
-        dm_btn = discord.ui.Button(label=f"📨 DM 공지: {'OFF' if dm_off else 'ON'}",
-                                   style=discord.ButtonStyle.secondary, row=0)
-
-        async def dm_cb(interaction: discord.Interaction) -> None:
-            cur = db.get_announce_optout(_conn, "dm", self.user_id)
-            db.set_announce_optout(_conn, "dm", self.user_id, opted_out=not cur)
-            self.refresh()
-            await interaction.response.edit_message(embed=self.embed(), view=self)
-        dm_btn.callback = dm_cb
-        self.add_item(dm_btn)
-
-        if self.channel_id:
-            ch_off = db.get_announce_optout(_conn, "channel", self.channel_id)
-            ch_btn = discord.ui.Button(label=f"📣 채널 공지: {'OFF' if ch_off else 'ON'}",
-                                       style=discord.ButtonStyle.secondary,
-                                       disabled=not self.manage_channels, row=0)
-
-            async def ch_cb(interaction: discord.Interaction) -> None:
-                cur = db.get_announce_optout(_conn, "channel", self.channel_id or "")
-                db.set_announce_optout(_conn, "channel", self.channel_id or "", opted_out=not cur)
-                self.refresh()
-                await interaction.response.edit_message(embed=self.embed(), view=self)
-            ch_btn.callback = ch_cb
-            self.add_item(ch_btn)
-
-        dm_time = db.get_deliver_at(_conn, target_kind="dm", target_id=self.user_id)
-        dm_time_btn = discord.ui.Button(label=f"⏰ DM 시각: {dm_time} ✎",
-                                        style=discord.ButtonStyle.secondary, row=1)
-
-        async def dm_time_cb(interaction: discord.Interaction) -> None:
-            await interaction.response.send_modal(
-                SettingTimeModal(self, "dm", self.user_id, dm_time))
-        dm_time_btn.callback = dm_time_cb
-        self.add_item(dm_time_btn)
-
-        if self.channel_id:
-            ch_time = db.get_deliver_at(_conn, target_kind="channel", target_id=self.channel_id)
-            ch_time_btn = discord.ui.Button(label=f"⏰ 채널 시각: {ch_time} ✎",
-                                            style=discord.ButtonStyle.secondary,
-                                            disabled=not self.manage_channels, row=1)
-
-            async def ch_time_cb(interaction: discord.Interaction) -> None:
-                await interaction.response.send_modal(
-                    SettingTimeModal(self, "channel", self.channel_id or "", ch_time))
-            ch_time_btn.callback = ch_time_cb
-            self.add_item(ch_time_btn)
-
-        close_btn = discord.ui.Button(label="❌ 닫기", style=discord.ButtonStyle.secondary, row=2)
-
-        async def close_cb(interaction: discord.Interaction) -> None:
-            self.stop()
-            await interaction.response.edit_message(view=None)
-        close_btn.callback = close_cb
-        self.add_item(close_btn)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if str(interaction.user.id) != self.user_id:
-            await interaction.response.send_message("이 설정은 호출한 사람만 조작할 수 있어요.", ephemeral=True)
+            await interaction.response.send_message(
+                "이 설정은 호출한 사람만 조작할 수 있어요.", ephemeral=True)
             return False
         return True
 
+    async def on_error(self, interaction: discord.Interaction, error: Exception,
+                       item: discord.ui.Item) -> None:
+        tb = "".join(traceback.format_exception(type(error), error, error.__traceback__))
+        log.error("[setting view] item=%s error=%s\n%s",
+                  getattr(item, 'custom_id', '?'), error, tb)
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(
+                    f"⚠️ 오류: {type(error).__name__} — 다시 시도해 주세요.", ephemeral=True)
+            else:
+                await interaction.response.send_message(
+                    f"⚠️ 오류: {type(error).__name__} — 다시 시도해 주세요.", ephemeral=True)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def refresh(self) -> None:
+        # DM 공지·시각 — 본인 user 컨텍스트, 항상 enable
+        dm_off = db.get_announce_optout(_conn, "dm", self.user_id)
+        self.dm_btn.label = f"📨 DM 공지: {'OFF' if dm_off else 'ON'}"
+        dm_time = db.get_deliver_at(_conn, target_kind="dm", target_id=self.user_id)
+        self.dm_time_btn.label = f"⏰ DM 시각: {dm_time} ✎"
+        # 채널 공지·시각 — guild 면 권한 따라 토글, DM 컨텍스트면 둘 다 비활성
+        if self.channel_id:
+            ch_off = db.get_announce_optout(_conn, "channel", self.channel_id)
+            self.ch_btn.label = f"📣 채널 공지: {'OFF' if ch_off else 'ON'}"
+            self.ch_btn.disabled = not self.manage_channels
+            ch_time = db.get_deliver_at(_conn, target_kind="channel", target_id=self.channel_id)
+            self.ch_time_btn.label = f"⏰ 채널 시각: {ch_time} ✎"
+            self.ch_time_btn.disabled = not self.manage_channels
+        else:
+            self.ch_btn.label = "📣 채널 공지: (DM 에선 불가)"
+            self.ch_btn.disabled = True
+            self.ch_time_btn.label = "⏰ 채널 시각: (DM 에선 불가)"
+            self.ch_time_btn.disabled = True
+
     def embed(self) -> discord.Embed:
-        embed = discord.Embed(title="발송 설정", color=0x5865F2)
+        embed = discord.Embed(title="⚙️ 발송 설정", color=0x5865F2)
+        dm_off = db.get_announce_optout(_conn, "dm", self.user_id)
+        dm_time = db.get_deliver_at(_conn, target_kind="dm", target_id=self.user_id)
         lines = [
-            f"DM 공지: **{'OFF' if db.get_announce_optout(_conn, 'dm', self.user_id) else 'ON'}**",
-            f"DM 시각: **{db.get_deliver_at(_conn, target_kind='dm', target_id=self.user_id)} (KST)**",
+            f"📨 DM 공지: **{'OFF (받지 않음)' if dm_off else 'ON (받음)'}**",
+            f"⏰ DM 발송 시각: **{dm_time} (KST)**",
         ]
         if self.channel_id:
-            suffix = "" if self.manage_channels else " · 권한 필요"
-            lines.append(f"채널 공지: **{'OFF' if db.get_announce_optout(_conn, 'channel', self.channel_id) else 'ON'}**{suffix}")
-            lines.append(f"채널 시각: **{db.get_deliver_at(_conn, target_kind='channel', target_id=self.channel_id)} (KST)**{suffix}")
+            ch_off = db.get_announce_optout(_conn, "channel", self.channel_id)
+            ch_time = db.get_deliver_at(_conn, target_kind="channel", target_id=self.channel_id)
+            suffix = "" if self.manage_channels else " — *Manage Channels 권한 필요*"
+            lines.append("")
+            lines.append(f"📣 채널 공지: **{'OFF' if ch_off else 'ON'}**{suffix}")
+            lines.append(f"⏰ 채널 발송 시각: **{ch_time} (KST)**{suffix}")
         embed.description = "\n".join(lines)
         return embed
 
+    async def _dm_cb(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer()
+        cur = db.get_announce_optout(_conn, "dm", self.user_id)
+        db.set_announce_optout(_conn, "dm", self.user_id, opted_out=not cur)
+        self.refresh()
+        await interaction.edit_original_response(embed=self.embed(), view=self)
+
+    async def _ch_cb(self, interaction: discord.Interaction) -> None:
+        if not self.channel_id:
+            await interaction.response.send_message(
+                "DM 컨텍스트에서는 채널 공지를 토글할 수 없어요.", ephemeral=True)
+            return
+        await interaction.response.defer()
+        cur = db.get_announce_optout(_conn, "channel", self.channel_id)
+        db.set_announce_optout(_conn, "channel", self.channel_id, opted_out=not cur)
+        self.refresh()
+        await interaction.edit_original_response(embed=self.embed(), view=self)
+
+    async def _dm_time_cb(self, interaction: discord.Interaction) -> None:
+        cur = db.get_deliver_at(_conn, target_kind="dm", target_id=self.user_id)
+        await interaction.response.send_modal(
+            SettingTimeModal(self, "dm", self.user_id, cur))
+
+    async def _ch_time_cb(self, interaction: discord.Interaction) -> None:
+        if not self.channel_id:
+            await interaction.response.send_message(
+                "DM 컨텍스트에서는 채널 시각을 바꿀 수 없어요.", ephemeral=True)
+            return
+        cur = db.get_deliver_at(_conn, target_kind="channel", target_id=self.channel_id)
+        await interaction.response.send_modal(
+            SettingTimeModal(self, "channel", self.channel_id, cur))
+
+    async def _close_cb(self, interaction: discord.Interaction) -> None:
+        self.stop()
+        await interaction.response.edit_message(view=None)
+
 
 @tree.command(name="setting", description="발송·공지 설정")
+@app_commands.allowed_installs(guilds=True, users=True)
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def setting_cmd(interaction: discord.Interaction):
+    # 3초 ack 안전망 — sqlite lock 시 느려질 수 있음.
+    await interaction.response.defer(ephemeral=True)
     user_id = str(interaction.user.id)
     channel_id = str(interaction.channel_id) if interaction.guild is not None and interaction.channel_id else None
     view = SettingView(user_id=user_id, channel_id=channel_id,
                        manage_channels=bool(interaction.permissions.manage_channels))
-    await interaction.response.send_message(embed=view.embed(), view=view, ephemeral=True)
+    await interaction.followup.send(embed=view.embed(), view=view, ephemeral=True)
 
 
 @tree.command(name="help", description="봇 명령어 안내")
+@app_commands.allowed_installs(guilds=True, users=True)
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def help_cmd(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
     embed = discord.Embed(
         title="📖 notice-watcher 명령어",
         description=msg("help_embed_description"),
@@ -670,7 +783,7 @@ async def help_cmd(interaction: discord.Interaction):
     )
     embed.add_field(name="기타", value=msg("help_field_misc_value"), inline=False)
     embed.set_footer(text=msg("help_footer"))
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    await interaction.followup.send(embed=embed, ephemeral=True)
 
 
 @tree.command(name="report", description="사이트 문제 신고 또는 지원 요청")
@@ -680,27 +793,31 @@ async def help_cmd(interaction: discord.Interaction):
     url="문제 있는 URL 또는 지원 요청 URL (선택, https://)",
 )
 @app_commands.autocomplete(slug=_own_slug_autocomplete)
+@app_commands.allowed_installs(guilds=True, users=True)
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def report_cmd(interaction: discord.Interaction, issue: str,
                      slug: Optional[str] = None, url: Optional[str] = None):
+    # 3초 ack 안전망 — inspector.inspect / db 호출 무거울 수 있음.
+    await interaction.response.defer(ephemeral=True)
     user_id = str(interaction.user.id)
     issue = (issue or "").strip()
     if not issue:
-        await interaction.response.send_message(msg("report_issue_empty"), ephemeral=True)
+        await interaction.followup.send(msg("report_issue_empty"), ephemeral=True)
         return
     slug = (slug or "").strip() or None
     url = (url or "").strip() or None
     if not slug and not url:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "URL 없는 자유 의견은 `/feedback` 으로 보내주세요.", ephemeral=True)
         return
     if url and not re.match(r"^https?://", url):
-        await interaction.response.send_message(msg("validation_url_required"), ephemeral=True)
+        await interaction.followup.send(msg("validation_url_required"), ephemeral=True)
         return
     if slug:
         # slug 가 본인 구독이 아니면 거부 (자동완성 우회 입력 차단)
         own = {r["slug"] for r in db.list_subscriptions(_conn, user_id=user_id)}
         if slug not in own:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 msg("report_slug_not_owned", slug=slug), ephemeral=True)
             return
     issue_body = issue[:1500]
@@ -708,7 +825,7 @@ async def report_cmd(interaction: discord.Interaction, issue: str,
         issue_body = f"{issue_body}\n\nURL: {url}"
     report_id = db.add_report(_conn, user_id=user_id, username=str(interaction.user),
                               slug=slug, url=url, issue=issue_body)
-    await interaction.response.send_message(
+    await interaction.followup.send(
         msg("report_received", report_id=report_id, slug=(slug or url or "URL")),
         ephemeral=True)
     # owner DM — 자동 진단 결과까지 함께. admin.send_chunked_dm 재사용(2000 chars split, 실패 시 False).
@@ -727,7 +844,11 @@ async def report_cmd(interaction: discord.Interaction, issue: str,
 
 
 @tree.command(name="status", description="봇/폴링 상태")
+@app_commands.allowed_installs(guilds=True, users=True)
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def status(interaction: discord.Interaction):
+    # 3초 ack 안전망 — STATE_DIR glob + 파일별 read 가 사이트 많을 때 무거움.
+    await interaction.response.defer(ephemeral=True)
     cnt = db.counts(_conn)
     jq = db.jobs_summary(_conn)
     n_configs = len(list(CONFIGS_DIR.glob("*.json"))) if CONFIGS_DIR.exists() else 0
@@ -767,7 +888,7 @@ async def status(interaction: discord.Interaction):
         f"• 자동등록 실패 slug: {', '.join(failed) if failed else '없음'}",
         f"• 마지막 에러: {(LAST_ERROR['when'] + ' — ' + LAST_ERROR['text']) if LAST_ERROR['when'] else '없음'}",
     ]
-    await interaction.response.send_message("\n".join(lines)[:1900], ephemeral=True)
+    await interaction.followup.send("\n".join(lines)[:1900], ephemeral=True)
 
 
 # --------------------------------------------------------------------------- #

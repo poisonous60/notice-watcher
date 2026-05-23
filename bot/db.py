@@ -362,8 +362,19 @@ def add_subscription(conn: sqlite3.Connection, *, user_id: str, slug: str, url: 
 
 
 def remove_subscription(conn: sqlite3.Connection, *, user_id: str, slug: str) -> int:
+    """slug 의 *모든* 구독 제거 — `/unwatch` 류 URL 단위 일괄 해제용. /list UI 의 단일 행 해제는
+    `remove_subscription_by_id` 사용 (같은 slug 의 DM+채널 양쪽 구독 시 한 번에 사라지는 함정 회피)."""
     def _do():
         cur = conn.execute("DELETE FROM subscriptions WHERE user_id=? AND slug=?", (user_id, slug))
+        conn.commit()
+        return cur.rowcount
+    return _retry(_do)
+
+
+def remove_subscription_by_id(conn: sqlite3.Connection, *, user_id: str, sub_id: int) -> int:
+    """단일 row 제거 (id 기준) — /list UI ✕ 버튼이 쓴다. user_id 가드는 본인 row 만 지우게."""
+    def _do():
+        cur = conn.execute("DELETE FROM subscriptions WHERE user_id=? AND id=?", (user_id, sub_id))
         conn.commit()
         return cur.rowcount
     return _retry(_do)
@@ -375,12 +386,13 @@ def list_subscriptions(conn: sqlite3.Connection, *, user_id: str) -> list[sqlite
     ).fetchall()
 
 
-def update_subscription_filter(conn: sqlite3.Connection, *, user_id: str, slug: str,
+def update_subscription_filter(conn: sqlite3.Connection, *, user_id: str, sub_id: int,
                                filter_prompt: Optional[str]) -> bool:
+    """단일 row 의 filter_prompt 갱신 (id 기준). user_id 가드는 본인 row 만."""
     def _do():
         cur = conn.execute(
-            "UPDATE subscriptions SET filter_prompt=? WHERE user_id=? AND slug=?",
-            (filter_prompt, user_id, slug),
+            "UPDATE subscriptions SET filter_prompt=? WHERE user_id=? AND id=?",
+            (filter_prompt, user_id, sub_id),
         )
         conn.commit()
         return cur.rowcount > 0
