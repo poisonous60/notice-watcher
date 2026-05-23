@@ -314,10 +314,11 @@ def _short_text(text: Optional[str], limit: int) -> str:
 
 
 class SubscriptionRemoveButton(discord.ui.Button["SubscriptionListView"]):
-    """Section 의 accessory — 그 sub 한 행 옆 inline ✕."""
+    """Section 의 accessory — 행 옆 inline 해제 button. emoji-only + secondary
+    = Discord 의 compact icon button (label 박으면 크고 두드러져 사용자 거부 2026-05-23)."""
 
     def __init__(self, sub_id: int) -> None:
-        super().__init__(label="✕", style=discord.ButtonStyle.danger,
+        super().__init__(emoji="❌", style=discord.ButtonStyle.secondary,
                          custom_id=f"sub_rem_{sub_id}")
         self.sub_id = sub_id
 
@@ -376,7 +377,7 @@ class SubscriptionListView(discord.ui.LayoutView):
         if not self.rows:
             self.add_item(discord.ui.Container(
                 discord.ui.TextDisplay(
-                    "## 📋 내 구독\n구독이 없어요. `/watch <url>` 로 추가하세요."
+                    "구독이 없어요. `/watch <url>` 로 추가하세요."
                 ),
                 accent_color=discord.Color.blurple(),
             ))
@@ -385,23 +386,23 @@ class SubscriptionListView(discord.ui.LayoutView):
         start = self.page * self.PAGE_SIZE
         prs = self.rows[start:start + self.PAGE_SIZE]
 
-        header = discord.ui.TextDisplay(
-            f"## 📋 내 구독 ({len(self.rows)}개 · {self.page + 1}/{max_page + 1}페이지)\n"
-            "각 행의 **✕ 버튼**으로 해제합니다. 필터 바꾸려면 `/watch` 다시 호출."
-        )
-        sections: list[discord.ui.Section] = []
+        children: list = []
         for offset, r in enumerate(prs):
             idx = start + offset + 1
             where = "내 DM" if r["target_kind"] == "dm" else f"<#{r['target_id']}>"
             filt = _short_text(r["filter_prompt"] or "없음 (새 글 전부)", 200)
             title = _display_title(r)
-            sections.append(discord.ui.Section(
+            children.append(discord.ui.Section(
                 f"**{idx}. {title}**",
                 f"📝 필터: {filt} · 📨 발송: {where}",
                 accessory=SubscriptionRemoveButton(int(r["id"])),
             ))
+            # 행 사이 빈 spacing (line 없이 공간만)
+            if offset < len(prs) - 1:
+                children.append(discord.ui.Separator(
+                    visible=False, spacing=discord.SeparatorSpacing.large,
+                ))
 
-        nav_items: list = []
         if max_page > 0:
             prev_btn: discord.ui.Button
             next_btn: discord.ui.Button
@@ -417,14 +418,14 @@ class SubscriptionListView(discord.ui.LayoutView):
                 next_btn = discord.ui.Button(label="다음 ▶",
                                              style=discord.ButtonStyle.secondary,
                                              disabled=True, custom_id="sub_nav_next_dis")
-            nav_items = [discord.ui.Separator(), discord.ui.ActionRow(prev_btn, next_btn)]
+            children.append(discord.ui.Separator(visible=True))
+            children.append(discord.ui.ActionRow(prev_btn, next_btn))
+            children.append(discord.ui.TextDisplay(
+                f"-# {len(self.rows)}개 구독 · {self.page + 1}/{max_page + 1}페이지"
+            ))
 
         container = discord.ui.Container(
-            header,
-            discord.ui.Separator(),
-            *sections,
-            *nav_items,
-            accent_color=discord.Color.blurple(),
+            *children, accent_color=discord.Color.blurple(),
         )
         self.add_item(container)
 
