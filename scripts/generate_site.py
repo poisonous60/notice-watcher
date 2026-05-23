@@ -412,21 +412,29 @@ def svg_grouped_scatter(sites: list[dict], color_map: dict) -> str:
     dots: list[str] = []
 
     # ring 1 — host-clustered sunflower (boards on the same host pack together),
-    # color = fetch strategy. Hosts are placed by golden-angle spiral, then each
-    # host expands into a mini-spiral so its boards visibly group.
+    # color = fetch strategy. Each host gets an anchor whose radial position is
+    # proportional to its cumulative cluster *area* (∝ member count) so that big
+    # clusters claim more room — adjacent anchors stay apart even when clusters
+    # have very different sizes.
     from collections import OrderedDict as _OD
     board_sorted = sorted(board, key=lambda s: (str(s.get("color_key")), str(s["host"]), str(s["slug"])))
     host_groups: "OrderedDict[str, list[dict]]" = _OD()
     for s in board_sorted:
         host_groups.setdefault(str(s["host"]), []).append(s)
-    n_hosts = len(host_groups)
-    for h_idx, (_host, items) in enumerate(host_groups.items()):
-        r_anchor = r_core * math.sqrt((h_idx + 0.5) / max(n_hosts, 1))
+    items_list = list(host_groups.items())
+    weights = [max(1, len(items)) for _host, items in items_list]
+    total_w = sum(weights) or 1
+    r_effective = r_core - 14.0  # leave a margin so the largest cluster doesn't bleed into ring 2
+    cumsum = 0.0
+    for h_idx, (_host, items) in enumerate(items_list):
+        w = weights[h_idx]
+        r_anchor = r_effective * math.sqrt((cumsum + w * 0.5) / total_w)
         theta_anchor = h_idx * GOLDEN_ANGLE
+        cumsum += w
         ax = cx + r_anchor * math.cos(theta_anchor)
         ay = cy + r_anchor * math.sin(theta_anchor)
         n_sub = len(items)
-        cluster_r = 1.8 * math.sqrt(n_sub)
+        cluster_r = 3.0 + 2.6 * math.sqrt(max(n_sub - 1, 0))
         for j, site in enumerate(items):
             if n_sub == 1:
                 x, y = ax, ay
