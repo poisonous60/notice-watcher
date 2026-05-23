@@ -1034,6 +1034,56 @@ def detect_medium_custom_domain(html: str, base_url: str) -> Optional[dict]:
     return {"is_medium_custom": True, "base_url": origin, "feed_url": feed_url}
 
 
+@heuristic
+def detect_common_platform(html: str, base_url: str) -> Optional[dict]:
+    """Common/Commonwealth SPA shell marker 로 governance forum 판정.
+
+    Common pages often return only an app shell (`<title>Common</title>`,
+    `/assets/index-*`, `/brand_assets/common*`) while discussion rows come from
+    `/api/internal/trpc/thread.getThreads`.  URL-only matching is intentionally
+    limited to `common.xyz`/`commonwealth.im`; custom domains are routed through
+    this probe signal and later verified by the adapter baseline.
+    """
+    from urllib.parse import urlsplit
+    if not html or not base_url:
+        return None
+    try:
+        parts = urlsplit(base_url)
+        host = (parts.netloc or "").strip().lower()
+        scheme = parts.scheme or "https"
+    except (ValueError, AttributeError):
+        return None
+    if not host or "." not in host:
+        return None
+
+    low = html.lower()
+    soup = BeautifulSoup(html, "lxml")
+    title_common = bool(soup.find("title", string=lambda s: bool(s) and s.strip().lower() == "common"))
+    og_common = bool(soup.find(
+        "meta",
+        attrs={"property": re.compile(r"^og:site_name$", re.I), "content": re.compile(r"^common$", re.I)},
+    ))
+    marker_hits = sum(1 for hit in (
+        title_common,
+        "/assets/index-" in low,
+        "/brand_assets/common" in low,
+        "/api/internal/trpc" in low,
+        og_common,
+    ) if hit)
+    if marker_hits < 2:
+        return None
+
+    community_id: Optional[str] = None
+    first_segment = (parts.path or "").strip("/").split("/", 1)[0].strip()
+    if first_segment and first_segment.lower() not in {"discussions", "discussion"}:
+        community_id = first_segment
+    return {
+        "is_common": True,
+        "base_url": f"{scheme}://{host}",
+        "community_id_hint": community_id,
+    }
+
+
 # XenForo: 모든 public 페이지가 `<html id="XF" ... data-app="public">` + `XF.config` JS 를 박는다.
 # generator meta 는 없지만 이 두 마커는 false-positive ~0 (XenForo 외 사이트 안 씀). Discourse 와 같은 이유로
 # root URL 만으론 URL-recognizer 가 못 잡아 → probe 후 이 휴리스틱이 봉합.
@@ -1601,6 +1651,7 @@ def write_list_candidates(
     article_meta_signals: Optional[dict] = None,
     wordpress_platform: Optional[dict] = None,
     discourse_platform: Optional[dict] = None,
+    common_platform: Optional[dict] = None,
     xenforo_platform: Optional[dict] = None,
     medium_custom_domain: Optional[dict] = None,
     lemmy_platform: Optional[dict] = None,
@@ -1665,6 +1716,7 @@ def write_list_candidates(
         # config 만들어 등록 시도 (fetch_list 빈 목록이면 일반 파이프라인 폴백).
         "wordpress_platform": wordpress_platform,
         "discourse_platform": discourse_platform,
+        "common_platform": common_platform,
         "xenforo_platform": xenforo_platform,
         "medium_custom_domain": medium_custom_domain,
         "lemmy_platform": lemmy_platform,
