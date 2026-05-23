@@ -1,11 +1,11 @@
 """inspect.py — 사용자 신고(`/report`) 와 등록된 구독을 dev박스에서 진단·열람.
 
 `bot/admin.py` 의 `/admin` 명령들과 *같은* lib(`bot/inspector.py`)을 호출 — Discord 와 CLI 가 같은
-데이터 모델·진단을 본다. 라이브 데이터는 N100 에만 있으므로 `pull` 로 snapshot 을 떨구고 그 다음
+데이터 모델·진단을 본다. 라이브 데이터는 운영 호스트에 있으므로 `pull` 로 snapshot 을 떨구고 그 다음
 명령들은 snapshot 을 읽는다.
 
 흐름:
-  python scripts/inspect_subs.py pull                 # N100 → output/snapshot/{bot.sqlite3, poll_state/}, configs.snapshot/
+  python scripts/inspect_subs.py pull                 # 운영 호스트 → output/snapshot/{bot.sqlite3, poll_state/}, configs.snapshot/
   python scripts/inspect_subs.py reports              # 미해결 신고 목록 + (각 신고 자동 진단)
   python scripts/inspect_subs.py recent               # 최근 register 잡 20개 — 등록 흐름 추적
   python scripts/inspect_subs.py inspect report 12    # 신고 #12 풀 dump (jobs/subs/config/state/diagnose)
@@ -14,7 +14,7 @@
   python scripts/inspect_subs.py fetch <slug> [-n 5]  # 현 config 로 fetch_list 돌려 결과 출력 + 진단 갱신
   python scripts/inspect_subs.py diagnose <slug>      # fetch 없이 정적 진단만
 
-N100 호스트: `DEPLOY_HOST` (기본 `<user>@<host>` — Tailscale MagicDNS), `DEPLOY_PATH` (기본 `~/notice-watcher`).
+운영 호스트: `DEPLOY_HOST` 환경변수 (예: `<user>@<host>`), `DEPLOY_PATH` (기본 `~/notice-watcher`).
 snapshot 디렉토리는 `.gitignore` 에 추가됨 — dev 의 git tracked `configs/` 는 절대 안 건드림.
 """
 from __future__ import annotations
@@ -34,7 +34,7 @@ from bot import db, inspector  # noqa: E402
 
 SNAPSHOT_DIR = ROOT / "output" / "snapshot"
 CONFIGS_SNAPSHOT = ROOT / "configs.snapshot"
-DEPLOY_HOST = os.environ.get("DEPLOY_HOST", "<user>@<host>")
+DEPLOY_HOST = os.environ.get("DEPLOY_HOST", "")
 DEPLOY_PATH = os.environ.get("DEPLOY_PATH", "~/notice-watcher")
 
 # DEPLOY_HOST / DEPLOY_PATH 는 ssh 명령 문자열에 직접 보간됨 (cd {DEPLOY_PATH}, ssh {DEPLOY_HOST}).
@@ -42,17 +42,26 @@ DEPLOY_PATH = os.environ.get("DEPLOY_PATH", "~/notice-watcher")
 # 허용: 영숫자·`.`·`_`·`@`·`~`·`/`·`:`·`-`. 차단: 공백·`$`·`;`·`|`·`&`·backtick·괄호 등.
 import re as _re_guard  # noqa: E402
 _SAFE_REMOTE_RE = _re_guard.compile(r"^[A-Za-z0-9._@~/:\-]+$")
-if not _SAFE_REMOTE_RE.match(DEPLOY_HOST):
+if DEPLOY_HOST and not _SAFE_REMOTE_RE.match(DEPLOY_HOST):
     raise ValueError(f"unsafe DEPLOY_HOST (shell metachar 감지): {DEPLOY_HOST!r}")
 if not _SAFE_REMOTE_RE.match(DEPLOY_PATH):
     raise ValueError(f"unsafe DEPLOY_PATH (shell metachar 감지): {DEPLOY_PATH!r}")
+
+
+def _require_deploy_host() -> str:
+    if DEPLOY_HOST:
+        return DEPLOY_HOST
+    raise RuntimeError(
+        "DEPLOY_HOST 환경변수가 설정되지 않았습니다. 운영 호스트 SSH 대상을 지정하세요 "
+        "(예: PowerShell `$env:DEPLOY_HOST = 'user@host'`, bash `export DEPLOY_HOST=user@host`)."
+    )
 
 
 def _run(cmd: list[str], *, check: bool = False,
          timeout: float = 30.0) -> tuple[int, str]:
     """subprocess 동기 래퍼.
 
-    timeout: SSH/scp 가 N100 응답 없이 무한 hang 시 dashboard 잠금 방지.
+    timeout: SSH/scp 가 운영 호스트 응답 없이 무한 hang 시 dashboard 잠금 방지.
     초과 시 rc=124 + stderr 메시지 반환 (curl/timeout 관례).
     """
     try:
@@ -78,7 +87,7 @@ def _snapshot_paths() -> inspector.InspectorPaths:
 
 
 # --------------------------------------------------------------------------- #
-# pull — N100 → 로컬 snapshot
+# pull — 운영 호스트 → 로컬 snapshot
 # --------------------------------------------------------------------------- #
 # source = 데이터 카테고리. dashboard 가 페이지별로 *필요한 source 만* 가져오기 위해 분리.
 # 각 puller 는 ok(bool) 반환. cmd_pull 은 5개 모두 호출.
@@ -92,35 +101,37 @@ def _ensure_dirs() -> None:
 
 
 def pull_bot_db() -> bool:
-    """bot.sqlite3 (WAL mode) — N100 .backup 으로 일관 사본 만들고 scp."""
+    """bot.sqlite3 (WAL mode) — 운영 호스트 .backup 으로 일관 사본 만들고 scp."""
     _ensure_dirs()
+    host = _require_deploy_host()
     remote_snap = "/tmp/inspect_snap.sqlite3"
     rc, out = _run([
-        "ssh", DEPLOY_HOST,
+        "ssh", host,
         f"cd {DEPLOY_PATH} && sqlite3 output/bot.sqlite3 \".backup '{remote_snap}'\" && echo OK",
     ])
     if rc != 0 or "OK" not in out:
         sys.stderr.write(f"[inspect pull] sqlite .backup 실패: {out}\n")
         return False
-    rc, out = _run(["scp", "-q", f"{DEPLOY_HOST}:{remote_snap}",
+    rc, out = _run(["scp", "-q", f"{host}:{remote_snap}",
                     str(SNAPSHOT_DIR / "bot.sqlite3")])
     if rc != 0:
         sys.stderr.write(f"[inspect pull] DB scp 실패: {out}\n")
         return False
-    _run(["ssh", DEPLOY_HOST, f"rm -f {remote_snap}"])
+    _run(["ssh", host, f"rm -f {remote_snap}"])
     return True
 
 
 def pull_configs() -> bool:
     """configs/ 통째 mirror — *.json 글로브 단일 scp (server-side expand). dev 의 git tracked
-    configs/ 는 *별도 폴더* (configs.snapshot/) 라 안 건드림. N100 에서 삭제된 파일 sync 위해
+    configs/ 는 *별도 폴더* (configs.snapshot/) 라 안 건드림. 운영 호스트에서 삭제된 파일 sync 위해
     매번 비우고 받음."""
     _ensure_dirs()
+    host = _require_deploy_host()
     import shutil
     if CONFIGS_SNAPSHOT.exists():
         shutil.rmtree(CONFIGS_SNAPSHOT)
     CONFIGS_SNAPSHOT.mkdir(parents=True)
-    rc, out = _run(["scp", "-q", f"{DEPLOY_HOST}:{DEPLOY_PATH}/configs/*.json",
+    rc, out = _run(["scp", "-q", f"{host}:{DEPLOY_PATH}/configs/*.json",
                     f"{CONFIGS_SNAPSHOT}{os.sep}"])
     # 빈 결과는 정상 (등록된 사이트 없음). 진짜 에러면 stderr.
     if rc != 0 and not any(s in out for s in ("No such file", "matches no files", "not match")):
@@ -132,12 +143,13 @@ def pull_configs() -> bool:
 def pull_poll_state() -> bool:
     """output/poll_state/*.json (255개 내외) — 같은 이유로 매번 비우고 받음."""
     _ensure_dirs()
+    host = _require_deploy_host()
     for old in (SNAPSHOT_DIR / "poll_state").glob("*"):
         try:
             old.unlink()
         except OSError:
             pass
-    rc, out = _run(["scp", "-q", f"{DEPLOY_HOST}:{DEPLOY_PATH}/output/poll_state/*.json",
+    rc, out = _run(["scp", "-q", f"{host}:{DEPLOY_PATH}/output/poll_state/*.json",
                     f"{SNAPSHOT_DIR}{os.sep}poll_state{os.sep}"])
     if rc != 0 and not any(s in out for s in ("No such file", "matches no files", "not match")):
         sys.stderr.write(f"[inspect pull] poll_state scp 실패 (rc={rc}): {out}\n")
@@ -148,21 +160,22 @@ def pull_poll_state() -> bool:
 def pull_usage_db() -> bool:
     """usage.sqlite3 — LLM 호출 기록 (WAL). 파일 없으면 정상 skip (아직 호출 0건)."""
     _ensure_dirs()
+    host = _require_deploy_host()
     remote_usage_snap = "/tmp/inspect_usage_snap.sqlite3"
     rc, out = _run([
-        "ssh", DEPLOY_HOST,
+        "ssh", host,
         f"cd {DEPLOY_PATH} && "
         f"if [ -f output/usage.sqlite3 ]; then "
         f"sqlite3 output/usage.sqlite3 \".backup '{remote_usage_snap}'\" && echo OK; "
         f"else echo SKIP_NO_FILE; fi",
     ])
     if rc == 0 and "OK" in out:
-        rc2, out2 = _run(["scp", "-q", f"{DEPLOY_HOST}:{remote_usage_snap}",
+        rc2, out2 = _run(["scp", "-q", f"{host}:{remote_usage_snap}",
                           str(SNAPSHOT_DIR / "usage.sqlite3")])
         if rc2 != 0:
             sys.stderr.write(f"[inspect pull] usage.sqlite3 scp 실패: {out2}\n")
             return False
-        _run(["ssh", DEPLOY_HOST, f"rm -f {remote_usage_snap}"])
+        _run(["ssh", host, f"rm -f {remote_usage_snap}"])
         return True
     if "SKIP_NO_FILE" in out:
         return True  # 정상
@@ -179,8 +192,9 @@ def pull_learned() -> bool:
             learned_dst.unlink()
         except OSError:
             pass
+    host = _require_deploy_host()
     rc, out = _run(["scp", "-q",
-                    f"{DEPLOY_HOST}:{DEPLOY_PATH}/output/learned_blacklist.json",
+                    f"{host}:{DEPLOY_PATH}/output/learned_blacklist.json",
                     str(learned_dst)])
     if rc != 0 and not any(s in out for s in ("No such file", "matches no files", "not match")):
         sys.stderr.write(f"[inspect pull] learned_blacklist scp 실패 (rc={rc}): {out}\n")
@@ -229,7 +243,7 @@ def fetch_markers() -> dict[str, str]:
         '| { read x; if [ -z "$x" ]; then echo "(none)"; else echo "$x"; fi; }; '
         '}'
     )
-    rc, out = _run(["ssh", DEPLOY_HOST, script], timeout=10.0)
+    rc, out = _run(["ssh", _require_deploy_host(), script], timeout=10.0)
     if rc != 0:
         return {}
     lines = (out or "").splitlines()
@@ -259,7 +273,7 @@ def cmd_pull() -> int:
             n_learned = len(_ldata.get("patterns") or [])
         except (json.JSONDecodeError, OSError, UnicodeDecodeError):
             n_learned = 0
-    print(f"[inspect pull] {DEPLOY_HOST}:{DEPLOY_PATH} → {SNAPSHOT_DIR} + {CONFIGS_SNAPSHOT}")
+    print(f"[inspect pull] {DEPLOY_HOST or '(unset)'}:{DEPLOY_PATH} → {SNAPSHOT_DIR} + {CONFIGS_SNAPSHOT}")
     print(f"  bot.sqlite3: {n_db:,} bytes   usage.sqlite3: {n_usage:,} bytes   "
           f"poll_state: {n_states}개   configs: {n_cfgs}개   learned: {n_learned}건")
     fails = [name for name, ok in ok_flags.items() if not ok]
@@ -404,10 +418,10 @@ def cmd_verify(args) -> int:
 
 # --------------------------------------------------------------------------- #
 def main(argv) -> int:
-    p = argparse.ArgumentParser(description="구독·신고 진단 (N100 snapshot 기반).")
+    p = argparse.ArgumentParser(description="구독·신고 진단 (운영 호스트 snapshot 기반).")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    sub.add_parser("pull", help="N100 → 로컬 snapshot")
+    sub.add_parser("pull", help="운영 호스트 → 로컬 snapshot")
     sub.add_parser("markers", help="5 source freshness marker 출력 (디버그)")
 
     p_recent = sub.add_parser("recent", help="최근 register 잡 N개")

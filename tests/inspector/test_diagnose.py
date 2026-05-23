@@ -198,7 +198,7 @@ def run() -> list[tuple[str, bool, str]]:
                       "article_body_empty" not in tags, f"tags={tags}"))
 
         # 9b) _latest_register_job_for — json_extract 매칭. user_id 가 username 안에 substring 으로
-        # 들어있어도 (예: username = "user_<OWNER_ID>") 다른 사용자의 잡으로 잘못 잡지 않는다.
+        # 들어있어도 (예: username = "user_000000000000000000") 다른 사용자의 잡으로 잘못 잡지 않는다.
         slug_x = "j.example.com_x"
         conn = _setup_conn()
         conn.execute(

@@ -1,4 +1,4 @@
-"""N100 원격 명령 실행 CLI. allowlist 강제 — 임의 명령 X.
+"""운영 호스트 원격 명령 실행 CLI. allowlist 강제 — 임의 명령 X.
 
 사용:
     python scripts/remote.py poll-now                                       # 폴링 즉시 1회 실행
@@ -25,7 +25,7 @@ dashboard 가 subprocess 로 호출. stdout 그대로 캡처해 토스트/박스
 설계:
 - 명령은 ACTIONS dict 의 enum (SSH command injection 차단). 사용자 인자는 정해진 알리아스만 매핑.
 - 자유 입력(slug, target_id, post_id, base64 payload) 은 정규식으로 거른 뒤에만 SSH command 에 interpolation.
-- 모든 verb 의 N100 측 실행 = `cd $DEPLOY_PATH && python scripts/<helper>.py …` — 인자는 항상 끝에 append, base64 같은 큰 페이로드도 shell escape 안전 (base64 문자셋 [A-Za-z0-9+/=] 는 metachar 없음).
+- 모든 verb 의 운영 호스트 측 실행 = `cd $DEPLOY_PATH && python scripts/<helper>.py …` — 인자는 항상 끝에 append, base64 같은 큰 페이로드도 shell escape 안전 (base64 문자셋 [A-Za-z0-9+/=] 는 metachar 없음).
 - DEPLOY_HOST 는 env 로만 받음 (인자로 호스트 받으면 위험).
 - 결과 코드: SSH 종료 코드 그대로 전파 (0=성공). stdout 만 print.
 """
@@ -40,7 +40,7 @@ import sys
 from typing import Optional
 
 
-DEPLOY_HOST = os.environ.get("DEPLOY_HOST", "<user>@<host>")
+DEPLOY_HOST = os.environ.get("DEPLOY_HOST", "")
 DEPLOY_PATH_RAW = os.environ.get("DEPLOY_PATH", "~/notice-watcher")
 
 # DEPLOY_PATH 가 SSH command 에 직접 interpolation 되므로 안전 문자만 허용. 위반 시 즉시 거부.
@@ -48,6 +48,15 @@ DEPLOY_PATH_RAW = os.environ.get("DEPLOY_PATH", "~/notice-watcher")
 _DEPLOY_PATH_RE = re.compile(r"^[A-Za-z0-9_./~$-]+$")
 if not _DEPLOY_PATH_RE.match(DEPLOY_PATH_RAW):
     raise SystemExit(f"[remote] DEPLOY_PATH unsafe characters: {DEPLOY_PATH_RAW!r}")
+
+
+def _require_deploy_host() -> str:
+    if DEPLOY_HOST:
+        return DEPLOY_HOST
+    raise RuntimeError(
+        "DEPLOY_HOST 환경변수가 설정되지 않았습니다. 운영 호스트 SSH 대상을 지정하세요 "
+        "(예: PowerShell `$env:DEPLOY_HOST = 'user@host'`, bash `export DEPLOY_HOST=user@host`)."
+    )
 
 # 자유 입력 인자 validation — interpolation 전 거름.
 _SLUG_RE = re.compile(r"^[A-Za-z0-9._%\-]{1,200}$")           # engine.slug 형식 — `%` 포함(URL-encoded UTF-8 seg)
@@ -131,7 +140,7 @@ def _trace_env_prefix() -> str:
 
 def _ssh(remote_cmd: str) -> int:
     full = _trace_env_prefix() + remote_cmd
-    p = subprocess.run(["ssh", DEPLOY_HOST, full], capture_output=True, text=True, errors="replace")
+    p = subprocess.run(["ssh", _require_deploy_host(), full], capture_output=True, text=True, errors="replace")
     if p.stdout:
         sys.stdout.write(p.stdout)
     if p.stderr:
@@ -162,7 +171,7 @@ def cmd_status(alias: str = "bot") -> int:
 def cmd_logs(alias: str, tail: int) -> int:
     u = _resolve_unit(alias)
     # `--user -u <unit>` 는 systemd 일부 버전에서 user-scope journal 을 못 찾고 "No journal files were found"
-    # 반환 (관찰: N100 Arch). `--user-unit <unit>` 또는 `_SYSTEMD_USER_UNIT=...` 로 명시해야 안정.
+    # 반환 (관찰: 일부 systemd 환경). `--user-unit <unit>` 또는 `_SYSTEMD_USER_UNIT=...` 로 명시해야 안정.
     return _ssh(f"journalctl --user-unit {u} -n {int(tail)} --no-pager")
 
 
@@ -257,7 +266,7 @@ def cmd_trace_fetch(trace_id: str) -> int:
 
 def cmd_unlearn(pattern_id: str) -> int:
     """learned_blacklist 의 pattern entry 제거 (false positive 손-회수).
-    N100 의 `scripts/register.py --unlearn <id>` 호출 — atomic write 보장 + shell-quoting 안전.
+    운영 호스트의 `scripts/register.py --unlearn <id>` 호출 — atomic write 보장 + shell-quoting 안전.
     pattern_id 는 [a-f0-9]{1,12} 만 (path-traversal/injection 차단)."""
     pid = _require(pattern_id, _PATTERN_ID_RE, name="pattern_id")
     return _ssh(_remote_python_cmd("scripts/register.py", "--unlearn", pid))
@@ -268,7 +277,7 @@ _SLUG_RE = re.compile(r"^[A-Za-z0-9._%-]+$")
 
 def cmd_clear_bug(slug: str) -> int:
     """`.BUG.json` 마커 제거 — bug-fix workflow 마지막 step (대시보드 Clear 버튼).
-    N100 의 `scripts/register.py --clear-bug <slug>` 호출.
+    운영 호스트의 `scripts/register.py --clear-bug <slug>` 호출.
     slug 는 [A-Za-z0-9._%-]+ 만 (path-traversal/injection 차단)."""
     s = _require(slug, _SLUG_RE, name="slug")
     return _ssh(_remote_python_cmd("scripts/register.py", "--clear-bug", s))
@@ -278,7 +287,7 @@ _URL_ARG_RE = re.compile(r"^https?://[A-Za-z0-9._~\-]+(?::\d+)?/[A-Za-z0-9._~%:/
 _CATALOG_NAME_ARG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _RC_LIST_ARG_RE = re.compile(r"^-?\d+(?:,-?\d+)*$")
 
-# rev6: dev box 의 output/candidates/ 가 catalog 단일 진본. N100 은 batch-register 시 atomic
+# rev6: dev box 의 output/candidates/ 가 catalog 단일 진본. 운영 호스트는 batch-register 시 atomic
 # scp 로 동기. configs/candidates/ 는 폐기 (예전 git-tracked 위치).
 _LOCAL_CATALOG_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -287,14 +296,14 @@ _LOCAL_CATALOG_DIR = os.path.join(
 
 
 def _sync_catalogs_to_n100(catalogs: list[str]) -> int:
-    """각 catalog yaml 을 dev box → N100 atomic scp.
+    """각 catalog yaml 을 dev box → 운영 호스트 atomic scp.
 
     절차 (per catalog):
       1. dev box 의 `output/candidates/<name>.yaml` 존재 확인 — 없으면 abort.
       2. SSH `mkdir -p $HOME/notice-watcher/output/candidates/` (idempotent).
-      3. scp local → N100 의 `output/candidates/.tmp.<name>.<pid>.yaml`.
+      3. scp local → 운영 호스트의 `output/candidates/.tmp.<name>.<pid>.yaml`.
       4. SSH `mv` → `output/candidates/<name>.yaml` (atomic rename).
-      5. 실패 시 N100 의 temp 정리 시도 + return 0 아닌 값.
+      5. 실패 시 운영 호스트의 temp 정리 시도 + return 0 아닌 값.
 
     quoting: DEPLOY_PATH_RAW + name 둘 다 module-load 시점 regex 검증 (`_DEPLOY_PATH_RE`,
     `_CATALOG_NAME_ARG_RE`) — shell metachar 없음. tilde 확장 보존 위해 unquoted.
@@ -304,6 +313,7 @@ def _sync_catalogs_to_n100(catalogs: list[str]) -> int:
       5  로컬 yaml 없음
       6  scp / SSH 실패
     """
+    deploy_host = _require_deploy_host()
     pid = os.getpid()
     for name in catalogs:
         if not _CATALOG_NAME_ARG_RE.match(name):
@@ -319,39 +329,39 @@ def _sync_catalogs_to_n100(catalogs: list[str]) -> int:
         remote_tmp = f"{remote_dir}/.tmp.{name}.{pid}.yaml"
         # 1. mkdir (idempotent)
         rc = subprocess.run(
-            ["ssh", DEPLOY_HOST, f"mkdir -p {remote_dir}"],
+            ["ssh", deploy_host, f"mkdir -p {remote_dir}"],
             capture_output=True, text=True,
         )
         if rc.returncode != 0:
-            print(f"[remote] N100 mkdir 실패: {rc.stderr}", file=sys.stderr)
+            print(f"[remote] 운영 호스트 mkdir 실패: {rc.stderr}", file=sys.stderr)
             return 6
         # 2. scp → temp. scp 의 remote dest 는 unquoted — tilde 확장 위함 (sshd 측 shell 처리).
         rc = subprocess.run(
-            ["scp", "-q", local, f"{DEPLOY_HOST}:{remote_tmp}"],
+            ["scp", "-q", local, f"{deploy_host}:{remote_tmp}"],
             capture_output=True, text=True,
         )
         if rc.returncode != 0:
             print(f"[remote] scp 실패 ({name}): {rc.stderr or rc.stdout}", file=sys.stderr)
             # temp 청소 시도 (best-effort)
             subprocess.run(
-                ["ssh", DEPLOY_HOST, f"rm -f {remote_tmp}"],
+                ["ssh", deploy_host, f"rm -f {remote_tmp}"],
                 capture_output=True, text=True,
             )
             return 6
         # 3. atomic rename
         rc = subprocess.run(
-            ["ssh", DEPLOY_HOST, f"mv {remote_tmp} {remote_final}"],
+            ["ssh", deploy_host, f"mv {remote_tmp} {remote_final}"],
             capture_output=True, text=True,
         )
         if rc.returncode != 0:
-            print(f"[remote] N100 mv 실패 ({name}): {rc.stderr}", file=sys.stderr)
+            print(f"[remote] 운영 호스트 mv 실패 ({name}): {rc.stderr}", file=sys.stderr)
             # 실패한 temp 청소
             subprocess.run(
-                ["ssh", DEPLOY_HOST, f"rm -f {remote_tmp}"],
+                ["ssh", deploy_host, f"rm -f {remote_tmp}"],
                 capture_output=True, text=True,
             )
             return 6
-        print(f"[remote] catalog 동기: {name}.yaml → N100")
+        print(f"[remote] catalog 동기: {name}.yaml → 운영 호스트")
     return 0
 
 
@@ -362,9 +372,9 @@ def cmd_batch_register(
     rc: str,
     force: bool,
 ) -> int:
-    """N100 의 `scripts/register_batch.py` 호출 — catalog/url scope × filter (untried/failed/rc/force).
+    """운영 호스트의 `scripts/register_batch.py` 호출 — catalog/url scope × filter (untried/failed/rc/force).
 
-    rev6 변경: catalog scope 면 *호출 전* dev box 의 `output/candidates/<name>.yaml` 을 N100 으로
+    rev6 변경: catalog scope 면 *호출 전* dev box 의 `output/candidates/<name>.yaml` 을 운영 호스트로
     atomic scp 동기. 즉 dashboard live edit 이 git 안 거치고 즉시 다음 batch run 에 반영됨.
     scp 실패 시 hard abort — stale yaml 로 register 진행 X.
 
@@ -378,7 +388,7 @@ def cmd_batch_register(
     if failed and rc:
         print("[remote] --failed 와 --rc 동시 사용 불가", file=sys.stderr)
         return 4
-    # catalog 인자 검증 + dev → N100 동기 (scp 실패 시 abort).
+    # catalog 인자 검증 + dev → 운영 호스트 동기 (scp 실패 시 abort).
     if catalogs:
         sync_rc = _sync_catalogs_to_n100(catalogs)
         if sync_rc != 0:
@@ -408,7 +418,7 @@ def cmd_batch_register(
 
 
 def cmd_announce_scoped(b64: str) -> int:
-    """base64-인코딩된 JSON 페이로드를 받아 N100 의 `scripts/announce.py --base64` 로 전달.
+    """base64-인코딩된 JSON 페이로드를 받아 운영 호스트의 `scripts/announce.py --base64` 로 전달.
 
     페이로드 검증은 announce.py 가 함 (title/message 길이, recipients 형식 등). 여기선
     base64 문자셋만 검증 → SSH 명령 안전 interpolation 보장.
@@ -455,7 +465,7 @@ def list_actions() -> int:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
-    p = argparse.ArgumentParser(description="N100 원격 명령 (allowlist)")
+    p = argparse.ArgumentParser(description="운영 호스트 원격 명령 (allowlist)")
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("poll-now")
     sub.add_parser("restart-bot")

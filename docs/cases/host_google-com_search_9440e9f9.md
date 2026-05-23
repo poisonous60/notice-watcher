@@ -10,7 +10,7 @@ config_strategy:
 adapters_changed:
 engine_files_touched: [bot/site_ops.py, probe/fetch_headless.py, scripts/register.py]
 tags: [silent-death, subprocess, playwright, anti-bot, /preview, policy-gate, non-board, antibot-redirect, google-search]
-requested_by: poi2 (Discord user id <OWNER_ID>)
+requested_by: <owner>
 ---
 
 ## 무엇이 일어났나

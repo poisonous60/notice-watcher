@@ -1,6 +1,6 @@
-"""dev박스 → N100 파일 push CLI. `inspect_subs.py pull` 의 대칭.
+"""dev박스 → 운영 호스트 파일 push CLI. `inspect_subs.py pull` 의 대칭.
 
-운영 컨피그/라우팅을 N100 에 반영할 때 사용. dashboard 가 subprocess 로도 호출.
+운영 컨피그/라우팅을 운영 호스트에 반영할 때 사용. dashboard 가 subprocess 로도 호출.
 
 사용:
     python scripts/push.py routing                     # output/llm_routing.json
@@ -10,7 +10,7 @@
     python scripts/push.py env                         # .env (로컬 .env.push 가 있을 때만)
     python scripts/push.py timer                       # notice-poll.timer (~/.config/systemd/user/)
 
-N100 호스트: `DEPLOY_HOST` (기본 `<user>@<host>` — Tailscale MagicDNS), `DEPLOY_PATH` (기본 `~/notice-watcher`).
+운영 호스트: `DEPLOY_HOST`, `DEPLOY_PATH` (기본 `~/notice-watcher`).
 
 설계:
 - target 종류는 allowlist (TARGETS dict). 임의 파일 path 인자 안 받음 → SSH/scp injection 차단.
@@ -31,8 +31,17 @@ from typing import Optional
 
 
 ROOT = Path(__file__).resolve().parent.parent
-DEPLOY_HOST = os.environ.get("DEPLOY_HOST", "<user>@<host>")
+DEPLOY_HOST = os.environ.get("DEPLOY_HOST", "")
 DEPLOY_PATH = os.environ.get("DEPLOY_PATH", "~/notice-watcher")
+
+
+def _require_deploy_host() -> str:
+    if DEPLOY_HOST:
+        return DEPLOY_HOST
+    raise RuntimeError(
+        "DEPLOY_HOST 환경변수가 설정되지 않았습니다. 운영 호스트 SSH 대상을 지정하세요 "
+        "(예: PowerShell `$env:DEPLOY_HOST = 'user@host'`, bash `export DEPLOY_HOST=user@host`)."
+    )
 
 
 _SLUG_RE = re.compile(r"^[A-Za-z0-9._%\-]{1,200}$")  # engine.slug 형식 — `%` 포함
@@ -47,7 +56,7 @@ class _Target:
     """allowlisted push target.
 
     local_path : repo-relative 로컬 소스 path (slug 인 경우 fmt 후 채워짐).
-    remote_path: N100 destination — shell expansion 됨 (`~/` 허용). DEPLOY_PATH/... 형식.
+    remote_path: 운영 호스트 destination — shell expansion 됨 (`~/` 허용). DEPLOY_PATH/... 형식.
     """
     name: str
     local_path: str           # `{slug}` 치환 지원
@@ -128,13 +137,14 @@ def push(target_name: str, slug: Optional[str] = None) -> int:
         print(f"[push] 로컬 파일 없음: {local}", file=sys.stderr)
         return 3
     remote = _resolve_remote(t, slug)
-    rc, out = _run(["scp", "-q", str(local), f"{DEPLOY_HOST}:{remote}"])
+    deploy_host = _require_deploy_host()
+    rc, out = _run(["scp", "-q", str(local), f"{deploy_host}:{remote}"])
     if rc != 0:
         print(f"[push] scp 실패 (rc={rc}): {out}", file=sys.stderr)
         return 2
-    print(f"[push] {local} → {DEPLOY_HOST}:{remote}  OK ({local.stat().st_size:,} bytes)")
+    print(f"[push] {local} → {deploy_host}:{remote}  OK ({local.stat().st_size:,} bytes)")
     if t.requires_systemd_reload:
-        rc2, out2 = _run(["ssh", DEPLOY_HOST, "systemctl --user daemon-reload"])
+        rc2, out2 = _run(["ssh", deploy_host, "systemctl --user daemon-reload"])
         if rc2 != 0:
             print(f"[push] daemon-reload 실패 (rc={rc2}): {out2}", file=sys.stderr)
             return 2
@@ -154,7 +164,7 @@ def list_targets() -> int:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
-    p = argparse.ArgumentParser(description="dev박스 → N100 파일 push (allowlist)")
+    p = argparse.ArgumentParser(description="dev박스 → 운영 호스트 파일 push (allowlist)")
     sub = p.add_subparsers(dest="cmd", required=True)
     for name in TARGETS:
         s = sub.add_parser(name, help=TARGETS[name].description)

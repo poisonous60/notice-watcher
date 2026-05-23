@@ -27,6 +27,15 @@ vercel-proxy/
 skills-lock.json
 docs/tmp_log.md
 
+# operator-private docs (N100 SSH/Tailscale/Discord owner info — do NOT publish)
+docs/운영 메모.md
+docs/공개 현황 사이트.md
+docs/2026-05-16-인프라-방어.md
+docs/중간발표/
+
+# session-local harness state
+.claude/scheduled_tasks.lock
+
 # Claude Code: only hand-config skill is part of deploy
 .claude/skills/cavecrew/
 .claude/skills/caveman/

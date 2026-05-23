@@ -1,4 +1,4 @@
-# dev-only — N100 배포엔 안 깔림. dev박스에서:
+# dev 전용 — dev박스에서:
 #   pip install -r requirements-dashboard.txt
 # 그 뒤 `python scripts/dashboard.py` 로 띄움 (127.0.0.1:8765).
 fastapi>=0.110

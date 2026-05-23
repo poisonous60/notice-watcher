@@ -5,6 +5,8 @@
 - **어댑터** (`adapters/`): 사이트별로 손으로 짠 수집기 (모두 async, `BaseAdapter` 상속).
 - **config 기반 엔진** (`engine/` + `generate/` + `scripts/register.py`,`poll.py`): 경량 LLM(Gemini)이 probe 결과를 보고 **선언적 config(JSON)** 를 작성 → 범용 엔진이 실행 → 자동 검증/재시도 → 폴링·새 글 감지·깨짐 시 재-probe. → **[docs/config 기반 엔진 가이드.md](docs/config%20기반%20엔진%20가이드.md)**
 
+> **Clone 사용자에게**: 학습·실습 목적 공개. 본인 환경에서 돌리려면 `.env` 에 `BOT_TOKEN`·`GEMINI_API_KEYS`·`OWNER_USER_ID` 등을 직접 채워야 합니다. 운영 호스트 ssh 도구(`scripts/inspect_subs.py`·`triage.py`·`push.py`·`remote.py`)는 `DEPLOY_HOST`·`DEPLOY_PATH` 환경변수가 필요합니다. 크롤링 정책(`docs/크롤링 지침.md`) 을 반드시 읽고 `polite_sleep`·`robots.txt` 를 지키세요 — 차단 우회·CAPTCHA bypass 는 다루지 않습니다.
+
 ## 디렉토리 구조
 
 ```
@@ -41,7 +43,7 @@ notice-watcher/
 │   ├── notice-poll.service · .timer    # 폴링 주기 트리거
 │   └── notice-notify.service · .timer  # 알림 주기 트리거
 ├── systemd/
-│   └── notice-pw-daemon.service        # 사용자 unit — chromium daemon (dev 박스만, N100 미적용)
+│   └── notice-pw-daemon.service        # 사용자 unit — chromium daemon (dev 박스 옵션)
 │
 ├── probe/                      # 사이트 정찰 패키지 (fetch_static/fetch_headless/fetch_headful, hydration, signals, diagnose, …)
 ├── adapters/                   # 사이트별 손어댑터 (모두 async, BaseAdapter 상속)
@@ -87,18 +89,18 @@ notice-watcher/
 │   ├── probe.py                # python scripts/probe.py "<URL>" [--lite]
 │   ├── probe_smoke.py          # pre-push hook 이 stage 3·5 자동 실행 (회귀 차단)
 │   ├── register.py             # URL → probe → digest → LLM → config + baseline   (또는 --config <path> 로 손-config 등록)
-│   ├── triage.py               # 봇(N100)에서 자동 등록 실패한 사이트 pull|list|show <slug> → 손 config (skill: hand-config)
+│   ├── triage.py               # 봇 운영 중 자동 등록 실패한 사이트 pull|list|show <slug> → 손 config (skill: hand-config)
 │   ├── poll.py                 # 등록된 사이트 폴링 + 새 글 감지 + 깨짐 시 재-probe + post-register validate
 │   ├── notify.py               # collected/<ts>/<slug>.new.json → LLM 요약·필터 → Discord 발송
 │   ├── poll_and_notify.py      # poll.py → notify.py 한 번에 (systemd 가 실행) — chromium 락 안에서
-│   ├── playwright_daemon.py    # ← chromium 데몬 (CDP attach, dev 박스만) — probe cold launch (~2-3s) 회피
+│   ├── playwright_daemon.py    # ← chromium 데몬 (CDP attach) — probe cold launch (~2-3s) 회피
 │   ├── _chromium_lock.py       # chromium 띄우는 작업끼리 동시 실행 방지 파일 락
 │   ├── case_log.py             # ← skill 실행 audit 로그 (output/cases.sqlite3, hand-config 마지막 단계)
 │   ├── cases_index.py          # docs/cases/*.md → docs/cases/INDEX.md 자동 생성
 │   ├── dashboard.py            # ← `python scripts/dashboard.py` — uvicorn 으로 dashboard.app:app
 │   ├── announce.py             # owner → 모든 구독자/관리자에 공지 발송
-│   ├── push.py                 # dev box → N100 ssh pull + restart 한방
-│   ├── remote.py               # N100 원격 진단 (ssh wrap)
+│   ├── push.py                 # dev box → 운영 호스트 ssh pull + restart 한방
+│   ├── remote.py               # 운영 호스트 원격 진단 (ssh wrap)
 │   ├── replay.py               # output/probe/<slug>/ 산출물 재생 (검증·디버그)
 │   ├── inspect_subs.py         # bot.sqlite3 구독/잡 sqlite3 dump
 │   ├── prune_probe.py          # output/probe·collected·tracing 디스크 pruning (cron)
@@ -111,7 +113,7 @@ notice-watcher/
 │
 ├── tests/                      # pytest — probe heuristics / recognizers / bot / llm / inspector
 ├── .claude/skills/             # 자율 워크플로 스킬
-│   ├── hand-config/            # 자동 등록 실패 사이트 손-config + N100 배포
+│   ├── hand-config/            # 자동 등록 실패 사이트 손-config + 배포
 │   ├── pipeline-rot-review/    # prompts/probe heuristics/cases 누적 rot 진단 (read-only)
 │   └── report-triage/          # 사용자 /report 자동 진단 → 수정 → 배포
 ├── .claude/agents/             # 서브에이전트 정의 (hand-config-reviewer 등)
@@ -129,7 +131,7 @@ notice-watcher/
 │   └── state/<slug>.json       # 로그인 storage_state
 │
 ├── requirements.txt
-├── requirements-dashboard.txt   # FastAPI/uvicorn/jinja2/htmx — dev 박스만
+├── requirements-dashboard.txt   # FastAPI/uvicorn/jinja2/htmx — 대시보드만
 └── .gitignore
 ```
 
@@ -200,7 +202,7 @@ python scripts/notify.py                     # webhook 발송 + output/delivered
 python scripts/poll_and_notify.py            # poll.py → notify.py 한 번에 (운영용; systemd notice-poll.service 가 이걸 실행)
 ```
 
-배포(N100 미니PC에 systemd 로 상시 + Discord 봇 `/watch` 로 사이트 등록): **[docs/배포 가이드.md](docs/배포%20가이드.md)**.
+배포(systemd 로 상시 폴링 + Discord 봇 `/watch` 로 사이트 등록): **[docs/배포 가이드.md](docs/배포%20가이드.md)**.
 
 ## 새 사이트 추가 (어떤 길로?)
 
@@ -249,7 +251,7 @@ owner 1인용·localhost 한정·인증 0. 페이지: `/subs` `/jobs` `/reports`
 
 자세한 내용: **[docs/대시보드 가이드.md](docs/%EB%8C%80%EC%8B%9C%EB%B3%B4%EB%93%9C%20%EA%B0%80%EC%9D%B4%EB%93%9C.md)**.
 
-## Chromium 데몬 (N100 + dev 박스)
+## Chromium 데몬
 
 probe 의 cold launch (~2-3s) 회피 + worker pool 동시 진입 시 chromium 컨텍스트 share. CDP endpoint
 띄워두고 probe 가 `connect_over_cdp` 로 attach.
@@ -259,11 +261,11 @@ python scripts/playwright_daemon.py             # foreground 시작
 python scripts/playwright_daemon.py status      # 상태
 python scripts/playwright_daemon.py stop        # graceful stop
 
-# systemd user unit (N100 + dev 박스 둘 다):
+# systemd user unit (장기 운영 시):
 systemctl --user enable --now notice-pw-daemon.service
 ```
 
-idle 정책: `IDLE_TIMEOUT_S` 미사용 시 자기 자신 stop. endpoint 파일 없으면 probe fresh launch — backwards-compatible. N100 은 `--no-idle` 로 systemd 가 상시 가동.
+idle 정책: `IDLE_TIMEOUT_S` 미사용 시 자기 자신 stop. endpoint 파일 없으면 probe fresh launch — backwards-compatible. 장기 운영은 `--no-idle` 로 상시 가동.
 
 ## LLM routing (Gemini ↔ OpenRouter)
 
@@ -291,7 +293,7 @@ call_site 별로 provider/model 분리. source: `output/llm_routing.json`.
 2. `docs/cases/<slug>.md` 작성 + `python scripts/cases_index.py`
 3. `Agent(subagent_type='hand-config-reviewer', model='sonnet')` 자가 점검
 4. dev 박스 commit → push (pre-push hook = `probe_smoke --stage 3 --stage 5` 강제)
-5. N100 ssh pull + bot restart
+5. 운영 호스트 ssh pull + bot restart
 6. `python scripts/case_log.py log …` 로 audit (`output/cases.sqlite3`) — 대시보드 `/cases` 에서 retrospect
 
 설계: **[docs/자가개선 인프라 계획.md](docs/%EC%9E%90%EA%B0%80%EA%B0%9C%EC%84%A0%20%EC%9D%B8%ED%94%84%EB%9D%BC%20%EA%B3%84%ED%9A%8D.md)** (rev 3).
@@ -303,16 +305,7 @@ call_site 별로 provider/model 분리. source: `output/llm_routing.json`.
 - 로그인은 사용자가 한 번 (Playwright headful → `state.json` 재사용); 자동 로그인은 안 함. 차단 우회(TLS fingerprint / IP 로테이션 / CAPTCHA)는 자동 경로에서 일절 안 함.
 - 요약본만 푸시, 원문 그대로 재배포 금지 (notify 컴포넌트 책임).
 - **Rate limit** (`config.toml [rate_limit]`): 사용자당 시간/일 register 잡 상한 + 워커 큐 전역 상한 — 초과 시 사용자에 안내 후 enqueue 거부. 비공개·LOGIN_REQUIRED 사이트 100개 던짐 → chromium_lock 직렬 + LLM 비용 폭증 시나리오 차단.
-- **Post-register safety** (`scripts/poll.py` + `engine/known_platforms.py`): 등록 후에도 known-platform validate / no-recognize 시 reprobe / body drift 감지 — silent 결함 3종 방어 (commit 79abc9f, `docs/운영 메모.md` §8).
+- **Post-register safety** (`scripts/poll.py` + `engine/known_platforms.py`): 등록 후에도 known-platform validate / no-recognize 시 reprobe / body drift 감지 — silent 결함 3종 방어 (commit 79abc9f).
 - **Disk prune** (`scripts/prune_probe.py`, `config.toml [prune]` cron): `output/probe·collected·tracing` 누적 차단.
 
-자세한 내용: `docs/크롤링 지침.md` (§6) + `docs/config 기반 엔진 가이드.md` + `docs/사이트별 구현 방침.md` + `docs/운영 메모.md`.
-
-## 두 머신 모델 (dev box ↔ N100)
-
-| 머신 | 역할 | 코드 변경 |
-|---|---|---|
-| **dev box** | 코드 작성·테스트·commit·push, 대시보드 (dev 전용) | YES |
-| **N100** (`<user>@<host>` Tailscale; LAN `<lan-ip>`) | 봇·polling 운영 (`notice-bot.service` systemd) | NO — `git pull` 만 |
-
-원칙: 모든 코드 변경 dev box only, N100 pull only. 룰·안전망: **[CLAUDE.md](CLAUDE.md)** §3·5·7 + **[docs/운영 메모.md](docs/%EC%9A%B4%EC%98%81%20%EB%A9%94%EB%AA%A8.md)**.
+자세한 내용: `docs/크롤링 지침.md` (§6) + `docs/config 기반 엔진 가이드.md` + `docs/사이트별 구현 방침.md`.

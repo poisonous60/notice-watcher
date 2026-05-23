@@ -1,14 +1,14 @@
-"""triage.py — 봇(N100)에서 자동 등록이 실패한 사이트들을 dev박스로 가져와 일괄 처리.
+"""triage.py — 운영 호스트에서 자동 등록이 실패한 사이트들을 dev박스로 가져와 일괄 처리.
 
-자동 등록 실패의 흔적 두 가지 (둘 다 N100 의 `~/notice-watcher/output/`):
+자동 등록 실패의 흔적 두 가지 (둘 다 운영 호스트의 `~/notice-watcher/output/`):
   - `output/poll_state/<slug>.FAILED.json` : register.py 가 씀 — `reason` / `last_feedback`(=`[FAIL] <체크>` …) / `last_config`(자동 생성된 마지막 시도).
   - `output/triage_queue.jsonl`            : 봇이 `_ensure_registered` 실패 때마다 한 줄씩 append — `{ts,url,slug,via("preview"|"watch"),requested_by,register_tail}`.
 성공 등록되면(자동이든 `register.py --config` 든) `_save_state` 가 둘 다 정리한다.
 
-흐름:  python scripts/triage.py pull [--skip-later] [--no-auto-defer]   # N100 → 로컬 (FAILED.json + triage_queue.jsonl + 각 실패 slug 의 probe/)
+흐름:  python scripts/triage.py pull [--skip-later] [--no-auto-defer]   # 운영 호스트 → 로컬 (FAILED.json + triage_queue.jsonl + 각 실패 slug 의 probe/)
        python scripts/triage.py list [--skip-later]   # 로컬에 받아온 실패 목록 표
        python scripts/triage.py show <slug>           # 그 slug 의 .FAILED.json + 요청자 + probe digest (diagnosis/list_candidates/HAR slice)
-   → 그다음 hand-config 스킬 "모드 B(triage)" 로 사이트별 처리(probe 고치거나 손 config/손어댑터 작성 → register --config → N100 배포).
+   → 그다음 hand-config 스킬 "모드 B(triage)" 로 사이트별 처리(probe 고치거나 손 config/손어댑터 작성 → register --config → 운영 호스트 배포).
 
 `--skip-later` : dashboard `/triage/failed` 에서 '나중에' 토글한 slug 제외 (`output/triage_later.json` 공유).
                   pull 시 → Later slug 의 `.FAILED.json`·`probe/<slug>/` 로컬에서 제거(다음 호출에서도 안 누적).
@@ -20,12 +20,11 @@
 
 게이트/분류 실패 전용 파킹 (`Later` 와 *분리* 버킷 — `triage_gate_failed.json`, dev box only):
   python scripts/triage.py park-gate-fail <slug>... [--reason=<text>]   # 게이트/분류 실패만 파킹 (활성 list 서 숨김)
-  python scripts/triage.py sweep-gate-fail [--execute] [--host=<host>]  # 분류기/게이트 개선 후 N100 full re-register → 해소 시 목록서 제거
+  python scripts/triage.py sweep-gate-fail [--execute] [--host=<host>]  # 분류기/게이트 개선 후 운영 호스트 full re-register → 해소 시 목록서 제거
   *언제 park*: gate_reject 가 놓쳐 gen_fail 로 샌 것·분류기 '?'/미신뢰 = *분류 계층* 실패. capability(cap_blocked·SPA·timeout)는 X — 그건 Later/render·stealth 트랙.
   *해소*: 분류기/게이트(ADR 0007 multi-class 등) 개선 → `sweep-gate-fail --execute` 한 방으로 일괄 재판정. per-site 손-거부 대신 쓰는 체계적 경로.
 
-N100 호스트: 환경변수 `DEPLOY_HOST`(기본 `<user>@<host>` — Tailscale MagicDNS) / `DEPLOY_PATH`(기본 `~/notice-watcher`).
-  Tailscale 이 LAN/외부 양쪽에서 라우팅 — IP 변동 무관. LAN IP `aaaa@<lan-ip>` 도 집에서는 OK.
+운영 호스트: 환경변수 `DEPLOY_HOST` / `DEPLOY_PATH`(기본 `~/notice-watcher`).
   ※ ssh/scp 가 PATH 에 있어야 함(Windows 10+ 기본 포함).
 """
 from __future__ import annotations
@@ -47,10 +46,19 @@ PROBE_DIR = OUTPUT / "probe"
 LATER_STORE = OUTPUT / "triage_later.json"  # dashboard `/triage/failed` 의 '나중에' 토글 (dev box only, gitignored)
 GATE_FAILED_STORE = OUTPUT / "triage_gate_failed.json"  # 게이트/분류 실패 전용 파킹 (dev box only, gitignored) — Later 와 분리
 
-DEPLOY_HOST = os.environ.get("DEPLOY_HOST", "<user>@<host>")
+DEPLOY_HOST = os.environ.get("DEPLOY_HOST", "")
 DEPLOY_PATH = os.environ.get("DEPLOY_PATH", "~/notice-watcher")
 
 _FAILED_SUFFIX = ".FAILED.json"
+
+
+def _require_deploy_host() -> str:
+    if DEPLOY_HOST:
+        return DEPLOY_HOST
+    raise RuntimeError(
+        "DEPLOY_HOST 환경변수가 설정되지 않았습니다. 운영 호스트 SSH 대상을 지정하세요 "
+        "(예: PowerShell `$env:DEPLOY_HOST = 'user@host'`, bash `export DEPLOY_HOST=user@host`)."
+    )
 
 
 def _load_later() -> set[str]:
@@ -266,12 +274,13 @@ def _print_har_digest(pd: Path) -> None:
 
 # --------------------------------------------------------------------------- #
 def cmd_pull(skip_later: bool = False, auto_defer: bool = True) -> int:
+    deploy_host = _require_deploy_host()
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     OUTPUT.mkdir(parents=True, exist_ok=True)
     later = _load_later() if skip_later else set()
 
-    # 1a) N100 의 현재 FAILED.json slug + triage_queue.jsonl 존재 여부를 *한 번의 ssh* 로 받는다 —
-    # local 의 stale (N100 에서 이미 REJECTED 로 전환됐는데 옛 FAILED 가 local 에 남은 것) 자동 정리.
+    # 1a) 운영 호스트의 현재 FAILED.json slug + triage_queue.jsonl 존재 여부를 *한 번의 ssh* 로 받는다 —
+    # local 의 stale (운영 호스트에서 이미 REJECTED 로 전환됐는데 옛 FAILED 가 local 에 남은 것) 자동 정리.
     # scp 는 reverse-delete 안 함 → 명시 sync 필요.
     #
     # 사전 안전 장치 — ssh 실패 (네트워크/권한/DEPLOY_PATH 오타) 시 remote 가 empty 라 *오해* 해서 모든 local
@@ -285,7 +294,7 @@ def cmd_pull(skip_later: bool = False, auto_defer: bool = True) -> int:
         f"(ls output/poll_state/*{_FAILED_SUFFIX} 2>/dev/null; echo {sentinel_ok}) && "
         f"(test -f output/triage_queue.jsonl && echo {sentinel_qok} || echo {sentinel_qmiss})"
     )
-    rc_ls, out_ls = _run(["ssh", DEPLOY_HOST, remote_cmd])
+    rc_ls, out_ls = _run(["ssh", deploy_host, remote_cmd])
     remote_response_trusted = (rc_ls == 0 and sentinel_ok in out_ls
                                 and (sentinel_qok in out_ls or sentinel_qmiss in out_ls))
     remote_failed: set[str] = set()
@@ -314,7 +323,7 @@ def cmd_pull(skip_later: bool = False, auto_defer: bool = True) -> int:
                     pruned_stale_slugs.append(fp.name[: -len(_FAILED_SUFFIX)])
                 except OSError as e:
                     sys.stderr.write(f"[triage pull] stale {fp.name} 삭제 실패: {e}\n")
-        # triage_queue 도 reverse-delete: N100 에 파일 자체가 사라졌으면 local 도 삭제 (N100 _prune_triage_queue
+        # triage_queue 도 reverse-delete: 운영 호스트에 파일 자체가 사라졌으면 local 도 삭제 (_prune_triage_queue
         # 가 last entry 지우면 파일 unlink 함 — local 에만 잔재 시 영구 stale 위험).
         if remote_queue_missing and QUEUE.exists():
             try:
@@ -323,7 +332,7 @@ def cmd_pull(skip_later: bool = False, auto_defer: bool = True) -> int:
                 sys.stderr.write(f"[triage pull] stale triage_queue.jsonl 삭제 실패: {e}\n")
 
     # 1b) <slug>.FAILED.json 들 — 원격 셸이 glob 확장. 매치 0개면 scp 가 비0 으로 끝남(에러 아님).
-    rc, out = _run(["scp", "-q", f"{DEPLOY_HOST}:{DEPLOY_PATH}/output/poll_state/*{_FAILED_SUFFIX}", f"{STATE_DIR}{os.sep}"])
+    rc, out = _run(["scp", "-q", f"{deploy_host}:{DEPLOY_PATH}/output/poll_state/*{_FAILED_SUFFIX}", f"{STATE_DIR}{os.sep}"])
     if rc != 0 and not any(s in out for s in ("No such file", "not a regular file", "matches no files")):
         sys.stderr.write(f"[triage pull] FAILED.json 가져오기 경고: {out}\n")
 
@@ -356,7 +365,7 @@ def cmd_pull(skip_later: bool = False, auto_defer: bool = True) -> int:
                     sys.stderr.write(f"[triage pull] Later {slug}.FAILED.json 삭제 실패: {e}\n")
 
     # 2) triage_queue.jsonl (없을 수 있음)
-    _run(["scp", "-q", f"{DEPLOY_HOST}:{DEPLOY_PATH}/output/triage_queue.jsonl", str(QUEUE)])
+    _run(["scp", "-q", f"{deploy_host}:{DEPLOY_PATH}/output/triage_queue.jsonl", str(QUEUE)])
 
     # 3) 각 실패 slug 의 probe 산출물 디렉토리 (진단 재료). Later 는 건너뜀 + 이미 받은 거 정리.
     PROBE_DIR.mkdir(parents=True, exist_ok=True)
@@ -365,7 +374,7 @@ def cmd_pull(skip_later: bool = False, auto_defer: bool = True) -> int:
     for slug in slugs:
         if slug in later:
             continue
-        _run(["scp", "-rq", f"{DEPLOY_HOST}:{DEPLOY_PATH}/output/probe/{slug}", f"{PROBE_DIR}{os.sep}"])
+        _run(["scp", "-rq", f"{deploy_host}:{DEPLOY_PATH}/output/probe/{slug}", f"{PROBE_DIR}{os.sep}"])
     if later:
         for slug in later:
             pd = PROBE_DIR / slug
@@ -389,10 +398,10 @@ def cmd_pull(skip_later: bool = False, auto_defer: bool = True) -> int:
                 sys.stderr.write(f"[triage pull] stale probe/{slug} 삭제 실패: {e}\n")
 
     nq = len({e.get("slug") for e in _read_queue()})
-    print(f"[triage pull] {DEPLOY_HOST}:{DEPLOY_PATH}/output → {OUTPUT}")
+    print(f"[triage pull] {deploy_host}:{DEPLOY_PATH}/output → {OUTPUT}")
     print(f"  FAILED.json: {len(slugs)}건   triage_queue slug: {nq}건   probe 디렉토리: {sum(1 for s in slugs if (PROBE_DIR / s).exists())}개")
     if pruned_stale or pruned_stale_probe:
-        print(f"  stale 정리 (N100 에서 이미 REJECTED/등록 완료): FAILED.json {pruned_stale}건 / probe {pruned_stale_probe}개")
+        print(f"  stale 정리 (운영 호스트에서 이미 REJECTED/등록 완료): FAILED.json {pruned_stale}건 / probe {pruned_stale_probe}개")
     if auto_deferred:
         print(f"  capability_blocked 자동 '나중에' 이동: {len(auto_deferred)}건 "
               f"(능력 생기면 재시도; 활성 큐서 숨김 · `show <slug>` 는 통과 · 끄기 --no-auto-defer)")
@@ -423,7 +432,7 @@ def cmd_list(skip_later: bool = False) -> int:
         all_slugs = [s for s in all_slugs if s not in gate_parked]
         gate_skipped = before - len(all_slugs)
     if not all_slugs:
-        print("처리할 실패 등록 없음. (먼저 `python scripts/triage.py pull` — N100 에서 가져오기)")
+        print("처리할 실패 등록 없음. (먼저 `python scripts/triage.py pull` — 운영 호스트에서 가져오기)")
         return 0
     rows = []
     for slug in all_slugs:
@@ -447,7 +456,7 @@ def cmd_list(skip_later: bool = False) -> int:
     if gate_skipped:
         print(f"  게이트-실패 파킹 제외: {gate_skipped}건 숨김 (`triage_gate_failed.json` — 분류기/게이트 개선 후 `sweep-gate-fail`).")
     print(f"  자세히: python scripts/triage.py show <slug>")
-    print(f"  처리:   hand-config 스킬 모드 B  (사이트별로: 진단 → probe 수정 or 손 config/손어댑터 → register --config → N100 배포)")
+    print(f"  처리:   hand-config 스킬 모드 B  (사이트별로: 진단 → probe 수정 or 손 config/손어댑터 → register --config → 운영 호스트 배포)")
     return 0
 
 
@@ -491,22 +500,22 @@ def cmd_show(slug: str) -> int:
 
 
 def cmd_post_fix_cleanup(execute: bool = False, host: Optional[str] = None) -> int:
-    """영구 게이트 박은 후 N100 의 옛 FAILED.json 정리.
+    """영구 게이트 박은 후 운영 호스트의 옛 FAILED.json 정리.
 
     default = dry-run: dev 박스 snapshot artifact 로 *순수 시뮬레이션* (write X). 각 FAILED 가
     게이트로 잡힐지 예측만.
 
-    --execute: N100 ssh + 각 FAILED 의 url 에 대해 `register.py --reuse-probe --gate-only` 호출.
+    --execute: 운영 호스트 ssh + 각 FAILED 의 url 에 대해 `register.py --reuse-probe --gate-only` 호출.
       rc=2/3 = 게이트 잡힘 (REJECTED + cleanup 자동) | rc=6 = no gate match (수동 작업 필요)
       rc=7 = artifact 없음 (probe 새 실행 권장) | 그 외 = error
 
-    ssh 실패 시: per-slug 'ssh_error' 표시 + N100 큐 변경 X. 다른 slug 들 계속 시도.
+    ssh 실패 시: per-slug 'ssh_error' 표시 + 운영 호스트 큐 변경 X. 다른 slug 들 계속 시도.
     """
-    target_host = host or DEPLOY_HOST
+    target_host = host or _require_deploy_host()
     target_path = DEPLOY_PATH
 
     if execute:
-        # N100 ssh 로 실행 — 실제 register --gate-only 호출.
+        # 운영 호스트 ssh 로 실행 — 실제 register --gate-only 호출.
         return _post_fix_cleanup_execute(target_host, target_path)
     else:
         # dry-run — dev 박스 snapshot artifact 로 순수 시뮬레이션 (write X).
@@ -518,7 +527,7 @@ def _post_fix_cleanup_dry_run() -> int:
     slugs = _failed_slugs()
     if not slugs:
         print("[post-fix-cleanup] dry-run: 로컬에 FAILED.json 없음.")
-        print("  먼저 `python scripts/triage.py pull` 로 N100 큐 가져오기.")
+        print("  먼저 `python scripts/triage.py pull` 로 운영 호스트 큐 가져오기.")
         return 0
     print(f"[post-fix-cleanup] dry-run — {len(slugs)} slug 시뮬레이션 (write X, ssh X):\n")
     sys.path.insert(0, str(ROOT))
@@ -586,7 +595,7 @@ def _post_fix_cleanup_dry_run() -> int:
     for _, rc, _, _ in rows:
         counts[rc] = counts.get(rc, 0) + 1
     print(f"\n[post-fix-cleanup] dry-run summary: " + ", ".join(f"rc={rc} {n}" for rc, n in sorted(counts.items())))
-    print(f"\n  rc=2/3 = 게이트 잡힘 — `--execute` 호출 시 N100 cleanup 자동")
+    print(f"\n  rc=2/3 = 게이트 잡힘 — `--execute` 호출 시 운영 호스트 cleanup 자동")
     print(f"  rc=6   = no gate match — 수동 작업 필요 (손-config 또는 새 게이트)")
     print(f"  rc=7   = artifact 없음 — probe 새 실행 권장 (scripts/probe.py)")
     print(f"\n  실행: python scripts/triage.py post-fix-cleanup --execute")
@@ -594,25 +603,25 @@ def _post_fix_cleanup_dry_run() -> int:
 
 
 def _post_fix_cleanup_execute(host: str, path: str) -> int:
-    """N100 ssh + register --gate-only per slug."""
-    # N100 의 FAILED 목록 조회
+    """운영 호스트 ssh + register --gate-only per slug."""
+    # 운영 호스트의 FAILED 목록 조회
     rc, out = _run(["ssh", host, f"ls {path}/output/poll_state/*FAILED.json 2>/dev/null"])
     if rc != 0 and not out.strip():
-        print(f"[post-fix-cleanup --execute] N100 에 FAILED.json 없음.")
+        print(f"[post-fix-cleanup --execute] 운영 호스트에 FAILED.json 없음.")
         return 0
     if rc != 0:
         print(f"[post-fix-cleanup --execute] ssh 실패 (rc={rc}): {out[:200]}", file=sys.stderr)
-        print(f"  Tailscale 확인: tailscale status — `n100-noticewatcher` 보이는지. 운영 메모 §1~2.", file=sys.stderr)
+        print(f"  SSH 접속과 DEPLOY_HOST/DEPLOY_PATH 값을 확인하세요.", file=sys.stderr)
         return 2
-    n100_failed = [Path(p.strip()).name[:-len(_FAILED_SUFFIX)]
+    deploy_failed = [Path(p.strip()).name[:-len(_FAILED_SUFFIX)]
                    for p in out.strip().splitlines() if p.strip().endswith(_FAILED_SUFFIX)]
-    if not n100_failed:
-        print(f"[post-fix-cleanup --execute] N100 FAILED.json 0건.")
+    if not deploy_failed:
+        print(f"[post-fix-cleanup --execute] 운영 호스트 FAILED.json 0건.")
         return 0
-    print(f"[post-fix-cleanup --execute] N100 — {len(n100_failed)} slug 처리 시작:\n")
+    print(f"[post-fix-cleanup --execute] 운영 호스트 — {len(deploy_failed)} slug 처리 시작:\n")
     rows: list[tuple[str, str, str]] = []  # (slug, rc, msg)
-    for slug in sorted(n100_failed):
-        # N100 의 FAILED.json 에서 url 추출
+    for slug in sorted(deploy_failed):
+        # 운영 호스트의 FAILED.json 에서 url 추출
         rc_get, out_get = _run(["ssh", host, f"cat {path}/output/poll_state/{slug}{_FAILED_SUFFIX}"])
         if rc_get != 0:
             rows.append((slug, "ssh_error", f"FAILED.json read 실패 (rc={rc_get})"))
@@ -668,20 +677,21 @@ def _shell_quote(s: str) -> str:
 
 def cmd_prune_orphans(execute: bool = False) -> int:
     """recognizer slug 변경으로 생긴 orphan 마커(이미 다른 slug 로 등록된 사이트의 stale
-    FAILED/REJECTED + triage_queue)를 dev box·N100 양쪽에서 정리. scripts/prune_orphans.py 실행
-    (N100 은 git pull 로 같은 스크립트 보유)."""
+    FAILED/REJECTED + triage_queue)를 dev box·운영 호스트 양쪽에서 정리. scripts/prune_orphans.py 실행
+    (운영 호스트는 git pull 로 같은 스크립트 보유)."""
     flag = " --execute" if execute else ""
+    deploy_host = _require_deploy_host()
     print("=== dev box ===")
     rc_local, out_local = _run([sys.executable, str(ROOT / "scripts" / "prune_orphans.py")]
                                + (["--execute"] if execute else []))
     print(out_local)
-    print(f"\n=== N100 ({DEPLOY_HOST}) ===")
-    rc_n100, out_n100 = _run(["ssh", DEPLOY_HOST,
-                              f"cd {DEPLOY_PATH} && .venv/bin/python scripts/prune_orphans.py{flag}"])
-    if rc_n100 != 0 and not out_n100.strip():
-        print(f"[prune-orphans] N100 ssh 실패 (rc={rc_n100}). Tailscale 확인.", file=sys.stderr)
+    print(f"\n=== 운영 호스트 ({deploy_host}) ===")
+    rc_deploy, out_deploy = _run(["ssh", deploy_host,
+                                  f"cd {DEPLOY_PATH} && .venv/bin/python scripts/prune_orphans.py{flag}"])
+    if rc_deploy != 0 and not out_deploy.strip():
+        print(f"[prune-orphans] 운영 호스트 ssh 실패 (rc={rc_deploy}).", file=sys.stderr)
         return 2
-    print(out_n100)
+    print(out_deploy)
     if not execute:
         print("\n  실제 정리: python scripts/triage.py prune-orphans --execute")
     return 0
@@ -714,7 +724,7 @@ def cmd_park_gate_fail(slugs: list[str], reason: str = "") -> int:
 
 
 def cmd_sweep_gate_fail(execute: bool = False, host: Optional[str] = None) -> int:
-    """파킹된 게이트-실패 slug 를 N100 에서 full re-register (분류기 active) — 분류기/게이트 개선 후.
+    """파킹된 게이트-실패 slug 를 운영 호스트에서 full re-register (분류기 active) — 분류기/게이트 개선 후.
 
     rc=0(등록) 또는 rc=2/3/4(거부=분류기/게이트가 이제 잡음) → 해소 → 목록서 제거.
     rc=1(여전히 gen_fail)·rc=5(cap) → 유지. dry-run(--execute 없이) = 목록만 표시.
@@ -727,9 +737,9 @@ def cmd_sweep_gate_fail(execute: bool = False, host: Optional[str] = None) -> in
         print(f"[sweep-gate-fail] dry-run — 파킹 {len(parked)}건 (실제 sweep: --execute):\n")
         for slug, meta in sorted(parked.items()):
             print(f"  {slug}  {meta.get('url','')}  ({meta.get('reason','')[:50]})")
-        print(f"\n  실행: python scripts/triage.py sweep-gate-fail --execute  (각 url N100 full re-register → 해소 시 목록서 제거)")
+        print(f"\n  실행: python scripts/triage.py sweep-gate-fail --execute  (각 url 운영 호스트 full re-register → 해소 시 목록서 제거)")
         return 0
-    target_host = host or DEPLOY_HOST
+    target_host = host or _require_deploy_host()
     resolved: list[str] = []
     kept: list[tuple[str, int]] = []
     for slug, meta in sorted(parked.items()):

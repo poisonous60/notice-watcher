@@ -10,7 +10,7 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-User=poiso
+User=<user>
 WorkingDirectory=/home/<user>/notice-watcher
 EnvironmentFile=/home/<user>/notice-watcher/.env
 ExecStart=/home/<user>/notice-watcher/.venv/bin/python scripts/poll_and_notify.py
