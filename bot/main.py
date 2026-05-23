@@ -708,26 +708,39 @@ async def report_cmd(interaction: discord.Interaction, issue: str,
     issue_body = issue[:1500]
     if slug and url:
         issue_body = f"{issue_body}\n\nURL: {url}"
-    report_id = db.add_report(_conn, user_id=user_id, username=str(interaction.user),
-                              slug=slug, url=url, issue=issue_body)
+    # slug/url 없는 자유 의견은 feedback 큐(/feedback 탭)로, 그 외 신고는 reports 큐(/reports 탭).
     if slug or url:
-        ack = msg("report_received", report_id=report_id, slug=(slug or url))
+        report_id = db.add_report(_conn, user_id=user_id, username=str(interaction.user),
+                                  slug=slug, url=url, issue=issue_body)
+        await interaction.followup.send(
+            msg("report_received", report_id=report_id, slug=(slug or url)),
+            ephemeral=True)
+        # owner DM — 자동 진단 결과까지 함께. admin.send_chunked_dm 재사용(2000 chars split).
+        try:
+            paths = inspector.InspectorPaths.live()
+            result = inspector.inspect(_conn, paths, report_id=report_id)
+            if result:
+                body = inspector.format_inspect_result(result)
+            else:
+                body = f"신고 #{report_id} — URL 기반 신고\nurl={url or '(없음)'}\nissue={issue_body}"
+            oid = owner_user_id()
+            if oid and oid.isdigit():
+                await admin_mod.send_chunked_dm(client, oid, msg("report_owner_dm_prefix") + body)
+        except Exception as e:  # noqa: BLE001
+            log.warning("report owner DM 실패: %r", e)
     else:
-        ack = msg("report_received_free", report_id=report_id)
-    await interaction.followup.send(ack, ephemeral=True)
-    # owner DM — 자동 진단 결과까지 함께. admin.send_chunked_dm 재사용(2000 chars split, 실패 시 False).
-    try:
-        paths = inspector.InspectorPaths.live()
-        result = inspector.inspect(_conn, paths, report_id=report_id)
-        if result:
-            body = inspector.format_inspect_result(result)
-        else:
-            body = f"신고 #{report_id} — URL 기반 신고\nurl={url or '(없음)'}\nissue={issue_body}"
-        oid = owner_user_id()
-        if oid and oid.isdigit():
-            await admin_mod.send_chunked_dm(client, oid, msg("report_owner_dm_prefix") + body)
-    except Exception as e:  # noqa: BLE001
-        log.warning("report owner DM 실패: %r", e)
+        fid = db.add_feedback(_conn, user_id=user_id,
+                              username=str(interaction.user), message=issue_body)
+        await interaction.followup.send(
+            msg("report_received_free", report_id=fid), ephemeral=True)
+        try:
+            oid = owner_user_id()
+            if oid and oid.isdigit():
+                body = msg("feedback_owner_dm", fid=fid, user=interaction.user,
+                           user_id=interaction.user.id, at_iso=_now_iso(), message=issue_body)
+                await admin_mod.send_chunked_dm(client, oid, body)
+        except Exception as e:  # noqa: BLE001
+            log.warning("feedback owner DM 실패: %r", e)
 
 
 # --------------------------------------------------------------------------- #
