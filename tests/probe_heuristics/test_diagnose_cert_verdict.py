@@ -29,6 +29,17 @@ def run() -> list[tuple[str, bool, str]]:
     err3 = "ConnectError: [Errno -2] Name or service not known"
     cases.append(("dns_getaddrinfo_failed", _is_cert_or_dns_error(err3), err3))
 
+    # 3b. EAI_NODATA (-5) — IPv4/IPv6 dual-stack 환경에서 NXDOMAIN.
+    # regression: 2026-05-23 crypto batch 의 forum.aave.com / curve.fi / compound / ens / 1inch /
+    # dydx 가 [Errno -5] No address associated with hostname 으로 떨어졌는데 마커 누락으로
+    # BASELINE_BLOCKED 로 오분류 (rc=5 cap_blocked) → 옳게 CERT_OR_DNS_BROKEN (rc=4 url_dead) 로.
+    err3b = "ConnectError: [Errno -5] No address associated with hostname"
+    cases.append(("dns_eai_nodata_errno5", _is_cert_or_dns_error(err3b), err3b))
+
+    # 3c. Chromium/Playwright DNS resolution 실패 (Phase 2 의 headless 결과).
+    err3c = "Error: Page.goto: net::ERR_NAME_NOT_RESOLVED at https://forum.aave.com/"
+    cases.append(("playwright_name_not_resolved", _is_cert_or_dns_error(err3c), err3c))
+
     # 4. 403 같은 일반 차단 에러는 False
     err4 = "HTTPStatusError: 403 Forbidden"
     cases.append(("normal_http_error_not_cert", not _is_cert_or_dns_error(err4), err4))

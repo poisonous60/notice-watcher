@@ -15,8 +15,11 @@ _CERT_OR_DNS_ERROR_MARKERS = (
     "Hostname mismatch",
     "SSL: ",
     "ERR_CERT_",
-    "[Errno -2]",                      # getaddrinfo failed
-    "[Errno -3]",
+    "ERR_NAME_NOT_RESOLVED",           # Chromium/Playwright DNS resolution fail
+    "[Errno -2]",                      # getaddrinfo EAI_NONAME
+    "[Errno -3]",                      # EAI_AGAIN
+    "[Errno -5]",                      # EAI_NODATA (No address associated with hostname — IPv6/IPv4 mismatch)
+    "No address associated with hostname",
     "Name or service not known",
     "nodename nor servname provided",
     "Temporary failure in name resolution",

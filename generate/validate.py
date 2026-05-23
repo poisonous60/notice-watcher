@@ -45,8 +45,23 @@ def _is_nav_junk_rows(row_selector: str, post_ids: list[str], any_dated: bool) -
 
 
 def _is_year_archive(post_ids: list[str]) -> bool:
-    """post_id 가 전부 4자리 연도뿐 → 연도 아카이브 인덱스(개별 글 아님). netbsd 2025/2024/2023 류."""
-    return bool(post_ids) and all(re.fullmatch(r"\s*\d{4}\s*", i) for i in post_ids)
+    """post_id 가 전부 4자리 *그럴듯한 연도* 뿐 → 연도 아카이브 인덱스(개별 글 아님). netbsd 2025/2024/2023 류.
+
+    "그럴듯한 연도" = 1990..2030 범위. 그 외 4자리 (Discourse topic id 5619/6976/7022 같은 것)
+    는 *연도가 아니므로* 연도 아카이브로 보지 X — false-positive 봉합 (2026-05-23 crypto batch
+    의 forum.safe.global / celestia / thegraph 가 Discourse topic id 5000~9000 영역이라
+    이 게이트에 잘못 걸려 DiscourseAdapter 폴백 후 LLM 실패).
+    """
+    if not post_ids:
+        return False
+    for raw in post_ids:
+        m = re.fullmatch(r"\s*(\d{4})\s*", raw or "")
+        if m is None:
+            return False
+        year = int(m.group(1))
+        if not (1990 <= year <= 2030):
+            return False
+    return True
 
 
 @dataclass

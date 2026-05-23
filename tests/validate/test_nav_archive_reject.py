@@ -41,6 +41,13 @@ def _nav_cases() -> list[tuple[str, bool, str]]:
         ("dated_slug_not_year", ["2026/05/19/deref"], False),
         ("mixed_year_and_post", ["2025", "kali-linux-2026"], False),
         ("empty", [], False),
+        # Discourse 4자리 topic id (1990~2030 범위 밖) — 연도 아니므로 False 가 정답.
+        # regression: 2026-05-23 crypto batch (forum.safe.global=6976/7022, forum.celestia.org,
+        # forum.thegraph.com 등 Discourse 4자리 topic id 가 잘못 잡혀 DiscourseAdapter 폴백되던 버그).
+        ("discourse_topic_ids_4digit", ["6976", "7022", "6992", "5619"], False),
+        ("discourse_topic_ids_boundary_below", ["1989"], False),  # 1989 < 1990 → 연도 아님
+        ("discourse_topic_ids_boundary_above", ["2031"], False),  # 2031 > 2030 → 연도 아님
+        ("years_with_one_topic_id_mixed", ["2024", "6976"], False),  # 하나라도 범위 밖이면 False
     ]
     for label, ids, expect in year_fixtures:
         got = _is_year_archive(ids)
