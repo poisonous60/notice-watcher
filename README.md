@@ -2,9 +2,9 @@
 
 # notice-watcher
 
-**게임 공지·게시판 새 글을 자동으로 디스코드로 알려주는 봇 + 크롤링 엔진**
+게임 공지·게시판 새 글을 자동으로 디스코드로 알려주는 봇
 
-URL 하나만 던지면 LLM이 사이트를 정찰해서 파싱 룰을 만들고, 새 글이 올라올 때마다 요약해서 알림을 보냅니다.
+URL을 넣으면 새 글을 요약해서 알림을 보냅니다.
 
 ![Python](https://img.shields.io/badge/python-3.11+-blue.svg)
 ![Platforms](https://img.shields.io/badge/platforms-linux%20%7C%20windows-lightgrey)
