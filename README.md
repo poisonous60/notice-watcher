@@ -5,8 +5,6 @@
 - **어댑터** (`adapters/`): 사이트별로 손으로 짠 수집기 (모두 async, `BaseAdapter` 상속).
 - **config 기반 엔진** (`engine/` + `generate/` + `scripts/register.py`,`poll.py`): 경량 LLM(Gemini)이 probe 결과를 보고 **선언적 config(JSON)** 를 작성 → 범용 엔진이 실행 → 자동 검증/재시도 → 폴링·새 글 감지·깨짐 시 재-probe. → **[docs/config 기반 엔진 가이드.md](docs/config%20기반%20엔진%20가이드.md)**
 
-> **Clone 사용자에게**: 학습·실습 목적 공개. 본인 환경에서 돌리려면 `.env` 에 `BOT_TOKEN`·`GEMINI_API_KEYS`·`OWNER_USER_ID` 등을 직접 채워야 합니다. 운영 호스트 ssh 도구(`scripts/inspect_subs.py`·`triage.py`·`push.py`·`remote.py`)는 `DEPLOY_HOST`·`DEPLOY_PATH` 환경변수가 필요합니다. 크롤링 정책(`docs/크롤링 지침.md`) 을 반드시 읽고 `polite_sleep`·`robots.txt` 를 지키세요 — 차단 우회·CAPTCHA bypass 는 다루지 않습니다.
-
 ## 디렉토리 구조
 
 ```
