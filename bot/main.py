@@ -171,8 +171,6 @@ def _record_error(where: str, exc: BaseException) -> str:
     notify_empty="(선택) 켜면 폴링했는데 새 글이 없을 때도 '새 공지 없음' 한 줄을 보냄. 끄면(기본) 새 글 있을 때만.",
     article_url="(선택) 처음 등록하는 사이트가 자동 분석에 실패할 때, 그 게시판의 실제 글 하나 URL 을 같이 주면 분석 성공률이 올라갑니다.",
 )
-@app_commands.allowed_installs(guilds=True, users=True)
-@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def watch(interaction: discord.Interaction, url: str, filter: Optional[str] = None,
                 here: bool = False, notify_empty: bool = False,
                 article_url: Optional[str] = None):
@@ -463,8 +461,6 @@ class SubscriptionListView(discord.ui.LayoutView):
 
 
 @tree.command(name="list", description="내 구독 목록과 편집 UI")
-@app_commands.allowed_installs(guilds=True, users=True)
-@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def list_cmd(interaction: discord.Interaction):
     # 3초 ack 안전망 — View 생성·db 조회가 sqlite lock 시 느려질 수 있음 (Unknown interaction 10062 회피).
     await interaction.response.defer(ephemeral=True)
@@ -483,8 +479,6 @@ _FEEDBACK_MAX_LEN_AT_LOAD = feedback_max_len()  # description 은 등록 시점�
 @app_commands.describe(
     message=f"의견 — 자연어 자유 입력. 최대 {_FEEDBACK_MAX_LEN_AT_LOAD}자.",
 )
-@app_commands.allowed_installs(guilds=True, users=True)
-@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def feedback_cmd(interaction: discord.Interaction, message: str):
     # 3초 ack 안전망.
     await interaction.response.defer(ephemeral=True)
@@ -700,8 +694,6 @@ class SettingView(discord.ui.View):
 
 
 @tree.command(name="setting", description="발송·공지 설정")
-@app_commands.allowed_installs(guilds=True, users=True)
-@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def setting_cmd(interaction: discord.Interaction):
     # 3초 ack 안전망 — sqlite lock 시 느려질 수 있음.
     await interaction.response.defer(ephemeral=True)
@@ -713,8 +705,6 @@ async def setting_cmd(interaction: discord.Interaction):
 
 
 @tree.command(name="help", description="봇 명령어 안내")
-@app_commands.allowed_installs(guilds=True, users=True)
-@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def help_cmd(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     embed = discord.Embed(
@@ -755,8 +745,6 @@ async def help_cmd(interaction: discord.Interaction):
     url="문제 있는 URL 또는 지원 요청 URL (선택, https://)",
 )
 @app_commands.autocomplete(slug=_own_slug_autocomplete)
-@app_commands.allowed_installs(guilds=True, users=True)
-@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def report_cmd(interaction: discord.Interaction, issue: str,
                      slug: Optional[str] = None, url: Optional[str] = None):
     # 3초 ack 안전망 — inspector.inspect / db 호출 무거울 수 있음.
@@ -806,8 +794,6 @@ async def report_cmd(interaction: discord.Interaction, issue: str,
 
 
 @tree.command(name="status", description="봇/폴링 상태")
-@app_commands.allowed_installs(guilds=True, users=True)
-@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def status(interaction: discord.Interaction):
     # 3초 ack 안전망 — STATE_DIR glob + 파일별 read 가 사이트 많을 때 무거움.
     await interaction.response.defer(ephemeral=True)
