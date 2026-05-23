@@ -725,7 +725,8 @@ def render_html(configs: dict, poll: dict, jobs: dict, generated_at: datetime) -
       box-shadow: 0 3px 12px rgba(31, 37, 40, 0.28);
       max-width: 300px;
     }}
-    .dot-tip b {{ display: block; }}
+    .dot-tip b {{ display: block; word-break: break-all; font-weight: 700; }}
+    .dot-tip b i {{ display: block; font-style: normal; font-weight: 400; color: var(--line); font-size: 0.78rem; word-break: break-all; margin-top: 1px; }}
     .dot-tip span {{ color: var(--line); font-size: 0.76rem; }}
     ol, ul {{ padding-left: 22px; }}
     .legend {{
@@ -899,7 +900,17 @@ def render_html(configs: dict, poll: dict, jobs: dict, generated_at: datetime) -
           if (!c) {{ setActive(null); tip.hidden = true; return; }}
           var pf = c.getAttribute('data-pf');
           setActive(pf);
-          tip.innerHTML = '<b>' + c.getAttribute('data-domain') + '</b>'
+          var domain = c.getAttribute('data-domain') || '';
+          var url = c.getAttribute('data-url') || '';
+          var path = '';
+          if (url) {{
+            try {{
+              var u = new URL(url);
+              path = u.pathname + (u.search || '');
+              if (path.length > 60) path = path.slice(0, 57) + '…';
+            }} catch (err) {{ path = ''; }}
+          }}
+          tip.innerHTML = '<b>' + domain + (path && path !== '/' ? '<i>' + path + '</i>' : '') + '</b>'
             + '<span>' + pf + ' · ' + c.getAttribute('data-status') + '</span>';
           tip.hidden = false;
         }});
