@@ -9,6 +9,7 @@ from .naver_blog import NaverBlogRssAdapter
 from .tistory import TistoryRssAdapter
 from .reddit import RedditAdapter
 from .discourse import DiscourseAdapter
+from .commonwealth import CommonwealthAdapter
 from .lemmy import LemmyAdapter
 from .peertube import PeerTubeAdapter
 from .google_news_rss import GoogleNewsRssAdapter
@@ -34,6 +35,7 @@ __all__ = [
     "TistoryRssAdapter",
     "RedditAdapter",
     "DiscourseAdapter",
+    "CommonwealthAdapter",
     "LemmyAdapter",
     "PeerTubeAdapter",
     "GoogleNewsRssAdapter",

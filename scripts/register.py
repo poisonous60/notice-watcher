@@ -1587,6 +1587,49 @@ def _try_known_platform(url: str, slug: str, *, out: Optional[str], force: bool)
     return _register_built_config(cfg, slug, url, out=out, force=force)
 
 
+def _find_common_community_id(node) -> Optional[str]:
+    if isinstance(node, dict):
+        for key in ("community_id", "communityId", "customDomain", "id"):
+            value = node.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        for value in node.values():
+            found = _find_common_community_id(value)
+            if found:
+                return found
+    elif isinstance(node, list):
+        for value in node:
+            found = _find_common_community_id(value)
+            if found:
+                return found
+    return None
+
+
+def _commonwealth_community_id_from_domain(base_url: str) -> Optional[str]:
+    try:
+        parts = urlsplit(base_url)
+    except (ValueError, AttributeError):
+        return None
+    host = (parts.netloc or "").strip().lower()
+    if not host:
+        return None
+    api = f"{parts.scheme or 'https'}://{host}/api/domain"
+    try:
+        r = httpx.get(
+            api,
+            params={"address": host},
+            headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json, text/plain, */*"},
+            timeout=10.0,
+            follow_redirects=True,
+        )
+        if r.status_code in (401, 403, 404):
+            return None
+        r.raise_for_status()
+        return _find_common_community_id(r.json())
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _register_built_config(cfg: dict, slug: str, url: str, *, out: Optional[str], force: bool) -> Optional[int]:
     """이미 만들어진 platform cfg(recognizer 또는 probe-후 detect 신호 산출)를 등록.
     fetch_list 0건/예외/검증 실패면 None 반환 → 호출 측이 일반 파이프라인으로 폴백."""
@@ -1942,6 +1985,28 @@ def _main_inner(argv) -> int:
                 if rc is not None:
                     return rc
                 print("[register] DiscourseAdapter 폴백 — 일반 파이프라인 계속.")
+
+    # Common/Commonwealth 포지티브 검출 — probe 가 SPA shell(`/assets/index-*`, `/brand_assets/common`,
+    # `/api/internal/trpc`) 로 판정. custom domain(`/discussions`) 은 URL 만으로 false-positive 가 커서
+    # probe 신호 + domain API community_id 확인 뒤 CommonwealthAdapter 등록을 시도한다.
+    if not args.gate_only:
+        common = ((digest.get("list_candidates") or {}).get("common_platform") or {})
+        if common.get("is_common") and common.get("base_url"):
+            from engine.recognizers.commonwealth import build_config as _common_build
+            community_id = common.get("community_id_hint") or _commonwealth_community_id_from_domain(common["base_url"])
+            if community_id:
+                ccfg = _common_build(common["base_url"], community_id, source_url=url)
+                if ccfg is not None:
+                    ccfg["_recognized_platform"] = "commonwealth (probe Common SPA marker -> tRPC)"
+                    print("[PHASE] common_detect", flush=True)
+                    print(f"[register] 🔎 Common SPA marker 검출 — CommonwealthAdapter 등록 시도 "
+                          f"(base={common['base_url']}, community={community_id})")
+                    rc = _register_built_config(ccfg, slug, url, out=args.out, force=args.force)
+                    if rc is not None:
+                        return rc
+                    print("[register] CommonwealthAdapter 폴백 (API 빈/차단/검증 실패) — 일반 파이프라인 계속.")
+            else:
+                print("[register] Common SPA marker 검출됐지만 community_id 확인 실패 — 일반 파이프라인 계속.")
 
     # XenForo 포지티브 검출 — probe 가 렌더 HTML 의 `<html id=XF>`/`XF.config` 마커로 판정 (detect_xenforo_platform).
     # XenForo 글 목록(/whats-new/, 서브포럼)은 Cloudflare/JS 라 LLM 이 httpx_html posts_nonempty:0 / playwright 운빨로

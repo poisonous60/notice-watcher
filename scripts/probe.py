@@ -37,6 +37,7 @@ from probe.extract import (
     write_list_candidates,
     detect_wordpress_platform,
     detect_discourse_platform,
+    detect_common_platform,
     detect_xenforo_platform,
     detect_lemmy_platform,
     detect_mastodon_platform,
@@ -506,6 +507,7 @@ def _run(args: argparse.Namespace, url: str, slug: str) -> int:
             meta_signals = article_meta_signals(html=page_html or "")
             wordpress_platform = detect_wordpress_platform(html=page_html or "", base_url=url)
             discourse_platform = detect_discourse_platform(html=page_html or "", base_url=url)
+            common_platform = detect_common_platform(html=page_html or "", base_url=url)
             xenforo_platform = detect_xenforo_platform(html=page_html or "", base_url=url)
             lemmy_platform = detect_lemmy_platform(html=page_html or "", base_url=url)
             mastodon_platform = detect_mastodon_platform(html=page_html or "", base_url=url)
@@ -528,6 +530,7 @@ def _run(args: argparse.Namespace, url: str, slug: str) -> int:
                 article_meta_signals=meta_signals,
                 wordpress_platform=wordpress_platform,
                 discourse_platform=discourse_platform,
+                common_platform=common_platform,
                 xenforo_platform=xenforo_platform,
                 lemmy_platform=lemmy_platform,
                 mastodon_platform=mastodon_platform,
