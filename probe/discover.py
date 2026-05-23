@@ -7,7 +7,7 @@ import re
 import zlib
 from pathlib import Path
 from typing import Optional
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urljoin, urlsplit, urlunsplit
 from xml.etree import ElementTree as ET
 
 import httpx
@@ -18,6 +18,7 @@ from .headers import preset_h2_chrome_min
 
 
 _FEED_PATHS = ("/rss", "/feed", "/atom.xml", "/rss.xml", "/feed.xml", "/feeds")
+_PAGE_FEED_SUFFIXES = ("/rss.xml", "/feed", "/index.xml", ".rss")
 
 # 입력 URL 자체가 RSS/Atom 피드인 경우 path 매칭. catalog 의
 # `bbs.ruliweb.com/news/board/<id>/rss` / `steamcommunity.com/.../rss/` /
@@ -79,6 +80,58 @@ def _url_serves_feed(url: str, *, timeout: float = 10.0) -> bool:
         return False
 
 
+def _verified_feed_candidate(url: str, *, source: str, timeout: float = 10.0) -> dict | None:
+    if not _url_serves_feed(url, timeout=timeout):
+        return None
+    return {"source": source, "url": url, "status": 200, "content_type": "application/xml"}
+
+
+def _feed_link_hrefs(soup: BeautifulSoup, page_url: str) -> list[dict]:
+    out: list[dict] = []
+    seen: set[str] = set()
+    for el in soup.select("a[href], link[href]"):
+        href = str(el.get("href") or "").strip()
+        if not href:
+            continue
+        label = " ".join(el.stripped_strings).lower()
+        rel = " ".join(el.get("rel") or []).lower() if isinstance(el.get("rel"), list) else str(el.get("rel") or "").lower()
+        typ = str(el.get("type") or "").lower()
+        if "opensearch" in typ or "sitemap" in href.lower():
+            continue
+        hay = " ".join([href.lower(), label, rel, typ])
+        if not any(tok in hay for tok in ("rss", "feed", "atom", ".xml")):
+            continue
+        url = urljoin(page_url, href)
+        if url in seen:
+            continue
+        seen.add(url)
+        out.append({"url": url, "type": typ or None, "title": el.get("title")})
+    return out
+
+
+def _page_path_feed_urls(page_url: str) -> list[str]:
+    try:
+        parts = urlsplit(page_url)
+    except ValueError:
+        return []
+    path = parts.path or "/"
+    base_path = path.rstrip("/") or "/"
+    roots = []
+    if path and path != "/":
+        roots.extend([base_path + "/rss.xml", base_path + "/feed", base_path + "/index.xml", base_path + ".rss"])
+    host = parts.netloc.lower()
+    if host.startswith("blog.") and path in ("", "/"):
+        roots.extend([suffix if suffix.startswith("/") else "/" + suffix for suffix in _PAGE_FEED_SUFFIXES])
+    out: list[str] = []
+    seen: set[str] = set()
+    for p in roots:
+        url = urlunsplit((parts.scheme, parts.netloc, p, "", ""))
+        if url not in seen:
+            seen.add(url)
+            out.append(url)
+    return out
+
+
 def discover_feeds(*, page_url: str, page_html: str, out_dir: Path, timeout: float = 10.0) -> dict:
     """페이지 head에서 alternate 피드 + 관용 경로 추측 + 입력 URL 자체 feed 검출.
 
@@ -109,6 +162,20 @@ def discover_feeds(*, page_url: str, page_html: str, out_dir: Path, timeout: flo
                     "title": link.get("title"),
                     "url": urljoin(page_url, href),
                 })
+
+    for link in _feed_link_hrefs(soup, page_url):
+        hit = _verified_feed_candidate(link["url"], source="page-feed-link", timeout=timeout)
+        if hit is not None:
+            if link.get("type"):
+                hit["type"] = link["type"]
+            if link.get("title"):
+                hit["title"] = link["title"]
+            candidates.append(hit)
+
+    for url in _page_path_feed_urls(page_url):
+        hit = _verified_feed_candidate(url, source="page-path-fallback", timeout=timeout)
+        if hit is not None:
+            candidates.append(hit)
 
     parts = urlsplit(page_url)
     base = f"{parts.scheme}://{parts.netloc}"

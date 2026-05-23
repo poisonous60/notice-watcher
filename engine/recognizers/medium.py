@@ -22,10 +22,12 @@ _RESERVED = {
 }
 
 
-def _config(*, board: str, source_url: str, slug_board: str) -> dict:
+def _config(*, board: str, source_url: str, slug_board: str, feed_url: str | None = None,
+            site: str = "medium.com", referer: str = "https://medium.com/") -> dict:
+    list_url = feed_url or "https://medium.com/feed/{board}"
     return {
         "version": 1,
-        "site": "medium.com",
+        "site": site,
         "board": board,
         "strategy": "httpx_html",
         "_slug_board": slug_board,
@@ -34,11 +36,11 @@ def _config(*, board: str, source_url: str, slug_board: str) -> dict:
             "User-Agent": UA,
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
-            "Referer": "https://medium.com/",
+            "Referer": referer,
         },
         "timeout": 15,
         "list": {
-            "url_template": "https://medium.com/feed/{board}",
+            "url_template": list_url,
             "pagination": {"kind": "none"},
             "row_selector": "channel > item",
             "fields": {
@@ -134,6 +136,25 @@ def _build_publication(m: "re.Match", url: str) -> Optional[dict]:
     if "/" in path:
         return None
     return _config(board=pub, source_url=url, slug_board=pub)
+
+
+def build_custom_domain_config(feed_url: str, *, base_url: str | None = None) -> Optional[dict]:
+    parts = urlsplit(feed_url)
+    host = (parts.netloc or "").strip().lower()
+    if not host or "." not in host:
+        return None
+    if host == "medium.com" or host.endswith(".medium.com"):
+        return None
+    clean_feed = f"{parts.scheme or 'https'}://{host}{parts.path.rstrip('/') or '/feed'}"
+    origin = base_url or f"{parts.scheme or 'https'}://{host}"
+    return _config(
+        board=host,
+        source_url=clean_feed,
+        slug_board=host,
+        feed_url=clean_feed,
+        site=host,
+        referer=origin.rstrip("/") + "/",
+    )
 
 
 PATTERNS = [

@@ -206,7 +206,7 @@ def _policy_reject_is_host_wide(verdict: str) -> bool:
 def _has_verified_feed(digest: dict) -> bool:
     """digest 의 feed_candidates 에 *fetch-검증된* RSS/Atom 피드가 있나.
 
-    검증 = (a) well-known-path 후보가 status 200 + content-type xml, 또는 (b) 입력 URL 직접 fetch
+    검증 = (a) 후보가 status 200 + content-type xml/rss/atom, 또는 (b) 입력 URL 직접 fetch
     로 확인된 source `input-url-feed-fetch` (probe/discover._url_serves_feed). path 모양만으로
     추측한 `input-url-feed-path` 는 미검증 (제외).
 
@@ -219,8 +219,8 @@ def _has_verified_feed(digest: dict) -> bool:
         src = c.get("source")
         if src == "input-url-feed-fetch":
             return True
-        if src == "well-known-path" and c.get("status") == 200 \
-                and "xml" in (c.get("content_type") or "").lower():
+        ct = (c.get("content_type") or "").lower()
+        if c.get("status") == 200 and any(tok in ct for tok in ("xml", "rss", "atom")):
             return True
     return False
 
@@ -1960,6 +1960,22 @@ def _main_inner(argv) -> int:
                 if rc is not None:
                     return rc
                 print("[register] XenForo RSS 폴백 (RSS 빈/차단) — 일반 파이프라인 계속.")
+
+    # Medium custom-domain 포지티브 검출 — probe 가 Medium 앱 meta/canonical/RSS alternate 로 판정.
+    # URL 만으로는 임의 blog host 와 구분할 수 없어 recognizer 직접 매칭 대신 probe 신호로만 봉합한다.
+    if not args.gate_only:
+        med = ((digest.get("list_candidates") or {}).get("medium_custom_domain") or {})
+        if med.get("is_medium_custom") and med.get("feed_url"):
+            from engine.recognizers.medium import build_custom_domain_config as _medium_custom_build
+            mcfg = _medium_custom_build(med["feed_url"], base_url=med.get("base_url"))
+            if mcfg is not None:
+                mcfg["_recognized_platform"] = "medium-custom-domain (probe markers -> RSS)"
+                print("[PHASE] medium_custom_domain_detect", flush=True)
+                print(f"[register] 🔎 Medium custom domain 검출 — RSS config 등록 시도 (feed={med['feed_url']})")
+                rc = _register_built_config(mcfg, slug, url, out=args.out, force=args.force)
+                if rc is not None:
+                    return rc
+                print("[register] Medium custom-domain RSS 폴백 (RSS 빈/차단) — 일반 파이프라인 계속.")
 
     # Lemmy 포지티브 검출 — probe 가 SSR/app-shell marker(window.isoData/site_res/local_site 등)로 판정.
     # root URL 은 URL 만으론 false-positive 가 커서 recognizer 가 직접 잡지 않고, 이 probe 신호로만 봉합한다.
