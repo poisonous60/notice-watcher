@@ -12,7 +12,7 @@ import json
 import re
 from pathlib import Path
 from typing import Any, Optional
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
 from bs4 import BeautifulSoup, Tag
 
@@ -985,6 +985,55 @@ def detect_discourse_platform(html: str, base_url: str) -> Optional[dict]:
     }
 
 
+@heuristic
+def detect_medium_custom_domain(html: str, base_url: str) -> Optional[dict]:
+    """Medium custom domain 판정.
+
+    URL 만으로는 임의 blog host 와 구분할 수 없으므로 Medium 앱 meta, Medium canonical
+    link, RSS alternate shape 를 함께 본다. 출력 feed_url 은 query 를 제거한 custom-domain
+    `/feed` 계열 URL 이며 register.py 가 Medium RSS XML config 등록을 시도한다.
+    """
+    if not html or not base_url:
+        return None
+    origin = _origin_from_url(base_url)
+    if not origin:
+        return None
+    try:
+        host = (urlsplit(origin).netloc or "").lower()
+    except ValueError:
+        return None
+    if host == "medium.com" or host.endswith(".medium.com"):
+        return None
+
+    soup = BeautifulSoup(html, "lxml")
+    low = html.lower()
+    has_medium_app = (
+        'content="com.medium.reader"' in low
+        or "content='com.medium.reader'" in low
+        or 'content="medium"' in low and "al:ios:app_name" in low
+    )
+    has_medium_post_link = bool(re.search(r"https?://medium\.com/p/[0-9a-f]{10,}", html, re.I))
+    feed_url: Optional[str] = None
+    for link in soup.select('link[rel="alternate"][href]'):
+        href = str(link.get("href") or "").strip()
+        typ = str(link.get("type") or "").lower()
+        if not href:
+            continue
+        full = urljoin(base_url, href)
+        parts = urlsplit(full)
+        path = parts.path or ""
+        if ("rss" in typ or "xml" in typ or "atom" in typ) and (
+            path.rstrip("/").endswith("/feed") or "source=rss-" in (parts.query or "")
+        ):
+            feed_url = urlunsplit((parts.scheme, parts.netloc, path.rstrip("/") or "/feed", "", ""))
+            break
+    if not (has_medium_app or has_medium_post_link):
+        return None
+    if not feed_url:
+        feed_url = f"{origin}/feed"
+    return {"is_medium_custom": True, "base_url": origin, "feed_url": feed_url}
+
+
 # XenForo: 모든 public 페이지가 `<html id="XF" ... data-app="public">` + `XF.config` JS 를 박는다.
 # generator meta 는 없지만 이 두 마커는 false-positive ~0 (XenForo 외 사이트 안 씀). Discourse 와 같은 이유로
 # root URL 만으론 URL-recognizer 가 못 잡아 → probe 후 이 휴리스틱이 봉합.
@@ -1553,6 +1602,7 @@ def write_list_candidates(
     wordpress_platform: Optional[dict] = None,
     discourse_platform: Optional[dict] = None,
     xenforo_platform: Optional[dict] = None,
+    medium_custom_domain: Optional[dict] = None,
     lemmy_platform: Optional[dict] = None,
     mastodon_platform: Optional[dict] = None,
     misskey_platform: Optional[dict] = None,
@@ -1616,6 +1666,7 @@ def write_list_candidates(
         "wordpress_platform": wordpress_platform,
         "discourse_platform": discourse_platform,
         "xenforo_platform": xenforo_platform,
+        "medium_custom_domain": medium_custom_domain,
         "lemmy_platform": lemmy_platform,
         "mastodon_platform": mastodon_platform,
         "misskey_platform": misskey_platform,
