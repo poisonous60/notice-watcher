@@ -16,6 +16,23 @@ sys.path.insert(0, str(ROOT))
 os.environ.setdefault("TRACE_ENABLED", "1")
 
 
+def _require_deploy_host_env() -> None:
+    """DEPLOY_HOST 없으면 startup 거부.
+
+    Why: 없으면 dashboard 는 뜨지만 모든 페이지가 N100 snapshot pull 에 RuntimeError → "Pull 실패 — stale 데이터"
+    badge 만 표시되고 snapshot 은 영원히 옛 시각에 머무름 (2026-05-23 발생). 사용자가 알아채려면 페이지를 열어
+    badge 호버해야 보여 무성하게 silent fail. startup 에서 즉시 거부해 다음 사람이 안 트게 게이트 박음.
+    """
+    if os.environ.get("DEPLOY_HOST"):
+        return
+    sys.stderr.write(
+        "[dashboard] DEPLOY_HOST 환경변수가 없습니다 — 운영 호스트 snapshot pull 이 모두 실패합니다.\n"
+        "  PowerShell: $env:DEPLOY_HOST = 'user@host'; python scripts/dashboard.py --reload\n"
+        "  bash:       DEPLOY_HOST=user@host python scripts/dashboard.py --reload\n"
+    )
+    sys.exit(2)
+
+
 def main(argv: list[str]) -> int:
     p = argparse.ArgumentParser(description="notice-watcher dev박스 대시보드")
     p.add_argument("--host", default="127.0.0.1",
@@ -23,6 +40,8 @@ def main(argv: list[str]) -> int:
     p.add_argument("--port", type=int, default=8765)
     p.add_argument("--reload", action="store_true", help="개발용 자동 reload (uvicorn --reload)")
     a = p.parse_args(argv)
+
+    _require_deploy_host_env()
 
     try:
         import uvicorn
