@@ -36,22 +36,22 @@ URL을 넣으면 새 글을 요약해서 알림을 보냅니다.
 /help   ─ 명령어 안내
 ```
 
+발송은 사용자별 시각(`HH:MM` KST, 기본 08:30) 에 하루 1회 digest. 폴링 주기와 독립 (ADR 0006).
+
 
 ## Features
 
 - 일반 사이트: probe → LLM → 선언적 config(JSON) 생성, 3-layer 검증·재시도
 - 알려진 플랫폼: URL 패턴만으로 probe·LLM skip 후 즉시 등록 — arca, dcinside, 네이버 카페·블로그, 다음 카페, reddit, tistory, lemmy, discourse, peertube 등
-- 자동 실패 사이트는 *hand-config* 사람-루프로 진입 → 단일 사이트 config 또는 probe/prompt/schema 자체를 개선해 다음부터 자동
+- 자동 실패 사이트는 hand-config 루프로 진입 → 단일 사이트 config 또는 probe/prompt/schema 자체를 개선
 - `/watch <URL>` 디스코드 슬래시 명령 (`/list`, `/setting`, `/report`, `/help` + owner `/admin`)
-- 새 글 LLM 요약 후 **사용자별 발송 시각**(`HH:MM` KST) digest 1회/일
+- 새 글 요약 후 사용자별 발송 (`HH:MM` KST) digest 1회/일
 - probe 정찰 툴 단독 사용 가능 (HAR · DOM · JSON API 후보 · 클릭 시뮬레이션)
 - 게이트 — Safe Browsing v4, robots `Crawl-Delay`, SSRF/private-IP 차단, 정책 블랙리스트
 - Gemini · GPT (Codex CLI) · OpenRouter — call_site 별 routing, dashboard 에서 hot swap
 - dev 대시보드 (FastAPI + HTMX) — 잡 큐, 토큰 비용, per-phase trace, case audit, 플랫폼 config 승급 클러스터, 어휘 확장 deferred queue
 
 
-
-발송은 사용자별 시각(`HH:MM` KST, 기본 08:30) 에 하루 1회 digest. 폴링 주기와 독립 (ADR 0006).
 
 ## Quickstart (self-host)
 
