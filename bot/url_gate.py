@@ -501,7 +501,7 @@ async def _check_safe_browsing(urls: list[str]) -> None:
     except SafeBrowsingUnavailable as e:
         if e.config_error:
             _reject("gsb_error",
-                    "Safe Browsing 검사 설정이 안 돼 있어요 — 운영자에게 문의해 주세요 (.env 의 SAFE_BROWSING_API_KEY).")
+                    "Safe Browsing 검사 설정이 안 돼 있어요 — 운영자에게 문의해 주세요.")
         _reject("gsb_error", "Safe Browsing 검사를 못 했어요 — 잠시 후 다시 시도해 주세요.")
     if threats:
         # GSB match 에 threatType 이 빠져 있으면(드묾) threats 값이 빈 리스트라 set 이 빌 수 있음 → "UNKNOWN" 으로.
