@@ -402,12 +402,9 @@ def svg_grouped_scatter(sites: list[dict], color_map: dict) -> str:
     bug = [s for s in sites if s.get("group") == "bug"]
     outer = dead + bug
 
-    # ring geometry: inner sunflower disk, then three necklace rings
+    # ring geometry: inner sunflower disk; outer bands auto-expand into multiple
+    # sub-rings when single-ring packing would overlap.
     r_core = 220.0
-    gap = 26.0
-    r_content = r_core + gap
-    r_blocked = r_content + 28.0
-    r_outer = r_blocked + 28.0
 
     dots: list[str] = []
 
@@ -494,40 +491,63 @@ def svg_grouped_scatter(sites: list[dict], color_map: dict) -> str:
                 y = ay + sub_r * math.sin(sub_theta)
             dots.append(_dot_svg(site, x, y, 4.2, color_map))
 
-    def necklace(items: list[dict], radius: float, dot_r: float, phase_salt: str) -> None:
-        items_sorted = sorted(items, key=lambda s: (str(s["host"]), str(s["slug"])))
-        n = len(items_sorted)
+    def necklace(items: list[dict], inner_r: float, dot_r: float, phase_salt: str) -> tuple[float, float]:
+        """Lay items out on one or more concentric sub-rings starting at inner_r,
+        expanding outward when a single ring would pack tighter than 2*dot_r+gap.
+        Returns (label_r, outer_r) — label_r is the inner ring radius, outer_r is
+        the radius the next band should start from."""
+        n = len(items)
         if n == 0:
-            return
+            return inner_r, inner_r
+        items_sorted = sorted(items, key=lambda s: (str(s["host"]), str(s["slug"])))
+        spacing = 2 * dot_r + 2.5
+        row_step = 2 * dot_r + 2.5
         phase = _hash_unit(phase_salt, "phase") * math.tau
-        for i, site in enumerate(items_sorted):
-            theta = phase + i * (math.tau / n)
-            jitter = (_hash_unit(str(site["slug"]), "rj") - 0.5) * 6.0
-            r = radius + jitter
-            x = cx + r * math.cos(theta)
-            y = cy + r * math.sin(theta)
-            dots.append(_dot_svg(site, x, y, dot_r, color_map))
+        i = 0
+        row = 0
+        outer_r = inner_r
+        while i < n:
+            r_row = inner_r + row * row_step
+            cap = max(1, int((math.tau * r_row) / spacing))
+            row_n = min(cap, n - i)
+            row_phase = phase + row * (math.tau / max(cap * 2, 1))  # offset alternating rows
+            for k in range(row_n):
+                site = items_sorted[i + k]
+                theta = row_phase + (k + 0.5) * (math.tau / row_n)
+                x = cx + r_row * math.cos(theta)
+                y = cy + r_row * math.sin(theta)
+                dots.append(_dot_svg(site, x, y, dot_r, color_map))
+            outer_r = r_row
+            i += row_n
+            row += 1
+        return inner_r, outer_r
 
-    # ring 2 — content
-    necklace(content, r_content, 3.4, "content")
-    # ring 3 — blocked
-    necklace(blocked, r_blocked, 3.4, "blocked")
-    # ring 4 — dead + system bug
-    necklace(outer, r_outer, 3.4, "outer")
+    band_gap = 14.0
+    label_specs: list[tuple[float, str]] = [(r_core, f"Watched boards · {len(board)}")]
+    guide_radii: list[float] = [r_core]
 
-    # faint ring guides
+    cursor = r_core + band_gap
+    label_r, cursor = necklace(content, cursor, 3.4, "content")
+    label_specs.append((label_r, f"Content pages · {len(content)}"))
+    guide_radii.append(label_r)
+    cursor += band_gap
+
+    label_r, cursor = necklace(blocked, cursor, 3.4, "blocked")
+    label_specs.append((label_r, f"Blocked · {len(blocked)}"))
+    guide_radii.append(label_r)
+    cursor += band_gap
+
+    label_r, cursor = necklace(outer, cursor, 3.4, "outer")
+    label_specs.append((label_r, f"Dead / bug · {len(outer)}"))
+    guide_radii.append(label_r)
+
+    # faint ring guides — one per band's inner radius
     guides = "".join(
         f'<circle class="ring-guide" cx="{cx:.0f}" cy="{cy:.0f}" r="{r:.0f}"></circle>'
-        for r in (r_core, r_content, r_blocked, r_outer)
+        for r in guide_radii
     )
 
-    # ring labels — small text on top of each ring
-    label_specs = [
-        (r_core, f"Watched boards · {len(board)}"),
-        (r_content, f"Content pages · {len(content)}"),
-        (r_blocked, f"Blocked · {len(blocked)}"),
-        (r_outer, f"Dead / bug · {len(outer)}"),
-    ]
+    # ring labels — small text above each band
     labels = "".join(
         f'<text class="ring-label" x="{cx:.0f}" y="{(cy - r - 6):.1f}" text-anchor="middle">{esc(text)}</text>'
         for r, text in label_specs
