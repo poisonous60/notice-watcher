@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 from typing import Optional
 
 # `.json` 파일명에 들어가도 안전한 slug 형식 — engine.slug._SANITIZE_RE 와 같은 charset.
@@ -23,7 +24,7 @@ import discord
 from discord import app_commands
 
 from bot import db, inspector, site_ops, url_gate
-from bot.config import admin_guild_id, owner_user_id
+from bot.config import admin_guild_id, owner_user_id, safe_browsing_api_key
 from bot.messages import render as msg
 from probe.paths import url_to_slug
 
@@ -53,10 +54,14 @@ async def send_chunked_dm(client: discord.Client, owner_id: str, text: str) -> b
 
 
 def build_admin_tree(client: discord.Client, conn, *, admin_guild: discord.Object,
-                     tree: app_commands.CommandTree) -> app_commands.CommandTree:
+                     tree: app_commands.CommandTree,
+                     start_ts: float, last_error: dict) -> app_commands.CommandTree:
     """admin 명령들을 main tree 의 `/admin` 그룹으로 등록(guild=admin_guild). 같은 client 에 두 번째
     CommandTree 를 만들면 discord.py 가 거부('This client already has an associated command tree')하므로
-    main 의 tree 를 재사용한다. group 자체에 guild kwarg 를 주면 그 guild 의 autocomplete 에만 노출됨."""
+    main 의 tree 를 재사용한다. group 자체에 guild kwarg 를 주면 그 guild 의 autocomplete 에만 노출됨.
+
+    `start_ts`·`last_error` 는 main.py 의 프로세스 전역 — `/admin status` 가 uptime/마지막 에러 표시에 사용.
+    last_error 는 dict 참조 (mutation 으로 main.py 의 LAST_ERROR 와 동기화)."""
     paths = inspector.InspectorPaths.live()
 
     async def _ack_and_dm(interaction: discord.Interaction, text: str) -> None:
@@ -77,6 +82,54 @@ def build_admin_tree(client: discord.Client, conn, *, admin_guild: discord.Objec
     async def recent(interaction: discord.Interaction, count: app_commands.Range[int, 1, 50] = 20):
         rows = inspector.recent_jobs(conn, limit=int(count))
         await _ack_and_dm(interaction, inspector.format_recent_jobs(rows))
+
+    @admin.command(name="status", description="봇/폴링 상태 (uptime · 큐 · URL 게이트 · 마지막 에러)")
+    async def status_cmd(interaction: discord.Interaction):
+        if not _is_owner(interaction):
+            await interaction.response.send_message(msg("admin_owner_only"), ephemeral=True)
+            return
+        # 3초 ack 안전망 — STATE_DIR glob + 파일별 read 가 사이트 많을 때 무거움.
+        await interaction.response.defer(ephemeral=True)
+        cnt = db.counts(conn)
+        jq = db.jobs_summary(conn)
+        n_configs = len(list(paths.configs_dir.glob("*.json"))) if paths.configs_dir.exists() else 0
+        last_poll = None
+        broken: list[str] = []
+        failed: list[str] = []
+        if paths.state_dir.exists():
+            for f in paths.state_dir.glob("*.json"):
+                if f.name.endswith(".FAILED.json"):
+                    failed.append(f.name[: -len(".FAILED.json")])
+                    continue
+                try:
+                    d = json.loads(f.read_text(encoding="utf-8"))
+                except Exception:  # noqa: BLE001
+                    continue
+                lp = d.get("last_poll_at")
+                if lp and (last_poll is None or lp > last_poll):
+                    last_poll = lp
+                if int(d.get("consecutive_breakage", 0) or 0) > 0:
+                    broken.append(d.get("slug", f.stem))
+        up = int(time.time() - start_ts)
+        gate = url_gate.rejection_summary_24h()
+        gate_line = ("• URL 게이트 거부(24h, 재시작 시 리셋): "
+                     + (", ".join(f"{k} {v}" for k, v in sorted(gate.items())) if gate else "없음")
+                     + f"  · blacklist: {url_gate.blacklist_status()}"
+                     + ("" if safe_browsing_api_key() else "  · ⚠SAFE_BROWSING_API_KEY 미설정 — 신규 등록 전부 거부됨"))
+        jq_line = (f"• 잡 큐: pending {jq.get('pending', 0)}건 / running {jq.get('running', 0)}건 "
+                   f"/ done {jq.get('done', 0)} / failed {jq.get('failed', 0)}")
+        lines = [
+            "**봇 상태**",
+            f"• uptime: {up // 3600}h {(up % 3600) // 60}m",
+            gate_line,
+            jq_line,
+            f"• 등록 config: {n_configs}개 / 구독: {cnt['subscriptions']}건 ({cnt['slugs']} slug) / pending(레거시 미발송): {cnt['pending']}건",
+            f"• 마지막 폴링: {last_poll or '아직 없음'}",
+            f"• 깨짐 신호 있는 slug: {', '.join(broken) if broken else '없음'}",
+            f"• 자동등록 실패 slug: {', '.join(failed) if failed else '없음'}",
+            f"• 마지막 에러: {(last_error['when'] + ' — ' + last_error['text']) if last_error['when'] else '없음'}",
+        ]
+        await interaction.followup.send("\n".join(lines)[:1900], ephemeral=True)
 
     @admin.command(name="reports", description="사용자 신고 목록")
     @app_commands.describe(status="필터: open(기본) / resolved / all")

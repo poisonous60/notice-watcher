@@ -1,4 +1,4 @@
-"""Discord 봇 — 게시판 등록(/watch) · 목록(/list) · 설정(/setting) · 신고(/report) · 상태(/status).
+"""Discord 봇 — 게시판 등록(/watch) · 목록(/list) · 설정(/setting) · 신고(/report). 상태는 owner 전용 `/admin status`.
 
 - 게이트웨이 연결(아웃바운드만 — 포트포워딩 불필요). 슬래시 명령 *수신* 용.
 - `/watch`(처음 보는 사이트) 는 jobs 큐에 enqueue 만 함. 실제 register.py 실행은
@@ -39,7 +39,6 @@ from bot.messages import render as msg  # noqa: E402
 from bot.runtime_config import settings  # noqa: E402
 from probe.paths import url_to_slug  # noqa: E402
 
-CONFIGS_DIR = site_ops.CONFIGS_DIR
 STATE_DIR = site_ops.STATE_DIR
 
 # N100 systemd user journal 가 안 잡히는 환경(persistent storage 비활성)을 위해 file 도 같이.
@@ -725,11 +724,10 @@ async def help_cmd(interaction: discord.Interaction):
         ),
         inline=False,
     )
-    embed.add_field(name="문제 신고 · 의견 · 상태",
+    embed.add_field(name="문제 신고 · 의견",
                     value=(
                         "`/report <issue> [slug:] [url:]` — 사이트 문제 신고 또는 지원 요청.\n"
-                        f"`/feedback <message>` — 자유 의견(slug 무관, 최대 {_FEEDBACK_MAX_LEN_AT_LOAD}자).\n"
-                        "`/status` — 봇·폴링 상태 (가동시간, 잡 큐, 마지막 폴링 등)."
+                        f"`/feedback <message>` — 자유 의견(slug 무관, 최대 {_FEEDBACK_MAX_LEN_AT_LOAD}자)."
                     ),
                     inline=False)
     embed.add_field(
@@ -744,9 +742,9 @@ async def help_cmd(interaction: discord.Interaction):
 
 @tree.command(name="report", description="사이트 문제 신고 또는 지원 요청")
 @app_commands.describe(
-    issue="무슨 문제? 자연어로 자유롭게 (예: '아카 공식 탭만 받고 싶은데 일반 게시판 글이 와요')",
-    slug="문제 있는 구독의 slug (선택, 본인 구독 자동완성)",
-    url="문제 있는 URL 또는 지원 요청 URL (선택, https://)",
+    issue="어떤 문제인지 자연어로 적어 주세요 (예: '아카 공식 탭만 받고 싶은데 일반 게시판 글이 와요')",
+    slug="문제 있는 구독의 `slug` — 본인 구독 자동완성 돼요 (선택)",
+    url="문제 있는 URL 또는 지원 요청 URL — `https://` 로 시작해요 (선택)",
 )
 @app_commands.autocomplete(slug=_own_slug_autocomplete)
 async def report_cmd(interaction: discord.Interaction, issue: str,
@@ -795,52 +793,6 @@ async def report_cmd(interaction: discord.Interaction, issue: str,
             await admin_mod.send_chunked_dm(client, oid, msg("report_owner_dm_prefix") + body)
     except Exception as e:  # noqa: BLE001
         log.warning("report owner DM 실패: %r", e)
-
-
-@tree.command(name="status", description="봇/폴링 상태")
-async def status(interaction: discord.Interaction):
-    # 3초 ack 안전망 — STATE_DIR glob + 파일별 read 가 사이트 많을 때 무거움.
-    await interaction.response.defer(ephemeral=True)
-    cnt = db.counts(_conn)
-    jq = db.jobs_summary(_conn)
-    n_configs = len(list(CONFIGS_DIR.glob("*.json"))) if CONFIGS_DIR.exists() else 0
-    last_poll = None
-    broken: list[str] = []
-    failed: list[str] = []
-    if STATE_DIR.exists():
-        for f in STATE_DIR.glob("*.json"):
-            if f.name.endswith(".FAILED.json"):
-                failed.append(f.name[: -len(".FAILED.json")])
-                continue
-            try:
-                d = json.loads(f.read_text(encoding="utf-8"))
-            except Exception:  # noqa: BLE001
-                continue
-            lp = d.get("last_poll_at")
-            if lp and (last_poll is None or lp > last_poll):
-                last_poll = lp
-            if int(d.get("consecutive_breakage", 0) or 0) > 0:
-                broken.append(d.get("slug", f.stem))
-    up = int(time.time() - START_TS)
-    gate = url_gate.rejection_summary_24h()
-    gate_line = ("• URL 게이트 거부(24h, 재시작 시 리셋): "
-                 + (", ".join(f"{k} {v}" for k, v in sorted(gate.items())) if gate else "없음")
-                 + f"  · blacklist: {url_gate.blacklist_status()}"
-                 + ("" if safe_browsing_api_key() else "  · ⚠SAFE_BROWSING_API_KEY 미설정 — 신규 등록 전부 거부됨"))
-    jq_line = (f"• 잡 큐: pending {jq.get('pending', 0)}건 / running {jq.get('running', 0)}건 "
-               f"/ done {jq.get('done', 0)} / failed {jq.get('failed', 0)}")
-    lines = [
-        "**봇 상태**",
-        f"• uptime: {up // 3600}h {(up % 3600) // 60}m",
-        gate_line,
-        jq_line,
-        f"• 등록 config: {n_configs}개 / 구독: {cnt['subscriptions']}건 ({cnt['slugs']} slug) / pending(레거시 미발송): {cnt['pending']}건",
-        f"• 마지막 폴링: {last_poll or '아직 없음'}",
-        f"• 깨짐 신호 있는 slug: {', '.join(broken) if broken else '없음'}",
-        f"• 자동등록 실패 slug: {', '.join(failed) if failed else '없음'}",
-        f"• 마지막 에러: {(LAST_ERROR['when'] + ' — ' + LAST_ERROR['text']) if LAST_ERROR['when'] else '없음'}",
-    ]
-    await interaction.followup.send("\n".join(lines)[:1900], ephemeral=True)
 
 
 # --------------------------------------------------------------------------- #
@@ -926,7 +878,8 @@ async def on_ready():
             # reconnect 마다 on_ready 가 다시 불릴 수 있음 — admin group 중복 등록 가드.
             # build_admin_tree 가 이미 박혀있으면 skip (idempotent).
             if tree.get_command("admin", guild=ag) is None:
-                admin_mod.build_admin_tree(client, _conn, admin_guild=ag, tree=tree)
+                admin_mod.build_admin_tree(client, _conn, admin_guild=ag, tree=tree,
+                                           start_ts=START_TS, last_error=LAST_ERROR)
             synced = await tree.sync(guild=ag)
             log.info("synced %d admin commands to admin guild %s (guild-scoped)", len(synced), agid)
         except Exception as e:  # noqa: BLE001
