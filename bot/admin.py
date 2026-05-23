@@ -1,16 +1,16 @@
-"""Owner 전용 admin 명령 — `/admin recent | inspect | fetch | reports | resolve | announce`.
+"""Admin guild 전용 명령 — `/admin recent | inspect | fetch | reports | resolve | preview | announce`.
 
 가시성: `.env` 의 `ADMIN_GUILD_ID` 가 가리키는 *private* guild 에만 등록(다른 길드/DM 의 autocomplete
 에 안 보임). 환경변수 없으면 admin 명령은 어디에도 등록되지 않는다 — `bot/main.py` 의 `on_ready` 가
 체크해서 sync 자체를 안 함.
 
-응답 채널: 모든 admin 명령은 *호출 채널엔 ephemeral ack 만* 보내고, 실 결과는 OWNER DM 으로 보낸다.
-긴 dump 도 채널 노이즈 없이 비공개로 받기 위함. owner 확인은 `OWNER_USER_ID` 일치만 본다(추가
-admin 가능성은 일단 없음 — 필요해지면 list 로 확장).
+응답 채널: 진단성 admin 명령은 *호출 채널엔 ephemeral ack 만* 보내고, 실 결과는 OWNER DM 으로 보낸다.
+긴 dump 도 채널 노이즈 없이 비공개로 받기 위함. 대부분의 운영 명령은 `OWNER_USER_ID` 일치만 본다.
 """
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 from typing import Optional
@@ -22,9 +22,10 @@ _SLUG_RE = re.compile(r"^[A-Za-z0-9._%-]+$")
 import discord
 from discord import app_commands
 
-from bot import db, inspector
+from bot import db, inspector, site_ops, url_gate
 from bot.config import admin_guild_id, owner_user_id
 from bot.messages import render as msg
+from probe.paths import url_to_slug
 
 SEND_SLEEP = 0.5
 
@@ -309,6 +310,74 @@ def build_admin_tree(client: discord.Client, conn, *, admin_guild: discord.Objec
             out_lines.append(msg("admin_feedback_item",
                                  fid=r['id'], user=user, ts=ts, preview=preview))
         await _ack_and_dm(interaction, "\n".join(out_lines))
+
+    @admin.command(name="preview", description="등록 없이 최신 글 하나로 알림 예시를 봅니다.")
+    @app_commands.describe(
+        url="공지/게시판 목록 페이지 URL",
+        article_url="(선택) 실제 글 하나 URL",
+    )
+    async def preview_cmd(interaction: discord.Interaction, url: str,
+                          article_url: Optional[str] = None):
+        await interaction.response.defer(thinking=True)
+        url = url.strip()
+        if not re.match(r"^https?://", url):
+            await interaction.edit_original_response(content=msg("validation_url_required"))
+            return
+        art = (article_url or "").strip() or None
+        if art and not re.match(r"^https?://", art):
+            await interaction.edit_original_response(content=msg("validation_article_url_required"))
+            return
+
+        slug = url_to_slug(url)
+        if not site_ops.is_registered(slug):
+            alias = site_ops.find_registered_alias(url, exclude_slug=slug)
+            if alias:
+                slug = alias
+        if site_ops.is_blocked(slug):
+            kind_m = site_ops.marker_kind(slug)
+            if kind_m == "bug":
+                await interaction.edit_original_response(content=msg("blocked_bug", slug=slug))
+            else:
+                info = site_ops.blocked_info(slug) or {}
+                await interaction.edit_original_response(
+                    content=msg("rejected_site",
+                                reason=site_ops.public_reason(info.get('reason')),
+                                note=info.get('note') or '없음'))
+            return
+        if site_ops.is_registered(slug):
+            await interaction.edit_original_response(content=msg("preview_analyzing"))
+            example = await site_ops.make_example(slug)
+            warn = site_ops.body_warning(slug)
+            if example:
+                await interaction.edit_original_response(
+                    content=msg("preview_with_example", example=example, warn=warn))
+            else:
+                await interaction.edit_original_response(
+                    content=msg("preview_no_example", warn=warn))
+            return
+
+        try:
+            await url_gate.check(url, article_url=art)
+        except url_gate.UrlRejected as e:
+            await interaction.edit_original_response(content=msg("gate_rejected", err=e.msg))
+            return
+
+        await interaction.edit_original_response(content=msg("enqueueing"))
+        ack_msg = await interaction.original_response()
+        requested_by = {"id": str(interaction.user.id), "name": str(interaction.user)}
+        job_id, _inserted = db.enqueue_job(
+            conn, kind="register", url=url, slug=slug, article_url=art,
+            via="preview", requested_by=json.dumps(requested_by),
+            ack_channel_id=str(ack_msg.channel.id), ack_message_id=str(ack_msg.id),
+            sub_payload=None, dedupe=False,
+        )
+        inflight = db.find_earlier_same_slug_job(conn, slug, exclude_id=job_id)
+        if inflight is not None:
+            await interaction.edit_original_response(content=msg("queued_same_url", job_id=inflight))
+            return
+        pos = db.queue_position(conn, job_id)
+        text = msg("preview_queued_first", job_id=job_id) if pos <= 1 else msg("preview_queued_wait", job_id=job_id, pos=pos)
+        await interaction.edit_original_response(content=text)
 
     @admin.command(name="announce", description="봇 공지 발송 — preview 후 버튼으로 확인 발송.")
     @app_commands.describe(

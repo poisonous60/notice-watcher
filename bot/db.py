@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     user_id      TEXT NOT NULL,
     slug         TEXT NOT NULL,
     url          TEXT NOT NULL,
+    display_title TEXT,
     filter_prompt TEXT,
     schedule     TEXT NOT NULL DEFAULT 'realtime',
     target_kind  TEXT NOT NULL CHECK (target_kind IN ('dm','channel')),
@@ -99,7 +100,8 @@ CREATE TABLE IF NOT EXISTS reports (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id        TEXT NOT NULL,
     username       TEXT,
-    slug           TEXT NOT NULL,
+    slug           TEXT,
+    url            TEXT,
     issue          TEXT NOT NULL,
     created_at     TEXT NOT NULL,
     status         TEXT NOT NULL DEFAULT 'open'
@@ -227,6 +229,37 @@ def _migrate(conn: sqlite3.Connection) -> None:
     sub_cols = {r[1] for r in conn.execute("PRAGMA table_info(subscriptions)").fetchall()}
     if "notify_empty" not in sub_cols:
         conn.execute("ALTER TABLE subscriptions ADD COLUMN notify_empty INTEGER NOT NULL DEFAULT 0")
+    if "display_title" not in sub_cols:
+        conn.execute("ALTER TABLE subscriptions ADD COLUMN display_title TEXT")
+    rep_cols = {r[1] for r in conn.execute("PRAGMA table_info(reports)").fetchall()}
+    if "url" not in rep_cols:
+        conn.execute("ALTER TABLE reports ADD COLUMN url TEXT")
+    rep_info = conn.execute("PRAGMA table_info(reports)").fetchall()
+    slug_info = next((r for r in rep_info if r[1] == "slug"), None)
+    if slug_info is not None and int(slug_info[3]) != 0:
+        conn.execute("ALTER TABLE reports RENAME TO reports_old")
+        conn.execute("""
+            CREATE TABLE reports (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id        TEXT NOT NULL,
+                username       TEXT,
+                slug           TEXT,
+                url            TEXT,
+                issue          TEXT NOT NULL,
+                created_at     TEXT NOT NULL,
+                status         TEXT NOT NULL DEFAULT 'open'
+                               CHECK (status IN ('open','resolved')),
+                resolved_at    TEXT,
+                resolved_note  TEXT
+            )
+        """)
+        conn.execute(
+            "INSERT INTO reports(id,user_id,username,slug,url,issue,created_at,status,resolved_at,resolved_note) "
+            "SELECT id,user_id,username,slug,url,issue,created_at,status,resolved_at,resolved_note FROM reports_old"
+        )
+        conn.execute("DROP TABLE reports_old")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_reports_status ON reports(status, id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_reports_slug ON reports(slug)")
     # 모든 구독은 polling 직후 즉시 발송(realtime). 옛 HH:MM schedule 행도 일괄 이전 — idempotent.
     conn.execute("UPDATE subscriptions SET schedule='realtime' WHERE schedule!='realtime'")
     # scoped announce 용 recipient_targets 컬럼 (옛 DB 에 추가).
@@ -307,15 +340,19 @@ def _retry(fn, *args, attempts: int = 5, **kw):
 # --------------------------------------------------------------------------- #
 def add_subscription(conn: sqlite3.Connection, *, user_id: str, slug: str, url: str,
                      filter_prompt: Optional[str], schedule: str,
-                     target_kind: str, target_id: str, notify_empty: bool = False) -> bool:
+                     target_kind: str, target_id: str, notify_empty: bool = False,
+                     display_title: Optional[str] = None) -> bool:
     """추가(또는 이미 있으면 필터/스케줄/notify_empty 갱신). 새로 생겼으면 True."""
     def _do():
         cur = conn.execute(
-            "INSERT INTO subscriptions(user_id,slug,url,filter_prompt,schedule,target_kind,target_id,notify_empty,created_at) "
-            "VALUES(?,?,?,?,?,?,?,?,?) "
+            "INSERT INTO subscriptions(user_id,slug,url,display_title,filter_prompt,schedule,target_kind,target_id,notify_empty,created_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?) "
             "ON CONFLICT(user_id,slug,target_id) DO UPDATE SET "
-            "filter_prompt=excluded.filter_prompt, schedule=excluded.schedule, url=excluded.url, notify_empty=excluded.notify_empty",
-            (user_id, slug, url, filter_prompt, schedule, target_kind, target_id, 1 if notify_empty else 0, _now_iso()),
+            "filter_prompt=excluded.filter_prompt, schedule=excluded.schedule, url=excluded.url, "
+            "display_title=COALESCE(excluded.display_title, subscriptions.display_title), "
+            "notify_empty=excluded.notify_empty",
+            (user_id, slug, url, display_title, filter_prompt, schedule, target_kind, target_id,
+             1 if notify_empty else 0, _now_iso()),
         )
         conn.commit()
         return cur.rowcount == 1 and conn.total_changes  # rowcount is unreliable for upsert; treat as ok
@@ -336,6 +373,28 @@ def list_subscriptions(conn: sqlite3.Connection, *, user_id: str) -> list[sqlite
     return conn.execute(
         "SELECT * FROM subscriptions WHERE user_id=? ORDER BY created_at", (user_id,)
     ).fetchall()
+
+
+def update_subscription_filter(conn: sqlite3.Connection, *, user_id: str, slug: str,
+                               filter_prompt: Optional[str]) -> bool:
+    def _do():
+        cur = conn.execute(
+            "UPDATE subscriptions SET filter_prompt=? WHERE user_id=? AND slug=?",
+            (filter_prompt, user_id, slug),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    return _retry(_do)
+
+
+def display_title_for_slug(conn: sqlite3.Connection, slug: str) -> Optional[str]:
+    row = conn.execute(
+        "SELECT display_title FROM subscriptions "
+        "WHERE slug=? AND display_title IS NOT NULL AND display_title!='' "
+        "ORDER BY created_at DESC LIMIT 1",
+        (slug,),
+    ).fetchone()
+    return row["display_title"] if row else None
 
 
 def subscriptions_for_slug(conn: sqlite3.Connection, slug: str) -> list[sqlite3.Row]:
@@ -832,12 +891,12 @@ def recent_register_jobs(conn: sqlite3.Connection, limit: int = 20,
 # reports (`/report`) — open/resolved 만 사용. admin triage 와 inspector.diagnose 가 enrich.
 # --------------------------------------------------------------------------- #
 def add_report(conn: sqlite3.Connection, *, user_id: str, username: Optional[str],
-               slug: str, issue: str) -> int:
+               slug: Optional[str], issue: str, url: Optional[str] = None) -> int:
     def _do():
         cur = conn.execute(
-            "INSERT INTO reports(user_id,username,slug,issue,created_at,status) "
-            "VALUES(?,?,?,?,?, 'open')",
-            (user_id, username, slug, issue, _now_iso()),
+            "INSERT INTO reports(user_id,username,slug,url,issue,created_at,status) "
+            "VALUES(?,?,?,?,?, ?, 'open')",
+            (user_id, username, slug, url, issue, _now_iso()),
         )
         conn.commit()
         return int(cur.lastrowid)

@@ -1,7 +1,7 @@
-"""Discord 봇 — 게시판 등록(/watch) · 미리보기(/preview) · 목록(/list) · 해제(/unwatch) · 상태(/status).
+"""Discord 봇 — 게시판 등록(/watch) · 목록(/list) · 설정(/setting) · 신고(/report) · 상태(/status).
 
 - 게이트웨이 연결(아웃바운드만 — 포트포워딩 불필요). 슬래시 명령 *수신* 용.
-- `/watch`·`/preview`(처음 보는 사이트) 는 jobs 큐에 enqueue 만 함. 실제 register.py 실행은
+- `/watch`(처음 보는 사이트) 는 jobs 큐에 enqueue 만 함. 실제 register.py 실행은
   bot/worker.py 의 단일 백그라운드 task 가 FIFO 로 처리(chromium_lock 안). 처리 끝나면 사용자가
   본 채널 메시지를 worker 가 직접 edit(interaction token 만료와 무관). 폴링의 re-probe 도 같은 큐.
 - 구독 정보(필터·스케줄·발송대상)는 SQLite(output/bot.sqlite3, bot/db.py)에만 — configs/·poll_state/ 엔 안 씀.
@@ -22,6 +22,7 @@ import traceback
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -200,10 +201,12 @@ async def watch(interaction: discord.Interaction, url: str, filter: Optional[str
 
     # 이미 등록된 사이트면 큐 안 거치고 즉시 subscription 추가 + 예시
     if _is_registered(slug):
+        display_title = db.display_title_for_slug(_conn, slug) or _state_display_title(slug)
         db.add_subscription(_conn, user_id=user_id, slug=slug, url=url,
                             filter_prompt=filter_prompt, schedule="realtime",
                             target_kind=target_kind, target_id=target_id,
-                            notify_empty=notify_empty)
+                            notify_empty=notify_empty,
+                            display_title=display_title)
         # 발송 시각 설정 행 보장 (ADR 0006) — due 쿼리 인덱스 스캔용. 기본 08:30.
         db.ensure_setting(_conn, target_kind=target_kind, target_id=target_id)
         n = _baseline_count(slug)
@@ -259,83 +262,6 @@ async def watch(interaction: discord.Interaction, url: str, filter: Optional[str
     await interaction.edit_original_response(content=text)
 
 
-@tree.command(name="preview", description="등록 없이 그 게시판의 최신 글 하나를 요약해 알림 예시를 보여줍니다.")
-@app_commands.describe(
-    url="공지/게시판 목록 페이지 URL",
-    article_url="(선택) 이 사이트가 처음이고 자동 분석에 실패할 때, 그 게시판의 실제 글 하나 URL 을 같이 주면 분석 성공률이 올라갑니다.",
-)
-async def preview(interaction: discord.Interaction, url: str, article_url: Optional[str] = None):
-    # ephemeral=False 로 — worker 가 채널 메시지 edit 으로 ack 해야 하니까 (token 만료 영향 X).
-    # 단 등록 끝나면 자동 unsubscribe — preview 만 보고 싶었던 사용자를 위해 결과 보여준 후 정리.
-    await interaction.response.defer(thinking=True)
-    url = url.strip()
-    if not re.match(r"^https?://", url):
-        await interaction.edit_original_response(content=msg("validation_url_required"))
-        return
-    art = (article_url or "").strip() or None
-    if art and not re.match(r"^https?://", art):
-        await interaction.edit_original_response(content=msg("validation_article_url_required"))
-        return
-
-    slug = url_to_slug(url)
-    # watch 와 동일 — 다른 slug 로 이미 등록된 board 면 그 slug 로 흡수(중복 등록 방지).
-    if not _is_registered(slug):
-        alias = site_ops.find_registered_alias(url, exclude_slug=slug)
-        if alias:
-            slug = alias
-    if site_ops.is_blocked(slug):
-        kind_m = site_ops.marker_kind(slug)
-        if kind_m == "bug":
-            await interaction.edit_original_response(content=msg("blocked_bug", slug=slug))
-        else:
-            info = site_ops.blocked_info(slug) or {}
-            await interaction.edit_original_response(
-                content=msg("rejected_site",
-                            reason=site_ops.public_reason(info.get('reason')),
-                            note=info.get('note') or '없음'))
-        return
-    if _is_registered(slug):
-        # 등록된 사이트 — 즉시 예시만
-        await interaction.edit_original_response(content=msg("preview_analyzing"))
-        example = await site_ops.make_example(slug)
-        warn = _body_warning(slug)
-        if example:
-            await interaction.edit_original_response(
-                content=msg("preview_with_example", example=example, warn=warn))
-        else:
-            await interaction.edit_original_response(
-                content=msg("preview_no_example", warn=warn))
-        return
-
-    # 신규 사이트 — URL 게이트 → 큐 enqueue
-    requested_by = {"id": str(interaction.user.id), "name": str(interaction.user)}
-    err = await _gate_check(url, article_url=art, via="preview", requested_by=requested_by)
-    if err:
-        await interaction.edit_original_response(content=msg("gate_rejected", err=err))
-        return
-
-    await interaction.edit_original_response(content=msg("enqueueing"))
-    ack_msg = await interaction.original_response()
-    job_id, inserted = db.enqueue_job(
-        _conn, kind="register", url=url, slug=slug, article_url=art,
-        via="preview", requested_by=json.dumps(requested_by),
-        ack_channel_id=str(ack_msg.channel.id), ack_message_id=str(ack_msg.id),
-        sub_payload=None,  # preview 는 subscription 안 만듦
-        dedupe=False,
-    )
-    inflight = db.find_earlier_same_slug_job(_conn, slug, exclude_id=job_id)
-    if inflight is not None:
-        text = msg("queued_same_url", job_id=inflight)
-        await interaction.edit_original_response(content=text)
-        return
-    pos = db.queue_position(_conn, job_id)
-    if pos <= 1:
-        text = msg("preview_queued_first", job_id=job_id)
-    else:
-        text = msg("preview_queued_wait", job_id=job_id, pos=pos)
-    await interaction.edit_original_response(content=text)
-
-
 async def _own_slug_autocomplete(interaction: discord.Interaction, current: str
                                   ) -> list[app_commands.Choice[str]]:
     """본인 subscriptions 의 slug 자동완성. Discord Choice.value 100자 한계 — 그 이상은 제외."""
@@ -353,44 +279,185 @@ async def _own_slug_autocomplete(interaction: discord.Interaction, current: str
     return out
 
 
-@tree.command(name="unwatch", description="구독 해제. slug 또는 URL 을 줍니다.")
-@app_commands.describe(target="해제할 구독의 slug (자동완성) 또는 등록할 때 쓴 URL")
-@app_commands.autocomplete(target=_own_slug_autocomplete)
-async def unwatch(interaction: discord.Interaction, target: str):
-    t = target.strip()
-    is_url = bool(re.match(r"^https?://", t))
-    slug = url_to_slug(t) if is_url else t
-    uid = str(interaction.user.id)
-    n = db.remove_subscription(_conn, user_id=uid, slug=slug)
-    if is_url:
-        # 같은 board 가 old/new slug 양쪽에 구독돼 있을 수 있음(slug 스키마 drift) — 둘 다 제거.
-        # (computed slug 에 구독이 있었어도 alias 쪽이 남으면 새 글 2번 알림 계속됨.)
-        alias = site_ops.find_registered_alias(t, exclude_slug=slug)
-        if alias:
-            n += db.remove_subscription(_conn, user_id=uid, slug=alias)
-    if n:
-        await interaction.response.send_message(msg("unwatch_removed", slug=slug, n=n), ephemeral=True)
-    else:
-        await interaction.response.send_message(msg("unwatch_not_found", slug=slug), ephemeral=True)
+def _display_title(row) -> str:
+    title = (row["display_title"] if "display_title" in row.keys() else None) or ""
+    title = title.strip()
+    if not title:
+        u = urlparse(row["url"] or "")
+        title = (u.netloc + u.path).strip("/") or row["slug"]
+    return title[:80]
 
 
-@tree.command(name="list", description="내 구독 목록")
+def _state_display_title(slug: str) -> Optional[str]:
+    try:
+        title = json.loads((STATE_DIR / f"{slug}.json").read_text(encoding="utf-8")).get("display_title")
+    except Exception:  # noqa: BLE001
+        return None
+    title = str(title or "").strip()
+    return title or None
+
+
+def _short_text(text: Optional[str], limit: int) -> str:
+    s = (text or "").replace("\n", " ").strip()
+    return s if len(s) <= limit else s[:limit - 1] + "…"
+
+
+class SubscriptionFilterModal(discord.ui.Modal):
+    def __init__(self, view: "SubscriptionListView", slug: str, current: Optional[str]) -> None:
+        super().__init__(title="필터 수정")
+        self.view_ref = view
+        self.slug = slug
+        self.filter_input = discord.ui.TextInput(
+            label="필터",
+            default=(current or "")[:500],
+            required=False,
+            max_length=500,
+            style=discord.TextStyle.paragraph,
+        )
+        self.add_item(self.filter_input)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        text = str(self.filter_input.value or "").strip() or None
+        db.update_subscription_filter(_conn, user_id=self.view_ref.user_id, slug=self.slug,
+                                      filter_prompt=text)
+        self.view_ref.selected_slug = self.slug
+        self.view_ref.reload()
+        await interaction.response.edit_message(embed=self.view_ref.embed(), view=self.view_ref)
+
+
+class SubscriptionListView(discord.ui.View):
+    PAGE_SIZE = 10
+
+    def __init__(self, *, user_id: str) -> None:
+        super().__init__(timeout=180)
+        self.user_id = user_id
+        self.page = 0
+        self.selected_slug: Optional[str] = None
+        self.rows = []
+        self.reload()
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if str(interaction.user.id) != self.user_id:
+            await interaction.response.send_message("이 목록은 호출한 사람만 조작할 수 있어요.", ephemeral=True)
+            return False
+        return True
+
+    def reload(self) -> None:
+        self.rows = db.list_subscriptions(_conn, user_id=self.user_id)
+        max_page = max(0, (len(self.rows) - 1) // self.PAGE_SIZE)
+        self.page = min(self.page, max_page)
+        self._build_items()
+
+    def _page_rows(self):
+        start = self.page * self.PAGE_SIZE
+        return self.rows[start:start + self.PAGE_SIZE]
+
+    def _selected_row(self):
+        if not self.selected_slug:
+            return None
+        for row in self.rows:
+            if row["slug"] == self.selected_slug:
+                return row
+        return None
+
+    def _build_items(self) -> None:
+        self.clear_items()
+        page_rows = self._page_rows()
+        if page_rows:
+            options = []
+            for r in page_rows:
+                where = "DM" if r["target_kind"] == "dm" else f"#{r['target_id']}"
+                options.append(discord.SelectOption(
+                    label=_short_text(_display_title(r), 100),
+                    value=str(r["id"]),
+                    description=_short_text(f"필터: {r['filter_prompt'] or '없음'} · {where}", 100),
+                    default=(r["slug"] == self.selected_slug),
+                ))
+            select = discord.ui.Select(placeholder="구독 선택 (편집/해제)", options=options, row=0)
+
+            async def select_cb(interaction: discord.Interaction) -> None:
+                selected_id = int(select.values[0])
+                self.selected_slug = next((r["slug"] for r in self.rows if int(r["id"]) == selected_id), None)
+                self._build_items()
+                await interaction.response.edit_message(embed=self.embed(), view=self)
+            select.callback = select_cb
+            self.add_item(select)
+
+        has_selected = self._selected_row() is not None
+        edit_btn = discord.ui.Button(label="✎ 필터 수정", style=discord.ButtonStyle.secondary,
+                                     disabled=not has_selected, row=1)
+        remove_btn = discord.ui.Button(label="✕ 해제", style=discord.ButtonStyle.danger,
+                                       disabled=not has_selected, row=1)
+
+        async def edit_cb(interaction: discord.Interaction) -> None:
+            row = self._selected_row()
+            if row is None:
+                await interaction.response.edit_message(embed=self.embed(), view=self)
+                return
+            await interaction.response.send_modal(
+                SubscriptionFilterModal(self, row["slug"], row["filter_prompt"]))
+
+        async def remove_cb(interaction: discord.Interaction) -> None:
+            if self.selected_slug:
+                db.remove_subscription(_conn, user_id=self.user_id, slug=self.selected_slug)
+            self.selected_slug = None
+            self.reload()
+            if not self.rows:
+                await interaction.response.edit_message(content=msg("list_empty"), embed=None, view=None)
+                return
+            await interaction.response.edit_message(embed=self.embed(), view=self)
+
+        edit_btn.callback = edit_cb
+        remove_btn.callback = remove_cb
+        self.add_item(edit_btn)
+        self.add_item(remove_btn)
+
+        max_page = max(0, (len(self.rows) - 1) // self.PAGE_SIZE)
+        if max_page > 0:
+            prev_btn = discord.ui.Button(label="◀", style=discord.ButtonStyle.secondary,
+                                         disabled=self.page == 0, row=2)
+            next_btn = discord.ui.Button(label="▶", style=discord.ButtonStyle.secondary,
+                                         disabled=self.page >= max_page, row=2)
+
+            async def prev_cb(interaction: discord.Interaction) -> None:
+                self.page = max(0, self.page - 1)
+                self.selected_slug = None
+                self._build_items()
+                await interaction.response.edit_message(embed=self.embed(), view=self)
+
+            async def next_cb(interaction: discord.Interaction) -> None:
+                self.page = min(max_page, self.page + 1)
+                self.selected_slug = None
+                self._build_items()
+                await interaction.response.edit_message(embed=self.embed(), view=self)
+
+            prev_btn.callback = prev_cb
+            next_btn.callback = next_cb
+            self.add_item(prev_btn)
+            self.add_item(next_btn)
+
+    def embed(self) -> discord.Embed:
+        max_page = max(0, (len(self.rows) - 1) // self.PAGE_SIZE)
+        embed = discord.Embed(title="내 구독 목록",
+                              description=f"{len(self.rows)}개 · {self.page + 1}/{max_page + 1}페이지",
+                              color=0x5865F2)
+        lines = []
+        start = self.page * self.PAGE_SIZE
+        for i, r in enumerate(self._page_rows(), start=start + 1):
+            where = "DM" if r["target_kind"] == "dm" else f"<#{r['target_id']}>"
+            filt = _short_text(r["filter_prompt"] or "없음", 80)
+            lines.append(f"{i}. **{_display_title(r)}** · 필터: {filt} · {where}")
+        embed.description = "\n".join(lines) or "구독이 없어요."
+        return embed
+
+
+@tree.command(name="list", description="내 구독 목록과 편집 UI")
 async def list_cmd(interaction: discord.Interaction):
-    rows = db.list_subscriptions(_conn, user_id=str(interaction.user.id))
-    if not rows:
+    view = SubscriptionListView(user_id=str(interaction.user.id))
+    if not view.rows:
         await interaction.response.send_message(msg("list_empty"), ephemeral=True)
         return
-    lines = [msg("list_header")]
-    for r in rows:
-        where = "DM" if r["target_kind"] == "dm" else f"<#{r['target_id']}>"
-        ne = " — 새글없음알림:on" if r["notify_empty"] else ""  # connect() 가 항상 _migrate 하므로 컬럼은 늘 있음
-        lines.append(msg("list_item",
-                         slug=r['slug'],
-                         filter=(r['filter_prompt'] or '없음'),
-                         where=where,
-                         ne=ne,
-                         created_at=r['created_at'][:10]))
-    await interaction.response.send_message("\n".join(lines)[:1900], ephemeral=True)
+    await interaction.response.send_message(embed=view.embed(), view=view, ephemeral=True)
 
 
 _FEEDBACK_MAX_LEN_AT_LOAD = feedback_max_len()  # description 은 등록 시점에 고정 — restart 시 갱신
@@ -438,50 +505,6 @@ async def feedback_cmd(interaction: discord.Interaction, message: str):
         log.warning("feedback owner DM 실패: %r", e)
 
 
-@tree.command(name="announce", description="봇 공지 수신 설정 — 인자 없이 호출하면 현재 상태 표시.")
-@app_commands.describe(
-    dm="내 DM 으로 공지 받기 (true=받음 / false=옵트아웃). 미지정이면 변경 안 함.",
-    channel="이 채널로 공지 받기 (true=받음 / false=옵트아웃). 'Manage Channels' 권한 필요. DM 에선 사용 불가.",
-)
-async def announce_cmd(interaction: discord.Interaction,
-                       dm: Optional[bool] = None,
-                       channel: Optional[bool] = None):
-    user_id = str(interaction.user.id)
-    is_guild = interaction.guild is not None
-    ch_id = str(interaction.channel_id) if interaction.channel_id else None
-    lines: list[str] = []
-
-    # dm 토글 — bool 인자 제공 시
-    if dm is not None:
-        db.set_announce_optout(_conn, "dm", user_id, opted_out=not dm)
-        lines.append(msg("announce_dm_set", state='ON' if dm else 'OFF'))
-
-    # channel 토글 — guild 안 + manage_channels 권한 + 채널에 봇이 알림 보내는 곳인지.
-    # interaction.permissions 는 항상 Permissions 객체(DM 이면 빈, guild 채널이면 effective).
-    if channel is not None:
-        if not is_guild or not ch_id:
-            lines.append(msg("announce_channel_in_dm"))
-        elif not interaction.permissions.manage_channels:
-            lines.append(msg("announce_no_manage_channels"))
-        else:
-            db.set_announce_optout(_conn, "channel", ch_id, opted_out=not channel)
-            lines.append(msg("announce_channel_set", state='ON' if channel else 'OFF'))
-
-    # 무인자 또는 토글 후 — 현재 상태 표시
-    dm_off = db.get_announce_optout(_conn, "dm", user_id)
-    state = [msg("announce_status_dm", state='OFF' if dm_off else 'ON')]
-    if is_guild and ch_id:
-        ch_off = db.get_announce_optout(_conn, "channel", ch_id)
-        state.append(msg("announce_status_channel", state='OFF' if ch_off else 'ON'))
-    if not lines:
-        lines.append(msg("announce_current_header"))
-    lines.append("")
-    lines.extend(state)
-    lines.append("")
-    lines.append(msg("announce_toggle_hint"))
-    await interaction.response.send_message("\n".join(lines), ephemeral=True)
-
-
 _HHMM_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
 
 
@@ -494,53 +517,127 @@ def _normalize_hhmm(raw: str) -> Optional[str]:
     return f"{int(m.group(1)):02d}:{m.group(2)}"
 
 
-@tree.command(name="notify-time",
-              description="공지 받을 시각 설정 (KST HH:MM). 인자 없이 호출하면 현재 설정 표시.")
-@app_commands.describe(
-    time="받을 시각 HH:MM (예: 08:30). 미지정이면 현재 설정만 표시.",
-    channel="이 채널의 발송 시각을 바꿈 (true). 'Manage Channels' 권한 필요. 미지정/false 면 내 DM 설정.",
-)
-async def notify_time_cmd(interaction: discord.Interaction,
-                          time: Optional[str] = None,
-                          channel: Optional[bool] = None):
-    user_id = str(interaction.user.id)
-    is_guild = interaction.guild is not None
-    ch_id = str(interaction.channel_id) if interaction.channel_id else None
-    set_channel = bool(channel)
+class SettingTimeModal(discord.ui.Modal):
+    def __init__(self, view: "SettingView", target_kind: str, target_id: str, current: str) -> None:
+        super().__init__(title="발송 시각")
+        self.view_ref = view
+        self.target_kind = target_kind
+        self.target_id = target_id
+        self.time_input = discord.ui.TextInput(
+            label="발송 시각 (HH:MM)",
+            default=current,
+            required=True,
+            max_length=5,
+        )
+        self.add_item(self.time_input)
 
-    if time is not None:
-        hhmm = _normalize_hhmm(time)
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        hhmm = _normalize_hhmm(str(self.time_input.value or ""))
         if not hhmm:
             await interaction.response.send_message(
-                "⏰ 시각 형식이 올바르지 않아요. `HH:MM` (24시간제, 예: `08:30`)으로 적어 주세요.",
-                ephemeral=True)
+                "시각 형식이 올바르지 않아요. `HH:MM` (예: `08:30`)으로 적어 주세요.",
+                ephemeral=True,
+            )
             return
-        if set_channel:
-            if not is_guild or not ch_id:
-                await interaction.response.send_message(
-                    "이 옵션은 서버 채널에서만 쓸 수 있어요. (DM 발송 시각은 `channel` 옵션 없이 설정해요.)",
-                    ephemeral=True)
-                return
-            if not interaction.permissions.manage_channels:
-                await interaction.response.send_message(
-                    "채널 발송 시각은 'Manage Channels' 권한이 있어야 바꿀 수 있어요.", ephemeral=True)
-                return
-            db.set_deliver_at(_conn, target_kind="channel", target_id=ch_id, deliver_at=hhmm)
-            await interaction.response.send_message(
-                f"📣 이 채널의 공지 발송 시각을 매일 **{hhmm} (KST)** 로 맞췄어요.", ephemeral=True)
-        else:
-            db.set_deliver_at(_conn, target_kind="dm", target_id=user_id, deliver_at=hhmm)
-            await interaction.response.send_message(
-                f"⏰ 내 공지 발송 시각을 매일 **{hhmm} (KST)** 로 맞췄어요.", ephemeral=True)
-        return
+        db.set_deliver_at(_conn, target_kind=self.target_kind, target_id=self.target_id,
+                          deliver_at=hhmm)
+        self.view_ref.refresh()
+        await interaction.response.edit_message(embed=self.view_ref.embed(), view=self.view_ref)
 
-    # 무인자 — 현재 설정 표시.
-    lines = [f"⏰ 내 DM 발송 시각: **{db.get_deliver_at(_conn, target_kind='dm', target_id=user_id)} (KST)**"]
-    if is_guild and ch_id:
-        lines.append(f"📣 이 채널 발송 시각: **{db.get_deliver_at(_conn, target_kind='channel', target_id=ch_id)} (KST)**")
-    lines.append("")
-    lines.append("바꾸려면 `/notify-time time:08:30` (채널은 `channel:true` 추가, 권한 필요).")
-    await interaction.response.send_message("\n".join(lines), ephemeral=True)
+
+class SettingView(discord.ui.View):
+    def __init__(self, *, user_id: str, channel_id: Optional[str], manage_channels: bool) -> None:
+        super().__init__(timeout=180)
+        self.user_id = user_id
+        self.channel_id = channel_id
+        self.manage_channels = manage_channels
+        self.refresh()
+
+    def refresh(self) -> None:
+        self.clear_items()
+        dm_off = db.get_announce_optout(_conn, "dm", self.user_id)
+        dm_btn = discord.ui.Button(label=f"📨 DM 공지: {'OFF' if dm_off else 'ON'}",
+                                   style=discord.ButtonStyle.secondary, row=0)
+
+        async def dm_cb(interaction: discord.Interaction) -> None:
+            cur = db.get_announce_optout(_conn, "dm", self.user_id)
+            db.set_announce_optout(_conn, "dm", self.user_id, opted_out=not cur)
+            self.refresh()
+            await interaction.response.edit_message(embed=self.embed(), view=self)
+        dm_btn.callback = dm_cb
+        self.add_item(dm_btn)
+
+        if self.channel_id:
+            ch_off = db.get_announce_optout(_conn, "channel", self.channel_id)
+            ch_btn = discord.ui.Button(label=f"📣 채널 공지: {'OFF' if ch_off else 'ON'}",
+                                       style=discord.ButtonStyle.secondary,
+                                       disabled=not self.manage_channels, row=0)
+
+            async def ch_cb(interaction: discord.Interaction) -> None:
+                cur = db.get_announce_optout(_conn, "channel", self.channel_id or "")
+                db.set_announce_optout(_conn, "channel", self.channel_id or "", opted_out=not cur)
+                self.refresh()
+                await interaction.response.edit_message(embed=self.embed(), view=self)
+            ch_btn.callback = ch_cb
+            self.add_item(ch_btn)
+
+        dm_time = db.get_deliver_at(_conn, target_kind="dm", target_id=self.user_id)
+        dm_time_btn = discord.ui.Button(label=f"⏰ DM 시각: {dm_time} ✎",
+                                        style=discord.ButtonStyle.secondary, row=1)
+
+        async def dm_time_cb(interaction: discord.Interaction) -> None:
+            await interaction.response.send_modal(
+                SettingTimeModal(self, "dm", self.user_id, dm_time))
+        dm_time_btn.callback = dm_time_cb
+        self.add_item(dm_time_btn)
+
+        if self.channel_id:
+            ch_time = db.get_deliver_at(_conn, target_kind="channel", target_id=self.channel_id)
+            ch_time_btn = discord.ui.Button(label=f"⏰ 채널 시각: {ch_time} ✎",
+                                            style=discord.ButtonStyle.secondary,
+                                            disabled=not self.manage_channels, row=1)
+
+            async def ch_time_cb(interaction: discord.Interaction) -> None:
+                await interaction.response.send_modal(
+                    SettingTimeModal(self, "channel", self.channel_id or "", ch_time))
+            ch_time_btn.callback = ch_time_cb
+            self.add_item(ch_time_btn)
+
+        close_btn = discord.ui.Button(label="❌ 닫기", style=discord.ButtonStyle.secondary, row=2)
+
+        async def close_cb(interaction: discord.Interaction) -> None:
+            self.stop()
+            await interaction.response.edit_message(view=None)
+        close_btn.callback = close_cb
+        self.add_item(close_btn)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if str(interaction.user.id) != self.user_id:
+            await interaction.response.send_message("이 설정은 호출한 사람만 조작할 수 있어요.", ephemeral=True)
+            return False
+        return True
+
+    def embed(self) -> discord.Embed:
+        embed = discord.Embed(title="발송 설정", color=0x5865F2)
+        lines = [
+            f"DM 공지: **{'OFF' if db.get_announce_optout(_conn, 'dm', self.user_id) else 'ON'}**",
+            f"DM 시각: **{db.get_deliver_at(_conn, target_kind='dm', target_id=self.user_id)} (KST)**",
+        ]
+        if self.channel_id:
+            suffix = "" if self.manage_channels else " · 권한 필요"
+            lines.append(f"채널 공지: **{'OFF' if db.get_announce_optout(_conn, 'channel', self.channel_id) else 'ON'}**{suffix}")
+            lines.append(f"채널 시각: **{db.get_deliver_at(_conn, target_kind='channel', target_id=self.channel_id)} (KST)**{suffix}")
+        embed.description = "\n".join(lines)
+        return embed
+
+
+@tree.command(name="setting", description="발송·공지 설정")
+async def setting_cmd(interaction: discord.Interaction):
+    user_id = str(interaction.user.id)
+    channel_id = str(interaction.channel_id) if interaction.guild is not None and interaction.channel_id else None
+    view = SettingView(user_id=user_id, channel_id=channel_id,
+                       manage_channels=bool(interaction.permissions.manage_channels))
+    await interaction.response.send_message(embed=view.embed(), view=view, ephemeral=True)
 
 
 @tree.command(name="help", description="봇 명령어 안내")
@@ -550,44 +647,78 @@ async def help_cmd(interaction: discord.Interaction):
         description=msg("help_embed_description"),
         color=0x5865F2,
     )
-    embed.add_field(name="구독 관리", value=msg("help_field_subs_value"), inline=False)
+    embed.add_field(
+        name="구독 관리",
+        value=(
+            "`/watch <url> [filter:] [here:] [notify_empty:] [article_url:]`\n"
+            "└ 게시판 URL 등록. filter 로 자연어 조건, here=true 면 이 채널에, 끄면 내 DM.\n"
+            "`/list` — 내 구독 목록, 필터 수정, 구독 해제."
+        ),
+        inline=False,
+    )
     embed.add_field(name="문제 신고 · 의견 · 상태",
-                    value=msg("help_field_report_value", max_len=_FEEDBACK_MAX_LEN_AT_LOAD),
+                    value=(
+                        "`/report <issue> [slug:] [url:]` — 사이트 문제 신고 또는 지원 요청.\n"
+                        f"`/feedback <message>` — 자유 의견(slug 무관, 최대 {_FEEDBACK_MAX_LEN_AT_LOAD}자).\n"
+                        "`/status` — 봇·폴링 상태 (가동시간, 잡 큐, 마지막 폴링 등)."
+                    ),
                     inline=False)
-    embed.add_field(name="공지 수신 설정", value=msg("help_field_announce_value"), inline=False)
+    embed.add_field(
+        name="설정",
+        value="`/setting` — DM/채널 공지 ON/OFF 와 매일 발송 시각을 버튼으로 설정.",
+        inline=False,
+    )
     embed.add_field(name="기타", value=msg("help_field_misc_value"), inline=False)
     embed.set_footer(text=msg("help_footer"))
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
-@tree.command(name="report", description="본인 구독에 문제가 있을 때 신고 — 관리자가 진단·해결합니다.")
+@tree.command(name="report", description="사이트 문제 신고 또는 지원 요청")
 @app_commands.describe(
-    slug="문제 있는 구독의 slug (목록에서 자동완성)",
     issue="무슨 문제? 자연어로 자유롭게 (예: '아카 공식 탭만 받고 싶은데 일반 게시판 글이 와요')",
+    slug="문제 있는 구독의 slug (선택, 본인 구독 자동완성)",
+    url="문제 있는 URL 또는 지원 요청 URL (선택, https://)",
 )
 @app_commands.autocomplete(slug=_own_slug_autocomplete)
-async def report_cmd(interaction: discord.Interaction, slug: str, issue: str):
+async def report_cmd(interaction: discord.Interaction, issue: str,
+                     slug: Optional[str] = None, url: Optional[str] = None):
     user_id = str(interaction.user.id)
     issue = (issue or "").strip()
     if not issue:
         await interaction.response.send_message(msg("report_issue_empty"), ephemeral=True)
         return
-    # slug 가 본인 구독이 아니면 거부 (자동완성 우회 입력 차단)
-    own = {r["slug"] for r in db.list_subscriptions(_conn, user_id=user_id)}
-    if slug not in own:
+    slug = (slug or "").strip() or None
+    url = (url or "").strip() or None
+    if not slug and not url:
         await interaction.response.send_message(
-            msg("report_slug_not_owned", slug=slug), ephemeral=True)
+            "URL 없는 자유 의견은 `/feedback` 으로 보내주세요.", ephemeral=True)
         return
+    if url and not re.match(r"^https?://", url):
+        await interaction.response.send_message(msg("validation_url_required"), ephemeral=True)
+        return
+    if slug:
+        # slug 가 본인 구독이 아니면 거부 (자동완성 우회 입력 차단)
+        own = {r["slug"] for r in db.list_subscriptions(_conn, user_id=user_id)}
+        if slug not in own:
+            await interaction.response.send_message(
+                msg("report_slug_not_owned", slug=slug), ephemeral=True)
+            return
+    issue_body = issue[:1500]
+    if slug and url:
+        issue_body = f"{issue_body}\n\nURL: {url}"
     report_id = db.add_report(_conn, user_id=user_id, username=str(interaction.user),
-                              slug=slug, issue=issue[:1500])
+                              slug=slug, url=url, issue=issue_body)
     await interaction.response.send_message(
-        msg("report_received", report_id=report_id, slug=slug),
+        msg("report_received", report_id=report_id, slug=(slug or url or "URL")),
         ephemeral=True)
     # owner DM — 자동 진단 결과까지 함께. admin.send_chunked_dm 재사용(2000 chars split, 실패 시 False).
     try:
         paths = inspector.InspectorPaths.live()
         result = inspector.inspect(_conn, paths, report_id=report_id)
-        body = inspector.format_inspect_result(result) if result else f"신고 #{report_id} — inspect 실패"
+        if result:
+            body = inspector.format_inspect_result(result)
+        else:
+            body = f"신고 #{report_id} — URL 기반 신고\nurl={url or '(없음)'}\nissue={issue_body}"
         oid = owner_user_id()
         if oid and oid.isdigit():
             await admin_mod.send_chunked_dm(client, oid, msg("report_owner_dm_prefix") + body)
@@ -676,7 +807,7 @@ async def on_ready():
              client.user.id if client.user else "?", [g.id for g in client.guilds])
     if not safe_browsing_api_key():
         log.warning("⚠ SAFE_BROWSING_API_KEY 가 .env 에 없습니다 — URL 게이트의 Safe Browsing 검사가 "
-                    "fail-closed 라 /watch·/preview(처음 보는 사이트)가 전부 거부됩니다. .env 에 키를 설정하세요 "
+                    "fail-closed 라 /watch(처음 보는 사이트)가 전부 거부됩니다. .env 에 키를 설정하세요 "
                     "(GCP 콘솔 → Safe Browsing API 사용 설정 → API 키).")
     # 잡 큐 worker 시작 — 재시작 시 running 잡 → pending 리셋. on_ready 가 reconnect 마다 호출돼도 worker.start 안에서 idempotent.
     try:

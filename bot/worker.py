@@ -22,6 +22,7 @@ from bot import db
 from bot.messages import render as msg
 from bot.runtime_config import settings
 from bot.site_ops import (
+    STATE_DIR,
     append_triage_queue,
     baseline_count,
     blocked_info,
@@ -43,6 +44,15 @@ _tasks: list[asyncio.Task] = []
 # 같은 잡이 봇을 N회 이상 죽이면 BUG 마커 박고 자동 fail — 큐 맨앞 무한 점유 방지.
 # 임계 2 = 한 번은 외부 사고 (deploy/OOM 등) 봐주고, 두 번째 죽음에 즉시 BUG (잡 자체 원인 명백).
 ATTEMPTS_LIMIT = 2
+
+
+def _display_title_from_state(slug: str) -> Optional[str]:
+    try:
+        title = json.loads((STATE_DIR / f"{slug}.json").read_text(encoding="utf-8")).get("display_title")
+    except Exception:  # noqa: BLE001
+        return None
+    title = str(title or "").strip()
+    return title or None
 
 # per-slug 직렬화 — 같은 slug 잡 두 개를 다른 worker 가 동시 claim 했을 때 chromium probe
 # 가 같은 사이트에 병렬로 못 가게. 첫 worker 가 끝나면 두 번째가 깨어나 is_registered(slug)
@@ -454,6 +464,7 @@ async def _post_register_success(client, conn, job, *, slug_override: Optional[s
         except Exception:  # noqa: BLE001
             sub = None
     if sub:
+        display_title = db.display_title_for_slug(conn, slug) or _display_title_from_state(slug)
         db.add_subscription(
             conn,
             user_id=sub["user_id"], slug=slug, url=url,
@@ -461,6 +472,7 @@ async def _post_register_success(client, conn, job, *, slug_override: Optional[s
             schedule=sub["schedule"],
             target_kind=sub["target_kind"], target_id=sub["target_id"],
             notify_empty=bool(sub.get("notify_empty", False)),
+            display_title=display_title,
         )
         # 발송 시각 설정 행 보장 (ADR 0006) — due 쿼리 인덱스 스캔용. 기본 08:30.
         db.ensure_setting(conn, target_kind=sub["target_kind"], target_id=sub["target_id"])

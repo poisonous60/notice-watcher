@@ -68,6 +68,10 @@ _Avoid_: "손-config" (작성자 의미로 오독 — strategy 종류일 뿐).
 interaction 응답을 *채널 메시지로 promote* 한 것 (`jobs.ack_channel_id/ack_message_id` 저장). worker 가 phase + 결과 edit. token 만료 무관, 사용자가 슬래시 친 채널에 그대로 노출.
 _Avoid_: "사용자 응답" (어느 채널인지 불명), "interaction 메시지" (promote 후엔 interaction 영역 벗어남).
 
+**display_title** (= 사용자에게 보일 구독 이름):
+등록 시점 register subprocess 가 board URL 의 HTML `<title>` 을 스냅샷해 `subscriptions.display_title` 컬럼에 저장. `/list` 등 사용자 향 UI 가 `slug` 대신 이걸 표시 — slug 는 내부 식별자(host_/recognizer 인코딩, 사람에 무의미). NULL = 기존(마이그 전) 또는 추출 실패 → URL host+path fallback. 시간 지나 페이지 title 바뀌어도 안 갱신(stale 가능, trade-off).
+_Avoid_: "slug"(내부 식별자 — 사용자 노출 X), "board_title"(어휘 떠다님 — register output 에선 안 씀), "별명"(사용자가 직접 적은 게 아님 — 스냅샷).
+
 **사용자 DM**:
 봇이 사용자와 1:1 DM 채널에 따로 보내는 메시지. `/watch here=False` 일 때 폴링 결과 도착처. ack 와 무관한 별도 채널.
 

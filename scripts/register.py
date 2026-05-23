@@ -28,6 +28,7 @@ import argparse
 import asyncio
 import contextlib
 import hashlib
+import html
 import json
 import os
 import re
@@ -738,8 +739,28 @@ def _accept_path_content_reject(digest: dict, url: str, slug: str, gate_only: bo
     return rc
 
 
+def _extract_display_title(slug: str) -> Optional[str]:
+    probe_dir = output_dir(slug)
+    for name in ("list.html", "article.html"):
+        p = probe_dir / name
+        if not p.exists():
+            continue
+        try:
+            text = p.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        m = re.search(r"<title[^>]*>(.*?)</title>", text, re.I | re.S)
+        if not m:
+            continue
+        title = re.sub(r"\s+", " ", html.unescape(m.group(1))).strip()
+        if title:
+            return title[:200]
+    return None
+
+
 def _save_state(slug: str, url: str, config_path: Path, post_ids: list[str],
-                body_empty_at_baseline: Optional[bool] = None) -> Path:
+                body_empty_at_baseline: Optional[bool] = None,
+                display_title: Optional[str] = None) -> Path:
     """state.json 작성. `body_empty_at_baseline`: 등록 직후 첫 글 1~3건 본문 fetch 결과 —
     None=확인 안 됨, True=모두 0자(비공개/등급제한 의심), False=하나라도 본문 있음. 봇이 이 플래그로
     `/preview`·`/watch` 응답에 "본문 추출 안 됨" 경고 표시 (`bot/site_ops.body_empty_at_baseline`)."""
@@ -756,6 +777,9 @@ def _save_state(slug: str, url: str, config_path: Path, post_ids: list[str],
         "n_baseline": len(post_ids),
         "seen_post_ids": post_ids,
     }
+    title = display_title or _extract_display_title(slug)
+    if title:
+        state["display_title"] = title
     if body_empty_at_baseline is not None:
         state["body_empty_at_baseline"] = bool(body_empty_at_baseline)
     p.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
