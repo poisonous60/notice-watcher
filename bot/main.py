@@ -1,4 +1,4 @@
-"""Discord 봇 — 게시판 등록(/watch) · 목록(/list) · 설정(/setting) · 신고(/report). 상태는 owner 전용 `/admin status`.
+"""Discord 봇 — 게시판 등록(/watch) · 목록(/list) · 설정(/setting) · 신고·의견(/report). 상태는 owner 전용 `/admin status`.
 
 - 게이트웨이 연결(아웃바운드만 — 포트포워딩 불필요). 슬래시 명령 *수신* 용.
 - `/watch`(처음 보는 사이트) 는 jobs 큐에 enqueue 만 함. 실제 register.py 실행은
@@ -33,7 +33,7 @@ from discord import app_commands  # noqa: E402
 
 from bot import admin as admin_mod, db, delivery_tick, inspector, site_ops, url_gate, worker  # noqa: E402
 from bot.config import (  # noqa: E402
-    admin_guild_id, bot_token, feedback_max_len, guild_id, owner_user_id, safe_browsing_api_key,
+    admin_guild_id, bot_token, guild_id, owner_user_id, safe_browsing_api_key,
 )
 from bot.messages import render as msg  # noqa: E402
 from bot.runtime_config import settings  # noqa: E402
@@ -472,53 +472,6 @@ async def list_cmd(interaction: discord.Interaction):
     await interaction.followup.send(view=view, ephemeral=True)
 
 
-_FEEDBACK_MAX_LEN_AT_LOAD = feedback_max_len()  # description 은 등록 시점에 고정 — restart 시 갱신
-
-
-@tree.command(
-    name="feedback",
-    description=f"자유 의견 (slug 무관, 최대 {_FEEDBACK_MAX_LEN_AT_LOAD}자).",
-)
-@app_commands.describe(
-    message=f"의견 — 자연어 자유 입력. 최대 {_FEEDBACK_MAX_LEN_AT_LOAD}자.",
-)
-async def feedback_cmd(interaction: discord.Interaction, message: str):
-    # 3초 ack 안전망.
-    await interaction.response.defer(ephemeral=True)
-    max_len = feedback_max_len()
-    text = (message or "").strip()
-    if not text:
-        await interaction.followup.send(msg("feedback_empty"), ephemeral=True)
-        return
-    if len(text) > max_len:
-        await interaction.followup.send(
-            msg("feedback_too_long", max_len=max_len, cur_len=len(text)),
-            ephemeral=True,
-        )
-        return
-    fid = db.add_feedback(
-        _conn, user_id=str(interaction.user.id),
-        username=str(interaction.user), message=text,
-    )
-    await interaction.followup.send(
-        msg("feedback_received", fid=fid),
-        ephemeral=True,
-    )
-    # OWNER DM — 전문 그대로. send_chunked_dm 이 2000자 단위로 split.
-    try:
-        oid = owner_user_id()
-        if oid and oid.isdigit():
-            body = msg("feedback_owner_dm",
-                       fid=fid,
-                       user=interaction.user,
-                       user_id=interaction.user.id,
-                       at_iso=_now_iso(),
-                       message=text)
-            await admin_mod.send_chunked_dm(client, oid, body)
-    except Exception as e:  # noqa: BLE001
-        log.warning("feedback owner DM 실패: %r", e)
-
-
 _HHMM_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
 
 
@@ -712,39 +665,23 @@ async def help_cmd(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     embed = discord.Embed(
         title="📖 notice-watcher 명령어",
-        description=msg("help_embed_description"),
         color=0x5865F2,
-    )
-    embed.add_field(
-        name="구독 관리",
-        value=(
+        description=(
             "`/watch <url> [filter:] [here:] [notify_empty:] [article_url:]`\n"
-            "└ 게시판 URL 등록. filter 로 자연어 조건, here=true 면 이 채널에, 끄면 내 DM.\n"
-            "`/list` — 내 구독 목록, 필터 수정, 구독 해제."
+            "`/list` — 내 구독 목록, 필터 수정, 구독 해제.\n"
+            "`/report <issue> [slug:] [url:]` — 사이트 문제 신고 또는 지원 요청.\n"
+            "`/setting` — DM/채널 공지 ON/OFF 와 매일 발송 시각을 버튼으로 설정.\n"
+            "`/help` — 이 안내."
         ),
-        inline=False,
     )
-    embed.add_field(name="문제 신고 · 의견",
-                    value=(
-                        "`/report <issue> [slug:] [url:]` — 사이트 문제 신고 또는 지원 요청.\n"
-                        f"`/feedback <message>` — 자유 의견(slug 무관, 최대 {_FEEDBACK_MAX_LEN_AT_LOAD}자)."
-                    ),
-                    inline=False)
-    embed.add_field(
-        name="설정",
-        value="`/setting` — DM/채널 공지 ON/OFF 와 매일 발송 시각을 버튼으로 설정.",
-        inline=False,
-    )
-    embed.add_field(name="기타", value=msg("help_field_misc_value"), inline=False)
-    embed.set_footer(text=msg("help_footer"))
     await interaction.followup.send(embed=embed, ephemeral=True)
 
 
-@tree.command(name="report", description="사이트 문제 신고 또는 지원 요청")
+@tree.command(name="report", description="사이트 문제 신고 또는 자유 의견")
 @app_commands.describe(
-    issue="어떤 문제인지 자연어로 적어 주세요 (예: '아카 공식 탭만 받고 싶은데 일반 게시판 글이 와요')",
+    issue="문제/의견을 적어 주세요",
     slug="문제 있는 구독의 `slug` — 본인 구독 자동완성 돼요 (선택)",
-    url="문제 있는 URL 또는 지원 요청 URL — `https://` 로 시작해요 (선택)",
+    url="문제 있는 URL 또는 지원을 원하는 URL — `https://` 로 시작해요 (선택)",
 )
 @app_commands.autocomplete(slug=_own_slug_autocomplete)
 async def report_cmd(interaction: discord.Interaction, issue: str,
@@ -758,10 +695,6 @@ async def report_cmd(interaction: discord.Interaction, issue: str,
         return
     slug = (slug or "").strip() or None
     url = (url or "").strip() or None
-    if not slug and not url:
-        await interaction.followup.send(
-            "URL 없는 자유 의견은 `/feedback` 으로 보내주세요.", ephemeral=True)
-        return
     if url and not re.match(r"^https?://", url):
         await interaction.followup.send(msg("validation_url_required"), ephemeral=True)
         return
@@ -777,9 +710,11 @@ async def report_cmd(interaction: discord.Interaction, issue: str,
         issue_body = f"{issue_body}\n\nURL: {url}"
     report_id = db.add_report(_conn, user_id=user_id, username=str(interaction.user),
                               slug=slug, url=url, issue=issue_body)
-    await interaction.followup.send(
-        msg("report_received", report_id=report_id, slug=(slug or url or "URL")),
-        ephemeral=True)
+    if slug or url:
+        ack = msg("report_received", report_id=report_id, slug=(slug or url))
+    else:
+        ack = msg("report_received_free", report_id=report_id)
+    await interaction.followup.send(ack, ephemeral=True)
     # owner DM — 자동 진단 결과까지 함께. admin.send_chunked_dm 재사용(2000 chars split, 실패 시 False).
     try:
         paths = inspector.InspectorPaths.live()
