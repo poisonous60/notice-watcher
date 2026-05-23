@@ -290,12 +290,21 @@ async def _own_slug_autocomplete(interaction: discord.Interaction, current: str
     return out
 
 
+_GENERIC_TITLES = {
+    "blog", "home", "index", "software", "tools", "loading...", "loading",
+    "untitled", "redirect", "redirecting", "please wait", "page not found",
+    "404", "403", "discord", "github",
+}
+
+
 def _display_title(row) -> str:
     title = (row["display_title"] if "display_title" in row.keys() else None) or ""
     title = title.strip()
-    if not title:
+    # 짧거나 generic 한 title (예: codingapple.com/blog 의 "Blog") 는 host 가 더 정보적.
+    if not title or len(title) < 6 or title.lower() in _GENERIC_TITLES:
         u = urlparse(row["url"] or "")
-        title = (u.netloc + u.path).strip("/") or row["slug"]
+        host_path = (u.netloc + u.path).strip("/")
+        title = host_path or row["slug"]
     return title[:80]
 
 
@@ -392,16 +401,14 @@ class SubscriptionListView(discord.ui.LayoutView):
             where = "내 DM" if r["target_kind"] == "dm" else f"<#{r['target_id']}>"
             filt = _short_text(r["filter_prompt"] or "없음 (새 글 전부)", 200)
             title = _display_title(r)
+            url = r["url"] or ""
+            # 제목 markdown link — 클릭 시 외부 URL 열림
+            title_md = f"[{title}]({url})" if url else title
             children.append(discord.ui.Section(
-                f"**{idx}. {title}**",
+                f"**{idx}. {title_md}**",
                 f"📝 필터: {filt} · 📨 발송: {where}",
                 accessory=SubscriptionRemoveButton(int(r["id"])),
             ))
-            # 행 사이 빈 spacing (line 없이 공간만)
-            if offset < len(prs) - 1:
-                children.append(discord.ui.Separator(
-                    visible=False, spacing=discord.SeparatorSpacing.large,
-                ))
 
         if max_page > 0:
             prev_btn: discord.ui.Button
