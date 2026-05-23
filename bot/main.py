@@ -167,11 +167,11 @@ def _record_error(where: str, exc: BaseException) -> str:
     url="공지/게시판 목록 페이지 URL",
     filter="(선택) 어떤 글만 받을지 자연어로. 예: '점검 공지는 빼고 신규 콘텐츠/이벤트만'. 비우면 새 글 전부.",
     here="(선택) 켜면 이 채널에 발송. 끄면(기본) 내 DM 으로.",
-    notify_empty="(선택) 켜면 폴링했는데 새 글이 없을 때도 '새 공지 없음' 한 줄을 보냄. 끄면(기본) 새 글 있을 때만.",
+    notify_empty="(선택) 켜면(기본) 폴링했는데 새 글이 없을 때도 '새 공지 없음' 한 줄을 보냄. 끄면 새 글 있을 때만.",
     article_url="(선택) 처음 등록하는 사이트가 자동 분석에 실패할 때, 그 게시판의 실제 글 하나 URL 을 같이 주면 분석 성공률이 올라갑니다.",
 )
 async def watch(interaction: discord.Interaction, url: str, filter: Optional[str] = None,
-                here: bool = False, notify_empty: bool = False,
+                here: bool = False, notify_empty: bool = True,
                 article_url: Optional[str] = None):
     await interaction.response.defer(thinking=True)
     url = url.strip()
@@ -644,7 +644,10 @@ async def help_cmd(interaction: discord.Interaction):
             "`/list` — 내 구독 목록, 필터 수정, 구독 해제.\n"
             "`/report <issue> [slug:] [url:]` — 사이트 문제 신고 또는 지원 요청.\n"
             "`/setting` — DM/채널 공지 ON/OFF 와 매일 발송 시각을 버튼으로 설정.\n"
-            "`/help` — 이 안내."
+            "`/help` — 이 안내.\n"
+            "\n"
+            "github: https://github.com/poisonous60/notice-watcher\n"
+            "현황 페이지: https://n100-noticewatcher.tail4a65b8.ts.net/"
         ),
     )
     await interaction.followup.send(embed=embed, ephemeral=True)
