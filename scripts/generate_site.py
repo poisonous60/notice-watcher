@@ -93,9 +93,14 @@ FETCH_COLORS = {
     "other method": "#9b6b6b",
     "content page": "#bcb3a4",
     "blocked": "#9aa0a6",
+    "dead URL": "#c4b9a6",
+    "system bug": "#b88a8a",
 }
 # legend / color order
-FETCH_ORDER = ["static HTML", "JSON API", "headless browser", "custom adapter", "other method", "content page", "blocked"]
+FETCH_ORDER = [
+    "static HTML", "JSON API", "headless browser", "custom adapter", "other method",
+    "content page", "blocked", "dead URL", "system bug",
+]
 
 
 def color_key_for(site: dict, strategy_by_slug: dict) -> str:
@@ -104,7 +109,13 @@ def color_key_for(site: dict, strategy_by_slug: dict) -> str:
         return FETCH_LABELS.get(str(strategy_by_slug.get(site.get("slug"), "")), "other method")
     if group == "content":
         return "content page"
-    return "blocked"
+    if group == "blocked":
+        return "blocked"
+    if group == "dead":
+        return "dead URL"
+    if group == "bug":
+        return "system bug"
+    return "other method"
 
 
 def marker_kind(path: Path) -> str:
@@ -210,27 +221,28 @@ def read_poll_state() -> dict:
         host = hostname_from_url(url)
         if kind == "polling":
             group = "board"
-            status = str(data.get("last_status") or "unknown")
+            raw = str(data.get("last_status") or "unknown")
+            status = "active" if raw in ("ok", "lurking", "registered") else raw
         elif kind == "rejected":
             group, status = rejected_group(data.get("reason"))
         elif kind == "failed":
             group, status = "blocked", "blocked"
         elif kind == "bug":
-            group, status = "exclude", "bug"
+            group, status = "bug", "bug"
         else:
-            group, status = "exclude", kind
+            continue
 
         if group == "exclude":
-            continue
+            group, status = "dead", "dead"
 
         sites.append(
             {
                 "slug": slug,
+                "url": url,
                 "platform": platform_from_slug(slug),
                 "host": host or "unknown host",
                 "group": group,
                 "status": status,
-                "seen_post_ids": data.get("seen_post_ids") if isinstance(data.get("seen_post_ids"), list) else [],
             }
         )
 
@@ -307,72 +319,112 @@ def _hash_unit(value: str, salt: str) -> float:
     return int.from_bytes(digest[:4], "big") / 0xFFFFFFFF
 
 
+GOLDEN_ANGLE = math.pi * (3.0 - math.sqrt(5.0))
+
+
+def _dot_svg(site: dict, x: float, y: float, radius: float, color_map: dict) -> str:
+    color_key = str(site.get("color_key") or "other method")
+    fill = color_map.get(color_key, FETCH_COLORS["other method"])
+    status = str(site.get("status") or "unknown")
+    url = str(site.get("url") or "")
+    circle = (
+        f'<circle class="dot" cx="{x:.1f}" cy="{y:.1f}" r="{radius:.1f}" '
+        f'fill="{fill}" '
+        f'data-pf="{esc(color_key)}" data-domain="{esc(site["host"])}" '
+        f'data-status="{esc(status)}" data-url="{esc(url)}"></circle>'
+    )
+    if url:
+        return f'<a xlink:href="{esc(url)}" target="_blank" rel="noopener noreferrer">{circle}</a>'
+    return circle
+
+
 def svg_grouped_scatter(sites: list[dict], color_map: dict) -> str:
-    width = 760
-    height = 460
-    pad = 44
-    plot_w = width - 2 * pad
-    plot_h = height - 2 * pad
-    groups = [
-        ("board", "Watched boards"),
-        ("content", "Content pages"),
-        ("blocked", "Blocked"),
-    ]
-    centers = {
-        "board": pad + plot_w * 0.18,
-        "content": pad + plot_w * 0.50,
-        "blocked": pad + plot_w * 0.82,
-    }
+    width = 880
+    height = 720
+    cx = width / 2
+    cy = height / 2
 
     if not sites:
         return (
-            f'<svg id="siteScatter" viewBox="0 0 {width} {height}" role="img" aria-label="Site outcome scatter">'
+            f'<svg id="siteScatter" xmlns:xlink="http://www.w3.org/1999/xlink" '
+            f'viewBox="0 0 {width} {height}" role="img" aria-label="Site outcome radial">'
             f'<rect x="0" y="0" width="{width}" height="{height}" class="scatter-bg"></rect>'
-            f'<rect x="{pad}" y="{pad}" width="{plot_w}" height="{plot_h}" class="scatter-frame"></rect>'
-            f'<text x="{width / 2:.0f}" y="{height / 2:.0f}" text-anchor="middle" class="svg-label">No sites yet</text>'
+            f'<text x="{cx:.0f}" y="{cy:.0f}" text-anchor="middle" class="svg-label">No sites yet</text>'
             "</svg>"
         )
 
-    circles = []
-    max_board_posts = max((len(site.get("seen_post_ids") or []) for site in sites if site.get("group") == "board"), default=0)
-    for group, _ in groups:
-        group_sites = sorted(
-            [site for site in sites if site.get("group") == group],
-            key=lambda site: (str(site.get("color_key")), str(site["host"]), str(site["slug"])),
-        )
-        count = len(group_sites)
-        for i, site in enumerate(group_sites):
-            base_y = pad + 60 if count <= 1 else pad + 60 + (plot_h - 116) * i / (count - 1)
-            y = min(height - pad - 28, max(pad + 48, base_y + (_hash_unit(str(site["slug"]), "y") - 0.5) * 18))
-            x = min(pad + plot_w - 24, max(pad + 24, centers[group] + (_hash_unit(str(site["slug"]), "x") - 0.5) * 104))
-            color_key = str(site.get("color_key") or "other method")
-            posts = len(site.get("seen_post_ids") or [])
-            radius = 3.5
-            if group == "board":
-                radius = 3 + (5 * math.log1p(posts) / math.log1p(max_board_posts) if max_board_posts else 0)
-            status = str(site.get("status") or "unknown")
-            ring = ' stroke="var(--ink)" stroke-width="1.4"' if group == "board" and status == "ok" else ""
-            circles.append(
-                f'<circle class="dot" cx="{x:.1f}" cy="{y:.1f}" r="{radius:.1f}" '
-                f'fill="{color_map.get(color_key, FETCH_COLORS["other method"])}"{ring} '
-                f'data-pf="{esc(color_key)}" data-domain="{esc(site["host"])}" '
-                f'data-status="{esc(status)}"></circle>'
-            )
+    board = [s for s in sites if s.get("group") == "board"]
+    content = [s for s in sites if s.get("group") == "content"]
+    blocked = [s for s in sites if s.get("group") == "blocked"]
+    dead = [s for s in sites if s.get("group") == "dead"]
+    bug = [s for s in sites if s.get("group") == "bug"]
+    outer = dead + bug
 
-    group_counts = Counter(str(site.get("group")) for site in sites)
-    labels = []
-    for group, label in groups:
-        labels.append(
-            f'<text x="{centers[group]:.1f}" y="{pad - 16}" text-anchor="middle" class="svg-label">'
-            f'{esc(label)} · {group_counts.get(group, 0)}</text>'
-        )
+    # ring geometry: inner sunflower disk, then three necklace rings
+    r_core = 220.0
+    gap = 26.0
+    r_content = r_core + gap
+    r_blocked = r_content + 28.0
+    r_outer = r_blocked + 28.0
+
+    dots: list[str] = []
+
+    # ring 1 — sunflower spiral (active boards), color = strategy
+    board_sorted = sorted(board, key=lambda s: (str(s.get("color_key")), str(s["host"]), str(s["slug"])))
+    n_board = len(board_sorted)
+    for i, site in enumerate(board_sorted):
+        r = r_core * math.sqrt((i + 0.5) / max(n_board, 1))
+        theta = i * GOLDEN_ANGLE
+        x = cx + r * math.cos(theta)
+        y = cy + r * math.sin(theta)
+        dots.append(_dot_svg(site, x, y, 4.2, color_map))
+
+    def necklace(items: list[dict], radius: float, dot_r: float, phase_salt: str) -> None:
+        items_sorted = sorted(items, key=lambda s: (str(s["host"]), str(s["slug"])))
+        n = len(items_sorted)
+        if n == 0:
+            return
+        phase = _hash_unit(phase_salt, "phase") * math.tau
+        for i, site in enumerate(items_sorted):
+            theta = phase + i * (math.tau / n)
+            jitter = (_hash_unit(str(site["slug"]), "rj") - 0.5) * 6.0
+            r = radius + jitter
+            x = cx + r * math.cos(theta)
+            y = cy + r * math.sin(theta)
+            dots.append(_dot_svg(site, x, y, dot_r, color_map))
+
+    # ring 2 — content
+    necklace(content, r_content, 3.4, "content")
+    # ring 3 — blocked
+    necklace(blocked, r_blocked, 3.4, "blocked")
+    # ring 4 — dead + system bug
+    necklace(outer, r_outer, 3.4, "outer")
+
+    # faint ring guides
+    guides = "".join(
+        f'<circle class="ring-guide" cx="{cx:.0f}" cy="{cy:.0f}" r="{r:.0f}"></circle>'
+        for r in (r_core, r_content, r_blocked, r_outer)
+    )
+
+    # ring labels — small text on top of each ring
+    label_specs = [
+        (r_core, f"Watched boards · {len(board)}"),
+        (r_content, f"Content pages · {len(content)}"),
+        (r_blocked, f"Blocked · {len(blocked)}"),
+        (r_outer, f"Dead / bug · {len(outer)}"),
+    ]
+    labels = "".join(
+        f'<text class="ring-label" x="{cx:.0f}" y="{(cy - r - 6):.1f}" text-anchor="middle">{esc(text)}</text>'
+        for r, text in label_specs
+    )
 
     return (
-        f'<svg id="siteScatter" viewBox="0 0 {width} {height}" role="img" aria-label="Site outcome scatter">'
+        f'<svg id="siteScatter" xmlns:xlink="http://www.w3.org/1999/xlink" '
+        f'viewBox="0 0 {width} {height}" role="img" aria-label="Site outcome radial">'
         f'<rect x="0" y="0" width="{width}" height="{height}" class="scatter-bg"></rect>'
-        f'<rect x="{pad}" y="{pad}" width="{plot_w}" height="{plot_h}" class="scatter-frame"></rect>'
-        + "".join(labels)
-        + "".join(circles)
+        + guides
+        + labels
+        + "".join(dots)
         + "</svg>"
     )
 
@@ -410,13 +462,54 @@ def render_html(configs: dict, poll: dict, jobs: dict, generated_at: datetime) -
     if not recent_rows:
         recent_rows.append('<tr><td colspan="4">No completed registration jobs on this machine yet.</td></tr>')
 
-    all_hosts = sorted(configs["hosts"].items(), key=lambda kv: (-kv[1], kv[0]))
-    host_total = len(all_hosts)
+    # Merge hosts from registered configs + every URL we evaluated (rejected / failed / dead / bug).
+    host_states: dict[str, Counter] = {}
+    for host, count in configs["hosts"].items():
+        host_states.setdefault(host, Counter())["registered"] += count
+    for site in sites:
+        host = site.get("host") or "unknown host"
+        if not host or host == "unknown host":
+            continue
+        group = str(site.get("group") or "")
+        if group == "board":
+            continue  # already counted via configs
+        label = {"content": "content", "blocked": "blocked", "dead": "dead", "bug": "bug"}.get(group)
+        if not label:
+            continue
+        host_states.setdefault(host, Counter())[label] += 1
+
+    STATE_ORDER = ["registered", "blocked", "content", "dead", "bug"]
+    STATE_TITLES = {
+        "registered": "watched",
+        "blocked": "blocked",
+        "content": "single article",
+        "dead": "URL dead",
+        "bug": "system bug",
+    }
+
+    def state_badges(states: Counter) -> str:
+        parts = []
+        for key in STATE_ORDER:
+            n = states.get(key, 0)
+            if not n:
+                continue
+            parts.append(f'<span class="state state-{key}" title="{esc(STATE_TITLES[key])}">{esc(STATE_TITLES[key])} {n}</span>')
+        return "".join(parts)
+
+    def total(states: Counter) -> int:
+        return sum(states.values())
+
+    sorted_hosts = sorted(
+        host_states.items(),
+        key=lambda kv: (-total(kv[1]), 0 if kv[1].get("registered") else 1, kv[0]),
+    )
+    host_total = len(sorted_hosts)
     top_hosts = "".join(
-        f'<li data-host="{esc(host)}"><span>{esc(host)}</span><b>{count}</b></li>' for host, count in all_hosts
+        f'<li data-host="{esc(host)}"><span>{esc(host)}</span><span class="states">{state_badges(states)}</span></li>'
+        for host, states in sorted_hosts
     )
     if not top_hosts:
-        top_hosts = '<li data-host=""><span>No public host summary yet</span><b>0</b></li>'
+        top_hosts = '<li data-host=""><span>No public host summary yet</span><span class="states"></span></li>'
 
     job_status = ", ".join(f"{name}: {count}" for name, count in top_items(jobs["status"], 6))
     if not job_status:
@@ -547,8 +640,10 @@ def render_html(configs: dict, poll: dict, jobs: dict, generated_at: datetime) -
     }}
     .svg-value {{ fill: var(--ink); font-weight: 700; }}
     .scatter-bg {{ fill: var(--panel); }}
-    .scatter-frame {{ fill: none; stroke: var(--muted); stroke-width: 1; }}
-    .dot {{ opacity: 0.58; cursor: pointer; transition: opacity 0.12s ease; }}
+    .ring-guide {{ fill: none; stroke: var(--line); stroke-width: 0.8; stroke-dasharray: 2 4; opacity: 0.55; }}
+    .ring-label {{ fill: var(--muted); font: 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 0.04em; }}
+    .dot {{ opacity: 0.68; cursor: pointer; transition: opacity 0.12s ease, r 0.12s ease; }}
+    .dot:hover {{ opacity: 1; }}
     #siteScatter.dimmed .dot {{ opacity: 0.08; }}
     #siteScatter.dimmed .dot.hl {{ opacity: 0.95; }}
     .dot-tip {{
@@ -612,14 +707,36 @@ def render_html(configs: dict, poll: dict, jobs: dict, generated_at: datetime) -
     .host-list li {{
       display: flex;
       justify-content: space-between;
+      align-items: center;
       gap: 20px;
       border-bottom: 1px solid var(--line);
       padding: 9px 0;
     }}
     .host-list li[hidden] {{ display: none; }}
-    .host-list span {{
+    .host-list > li > span:first-child {{
       overflow-wrap: anywhere;
+      flex: 1 1 auto;
     }}
+    .host-list .states {{
+      display: inline-flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      justify-content: flex-end;
+    }}
+    .state {{
+      font-size: 0.74rem;
+      padding: 2px 7px;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      color: var(--muted);
+      background: var(--paper);
+      white-space: nowrap;
+    }}
+    .state-registered {{ color: var(--ink); border-color: var(--accent); background: #eaf1f2; }}
+    .state-blocked {{ color: #4a4a52; background: #ebebed; }}
+    .state-content {{ color: #5a4f3d; background: #efe9dc; }}
+    .state-dead {{ color: #6a6253; background: #eee7d8; }}
+    .state-bug {{ color: #7a4a4a; background: #f1dede; }}
     table {{
       width: 100%;
       border-collapse: collapse;
@@ -679,12 +796,12 @@ def render_html(configs: dict, poll: dict, jobs: dict, generated_at: datetime) -
       {scatter_chart}
       <ul class="legend">{legend_html}</ul>
       <div id="dotTip" class="dot-tip" hidden></div>
-      <figcaption>Figure 1. Every page we evaluated, sorted by what it turned out to be. Left = list/board
-        pages we actively watch — color shows how we read each one (static HTML, JSON API, headless
-        browser, or a custom adapter; see legend), and a ring marks fully active boards. Middle = single
-        content pages (one article or info page, not a board) that we skip. Right = pages we could not
-        enter (anti-bot / Cloudflare). Broken or dead URLs are left out. Hover a dot to highlight the
-        same fetch method and see the domain.</figcaption>
+      <figcaption>Figure 1. Every URL we evaluated, arranged from the centre outward by outcome. The inner
+        disc is the set of boards we actively watch — each dot's colour shows how we read it (static
+        HTML, JSON API, headless browser, or a custom adapter; see legend), and the spiral layout has no
+        meaning beyond even packing. The outer rings are URLs we evaluated but did not subscribe to:
+        single content pages, anti-bot blocks, and dead or broken URLs. Hover a dot to highlight the
+        same fetch method and see the domain; click to open the URL in a new tab.</figcaption>
     </figure>
     <script>
       (function () {{
