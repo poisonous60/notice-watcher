@@ -381,8 +381,8 @@ def _dot_svg(site: dict, x: float, y: float, radius: float, color_map: dict) -> 
 
 
 def svg_grouped_scatter(sites: list[dict], color_map: dict) -> str:
-    width = 880
-    height = 720
+    width = 960
+    height = 820
     cx = width / 2
     cy = height / 2
 
@@ -403,11 +403,11 @@ def svg_grouped_scatter(sites: list[dict], color_map: dict) -> str:
     outer = dead + bug
 
     # ring geometry: inner sunflower disk, then three necklace rings
-    r_core = 220.0
-    gap = 26.0
+    r_core = 300.0
+    gap = 30.0
     r_content = r_core + gap
-    r_blocked = r_content + 28.0
-    r_outer = r_blocked + 28.0
+    r_blocked = r_content + 32.0
+    r_outer = r_blocked + 32.0
 
     dots: list[str] = []
 
