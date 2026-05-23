@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "site": "forum.sushi.com",
+  "board": "sushi",
+  "strategy": "handwritten",
+  "adapter": "CommonwealthAdapter",
+  "kwargs": {
+    "base_url": "https://forum.sushi.com",
+    "community_id": "sushi",
+    "order_by": "newest"
+  },
+  "_slug_board": "forum.sushi.com_sushi",
+  "_source_url": "https://forum.sushi.com/discussions",
+  "_note": "Common/Commonwealth governance forum — SPA shell with public tRPC thread.getThreads API. CommonwealthAdapter reads the JSON API directly; HTML may contain no static rows.",
+  "_recognized_platform": "commonwealth (probe Common SPA marker -> tRPC)"
+}
