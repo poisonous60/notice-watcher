@@ -313,39 +313,123 @@ def _short_text(text: Optional[str], limit: int) -> str:
     return s if len(s) <= limit else s[:limit - 1] + "…"
 
 
-class SubscriptionListView(discord.ui.View):
-    """RoboDanny-style paginator. View item set 은 __init__ 에서 한 번 고정 — 매 callback 마다
-    `_refresh()` 가 label·disabled 만 mutate (item 추가/제거 X).
+class SubscriptionRemoveButton(discord.ui.Button["SubscriptionListView"]):
+    """Section 의 accessory — 그 sub 한 행 옆 inline ✕."""
 
-    구조: 2 sub-button row (5 ✕ button per row = 10 sub/page) + 1 nav row [◀][▶]. ActionRow 5 안.
-    필터 수정 기능 제거 — Modal UX 못마음 (사용자 결정 2026-05-23). 필터 바꾸려면 unwatch + 재 /watch.
-    Select 안 씀 — discord.py issue #7284 default-empty-values 함정 회피."""
+    def __init__(self, sub_id: int) -> None:
+        super().__init__(label="✕", style=discord.ButtonStyle.danger,
+                         custom_id=f"sub_rem_{sub_id}")
+        self.sub_id = sub_id
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer()
+        view = self.view  # type: ignore[assignment]
+        db.remove_subscription_by_id(_conn, user_id=view.user_id, sub_id=self.sub_id)
+        new_view = SubscriptionListView(user_id=view.user_id, page=view.page)
+        await interaction.edit_original_response(view=new_view)
+
+
+class SubscriptionNavButton(discord.ui.Button["SubscriptionListView"]):
+    """페이지 nav — direction ±1."""
+
+    def __init__(self, label: str, direction: int) -> None:
+        super().__init__(label=label, style=discord.ButtonStyle.secondary,
+                         custom_id=f"sub_nav_{direction}")
+        self.direction = direction
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer()
+        view = self.view  # type: ignore[assignment]
+        new_page = max(0, min(view._max_page(), view.page + self.direction))
+        new_view = SubscriptionListView(user_id=view.user_id, page=new_page)
+        await interaction.edit_original_response(view=new_view)
+
+
+class SubscriptionListView(discord.ui.LayoutView):
+    """Components v2 (discord.py 2.4+) 패턴 — 각 sub 가 Section + accessory=Button 으로
+    행 옆에 inline ✕ 버튼. 사용자 요청 (2026-05-23) 으로 v1 의 ActionRow-only 한계 회피.
+
+    구조:
+      Container(accent_color=blurple):
+        TextDisplay("## 📋 내 구독 (N개 · p/m페이지) ...")
+        Separator()
+        Section("**1. <title>**", "필터: ... · 발송: ...", accessory=✕)
+        Section(... 2 ...)
+        ...
+        Separator()
+        ActionRow([◀ 이전][다음 ▶])  # max_page > 0 시만
+
+    매 callback (✕·nav) 마다 *새 view 인스턴스* 만들어 edit_message — children 동적 mutate 회피.
+    embed/content 사용 안 함 (v2 한계: 동시 사용 X). 모든 텍스트 TextDisplay/Section 안.
+    필터 수정 기능 없음 (사용자 결정 — Modal UX 거부). 필터 바꾸려면 unwatch + 재 /watch.
+    """
 
     PAGE_SIZE = 10
-    BUTTONS_PER_ROW = 5
 
-    def __init__(self, *, user_id: str) -> None:
+    def __init__(self, *, user_id: str, page: int = 0) -> None:
         super().__init__(timeout=300)
         self.user_id = user_id
-        self.page = 0
-        self.rows: list = []
-        self._remove_btns: list[discord.ui.Button] = []
-        for i in range(self.PAGE_SIZE):
-            row = i // self.BUTTONS_PER_ROW  # 0 or 1
-            rb = discord.ui.Button(style=discord.ButtonStyle.secondary, label="—", row=row,
-                                   custom_id=f"sub_rem_{i}")
-            rb.callback = self._make_remove_cb(i)
-            self._remove_btns.append(rb)
-            self.add_item(rb)
-        self.prev_btn = discord.ui.Button(label="◀ 이전", style=discord.ButtonStyle.secondary,
-                                          row=2, custom_id="sub_prev")
-        self.next_btn = discord.ui.Button(label="다음 ▶", style=discord.ButtonStyle.secondary,
-                                          row=2, custom_id="sub_next")
-        self.prev_btn.callback = self._prev_cb
-        self.next_btn.callback = self._next_cb
-        self.add_item(self.prev_btn)
-        self.add_item(self.next_btn)
-        self.reload()
+        self.rows = db.list_subscriptions(_conn, user_id=user_id)
+        max_page = max(0, (len(self.rows) - 1) // self.PAGE_SIZE)
+        self.page = max(0, min(page, max_page))
+
+        if not self.rows:
+            self.add_item(discord.ui.Container(
+                discord.ui.TextDisplay(
+                    "## 📋 내 구독\n구독이 없어요. `/watch <url>` 로 추가하세요."
+                ),
+                accent_color=discord.Color.blurple(),
+            ))
+            return
+
+        start = self.page * self.PAGE_SIZE
+        prs = self.rows[start:start + self.PAGE_SIZE]
+
+        header = discord.ui.TextDisplay(
+            f"## 📋 내 구독 ({len(self.rows)}개 · {self.page + 1}/{max_page + 1}페이지)\n"
+            "각 행의 **✕ 버튼**으로 해제합니다. 필터 바꾸려면 `/watch` 다시 호출."
+        )
+        sections: list[discord.ui.Section] = []
+        for offset, r in enumerate(prs):
+            idx = start + offset + 1
+            where = "내 DM" if r["target_kind"] == "dm" else f"<#{r['target_id']}>"
+            filt = _short_text(r["filter_prompt"] or "없음 (새 글 전부)", 200)
+            title = _display_title(r)
+            sections.append(discord.ui.Section(
+                f"**{idx}. {title}**",
+                f"📝 필터: {filt} · 📨 발송: {where}",
+                accessory=SubscriptionRemoveButton(int(r["id"])),
+            ))
+
+        nav_items: list = []
+        if max_page > 0:
+            prev_btn: discord.ui.Button
+            next_btn: discord.ui.Button
+            if self.page > 0:
+                prev_btn = SubscriptionNavButton("◀ 이전", -1)
+            else:
+                prev_btn = discord.ui.Button(label="◀ 이전",
+                                             style=discord.ButtonStyle.secondary,
+                                             disabled=True, custom_id="sub_nav_prev_dis")
+            if self.page < max_page:
+                next_btn = SubscriptionNavButton("다음 ▶", +1)
+            else:
+                next_btn = discord.ui.Button(label="다음 ▶",
+                                             style=discord.ButtonStyle.secondary,
+                                             disabled=True, custom_id="sub_nav_next_dis")
+            nav_items = [discord.ui.Separator(), discord.ui.ActionRow(prev_btn, next_btn)]
+
+        container = discord.ui.Container(
+            header,
+            discord.ui.Separator(),
+            *sections,
+            *nav_items,
+            accent_color=discord.Color.blurple(),
+        )
+        self.add_item(container)
+
+    def _max_page(self) -> int:
+        return max(0, (len(self.rows) - 1) // self.PAGE_SIZE)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if str(interaction.user.id) != self.user_id:
@@ -356,9 +440,9 @@ class SubscriptionListView(discord.ui.View):
 
     async def on_error(self, interaction: discord.Interaction, error: Exception,
                        item: discord.ui.Item) -> None:
-        """RoboDanny 패턴 — silent 함정 회피. log + ephemeral 응답."""
         tb = "".join(traceback.format_exception(type(error), error, error.__traceback__))
-        log.error("[list view] item=%s error=%s\n%s", getattr(item, 'custom_id', '?'), error, tb)
+        log.error("[list view] item=%s error=%s\n%s",
+                  getattr(item, 'custom_id', '?'), error, tb)
         try:
             if interaction.response.is_done():
                 await interaction.followup.send(
@@ -369,78 +453,6 @@ class SubscriptionListView(discord.ui.View):
         except Exception:  # noqa: BLE001
             pass
 
-    def _max_page(self) -> int:
-        return max(0, (len(self.rows) - 1) // self.PAGE_SIZE)
-
-    def _page_rows(self):
-        start = self.page * self.PAGE_SIZE
-        return self.rows[start:start + self.PAGE_SIZE]
-
-    def reload(self) -> None:
-        self.rows = db.list_subscriptions(_conn, user_id=self.user_id)
-        self.page = min(self.page, self._max_page())
-        self._refresh()
-
-    def _refresh(self) -> None:
-        prs = self._page_rows()
-        start_idx = self.page * self.PAGE_SIZE
-        for i, rb in enumerate(self._remove_btns):
-            if i < len(prs):
-                rb.label = f"{start_idx + i + 1} ✕"
-                rb.disabled = False
-            else:
-                rb.label = "—"
-                rb.disabled = True
-        max_page = self._max_page()
-        self.prev_btn.disabled = (self.page <= 0)
-        self.next_btn.disabled = (self.page >= max_page)
-
-    def embed(self) -> discord.Embed:
-        embed = discord.Embed(title="📋 내 구독", color=0x5865F2)
-        if not self.rows:
-            embed.description = "구독이 없어요.\n`/watch <url>` 로 추가하세요."
-            return embed
-        max_page = self._max_page()
-        embed.set_footer(text=f"{len(self.rows)}개 구독 · {self.page + 1}/{max_page + 1}페이지")
-        embed.description = "행 번호의 **✕ 버튼**으로 해제. 필터 바꾸려면 `/watch` 다시 호출."
-        for idx, r in enumerate(self._page_rows(), start=self.page * self.PAGE_SIZE + 1):
-            where = "내 DM" if r["target_kind"] == "dm" else f"<#{r['target_id']}>"
-            filt = _short_text(r["filter_prompt"] or "없음 (새 글 전부)", 100)
-            embed.add_field(
-                name=f"{idx}. {_display_title(r)}",
-                value=f"📝 필터: {filt}\n📨 발송: {where}",
-                inline=False,
-            )
-        return embed
-
-    def _make_remove_cb(self, idx: int):
-        async def cb(interaction: discord.Interaction) -> None:
-            # codex 리뷰 Critical 2 — sqlite lock 대비 즉시 ack.
-            await interaction.response.defer()
-            prs = self._page_rows()
-            if idx >= len(prs):
-                await interaction.followup.send("이 자리는 비어있어요.", ephemeral=True)
-                return
-            r = prs[idx]
-            # codex 리뷰 Critical 1 — row id 기준. slug 만으로 DELETE 하면 같은 board 의
-            # DM+채널 양쪽 구독 한 번에 사라지는 함정.
-            db.remove_subscription_by_id(_conn, user_id=self.user_id, sub_id=int(r["id"]))
-            self.reload()
-            await interaction.edit_original_response(embed=self.embed(), view=self)
-        return cb
-
-    async def _prev_cb(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer()
-        self.page = max(0, self.page - 1)
-        self._refresh()
-        await interaction.edit_original_response(embed=self.embed(), view=self)
-
-    async def _next_cb(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer()
-        self.page = min(self._max_page(), self.page + 1)
-        self._refresh()
-        await interaction.edit_original_response(embed=self.embed(), view=self)
-
 
 @tree.command(name="list", description="내 구독 목록과 편집 UI")
 @app_commands.allowed_installs(guilds=True, users=True)
@@ -449,10 +461,8 @@ async def list_cmd(interaction: discord.Interaction):
     # 3초 ack 안전망 — View 생성·db 조회가 sqlite lock 시 느려질 수 있음 (Unknown interaction 10062 회피).
     await interaction.response.defer(ephemeral=True)
     view = SubscriptionListView(user_id=str(interaction.user.id))
-    if not view.rows:
-        await interaction.followup.send(msg("list_empty"), ephemeral=True)
-        return
-    await interaction.followup.send(embed=view.embed(), view=view, ephemeral=True)
+    # Components v2 — embed/content 동시 사용 불가능. view 만 박음 (header 는 view 안 TextDisplay).
+    await interaction.followup.send(view=view, ephemeral=True)
 
 
 _FEEDBACK_MAX_LEN_AT_LOAD = feedback_max_len()  # description 은 등록 시점에 고정 — restart 시 갱신
