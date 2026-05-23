@@ -253,13 +253,34 @@ def read_sites(poll: dict) -> list[dict]:
     return list(poll.get("sites") or [])
 
 
+RC_TO_GROUP = {
+    0: ("board", "active"),
+    1: ("blocked", "generation failed"),
+    2: ("content", "policy rejected"),
+    3: ("content", "gate rejected"),
+    4: ("dead", "URL unavailable"),
+    5: ("blocked", "capability blocked"),
+}
+
+
+def rc_to_group(rc: object) -> tuple[str, str] | None:
+    try:
+        v = int(rc)
+    except (TypeError, ValueError):
+        return None
+    if v < 0:
+        return ("bug", "system bug")
+    return RC_TO_GROUP.get(v)
+
+
 def read_jobs(limit: int = 20) -> dict:
     db_path = ROOT / "output" / "bot.sqlite3"
     status = Counter()
     recent = []
+    by_url: dict[str, dict] = {}
 
     if not db_path.exists():
-        return {"status": status, "recent": recent, "available": False}
+        return {"status": status, "recent": recent, "by_url": by_url, "available": False}
 
     try:
         con = sqlite3.connect(str(db_path))
@@ -267,7 +288,7 @@ def read_jobs(limit: int = 20) -> dict:
         with con:
             for row in con.execute("SELECT status, COUNT(*) AS n FROM jobs GROUP BY status"):
                 status[str(row["status"] or "unknown")] += int(row["n"] or 0)
-            rows = con.execute(
+            recent_rows = con.execute(
                 """
                 SELECT url, status, result_rc, finished_at
                 FROM jobs
@@ -277,15 +298,30 @@ def read_jobs(limit: int = 20) -> dict:
                 """,
                 (limit,),
             ).fetchall()
+            # latest finished job per URL — used to populate figure with URLs that
+            # have no poll_state marker yet (or whose marker was overwritten by a
+            # later attempt).
+            all_rows = con.execute(
+                """
+                SELECT j.url, j.result_rc, j.finished_at
+                FROM jobs j
+                JOIN (
+                    SELECT url, MAX(finished_at) AS f
+                    FROM jobs
+                    WHERE finished_at IS NOT NULL
+                    GROUP BY url
+                ) latest ON latest.url = j.url AND latest.f = j.finished_at
+                """
+            ).fetchall()
     except sqlite3.Error:
-        return {"status": status, "recent": recent, "available": False}
+        return {"status": status, "recent": recent, "by_url": by_url, "available": False}
     finally:
         try:
             con.close()
         except UnboundLocalError:
             pass
 
-    for row in rows:
+    for row in recent_rows:
         recent.append(
             {
                 "host": hostname_from_url(row["url"]) or "unknown host",
@@ -295,7 +331,13 @@ def read_jobs(limit: int = 20) -> dict:
             }
         )
 
-    return {"status": status, "recent": recent, "available": True}
+    for row in all_rows:
+        url = str(row["url"] or "")
+        if not url:
+            continue
+        by_url[url] = {"rc": row["result_rc"], "finished_at": str(row["finished_at"] or "")}
+
+    return {"status": status, "recent": recent, "by_url": by_url, "available": True}
 
 
 def top_items(counter: Counter, limit: int = 8) -> list[tuple[str, int]]:
@@ -441,6 +483,30 @@ def render_html(configs: dict, poll: dict, jobs: dict, generated_at: datetime) -
     rejected_count = poll["markers"].get("rejected", 0)
     bug_count = poll["markers"].get("bug", 0)
     sites = read_sites(poll)
+
+    # Augment with jobs that have no marker file (the figure should show every
+    # URL we tried, not only those whose marker survived later retries).
+    seen_urls = {s["url"] for s in sites if s.get("url")}
+    jobs_by_url = jobs.get("by_url") or {}
+    for url, info in jobs_by_url.items():
+        if url in seen_urls:
+            continue
+        mapped = rc_to_group(info.get("rc"))
+        if not mapped:
+            continue
+        group, status = mapped
+        if group == "board":
+            continue  # only poll_state markers count as active boards
+        host = hostname_from_url(url) or "unknown host"
+        sites.append({
+            "slug": "",
+            "url": url,
+            "platform": "other",
+            "host": host,
+            "group": group,
+            "status": status,
+        })
+
     color_map = fetch_color_map(sites, configs.get("strategy_by_slug") or {})
     scatter_chart = svg_grouped_scatter(sites, color_map)
     key_counts = Counter(str(s.get("color_key")) for s in sites)
