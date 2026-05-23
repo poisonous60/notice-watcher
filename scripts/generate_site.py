@@ -708,10 +708,10 @@ def render_html(configs: dict, poll: dict, jobs: dict, generated_at: datetime) -
     .scatter-bg {{ fill: var(--panel); }}
     .ring-guide {{ fill: none; stroke: var(--line); stroke-width: 0.8; stroke-dasharray: 2 4; opacity: 0.55; }}
     .ring-label {{ fill: var(--muted); font: 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 0.04em; }}
-    .dot {{ opacity: 0.68; cursor: pointer; transition: opacity 0.12s ease, r 0.12s ease; }}
+    .dot {{ opacity: 0.7; cursor: pointer; }}
     .dot:hover {{ opacity: 1; }}
-    #siteScatter.dimmed .dot {{ opacity: 0.08; }}
-    #siteScatter.dimmed .dot.hl {{ opacity: 0.95; }}
+    #siteScatter.dimmed .dot {{ opacity: 0.35; }}
+    #siteScatter.dimmed .dot.hl {{ opacity: 1; }}
     .dot-tip {{
       position: fixed;
       z-index: 30;
@@ -874,28 +874,44 @@ def render_html(configs: dict, poll: dict, jobs: dict, generated_at: datetime) -
         var svg = document.getElementById('siteScatter');
         var tip = document.getElementById('dotTip');
         if (!svg || !tip) return;
-        function clear() {{
-          svg.classList.remove('dimmed');
-          svg.querySelectorAll('.dot.hl').forEach(function (d) {{ d.classList.remove('hl'); }});
-          tip.hidden = true;
+        // Bucket dots by data-pf once — avoid scanning all dots on every hover.
+        var byPf = {{}};
+        svg.querySelectorAll('.dot').forEach(function (d) {{
+          var pf = d.getAttribute('data-pf') || '';
+          (byPf[pf] = byPf[pf] || []).push(d);
+        }});
+        var activePf = null;
+        function setActive(pf) {{
+          if (pf === activePf) return;
+          if (activePf !== null) {{
+            (byPf[activePf] || []).forEach(function (d) {{ d.classList.remove('hl'); }});
+          }}
+          if (pf !== null) {{
+            (byPf[pf] || []).forEach(function (d) {{ d.classList.add('hl'); }});
+            svg.classList.add('dimmed');
+          }} else {{
+            svg.classList.remove('dimmed');
+          }}
+          activePf = pf;
         }}
         svg.addEventListener('mouseover', function (e) {{
           var c = e.target.closest ? e.target.closest('.dot') : null;
-          if (!c) {{ clear(); return; }}
+          if (!c) {{ setActive(null); tip.hidden = true; return; }}
           var pf = c.getAttribute('data-pf');
-          svg.classList.add('dimmed');
-          svg.querySelectorAll('.dot').forEach(function (d) {{
-            d.classList.toggle('hl', d.getAttribute('data-pf') === pf);
-          }});
+          setActive(pf);
           tip.innerHTML = '<b>' + c.getAttribute('data-domain') + '</b>'
             + '<span>' + pf + ' · ' + c.getAttribute('data-status') + '</span>';
           tip.hidden = false;
         }});
         svg.addEventListener('mousemove', function (e) {{
+          if (tip.hidden) return;
           tip.style.left = (e.clientX + 14) + 'px';
           tip.style.top = (e.clientY + 14) + 'px';
         }});
-        svg.addEventListener('mouseleave', clear);
+        svg.addEventListener('mouseleave', function () {{
+          setActive(null);
+          tip.hidden = true;
+        }});
       }})();
     </script>
   </section>
