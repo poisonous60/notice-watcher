@@ -313,67 +313,34 @@ def _short_text(text: Optional[str], limit: int) -> str:
     return s if len(s) <= limit else s[:limit - 1] + "…"
 
 
-class SubscriptionFilterModal(discord.ui.Modal):
-    """필터 수정 Modal — RoboDanny 류 단순 패턴. row id 기준 update (같은 slug 의
-    DM+채널 양쪽 구독 시 한쪽만 바꾸기 위함)."""
-
-    def __init__(self, view: "SubscriptionListView", sub_id: int,
-                 current: Optional[str]) -> None:
-        super().__init__(title="필터 수정")
-        self.view_ref = view
-        self.sub_id = sub_id
-        self.filter_input = discord.ui.TextInput(
-            label="필터 (자연어, 비우면 새 글 전부)",
-            default=(current or "")[:1000],
-            required=False,
-            max_length=1000,
-            style=discord.TextStyle.paragraph,
-            placeholder="예: 이벤트·업데이트만",
-        )
-        self.add_item(self.filter_input)
-
-    async def on_submit(self, interaction: discord.Interaction) -> None:
-        # 3초 ack 안전망 — sqlite lock 가능성 (codex 리뷰).
-        await interaction.response.defer()
-        text = str(self.filter_input.value or "").strip() or None
-        db.update_subscription_filter(_conn, user_id=self.view_ref.user_id,
-                                      sub_id=self.sub_id, filter_prompt=text)
-        self.view_ref.reload()
-        await interaction.edit_original_response(embed=self.view_ref.embed(),
-                                                 view=self.view_ref)
-
-
 class SubscriptionListView(discord.ui.View):
     """RoboDanny-style paginator. View item set 은 __init__ 에서 한 번 고정 — 매 callback 마다
     `_refresh()` 가 label·disabled 만 mutate (item 추가/제거 X).
 
-    구조: 4 sub-row (행마다 [✎ <title>:<filter>][✕]) + 1 nav row ([◀][▶]). ActionRow 5 한계 안.
-    Select 안 씀 — discord.py issue #7284 의 default-empty-values 함정 회피."""
+    구조: 2 sub-button row (5 ✕ button per row = 10 sub/page) + 1 nav row [◀][▶]. ActionRow 5 안.
+    필터 수정 기능 제거 — Modal UX 못마음 (사용자 결정 2026-05-23). 필터 바꾸려면 unwatch + 재 /watch.
+    Select 안 씀 — discord.py issue #7284 default-empty-values 함정 회피."""
 
-    PAGE_SIZE = 4
+    PAGE_SIZE = 10
+    BUTTONS_PER_ROW = 5
 
     def __init__(self, *, user_id: str) -> None:
         super().__init__(timeout=300)
         self.user_id = user_id
         self.page = 0
         self.rows: list = []
-        self._edit_btns: list[discord.ui.Button] = []
         self._remove_btns: list[discord.ui.Button] = []
         for i in range(self.PAGE_SIZE):
-            eb = discord.ui.Button(style=discord.ButtonStyle.secondary, label="—", row=i,
-                                   custom_id=f"sub_edit_{i}")
-            rb = discord.ui.Button(style=discord.ButtonStyle.danger, label="✕", row=i,
+            row = i // self.BUTTONS_PER_ROW  # 0 or 1
+            rb = discord.ui.Button(style=discord.ButtonStyle.secondary, label="—", row=row,
                                    custom_id=f"sub_rem_{i}")
-            eb.callback = self._make_edit_cb(i)
             rb.callback = self._make_remove_cb(i)
-            self._edit_btns.append(eb)
             self._remove_btns.append(rb)
-            self.add_item(eb)
             self.add_item(rb)
         self.prev_btn = discord.ui.Button(label="◀ 이전", style=discord.ButtonStyle.secondary,
-                                          row=4, custom_id="sub_prev")
+                                          row=2, custom_id="sub_prev")
         self.next_btn = discord.ui.Button(label="다음 ▶", style=discord.ButtonStyle.secondary,
-                                          row=4, custom_id="sub_next")
+                                          row=2, custom_id="sub_next")
         self.prev_btn.callback = self._prev_cb
         self.next_btn.callback = self._next_cb
         self.add_item(self.prev_btn)
@@ -416,22 +383,13 @@ class SubscriptionListView(discord.ui.View):
 
     def _refresh(self) -> None:
         prs = self._page_rows()
-        for i, eb in enumerate(self._edit_btns):
-            rb = self._remove_btns[i]
+        start_idx = self.page * self.PAGE_SIZE
+        for i, rb in enumerate(self._remove_btns):
             if i < len(prs):
-                r = prs[i]
-                title = _display_title(r)
-                filt = r["filter_prompt"]
-                if filt:
-                    label = _short_text(f"✎ {title} | {filt}", 80)
-                else:
-                    label = _short_text(f"✎ {title} (필터 추가…)", 80)
-                eb.label = label
-                eb.disabled = False
+                rb.label = f"{start_idx + i + 1} ✕"
                 rb.disabled = False
             else:
-                eb.label = "—"
-                eb.disabled = True
+                rb.label = "—"
                 rb.disabled = True
         max_page = self._max_page()
         self.prev_btn.disabled = (self.page <= 0)
@@ -444,9 +402,7 @@ class SubscriptionListView(discord.ui.View):
             return embed
         max_page = self._max_page()
         embed.set_footer(text=f"{len(self.rows)}개 구독 · {self.page + 1}/{max_page + 1}페이지")
-        embed.description = (
-            "각 행의 **✎ 버튼**으로 필터를 수정하고 **✕ 버튼**으로 해제합니다."
-        )
+        embed.description = "행 번호의 **✕ 버튼**으로 해제. 필터 바꾸려면 `/watch` 다시 호출."
         for idx, r in enumerate(self._page_rows(), start=self.page * self.PAGE_SIZE + 1):
             where = "내 DM" if r["target_kind"] == "dm" else f"<#{r['target_id']}>"
             filt = _short_text(r["filter_prompt"] or "없음 (새 글 전부)", 100)
@@ -456,18 +412,6 @@ class SubscriptionListView(discord.ui.View):
                 inline=False,
             )
         return embed
-
-    def _make_edit_cb(self, idx: int):
-        async def cb(interaction: discord.Interaction) -> None:
-            prs = self._page_rows()
-            if idx >= len(prs):
-                await interaction.response.send_message("이 자리는 비어있어요.", ephemeral=True)
-                return
-            r = prs[idx]
-            # Modal 호출은 *반드시* interaction.response.send_modal 직접 — defer 후 modal 불가.
-            await interaction.response.send_modal(
-                SubscriptionFilterModal(self, int(r["id"]), r["filter_prompt"]))
-        return cb
 
     def _make_remove_cb(self, idx: int):
         async def cb(interaction: discord.Interaction) -> None:
