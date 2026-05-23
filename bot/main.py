@@ -664,7 +664,6 @@ async def setting_cmd(interaction: discord.Interaction):
 async def help_cmd(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     embed = discord.Embed(
-        title="📖 notice-watcher 명령어",
         color=0x5865F2,
         description=(
             "`/watch <url> [filter:] [here:] [notify_empty:] [article_url:]`\n"
