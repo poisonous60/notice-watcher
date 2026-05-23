@@ -425,6 +425,9 @@ def svg_grouped_scatter(sites: list[dict], color_map: dict) -> str:
     weights = [max(1, len(items)) for _host, items in items_list]
     total_w = sum(weights) or 1
     r_effective = r_core - 14.0  # leave a margin so the largest cluster doesn't bleed into ring 2
+
+    # initial anchor placement: area-weighted sunflower
+    anchors: list[list[float]] = []  # [ax, ay, cluster_r]
     cumsum = 0.0
     for h_idx, (_host, items) in enumerate(items_list):
         w = weights[h_idx]
@@ -435,6 +438,52 @@ def svg_grouped_scatter(sites: list[dict], color_map: dict) -> str:
         ay = cy + r_anchor * math.sin(theta_anchor)
         n_sub = len(items)
         cluster_r = 3.0 + 2.6 * math.sqrt(max(n_sub - 1, 0))
+        anchors.append([ax, ay, cluster_r])
+
+    # Lloyd-style relaxation: golden-angle sunflower has Fibonacci-neighbour collisions
+    # (e.g. index i and i+13 land ~12° apart in angle); push overlapping anchors apart.
+    gap_px = 4.0
+    r_clamp = r_core - 2.0  # keep anchors inside the disc
+    n_a = len(anchors)
+    for _ in range(40):
+        any_move = False
+        for i in range(n_a):
+            for j in range(i + 1, n_a):
+                ax_i, ay_i, ri = anchors[i]
+                ax_j, ay_j, rj = anchors[j]
+                dx = ax_j - ax_i
+                dy = ay_j - ay_i
+                d = math.hypot(dx, dy)
+                min_d = ri + rj + gap_px
+                if d >= min_d:
+                    continue
+                if d < 1e-6:
+                    # identical — nudge deterministically
+                    dx, dy = math.cos(i * 0.7), math.sin(i * 0.7)
+                    d = 1.0
+                push = (min_d - d) * 0.5
+                ux, uy = dx / d, dy / d
+                anchors[i][0] -= ux * push
+                anchors[i][1] -= uy * push
+                anchors[j][0] += ux * push
+                anchors[j][1] += uy * push
+                any_move = True
+        # clamp to disc
+        for k in range(n_a):
+            ax_k, ay_k, rk = anchors[k]
+            d_c = math.hypot(ax_k - cx, ay_k - cy)
+            limit = r_clamp - rk
+            if d_c > limit and d_c > 0:
+                scale = limit / d_c
+                anchors[k][0] = cx + (ax_k - cx) * scale
+                anchors[k][1] = cy + (ay_k - cy) * scale
+        if not any_move:
+            break
+
+    # emit sub-dots
+    for (anchor, (_host, items)) in zip(anchors, items_list):
+        ax, ay, cluster_r = anchor
+        n_sub = len(items)
         for j, site in enumerate(items):
             if n_sub == 1:
                 x, y = ax, ay
