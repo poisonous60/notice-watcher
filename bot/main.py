@@ -372,7 +372,11 @@ class SubscriptionListView(discord.ui.LayoutView):
     필터 수정 기능 없음 (사용자 결정 — Modal UX 거부). 필터 바꾸려면 unwatch + 재 /watch.
     """
 
-    PAGE_SIZE = 10
+    # Components V2 의 LayoutView 가 max 40 children 한계. Section = 4 children 카운트
+    # (codex 최종 리뷰 확인 — discord.py 2.7.1 에서 ValueError reproduce 됨).
+    # 8 sections × 4 + Container + nav (Separator + ActionRow + footer TextDisplay)
+    # ≈ 36 — 안전 마진.
+    PAGE_SIZE = 8
 
     def __init__(self, *, user_id: str, page: int = 0) -> None:
         super().__init__(timeout=300)
@@ -919,7 +923,10 @@ async def on_ready():
     if agid:
         try:
             ag = discord.Object(id=agid)
-            admin_mod.build_admin_tree(client, _conn, admin_guild=ag, tree=tree)
+            # reconnect 마다 on_ready 가 다시 불릴 수 있음 — admin group 중복 등록 가드.
+            # build_admin_tree 가 이미 박혀있으면 skip (idempotent).
+            if tree.get_command("admin", guild=ag) is None:
+                admin_mod.build_admin_tree(client, _conn, admin_guild=ag, tree=tree)
             synced = await tree.sync(guild=ag)
             log.info("synced %d admin commands to admin guild %s (guild-scoped)", len(synced), agid)
         except Exception as e:  # noqa: BLE001

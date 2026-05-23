@@ -37,27 +37,31 @@ ALTER TABLE subscriptions ADD COLUMN display_title TEXT
 
 `/watch` 의 *이미 등록된 사이트 즉시 add_subscription* path (`bot/main.py:202` 근처) 도 display_title 같이 넘김 — 이 경우 result 없음, 기존 `subscriptions` 행에서 *다른 사용자* 가 등록한 display_title 가져와 재사용 (`db.list_subscriptions(slug=slug)` 첫 행).
 
-## 작업 4 — /list UI (RoboDanny per-row Button 패턴)
+## 작업 4 — /list UI (Components V2 LayoutView)
 
-> v1 (Select 기반) 은 discord.py issue #7284 함정에 걸려 production crash. RoboDanny paginator + per-row Button 으로 재작성. 상세는 ADR 0012 의 `/list` UI 절.
+> 진화 사: Select 기반 (issue #7284 crash) → RoboDanny per-row Button (✕ 만 아래 몰림) → Components V2 (Section accessory 로 행 옆 inline ✕). 상세는 ADR 0012 의 `/list` UI 절.
 
 `bot/main.py` 의 `SubscriptionListView`:
-- `discord.ui.View(timeout=300)`, ephemeral, `interaction_check` 본인 only, `on_error` traceback log + ephemeral 응답.
-- **`__init__` 에서 모든 item 한 번만 add**, 이후 `_refresh()` 가 label/disabled mutate 만.
-- PAGE_SIZE=4. ActionRow 5 한계 안:
-  - row 0~3: 각 sub `[✎ <title> | <filter>][✕]` (`custom_id=sub_edit_{i}`, `sub_rem_{i}`)
-  - row 4: `[◀ 이전][다음 ▶]`
-- row 식별 = `subscriptions.id` (slug+target_kind+target_id mix 회피 — 같은 slug DM+채널 양쪽 구독 가능).
-- 모든 write callback 첫 라인 `await interaction.response.defer()` (sqlite lock 안전망).
-- Modal: `SubscriptionFilterModal(view, sub_id, current)` TextInput(paragraph, 1000 chars), submit 후 `db.update_subscription_filter(sub_id=...)` + view reload + edit_original_response.
+- `discord.ui.LayoutView(timeout=300)`, ephemeral. `interaction_check` 본인 only, `on_error` traceback log + ephemeral 응답.
+- `Container(accent_color=blurple)` 안에 `Section` 들 + 페이지 nav (≥9 sub 시).
+- **`PAGE_SIZE = 8`** — Components V2 의 40 children 한계 (Section=4 children).
+- 각 Section: `(title_md, info_md, accessory=SubscriptionRemoveButton)`. 제목 = `[<display_title>](<url>)` markdown link.
+- 매 callback (✕·nav) 마다 *새 LayoutView 인스턴스* 만들어 `interaction.edit_original_response(view=new_view)`. children 동적 mutate 회피.
+- 모든 callback 첫 라인 `await interaction.response.defer()`.
+- empty case = Container + TextDisplay 단순 메시지.
+- ❌ accessory Button = `emoji="❌"` + `style=secondary` + label X — Discord 의 compact icon (label 박으면 큰 박스).
+
+필터 수정 기능 없음 (Modal UX 거부, ADR 0012 참고).
 
 `db.py` 신규 함수:
-- `remove_subscription_by_id(conn, *, user_id, sub_id)` — 단일 row 제거 (id 기준).
-- `update_subscription_filter(conn, *, user_id, sub_id, filter_prompt)` — id 기반 갱신.
+- `remove_subscription_by_id(conn, *, user_id, sub_id)` — 단일 row 제거 (id 기준, user_id guard).
+- `update_subscription_filter(conn, *, user_id, sub_id, filter_prompt)` — id 기반 갱신 (현재 호출처 없음 — Modal 제거).
 
-기존 `remove_subscription(slug)` 유지 — `/unwatch` 류 URL 일괄 해제용.
+기존 `remove_subscription(slug)` 유지 — URL 일괄 해제 (사용 안 함, dead code 아님 — future use).
 
-display_title 표시 헬퍼: `subscriptions.display_title` NULL 이면 `urllib.parse.urlparse(url).netloc + path`.
+display_title 표시 헬퍼 `_display_title(row)`:
+1. `subscriptions.display_title` NULL/빈 값 → URL `host+path` fallback
+2. 길이 < 6 또는 `_GENERIC_TITLES` (Blog/Home/Software/Index 등) 일치 → host+path fallback
 
 ## 작업 5 — /setting 신규
 

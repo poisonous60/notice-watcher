@@ -36,22 +36,33 @@
 - **모든 write callback 첫 라인 `interaction.response.defer()`** — sqlite lock 시 3초 ack timeout 회피.
 - **row 식별은 `subscriptions.id`** — 같은 slug 의 DM+채널 양쪽 구독 시 ✕ 가 한 행만 지움 (slug-only DELETE 함정 회피, codex 리뷰).
 
-레이아웃 (ActionRow 5 한계 안):
-- 4 sub-row × `[✎ <title>: <filter>][✕]` = 4 sub/page
-- 1 nav row `[◀ 이전][다음 ▶]`
-- 필터 라벨 truncate 80 chars
-- 빈 자리 (sub 수 < PAGE_SIZE) = label="—" + disabled
-- 페이지 1개뿐이면 nav 둘 다 disabled
+최종 레이아웃 — Discord **Components V2** (discord.py 2.4+ `LayoutView`):
 
-필터 수정 = `[✎ <title>: <filter>]` 버튼 → `discord.ui.Modal` TextInput (현재 값 prefilled, paragraph style, 1000 chars).
+```
+┌─ Container(accent_color=blurple) ─────────
+│  Section[title="**1. [<display_title>](<url>)**",
+│          info="📝 필터: <filter> · 📨 발송: <where>",
+│          accessory=Button(emoji="❌", style=secondary)]
+│  Section[2. ...]
+│  ...
+│  (≥9 sub 시) Separator(visible=True)
+│              ActionRow([◀ 이전][다음 ▶])
+│              TextDisplay("-# N개 구독 · p/m페이지")
+└───────────────────────────────────────────
+```
 
-해제 = `[✕]` 즉시 `db.remove_subscription_by_id(sub_id)` + view reload + embed refresh.
+- `PAGE_SIZE = 8`. **40 children 한계** (Components V2) — Section=4 children 카운트라 9 sections × 4 = 36 + Container + nav ≈ 40 (codex 최종 리뷰 reproduce `ValueError: maximum number of children exceeded`).
+- 제목 = `[<display_title>](<url>)` markdown link — 클릭 시 외부 URL 새 탭. display_title 짧음·generic 단어(Blog, Home 등) 면 URL host+path fallback (`_GENERIC_TITLES` 헬퍼).
+- 해제 = ❌ Section accessory Button. emoji-only + secondary 로 작은 회색 icon (label 박으면 큰 박스 — Discord 한계상 더 작게 안 됨).
+- 매 callback (해제·nav) 마다 *새 LayoutView 인스턴스* 만들어 `interaction.edit_original_response(view=new_view)` — children 동적 mutate 회피.
+- empty 케이스 = Container + TextDisplay "구독이 없어요" 만.
+- `SubscriptionListView(timeout=300s, ephemeral=True)`. 5분 후 버튼 dead.
 
-페이지 nav = ◀/▶ disabled state mutate, item 추가 X.
+**필터 수정 기능 없음** (사용자 결정 2026-05-23). Modal 의 *전송* 버튼 UX 못마음 + Discord 가 inline text edit 자체 미지원 (Modal 이 유일한 텍스트 입력 경로). 필터 바꾸려면 `unwatch` (실은 ❌ 버튼) + 재 `/watch <url> filter:...` 또는 같은 url 재호출의 upsert 동작.
 
-`SubscriptionListView(timeout=300s, ephemeral=True)`. 5분 후 버튼 dead → 사용자 재 `/list`.
+**Section accessory Button 크기 = Discord 측 고정**. discord.py 가 size 옵션 노출 X — accessory 박는 모든 button 은 동일 크기 (사용자 "더 작게" 요청했으나 Discord 한계).
 
-> 결정 근거: discord.py 공식 examples/views/persistent.py + confirm.py, RoboDanny paginator (`cogs/utils/paginator.py`).
+> 결정 근거: discord.py 공식 examples/views/persistent.py + confirm.py, RoboDanny paginator (`cogs/utils/paginator.py`), Components V2 가이드 (Umbra·Masterclass), codex 정적 리뷰 3회 (2026-05-23).
 
 ### `/setting` UI — 1화면 전체
 
