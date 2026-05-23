@@ -512,8 +512,7 @@ class SettingTimeModal(discord.ui.Modal):
         db.set_deliver_at(_conn, target_kind=self.target_kind, target_id=self.target_id,
                           deliver_at=hhmm)
         self.view_ref.refresh()
-        await interaction.edit_original_response(embed=self.view_ref.embed(),
-                                                 view=self.view_ref)
+        await interaction.edit_original_response(view=self.view_ref)
 
 
 class SettingView(discord.ui.View):
@@ -522,9 +521,9 @@ class SettingView(discord.ui.View):
     레이아웃 (5 ActionRow 안):
       Row0: [📨 DM 공지: ON/OFF]  [📣 채널 공지: ON/OFF]  ← 채널 버튼은 guild 일 때만 enable
       Row1: [⏰ DM 시각: hh:mm ✎] [⏰ 채널 시각: hh:mm ✎]
-      Row2: [❌ 닫기]
 
     DM(=guild 아님) 컨텍스트에선 채널 버튼 둘 다 disabled. guild 인데 Manage Channels 권한 없으면 disabled.
+    embed 없이 버튼 라벨이 현재값을 직접 표시(중복 제거 2026-05-23).
     """
 
     def __init__(self, *, user_id: str, channel_id: Optional[str], manage_channels: bool) -> None:
@@ -541,14 +540,11 @@ class SettingView(discord.ui.View):
                                              custom_id="set_dm_time")
         self.ch_time_btn = discord.ui.Button(style=discord.ButtonStyle.secondary, row=1,
                                              custom_id="set_ch_time")
-        self.close_btn = discord.ui.Button(label="❌ 닫기", style=discord.ButtonStyle.secondary,
-                                           row=2, custom_id="set_close")
         self.dm_btn.callback = self._dm_cb
         self.ch_btn.callback = self._ch_cb
         self.dm_time_btn.callback = self._dm_time_cb
         self.ch_time_btn.callback = self._ch_time_cb
-        self.close_btn.callback = self._close_cb
-        for it in (self.dm_btn, self.ch_btn, self.dm_time_btn, self.ch_time_btn, self.close_btn):
+        for it in (self.dm_btn, self.ch_btn, self.dm_time_btn, self.ch_time_btn):
             self.add_item(it)
         self.refresh()
 
@@ -594,30 +590,12 @@ class SettingView(discord.ui.View):
             self.ch_time_btn.label = "⏰ 채널 시각: (DM 에선 불가)"
             self.ch_time_btn.disabled = True
 
-    def embed(self) -> discord.Embed:
-        embed = discord.Embed(title="⚙️ 발송 설정", color=0x5865F2)
-        dm_off = db.get_announce_optout(_conn, "dm", self.user_id)
-        dm_time = db.get_deliver_at(_conn, target_kind="dm", target_id=self.user_id)
-        lines = [
-            f"📨 DM 공지: **{'OFF (받지 않음)' if dm_off else 'ON (받음)'}**",
-            f"⏰ DM 발송 시각: **{dm_time} (KST)**",
-        ]
-        if self.channel_id:
-            ch_off = db.get_announce_optout(_conn, "channel", self.channel_id)
-            ch_time = db.get_deliver_at(_conn, target_kind="channel", target_id=self.channel_id)
-            suffix = "" if self.manage_channels else " — *Manage Channels 권한 필요*"
-            lines.append("")
-            lines.append(f"📣 채널 공지: **{'OFF' if ch_off else 'ON'}**{suffix}")
-            lines.append(f"⏰ 채널 발송 시각: **{ch_time} (KST)**{suffix}")
-        embed.description = "\n".join(lines)
-        return embed
-
     async def _dm_cb(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer()
         cur = db.get_announce_optout(_conn, "dm", self.user_id)
         db.set_announce_optout(_conn, "dm", self.user_id, opted_out=not cur)
         self.refresh()
-        await interaction.edit_original_response(embed=self.embed(), view=self)
+        await interaction.edit_original_response(view=self)
 
     async def _ch_cb(self, interaction: discord.Interaction) -> None:
         if not self.channel_id:
@@ -628,7 +606,7 @@ class SettingView(discord.ui.View):
         cur = db.get_announce_optout(_conn, "channel", self.channel_id)
         db.set_announce_optout(_conn, "channel", self.channel_id, opted_out=not cur)
         self.refresh()
-        await interaction.edit_original_response(embed=self.embed(), view=self)
+        await interaction.edit_original_response(view=self)
 
     async def _dm_time_cb(self, interaction: discord.Interaction) -> None:
         cur = db.get_deliver_at(_conn, target_kind="dm", target_id=self.user_id)
@@ -644,10 +622,6 @@ class SettingView(discord.ui.View):
         await interaction.response.send_modal(
             SettingTimeModal(self, "channel", self.channel_id, cur))
 
-    async def _close_cb(self, interaction: discord.Interaction) -> None:
-        self.stop()
-        await interaction.response.edit_message(view=None)
-
 
 @tree.command(name="setting", description="발송·공지 설정")
 async def setting_cmd(interaction: discord.Interaction):
@@ -657,7 +631,7 @@ async def setting_cmd(interaction: discord.Interaction):
     channel_id = str(interaction.channel_id) if interaction.guild is not None and interaction.channel_id else None
     view = SettingView(user_id=user_id, channel_id=channel_id,
                        manage_channels=bool(interaction.permissions.manage_channels))
-    await interaction.followup.send(embed=view.embed(), view=view, ephemeral=True)
+    await interaction.followup.send(view=view, ephemeral=True)
 
 
 @tree.command(name="help", description="봇 명령어 안내")
