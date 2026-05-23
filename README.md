@@ -18,6 +18,25 @@ URL을 넣으면 새 글을 요약해서 알림을 보냅니다.
 
 ---
 
+## 봇 사용법
+
+[봇을 서버에 추가](https://discord.com/oauth2/authorize?client_id=1503367965880356984&permissions=2048&integration_type=0&scope=bot)한 뒤 디스코드에서 슬래시 명령으로 사용합니다.
+
+```
+/watch <url> [filter:] [here:] [notify_empty:] [article_url:]
+        ─ 게시판 URL 을 등록. 기본은 DM 으로 받음
+        ─ filter: "점검 공지는 빼고 신규 콘텐츠만" 같이 자연어로 필터
+        ─ here: 켜면 이 채널에 발송 (끄면 DM)
+        ─ notify_empty: 켜면 새 글 없어도 "새 공지 없음" 한 줄 발송
+
+/list   ─ 내 구독 목록, 필터 수정, 구독 해제 UI
+/setting ─ DM/채널 공지 ON/OFF + 매일 발송 시각(HH:MM KST) 설정
+/report <issue> [slug:] [url:]
+        ─ 사이트 문제 신고 또는 자유 의견
+/help   ─ 명령어 안내
+```
+
+
 ## Features
 
 - 일반 사이트: probe → LLM → 선언적 config(JSON) 생성, 3-layer 검증·재시도
@@ -29,6 +48,10 @@ URL을 넣으면 새 글을 요약해서 알림을 보냅니다.
 - 게이트 — Safe Browsing v4, robots `Crawl-Delay`, SSRF/private-IP 차단, 정책 블랙리스트
 - Gemini · GPT (Codex CLI) · OpenRouter — call_site 별 routing, dashboard 에서 hot swap
 - dev 대시보드 (FastAPI + HTMX) — 잡 큐, 토큰 비용, per-phase trace, case audit, 플랫폼 config 승급 클러스터, 어휘 확장 deferred queue
+
+
+
+발송은 사용자별 시각(`HH:MM` KST, 기본 08:30) 에 하루 1회 digest. 폴링 주기와 독립 (ADR 0006).
 
 ## Quickstart (self-host)
 
