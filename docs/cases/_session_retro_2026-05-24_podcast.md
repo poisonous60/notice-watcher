@@ -144,3 +144,86 @@ tags: [retro, process, hand-config, pipeline-improvement]
 1. codex 리뷰 받기 (이 문서 + 청크 C diff).
 2. P1~P10 중 청크 C 가 박는 것 (P6+P7) 외 나머지는 *별도 청크 D* 로 codex 위임.
 3. P10 (SKILL.md hand-config 절차) 박힌 후 *다음 batch* 에서 자동 검증.
+
+---
+
+## 7. 청크 F1+F2+G — register 파이프라인 개선 (옵션 A site_kind enum)
+
+세션 후반 사용자 goal = *batch 자동생성 실패 사이트 풀어내거나 게이트 거부*. 옵션 A (site_kind enum) 박는 3-청크 시퀀스 진행.
+
+### 7a. 청크 F1 — critical fix (R-D1/R-D4/R-C1 봉합)
+
+청크 C+D 의 Claude 직접 코드 리뷰 결과 3 critical risk 봉합:
+- **R-D1**: `probe/discover.py:_verified_feed_candidate` fake `validated:True` fallback 제거. validate fail 시 `None`.
+- **R-D4**: `scripts/register.py:_count_board_feed_signals` backward compat 룰 제거. validated=True 만 카운트.
+- **R-C1**: `_generate` 의 모듈 글로벌 monkeypatch 제거 → `generate/generator.py:generate_config_validated` 에 `cfg_post_processor` callback 인자 추가.
+
+commit `9ea7148`.
+
+### 7b. 청크 F2 — site_kind 옵션 A 최소 viable
+
+- `engine/digest.py:classify_site_kind` 신설 — 6 enum (`rss`/`podcast`/`static_html`/`spa_rendered`/`hybrid`/`unknown`) + confidence (high/med/low) + evidence + primary_feed_url.
+- `scripts/register.py:_enforce_site_kind_config` 신설 — `kind=podcast/rss` high 시 list.url_template override (validated primary 만).
+- `prompts/config_writer.system.txt` 에 site_kind 별 prompt hint 추가.
+- `tests/probe_heuristics/test_site_kind.py` 신규 — 9 fixture (cbs/dotnetrocks/thisamericanlife/oxide/radiolab + static_html/hybrid/weak/host_known).
+
+commit `04817bf` → main merge `f487b54`.
+
+### 7c. Claude 직접 fix 2건 (F2 후 발견)
+
+8 slug 테스트 도중 발견:
+
+- **junk row filter** (commit `af41a2e`): `_html_same_host_row_count` 가 `head > meta` / `head > link` 같은 non-content row 도 카운트 — dotnetrocks Blazor SPA 의 28 junk row 가 `static_html high` 잘못 박힌 문제. selector root in (head/nav/footer/header/aside) 제외 + sample_url=None 제외.
+- **backfill 순서 fix** (commit `8610d9c`): `register._build_digest` 의 `rss_feed_urls` 박는 순서가 *input-url-feed-path* (HTML SPA 추측) 우선 → 진짜 link rel feed URL 이 [1] 박혔던 버그. oxide 의 `primary_feed_url` 이 잘못된 URL 박힌 직접 원인. 순서: link rel + HAR XML → validated feed_candidates → fallback (input-url-feed-path 제외).
+- **link_rel med confidence** (commit `e638bfe`): site_kind 분류가 옛 probe artifact (validated 키 없음) 의 link rel feed 도 source 로 사용. F enforcement 는 high 만 작동 — med 는 prompt hint 만. 안전.
+
+### 7d. 8 slug N100 자동생성 테스트 결과
+
+| slug | site_kind | register 결과 | 효과 |
+|---|---|---|---|
+| cbs.co.kr/podcast/ | (404 TARGET_NOT_FOUND) | ❌ 자동 거부 ✅ | 자동 거부 |
+| dotnetrocks.com/RSS | rss med (link_rel: dotnetrocks.com/feed) | ❌ gen_fail | link_rel 가짜 RSS (Blazor SPA) — F enforcement med 안 작동, prompt hint 만 → LLM 이 가짜 URL 박음 |
+| feeds.thisamericanlife.org/talpodcast | rss med (link_rel HAR XML) | ❌ gen_fail post_id_unique | LLM weight 부족 — post_id link path tail 룰 prompt 박혀있어도 LLM 이 follow X |
+| **oxide.computer/podcast/rss.xml** | **hybrid med** (link_rel: feeds.transistor.fm) | ✅ **자동생성 30건** (시도 2 PASS) | **site_kind 핵심 효과 입증** |
+| radiolab.org/podcast | spa_rendered high | ❌ gen_fail posts_nonempty | Nuxt skeleton selector LLM weight 부족 — handcrafted (.radiolab-card .card-title-link .h2) 박은 이유 그대로 |
+
+= **1/5 자동생성 효과 입증** (oxide). 옵션 A 가 *handcrafted overhead 제거 가능성* 증명. dotnetrocks/thisamericanlife/radiolab fail = LLM weight 부족 또는 link_rel 검증 한계 (후속 청크 영역).
+
+### 7e. 청크 G — 코드 리뷰 결과 후속 fix
+
+청크 F (F1+F2+직접 fix) 박힌 후 codex read-only 리뷰가 9 issue 식별. 청크 G 가 critical 4 + minor 2 봉합:
+
+- **A (medium)**: `primary_feed_url` 가 *unvalidated* link rel 도 박혀 prompt "validated" 주장과 불일치 → `_validated_or_linked_feeds` 분리 + link_rel 신호도 validated 표시 박힌 경우만 promote.
+- **A2 (minor)**: JS signal 토큰 `"js"`/`"next"`/`"s4"` 단독 false positive → `"next.js"`/`"__next_data__"`/`"nextjs"`/`"render delta"` 로 정밀화.
+- **C (medium)**: `_build_digest` backfill 순서 — link_rel 이 validated 앞 → validated 우선으로 정정.
+- **D (medium)**: `ET.fromstring(text)` size cap 없음 + `_verified_feed_candidate` double fetch → `ET.iterparse(io.StringIO(text))` + `_MAX_FEED_VALIDATE_CHARS = 1_000_000` (1MB cap) + double fetch 제거.
+- **E (minor)**: `_has_verified_feed` 와 `_count_board_feed_signals` legacy 처리 불일치 → `_has_verified_feed` 도 legacy 제거 (validated=True 만).
+- **H (minor)**: case_log frontmatter hand-parse → `yaml.safe_load` 표준 parse.
+
+commit `cd3749b` → main merge.
+
+### 7f. 후속 청크 후보 (미진행)
+
+리뷰가 식별한 jewel:
+
+- **link_rel validate** — `rss_feed_urls` 의 link_rel feed 가 *진짜 RSS XML 인지* fetch + validate 박기. dotnetrocks `/feed` (Blazor SPA) 같은 가짜 feed 자동 거부. 1 fetch 비용 — 가치 큼.
+- **LLM weight 강화** — thisamericanlife post_id_unique / radiolab Nuxt selector 같은 LLM 약점. retry feedback 의 dynamic injection (특정 fail pattern 보면 자동 inject) 또는 더 강한 모델로 escalation.
+- **시간 budget** — `discover_feeds` 의 fetch 누적 10s+ 시간 — per-host concurrency limit (async) 또는 max_candidates cap.
+
+다음 batch 진행 시 *site_kind=hybrid/podcast med* slug 가 자동생성 vs handcrafted 비율 측정.
+
+### 7g. 최종 commit chain
+
+| commit | 내용 |
+|---|---|
+| `32d036e` | merge chunk C — audio share structural + register enforcement |
+| `219fb18` | merge chunk D — SKILL guards + feed validation + case_log warn + 4xx cap_blocked |
+| `4cec12e` | retro 작성 (β1~β7 + P1~P10) |
+| `f487b54` | merge F1 (R-D1/R-D4/R-C1) |
+| `9ea7148` | (alt) F1 merge |
+| `04817bf` | merge F2 (site_kind enum) |
+| `af41a2e` | junk row filter |
+| `e638bfe` | link_rel med confidence |
+| `8610d9c` | backfill 순서 fix |
+| `<TBD>` | merge G (review fixes A/A2/C/D/E/H) |
+

@@ -6,6 +6,7 @@
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
+| [`host_oxide-computer_podcast_9f69bff0`](host_oxide-computer_podcast_9f69bff0.md) | ✅ 자동생성 성공 (옵션 A site_kind=hybrid med — N100 register 시도 2 PASS 30건). handcrafted config 도 보존 | 2026-05-25 | C+A+D+F | article_body_len, audio_share_host | https://oxide.computer/podcast/rss.xml |
 | [`host_yongin-go-kr_user_f1eef610`](host_yongin-go-kr_user_f1eef610.md) | ✅ 수동 config — Playwright로 용인 시정소식 10건 추출 | 2026-05-24 | none | posts_nonempty, tls_handshake, playwright_required | https://www.yongin.go.kr/user/bbs/BD_selectBbsList.do?q_bbsCode=1001 |
 | [`host_worldbank-org_en_61b26912`](host_worldbank-org_en_61b26912.md) | 수동 config - World Bank news landing 의 정적 latest news cards 로 등록 | 2026-05-24 | none | posts_nonempty, matches_probe_first_article, count_ballpark | https://www.worldbank.org/en/news |
 | [`host_ulsan-go-kr_u_cdf4ac30`](host_ulsan-go-kr_u_cdf4ac30.md) | ⏸ deferred — 원 board 빈 shell, 다른 bbsId 등록은 scope 오염 | 2026-05-24 | none | posts_nonempty, empty_board, scope_pollution_risk | https://www.ulsan.go.kr/u/rep/bbs/list.ulsan?bbsId=BBS_0000000000000001 |
@@ -21,7 +22,6 @@
 | [`host_rbnz-govt-nz_news-and-events_ada928b5`](host_rbnz-govt-nz_news-and-events_ada928b5.md) | 🧩 수동 config — RBNZ Coveo 목록을 Playwright로 수집 | 2026-05-24 | none | fetch_list_403, article_body_len | https://www.rbnz.govt.nz/news-and-events/news |
 | [`host_radiolab-org_podcast_0080db5b`](host_radiolab-org_podcast_0080db5b.md) | 🧩 수동 config — Nuxt skeleton row 대신 hydrated Radiolab episode card를 기다려 title/url 추출 | 2026-05-24 | F | title_nonempty, skeleton_rows, nuxt_hydration | https://radiolab.org/podcast |
 | [`host_pusan-ac-kr_notice_88427aed`](host_pusan-ac-kr_notice_88427aed.md) | ✅ config registered from official PNU notice board | 2026-05-24 | none | capability_blocked, catalog_notice_path_noise, wrong_board_url | https://www.pusan.ac.kr/notice |
-| [`host_oxide-computer_podcast_9f69bff0`](host_oxide-computer_podcast_9f69bff0.md) | ⚠ 추론 개선 적용 — 등록은 LLM key 0개로 escalated | 2026-05-24 | C+A+D | article_body_len, audio_share_host | https://oxide.computer/podcast/rss.xml |
 | [`host_nseindia-com_resources_b0248e5e`](host_nseindia-com_resources_b0248e5e.md) | 수동 config - NSE press-release JSON API 사용 | 2026-05-24 | none | fetch_list, posts_nonempty, wrong_first_article | https://www.nseindia.com/resources/exchange-communication-press-releases |
 | [`host_nps-or-kr_jsppage_ffd1ade5`](host_nps-or-kr_jsppage_ffd1ade5.md) | capability_blocked (entry_blocked) — RSS unavailable, HTML remap policy-rejected | 2026-05-24 | none | capability_blocked, entry_blocked, rss_unavailable | https://www.nps.or.kr/jsppage/main.jsp |
 | [`host_news-cornell-ed_root_5ab391ee`](host_news-cornell-ed_root_5ab391ee.md) | 🔧 손 config (playwright_html) — browser-rendered/latest-news selector works; httpx gets 403 from Cornell | 2026-05-24 | none | posts_nonempty, httpx_403, first_article_ok | https://news.cornell.edu/ |
@@ -325,7 +325,8 @@
 | B | 1 |
 | C | 17 |
 | C+A | 1 |
-| C+A+D | 3 |
+| C+A+D | 2 |
+| C+A+D+F | 1 |
 | C+D | 2 |
 | C+F | 2 |
 | C+F+A | 1 |
@@ -344,9 +345,9 @@
 
 | strategy | count |
 |---|---|
-| (미기재) | 57 |
+| (미기재) | 56 |
 | handwritten | 31 |
-| httpx_html | 109 |
+| httpx_html | 110 |
 | httpx_json | 24 |
 | httpx_json (미적용 — 콘텐츠 0) | 1 |
 | mixed | 1 |
