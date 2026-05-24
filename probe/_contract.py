@@ -157,8 +157,10 @@ _ARTIFACTS: dict[str, ArtifactContract] = {
                                 "None=매칭 0건. dict={matched_row_count, matched_keyword_set, sample_row_first_text, is_interactive_action}. "
                                 "is_interactive_action=true 면 본문 없는 사이트일 가능성 — article.body_empty_acceptable:true 박을 것."),
             _ContractField("audio_share_host_detected", type_hint="dict|null", required=False,
-                           note="Podcast RSS item link 가 share.transistor.fm/libsyn/simplecast/art19/megaphone/anchor/podbean/podtrac 등 "
-                                "외부 audio player host 를 가리키는 신호. dict={audio_share_host_detected, host, base_host, sample_url}. "
+                           note="Podcast RSS item link 가 외부 audio player/share host 를 가리키는 신호. "
+                                "dict={audio_share_host_detected, host, base_host, sample_url, confidence, evidence}. "
+                                "confidence='structural' 은 HAR content-type/audio path/tiny player HTML 로 확인된 신호, "
+                                "confidence='host_known' 은 bootstrap host suffix fallback. "
                                 "true 면 article body fetch 로 본문이 나오지 않으므로 body_empty_likely=true."),
             _ContractField("body_empty_likely", type_hint="bool", required=False,
                            note="본문 없는 사이트 summary — row_external_host(external_ratio≥0.8) OR row_interactive_action(is_interactive_action=true) 둘 중 하나면 true. "

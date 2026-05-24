@@ -913,6 +913,7 @@ def _build_digest(slug: str, url: str) -> dict:
             first_article_url=lc.get("first_article_url") or (digest.get("article_sample") or {}).get("url"),
             html_candidates=lc.get("html_repeating_patterns") or [],
             feeds=lc.get("rss_feed_urls") or [],
+            har_path=har_path if har_path.exists() else None,
         )
     if lc.get("audio_share_host_detected"):
         lc["body_empty_likely"] = True
@@ -1461,14 +1462,64 @@ def _list_sites(csv_path: Optional[str]) -> int:
 
 
 async def _generate(digest: dict, *, max_attempts: int, model):
-    return await generate_config_validated(
-        digest, model=model, max_attempts=max_attempts, fetch_articles=1, on_attempt=_attempt_logger,
-    )
+    if not _has_structural_audio_share(digest):
+        return await generate_config_validated(
+            digest, model=model, max_attempts=max_attempts, fetch_articles=1, on_attempt=_attempt_logger,
+        )
+
+    gen_globals = getattr(generate_config_validated, "__globals__", {})
+    original_validate_config = gen_globals.get("validate_config")
+    original_validate_built_config = gen_globals.get("validate_built_config")
+    if original_validate_config is None or original_validate_built_config is None:
+        return await generate_config_validated(
+            digest, model=model, max_attempts=max_attempts, fetch_articles=1, on_attempt=_attempt_logger,
+        )
+
+    def validate_config_enforced(cfg):
+        return original_validate_config(_enforce_audio_share_config(cfg, digest))
+
+    async def validate_built_config_enforced(cfg, *args, **kwargs):
+        return await original_validate_built_config(_enforce_audio_share_config(cfg, digest), *args, **kwargs)
+
+    gen_globals["validate_config"] = validate_config_enforced
+    gen_globals["validate_built_config"] = validate_built_config_enforced
+    try:
+        return await generate_config_validated(
+            digest, model=model, max_attempts=max_attempts, fetch_articles=1, on_attempt=_attempt_logger,
+        )
+    finally:
+        gen_globals["validate_config"] = original_validate_config
+        gen_globals["validate_built_config"] = original_validate_built_config
 
 
 def _gen(digest: dict, *, max_attempts: int, model):
     """동기 래퍼 (asyncio.run)."""
     return asyncio.run(_generate(digest, max_attempts=max_attempts, model=model))
+
+
+def _has_structural_audio_share(digest: dict) -> bool:
+    lc = digest.get("list_candidates") or {}
+    audio = lc.get("audio_share_host_detected") or {}
+    return (
+        isinstance(audio, dict)
+        and bool(audio.get("audio_share_host_detected") or audio.get("detected"))
+        and audio.get("confidence") == "structural"
+    )
+
+
+def _enforce_audio_share_config(cfg: dict, digest: dict) -> dict:
+    """Structural audio share links are player pages, so article body extraction is optional."""
+    if not isinstance(cfg, dict) or not _has_structural_audio_share(digest):
+        return cfg
+    art = cfg.setdefault("article", {})
+    if not isinstance(art, dict):
+        art = {}
+        cfg["article"] = art
+    art["body_empty_acceptable"] = True
+    art.setdefault("skip_status", [200])
+    if "content" not in art:
+        art["content"] = []
+    return cfg
 
 
 def _article_url_score(u: Optional[str], host: str) -> int:
