@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "site": "www.deu.ac.kr",
+  "board": "deu-notice",
+  "strategy": "playwright_html",
+  "headless": false,
+  "nav_timeout_ms": 30000,
+  "idle_timeout_ms": 8000,
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9",
+    "Referer": "https://www.deu.ac.kr/"
+  },
+  "list": {
+    "url_template": "https://www.deu.ac.kr/www/deu-notice.do",
+    "pagination": {"kind": "none"},
+    "wait_selector": "td.subject a[href*='articleNo=']",
+    "row_selector": "table tbody tr",
+    "row_required_selector": "td.subject a[href*='articleNo=']",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {"from": "attr", "selector": "td.subject a[href*='articleNo=']", "attr": "href", "transform": [["regex_extract", "articleNo=(\\d+)"]]}
+      ],
+      "title": [
+        {"from": "css", "selector": "td.subject a[href*='articleNo=']", "text": true, "transform": [["collapse_ws"]]}
+      ],
+      "url": [
+        {"from": "attr", "selector": "td.subject a[href*='articleNo=']", "attr": "href", "transform": [["urljoin", "https://www.deu.ac.kr/www/deu-notice.do"]]}
+      ],
+      "author": [
+        {"from": "css", "selector": "td.name", "text": true, "transform": [["collapse_ws"]]}
+      ],
+      "published_at": [
+        {"from": "css", "selector": "td.data", "text": true, "transform": [["date_only_to_iso", "+09:00"]]}
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {"from": "css", "selector": "div.fr-view", "html": true}
+    ]
+  },
+  "_source_url": "https://www.deu.ac.kr/notice",
+  "_note": "Catalog /notice returned 404. The same official site exposes the representative notice board at /www/deu-notice.do."
+}

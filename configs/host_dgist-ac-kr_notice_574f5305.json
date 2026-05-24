@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "site": "www.dgist.ac.kr",
+  "board": "notice",
+  "strategy": "playwright_html",
+  "headless": false,
+  "nav_timeout_ms": 30000,
+  "idle_timeout_ms": 8000,
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9",
+    "Referer": "https://www.dgist.ac.kr/"
+  },
+  "list": {
+    "url_template": "https://www.dgist.ac.kr/bbs/BBSMSTR_000000000066/list.do",
+    "pagination": {"kind": "none"},
+    "wait_selector": "td.subject button[onclick*='fn_search_detail']",
+    "row_selector": "table tbody tr",
+    "row_required_selector": "td.subject button[onclick*='fn_search_detail']",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {"from": "attr", "selector": "td.subject button[onclick*='fn_search_detail']", "attr": "onclick", "transform": [["regex_extract", "fn_search_detail\\('([^']+)'\\)"]]}
+      ],
+      "title": [
+        {"from": "css", "selector": "td.subject button[onclick*='fn_search_detail']", "text": true, "transform": [["collapse_ws"]]}
+      ],
+      "url": [
+        {"from": "template", "value": "https://www.dgist.ac.kr/bbs/BBSMSTR_000000000066/view.do?nttId={post_id}"}
+      ],
+      "author": [
+        {"from": "css", "selector": "td[data-cell-header='작성자']", "text": true, "transform": [["collapse_ws"]]}
+      ],
+      "published_at": [
+        {"from": "css", "selector": "td[data-cell-header='등록일']", "text": true, "transform": [["replace", ".", "-"], ["date_only_to_iso", "+09:00"]]}
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {"from": "css", "selector": "div.ui.bbs--view, div.program--contents, div.contents_wrap", "html": true}
+    ]
+  },
+  "_source_url": "https://www.dgist.ac.kr/notice",
+  "_note": "Catalog /notice returned 404. The same official site links Notice > 일반공지 to /bbs/BBSMSTR_000000000066/list.do."
+}
