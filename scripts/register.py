@@ -922,22 +922,33 @@ def _build_digest(slug: str, url: str) -> dict:
         har_path = probe_dir / "traffic.list.har"
     if "rss_feed_urls" not in lc:
         feeds = []
-        for c in digest.get("feed_candidates") or []:
-            if not isinstance(c, dict) or not str(c.get("source") or "").startswith("input-url"):
-                continue
-            cu = c.get("url")
-            if cu:
-                feeds.append({"url": cu, "source": c.get("source") or "feed_candidates", "type": c.get("type")})
+        # 1순위: list.html 의 link rel + HAR XML — 사이트가 명시한 RSS feed URL (가장 신뢰)
         feeds.extend(rss_feed_urls(
             html=list_html,
             base_url=url,
             har_path=har_path if har_path.exists() else None,
         ))
-        if not feeds and digest.get("feed_candidates"):
+        # 2순위: feed_candidates 중 *validated=true* 만 — 새 probe artifact 의 검증된 후보
+        for c in digest.get("feed_candidates") or []:
+            if not isinstance(c, dict):
+                continue
+            if c.get("validated") is not True:
+                continue
+            cu = c.get("url")
+            if cu:
+                feeds.append({"url": cu, "source": c.get("source") or "feed_candidates", "type": c.get("type")})
+        # 3순위: 위 둘 다 0이면 옛 feed_candidates fallback — input-url 추측은 *마지막*
+        if not feeds:
             for c in digest.get("feed_candidates") or []:
-                cu = c.get("url") if isinstance(c, dict) else None
+                if not isinstance(c, dict):
+                    continue
+                src = str(c.get("source") or "")
+                # input-url-feed-path 는 *추측만* — 다른 source 우선
+                if src.startswith("input-url-feed-path"):
+                    continue
+                cu = c.get("url")
                 if cu:
-                    feeds.append({"url": cu, "source": c.get("source") or "feed_candidates", "type": c.get("type")})
+                    feeds.append({"url": cu, "source": src or "feed_candidates", "type": c.get("type")})
         seen = set()
         lc["rss_feed_urls"] = [
             f for f in feeds
