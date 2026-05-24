@@ -139,6 +139,10 @@ _ARTIFACTS: dict[str, ArtifactContract] = {
                            prompt_aliases=("hydration",)),
             _ContractField("inline_js_data_candidates", type_hint="list[dict]",
                            note="<script type=application/json> JSON island / var X=[...] / X.push({...}) — kind=json_island/js_array/js_push"),
+            _ContractField("rss_feed_urls", type_hint="list[dict]", required=False,
+                           note="RSS/Atom feed URL 후보 — link rel alternate, HTML body feed/rss anchor, HAR XML feed response. "
+                                "각 dict={url, source: 'link_rel'|'html_body'|'har_resp_xml', type?}. "
+                                "RSS/Atom config 는 list.url_template 에 이 URL 을 그대로 쓴다."),
             _ContractField("runtime_id_candidates", type_hint="list[dict]",
                            note="HTML 안 *런타임 ID/슬러그* 후보 — URL path 에 없지만 사이트가 페이지에 명시한 cafe_id/board_id/community_id 등. "
                                 "각 dict: {name, value, source: 'js_var'|'next_data'|'meta_og_url', context}. config 작성자가 이 값을 "
@@ -152,6 +156,10 @@ _ARTIFACTS: dict[str, ArtifactContract] = {
                            note="list row 의 first_text 안 *액션 UI* 키워드 매칭 — 게임 디렉토리/투표/SPA 검출 신호. "
                                 "None=매칭 0건. dict={matched_row_count, matched_keyword_set, sample_row_first_text, is_interactive_action}. "
                                 "is_interactive_action=true 면 본문 없는 사이트일 가능성 — article.body_empty_acceptable:true 박을 것."),
+            _ContractField("audio_share_host_detected", type_hint="dict|null", required=False,
+                           note="Podcast RSS item link 가 share.transistor.fm/libsyn/simplecast/art19/megaphone/anchor/podbean/podtrac 등 "
+                                "외부 audio player host 를 가리키는 신호. dict={audio_share_host_detected, host, base_host, sample_url}. "
+                                "true 면 article body fetch 로 본문이 나오지 않으므로 body_empty_likely=true."),
             _ContractField("body_empty_likely", type_hint="bool", required=False,
                            note="본문 없는 사이트 summary — row_external_host(external_ratio≥0.8) OR row_interactive_action(is_interactive_action=true) 둘 중 하나면 true. "
                                 "true 면 article.body_empty_acceptable:true 박고 article.content selector 시도 안 해도 됨 (retry 단축)."),
@@ -369,6 +377,7 @@ _PROMPT_REQUIRED_KEY_PATHS: tuple[tuple[str, str], ...] = (
     ("list_candidates.json", "traffic_json_api_candidates"),
     ("list_candidates.json", "hydration_list_candidates"),
     ("list_candidates.json", "inline_js_data_candidates"),
+    ("list_candidates.json", "rss_feed_urls"),
     ("list_candidates.json", "runtime_id_candidates"),
     ("list_candidates.json", "body_empty_likely"),
     # robots.json

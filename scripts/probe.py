@@ -680,6 +680,8 @@ def _run(args: argparse.Namespace, url: str, slug: str) -> int:
             write_list_candidates(
                 out_dir,
                 base_url=url,
+                page_html=page_html or "",
+                har_path=har_path if har_path.exists() else None,
                 html_candidates=html_lists,
                 json_api_candidates=json_api_lists,
                 hydration_candidates=hydration_lists,

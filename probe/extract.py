@@ -1837,10 +1837,150 @@ def _walk_id_keys(node, prefix: str = "", _depth: int = 0):
                 yield from _walk_id_keys(v, f"{prefix}[{i}]", _depth + 1)
 
 
+_RSS_LINK_TYPE_RE = re.compile(r"(rss|atom)\+xml", re.IGNORECASE)
+_RSS_BODY_HREF_RE = re.compile(r"(?:^|[/_.-])(rss|feed|atom)(?:[/_.-]|$)", re.IGNORECASE)
+_RSS_CONTENT_TYPE_RE = re.compile(r"(application/(?:rss|atom)\+xml|text/xml|application/xml)", re.IGNORECASE)
+_RSS_XML_ROOT_RE = re.compile(r"^\s*(?:<\?xml[^>]*>\s*)?(?:<rss\b|<feed\b|<rdf:RDF\b)", re.IGNORECASE)
+
+
+@heuristic
+def rss_feed_urls(*, html: str, base_url: str, har_path: Optional[Path] = None) -> list[dict]:
+    """RSS/Atom feed URL 후보를 LLM digest 에 직접 노출한다.
+
+    discover_feeds 의 검증 후보와 별개로, config writer 가 `list.url_template` 을 추측하지 않도록
+    페이지 HTML 과 HAR 에서 실제 feed URL 을 보존한다.
+    """
+    out: list[dict] = []
+    seen: set[str] = set()
+
+    def add(url: str, *, source: str, typ: Optional[str] = None) -> None:
+        if not url:
+            return
+        abs_url = urljoin(base_url, url)
+        if abs_url in seen:
+            return
+        seen.add(abs_url)
+        item = {"url": abs_url, "source": source}
+        if typ:
+            item["type"] = typ
+        out.append(item)
+
+    if html:
+        soup = BeautifulSoup(html, "lxml")
+        for link in soup.find_all("link"):
+            if not isinstance(link, Tag):
+                continue
+            rel = " ".join(str(x).lower() for x in (link.get("rel") or []))
+            typ = str(link.get("type") or "")
+            href = str(link.get("href") or "")
+            if "alternate" in rel and _RSS_LINK_TYPE_RE.search(typ):
+                add(href, source="link_rel", typ=typ)
+        for a in soup.find_all("a", href=True):
+            if not isinstance(a, Tag):
+                continue
+            href = str(a.get("href") or "")
+            if _RSS_BODY_HREF_RE.search(urlsplit(href).path or href):
+                add(href, source="html_body")
+
+    if har_path and har_path.exists():
+        try:
+            har = json.loads(har_path.read_text(encoding="utf-8", errors="replace"))
+        except Exception:
+            har = {}
+        for entry in ((har.get("log") or {}).get("entries") or []):
+            req = entry.get("request") or {}
+            resp = entry.get("response") or {}
+            url = req.get("url") or ""
+            ct = ""
+            for h in resp.get("headers") or []:
+                if str(h.get("name") or "").lower() == "content-type":
+                    ct = str(h.get("value") or "")
+                    break
+            if not url or not _RSS_CONTENT_TYPE_RE.search(ct):
+                continue
+            text = _har_entry_response_text(entry, har_path)
+            if _RSS_XML_ROOT_RE.search(text or ""):
+                add(url, source="har_resp_xml", typ=ct)
+
+    return out
+
+
+_AUDIO_SHARE_HOST_SUFFIXES = (
+    "transistor.fm",
+    "libsyn.com",
+    "simplecast.com",
+    "art19.com",
+    "megaphone.fm",
+    "anchor.fm",
+    "podbean.com",
+    "podtrac.com",
+)
+
+
+def _is_audio_share_host(host: str) -> bool:
+    h = (host or "").lower().split(":", 1)[0]
+    return any(h == suffix or h.endswith("." + suffix) for suffix in _AUDIO_SHARE_HOST_SUFFIXES)
+
+
+@heuristic
+def audio_share_host_detected(*, base_url: str, first_article_url: Optional[str], html_candidates: list[dict]) -> Optional[dict]:
+    """Podcast RSS item link 가 외부 audio share/player host 를 가리키는지 감지한다."""
+    base_host = urlsplit(base_url or "").netloc.lower().split(":", 1)[0]
+    urls: list[str] = []
+    if first_article_url:
+        urls.append(first_article_url)
+    for cand in html_candidates or []:
+        sample = cand.get("sample_url")
+        if isinstance(sample, str):
+            urls.append(sample)
+
+    for url in urls[:10]:
+        host = urlsplit(urljoin(base_url, url)).netloc.lower().split(":", 1)[0]
+        if host and host != base_host and _is_audio_share_host(host):
+            return {
+                "audio_share_host_detected": True,
+                "host": host,
+                "base_host": base_host,
+                "sample_url": urljoin(base_url, url),
+            }
+    return None
+
+
+def _audio_share_from_feed_urls(*, base_url: str, feeds: list[dict]) -> Optional[dict]:
+    base_host = urlsplit(base_url or "").netloc.lower().split(":", 1)[0]
+    for feed in feeds or []:
+        url = feed.get("url") if isinstance(feed, dict) else None
+        if not isinstance(url, str):
+            continue
+        host = urlsplit(url).netloc.lower().split(":", 1)[0]
+        if host and host != base_host and _is_audio_share_host(host):
+            return {
+                "audio_share_host_detected": True,
+                "host": host,
+                "base_host": base_host,
+                "sample_url": url,
+                "source": "rss_feed_urls",
+            }
+    return None
+
+
+def audio_share_signal(*, base_url: str, first_article_url: Optional[str], html_candidates: list[dict], feeds: list[dict]) -> Optional[dict]:
+    return (
+        audio_share_host_detected(
+            base_url=base_url,
+            first_article_url=first_article_url,
+            html_candidates=html_candidates,
+        )
+        or _audio_share_from_feed_urls(base_url=base_url, feeds=feeds)
+    )
+
+
 def write_list_candidates(
     out_dir: Path,
     *,
     base_url: str,
+    page_html: str = "",
+    har_path: Optional[Path] = None,
     html_candidates: list[dict],
     json_api_candidates: list[dict],
     hydration_candidates: list[dict],
@@ -1863,12 +2003,20 @@ def write_list_candidates(
     peertube_platform: Optional[dict] = None,
     mbin_platform: Optional[dict] = None,
 ) -> None:
+    feeds = rss_feed_urls(html=page_html or "", base_url=base_url, har_path=har_path)
+    audio_share = audio_share_signal(
+        base_url=base_url,
+        first_article_url=first_article_url,
+        html_candidates=html_candidates,
+        feeds=feeds,
+    )
     # body_empty_likely summary — 본문이 본질적으로 없는 사이트 신호.
     # row_external_host (검색결과/aggregator) OR row_interactive_action (게임/투표/SPA) 중 하나라도 true 면 박힘.
     # LLM 한테 이 한 키만 보고 article.body_empty_acceptable=true 박으라고 시킴.
     body_empty_likely = bool(
         (row_external_host and float(row_external_host.get("external_ratio") or 0.0) >= 0.8)
         or (row_interactive_action and row_interactive_action.get("is_interactive_action"))
+        or audio_share
     )
     # root_marketing_homepage — root 도메인 + nav/footer/dropdown/carousel 키워드 우세 + same-host
     # article rows 작음. register.py 가 LLM 전 fail-fast 게이트로 사용.
@@ -1886,6 +2034,9 @@ def write_list_candidates(
         "hydration_list_candidates": hydration_candidates,
         # 목록이 정적 HTML 행이 아니라 인라인 JS/JSON 안에 있을 때 (다음카페 모바일: articles.push({...}) 등). probe/hydration.extract_inline_data 산출.
         "inline_js_data_candidates": inline_js_candidates or [],
+        # RSS/Atom URL 후보 — <link rel=alternate type=application/rss+xml|atom+xml>, HTML 본문 feed/rss 링크, HAR 의 XML feed 응답.
+        # config writer 는 feed 후보가 있으면 list.url_template 에 이 URL 을 그대로 써야 한다.
+        "rss_feed_urls": feeds,
         # 페이지 HTML 안에 박힌 ID/슬러그 후보 — URL 에 없지만 사이트가 명시한 cafe_id/board_id 등.
         "runtime_id_candidates": runtime_ids or [],
         "first_article_url": first_article_url,
@@ -1895,6 +2046,9 @@ def write_list_candidates(
         # list row 의 first_text 안 *액션 UI* 키워드 매칭 — 게임 디렉토리/투표/SPA 검출.
         # None = 매칭 0건; dict = {matched_row_count, matched_keyword_set, sample_row_first_text, is_interactive_action}.
         "row_interactive_action": row_interactive_action,
+        # RSS item 의 link 가 share.transistor.fm 등 오디오 플레이어 host 를 가리키는 podcast feed.
+        # 글 본문 HTML fetch 대상이 아니므로 article.body_empty_acceptable=true 로 완화한다.
+        "audio_share_host_detected": audio_share,
         # 본문 없는 사이트 summary — row_external_host(>=0.8) OR row_interactive_action 둘 중 하나면 true.
         # LLM 이 이 키 보고 article.body_empty_acceptable=true 박음. retry 안 거치고 1st attempt 부터.
         "body_empty_likely": body_empty_likely,
