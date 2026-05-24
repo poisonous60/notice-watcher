@@ -86,8 +86,34 @@ Phase 9b 안 어디서 python RSS 가 +1.7GB/2s 점프하나? 가설: HAR body b
 
 - `python scripts/probe_smoke.py --stage 3 --stage 5` exit 0 (configs 248/248 OK, fail_taxonomy
   971 cases PASS, fail 분류.md drift 0).
-- `mem_probe.py` 재실행으로 podcastindex.org probe 가 **rc=99 self-kill** (peak ~3.5GB) 되어
-  register 가 cleanly rc=5 + FAILED.json 박는지 확인은 N100 git pull + bot restart 후.
+- N100 podcastindex.org 단독 재현 (commit `2639013` 후):
+  ```
+  [register] ❌ MEMORY GUARD: probe process tree RSS=3539MB > threshold=3500MB — killing.
+  [register] ❌ 등록 불가 — probe memory guard. → host_podcastindex-or_root_892ddade.FAILED.json
+  [mem-probe] register.py exited rc=5 after 42.0s   (이전 7500MB+ → 3473MB cap)
+  ```
+  guard 가 3500MB 직후 process tree kill, register 가 `ProbeMemoryGuardError` → rc=5
+  capability_blocked + FAILED.json 박음. 5차 재시도 만에 (probe.py self-thread → parent-side
+  spawn child poll → process tree 합산 → register.py 외부 watchdog 까지 박아 GIL/greenlet
+  block 회피한 4 layer 변경 후) 안정.
+
+## 5차에 걸친 fix 변천 — 왜 각 단계가 부족했는지
+
+1. **probe.py self daemon thread** (commit `8acae30`) — `_start_memory_guard()` daemon thread.
+   *Failed*: Phase 9b 가 `mp.spawn` 으로 별도 subprocess 인데 thread 는 본체에만 박힘.
+2. **`_headless_child` 에 self guard** (commit `d8bb673`) — spawn 자식 안에도 `_start_memory_guard()`.
+   *Failed*: playwright sync API greenlet 이 GIL 독점 → daemon thread 안 깨움.
+3. **부모-side `_poll_child_memory`** (commit `95416e0`) — 부모 probe.py 가 자식 PID 폴.
+   *Failed*: `proc.pid` 단독 (60MB) → 7GB blower 는 chromium 손자 process.
+4. **process tree 합산** (commit `9237ae3`) — `/proc/<pid>/task/<pid>/children` BFS.
+   *Failed*: 7GB blower 는 spawn child 도 chromium 도 아닌 **probe.py main 본체** (1473054 가 7GB).
+5. **register.py 외부 watchdog thread** (commit `2639013`) — register.py 가 probe.py 전체 tree
+   RSS 폴 + `_kill_process_tree` + raise `ProbeMemoryGuardError`. ✅ **3539MB 에서 fire 확인.**
+
+핵심 통찰 — 같은 pid `/proc/<pid>/status` 도 reader 환경에 따라 stale 보임. probe.py 본체
+self-thread 가 1706MB 보고 끝났는데 register.py 외부 polling 은 3539MB 정확히 봄. lxml/playwright
+C 영역 안에서 thread scheduling 이 충분히 느려 1s poll interval 동안 RSS 가 +수GB 점프 → tick 사이
+miss. **외부 process 가 IO-block 으로 자유 CPU 라 fix 안전.**
 
 ## 영향
 
