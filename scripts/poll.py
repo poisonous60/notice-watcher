@@ -89,6 +89,36 @@ def _cap_seen(ids: set[str], *, keep: set[str]) -> list[str]:
 
 
 _LASTMOD_RE = re.compile(r"<lastmod[^>]*>([^<]+)</lastmod>", re.IGNORECASE)
+_SITEMAP_INDEX_RE = re.compile(r"<sitemapindex\b", re.IGNORECASE)
+_LASTMOD_BODY_CAP = 8192  # 진짜 download cap — server Range 무시해도 안 넘김.
+
+
+def _normalize_lastmod(s: str | None) -> str | None:
+    """timestamp 비교용 정규화 — UTC ISO 로. parse 실패 시 strip 만.
+
+    XML <lastmod> = W3C datetime (`2026-05-24T01:23:45+09:00` 또는 `2026-05-24`).
+    HTTP Last-Modified = RFC7231 (`Sun, 24 May 2026 01:23:45 GMT`). raw 비교는 timezone/precision
+    차이로 false negative — 2026-05-24 codex 2차 리뷰 LOW.
+    """
+    if not s:
+        return None
+    s = s.strip()
+    if not s:
+        return None
+    try:
+        from datetime import datetime, timezone
+        try:
+            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        except ValueError:
+            from email.utils import parsedate_to_datetime
+            dt = parsedate_to_datetime(s)
+        if dt is None:
+            return s
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc).isoformat()
+    except Exception:
+        return s
 
 
 async def _check_sitemap_lastmod(state: dict) -> dict | None:
@@ -119,25 +149,38 @@ async def _check_sitemap_lastmod(state: dict) -> dict | None:
     prev = state.get("sitemap_lastmod_last_seen")
     obs = {"sitemap_url": sitemap_url, "prev_lastmod": prev,
            "current_lastmod": None, "lastmod_source": "missing",
-           "would_skip": False, "error": None}
+           "would_skip": False, "is_sitemap_index": False, "error": None}
     try:
         import httpx
-        # timeout 2s 짧음 — observe-only 라서 5s 까지 끌 가치 없음. server 가 Range 안 지킬 때
-        # 대비해 body cap (decode 전 bytes 자름). codex bug review (2026-05-24) 보강.
+        # stream + aiter_bytes 로 진짜 download cap (Range 무시 서버 대비). 이전 `r.content[:8192]`
+        # 는 slice 만 — full body 다운로드 후 잘랐음. 2026-05-24 codex 2차 리뷰 MED.
         async with httpx.AsyncClient(timeout=2.0, follow_redirects=True) as c:
-            r = await c.get(sitemap_url, headers={"Range": "bytes=0-2047",
-                                                    "User-Agent": "notice-watcher/0 (+lastmod-observe)"})
-        body = (r.content[:8192]).decode(r.encoding or "utf-8", errors="replace") if r.content else ""
+            async with c.stream("GET", sitemap_url,
+                                headers={"Range": f"bytes=0-{_LASTMOD_BODY_CAP - 1}",
+                                         "User-Agent": "notice-watcher/0 (+lastmod-observe)"}) as r:
+                buf = bytearray()
+                async for chunk in r.aiter_bytes():
+                    buf.extend(chunk)
+                    if len(buf) >= _LASTMOD_BODY_CAP:
+                        break
+                http_last_modified = r.headers.get("last-modified")
+        body_bytes = bytes(buf[:_LASTMOD_BODY_CAP])
+        body = body_bytes.decode("utf-8", errors="replace") if body_bytes else ""
+        # sitemap index 면 child sitemap 의 timestamp 가 content URL timestamp 아님 — would_skip
+        # 에서 제외 (metric 오염 방지). 별 lastmod_source 라벨로 분리. 2026-05-24 codex 2차 리뷰 LOW.
+        is_index = bool(_SITEMAP_INDEX_RE.search(body[:1024]))
+        obs["is_sitemap_index"] = is_index
         m = _LASTMOD_RE.search(body)
         if m:
             obs["current_lastmod"] = m.group(1).strip()
-            obs["lastmod_source"] = "first_url_lastmod"
-        else:
-            hdr = r.headers.get("last-modified")
-            if hdr:
-                obs["current_lastmod"] = hdr
-                obs["lastmod_source"] = "http_last_modified"
-        obs["would_skip"] = bool(prev and obs["current_lastmod"] and prev == obs["current_lastmod"])
+            obs["lastmod_source"] = "sitemap_index_child_lastmod" if is_index else "first_url_lastmod"
+        elif http_last_modified:
+            obs["current_lastmod"] = http_last_modified.strip()
+            obs["lastmod_source"] = "http_last_modified"
+        # would_skip — sitemap index 파생 timestamp 는 제외 (child sitemap 변경 ≠ 새 글).
+        # normalize 후 비교 — W3C vs RFC7231 timezone/precision 차이로 false negative 차단.
+        if prev and obs["current_lastmod"] and not is_index:
+            obs["would_skip"] = (_normalize_lastmod(prev) == _normalize_lastmod(obs["current_lastmod"]))
     except Exception as exc:
         obs["lastmod_source"] = "error"
         obs["error"] = f"{type(exc).__name__}: {exc}"

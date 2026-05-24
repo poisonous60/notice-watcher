@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% block title %}Lastmod · notice-watcher{% endblock %}
+{% block body %}
+<h2>🗺 sitemap lastmod observe — ADR 0013 A 묶음</h2>
+<p class="muted">
+  매 poll cycle 마다 site 당 1줄 append. <code>output/sitemap_lastmod_log.jsonl</code> 의 최근 tail.
+  fetch_list skip 안 함 — <b>1주 evidence 후</b> 활성화 trigger 만족 여부로 결정
+  (false_skip_pct &lt; 1% / wasted_fetch_pct &gt; 30% / coverage ≥ 30%).
+  snapshot 기준 (N100 에서 pull).
+</p>
+
+{% if not present %}
+<article>
+  <header><b>로그 파일 없음</b></header>
+  <p class="muted">
+    snapshot 의 <code>{{ log_path }}</code> 가 없음. 가능 원인:
+  </p>
+  <ul class="muted">
+    <li>N100 에서 poll 1회 안 돌았다 (보통 poll-timer 가 1~5분 주기)</li>
+    <li>등록된 site 중 <code>output/probe/&lt;slug&gt;/sitemap.json</code> 가진 곳이 0</li>
+    <li>snapshot pull 이 lastmod_log source 못 받음 (sidebar 우상단 badge 확인)</li>
+  </ul>
+</article>
+{% else %}
+
+<section class="kpi-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:0.6rem;margin:1rem 0;">
+  <article style="margin:0;padding:0.6rem;">
+    <header style="padding:0;margin:0;font-size:0.85em;" class="muted">총 라인</header>
+    <div style="font-size:1.4em;"><b>{{ "{:,}".format(total) }}</b></div>
+    <div class="muted" style="font-size:0.8em;">tail {{ agg.n_total }} 표시 · slug {{ agg.n_slugs }}</div>
+  </article>
+  <article style="margin:0;padding:0.6rem;">
+    <header style="padding:0;margin:0;font-size:0.85em;" class="muted">coverage</header>
+    <div style="font-size:1.4em;"><b>{{ "%.1f"|format(agg.coverage_pct) }}%</b></div>
+    <div class="muted" style="font-size:0.8em;">lastmod 추출 성공 (≥ 30% trigger)</div>
+  </article>
+  <article style="margin:0;padding:0.6rem;">
+    <header style="padding:0;margin:0;font-size:0.85em;" class="muted">would_skip</header>
+    <div style="font-size:1.4em;"><b>{{ "%.1f"|format(agg.skip_pct) }}%</b></div>
+    <div class="muted" style="font-size:0.8em;">prev==current (실제 skip 안 함)</div>
+  </article>
+  <article style="margin:0;padding:0.6rem;">
+    <header style="padding:0;margin:0;font-size:0.85em;" class="muted">false_skip_pct</header>
+    <div style="font-size:1.4em;"><b>{{ "%.1f"|format(agg.false_skip_pct) }}%</b></div>
+    <div class="muted" style="font-size:0.8em;">skip 였는데 새 글 있었음 (&lt; 1% trigger). 비교 n={{ agg.n_compared }}</div>
+  </article>
+  <article style="margin:0;padding:0.6rem;">
+    <header style="padding:0;margin:0;font-size:0.85em;" class="muted">wasted_fetch_pct</header>
+    <div style="font-size:1.4em;"><b>{{ "%.1f"|format(agg.wasted_fetch_pct) }}%</b></div>
+    <div class="muted" style="font-size:0.8em;">fetch 했는데 새 글 0 (&gt; 30% trigger)</div>
+  </article>
+  <article style="margin:0;padding:0.6rem;">
+    <header style="padding:0;margin:0;font-size:0.85em;" class="muted">sitemap_index</header>
+    <div style="font-size:1.4em;"><b>{{ "%.1f"|format(agg.index_pct) }}%</b></div>
+    <div class="muted" style="font-size:0.8em;">child sitemap 가리킴 (skip 판정 제외)</div>
+  </article>
+  <article style="margin:0;padding:0.6rem;">
+    <header style="padding:0;margin:0;font-size:0.85em;" class="muted">error</header>
+    <div style="font-size:1.4em;"><b>{{ "%.1f"|format(agg.error_pct) }}%</b></div>
+    <div class="muted" style="font-size:0.8em;">HTTP/parse 오류 (fail-soft)</div>
+  </article>
+</section>
+
+<form method="get" action="/lastmod" style="margin-bottom:1rem;">
+  <fieldset role="group">
+    <input type="text" name="slug" placeholder="slug 필터 (빈 값=전체)" value="{{ slug_filter }}">
+    <input type="number" name="tail" min="10" max="2000" value="{{ tail }}" style="max-width:8em;">
+    <button type="submit">적용</button>
+  </fieldset>
+</form>
+
+<h3>slug 별 집계 ({{ agg.slug_rows|length }})</h3>
+{% if agg.slug_rows %}
+<table class="cases-table compact">
+  <thead>
+    <tr>
+      <th>slug</th>
+      <th class="nowrap">n</th>
+      <th class="nowrap">cov %</th>
+      <th class="nowrap">skip %</th>
+      <th class="nowrap">false_skip %</th>
+      <th class="nowrap">wasted %</th>
+      <th class="nowrap">index %</th>
+      <th class="nowrap">err %</th>
+      <th class="nowrap">last_ts</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in agg.slug_rows %}
+    <tr>
+      <td><a href="/lastmod?slug={{ r.slug }}&tail={{ tail }}"><code>{{ r.slug }}</code></a></td>
+      <td class="nowrap">{{ r.n }}</td>
+      <td class="nowrap">{{ "%.0f"|format(r.coverage_pct) }}</td>
+      <td class="nowrap">{{ "%.0f"|format(r.skip_pct) }}</td>
+      <td class="nowrap">{{ "%.0f"|format(r.false_skip_pct) }}<span class="muted" style="font-size:0.8em;">/{{ r.n_compared }}</span></td>
+      <td class="nowrap">{{ "%.0f"|format(r.wasted_fetch_pct) }}</td>
+      <td class="nowrap">{{ "%.0f"|format(r.index_pct) }}</td>
+      <td class="nowrap">{{ "%.0f"|format(r.error_pct) }}</td>
+      <td class="mono nowrap">{{ r.last_ts }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">집계 데이터 없음.</p>
+{% endif %}
+
+<h3>최근 라인 ({{ rows|length }}{% if slug_filter %}, slug={{ slug_filter }}{% endif %})</h3>
+{% if rows %}
+<table class="cases-table compact">
+  <thead>
+    <tr>
+      <th class="nowrap">ts</th>
+      <th>slug</th>
+      <th class="nowrap">source</th>
+      <th class="nowrap">prev</th>
+      <th class="nowrap">current</th>
+      <th class="nowrap">skip?</th>
+      <th class="nowrap">n_posts</th>
+      <th class="nowrap">n_new</th>
+      <th>sitemap_url / error</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+    <tr>
+      <td class="mono nowrap">{{ r.ts_short }}</td>
+      <td><code>{{ r.slug }}</code></td>
+      <td class="nowrap"><code>{{ r.lastmod_source }}</code></td>
+      <td class="mono nowrap" title="{{ r.prev_lastmod or '' }}">{{ r.prev_short }}</td>
+      <td class="mono nowrap" title="{{ r.current_lastmod or '' }}">{{ r.current_short }}</td>
+      <td class="nowrap">
+        {% if r.would_skip %}<b>YES</b>{% elif r.is_sitemap_index %}<span class="muted">idx</span>{% else %}—{% endif %}
+      </td>
+      <td class="nowrap">{{ r.fetch_list_n_posts if r.fetch_list_n_posts is not none else '' }}</td>
+      <td class="nowrap">{{ r.fetch_list_n_new if r.fetch_list_n_new is not none else '' }}</td>
+      <td>
+        {% if r.error %}
+          <span style="color:var(--pico-color-red-500, #c33);" title="{{ r.error }}">{{ r.error_short }}</span>
+        {% elif r.sitemap_url %}
+          {% if r.sitemap_url|is_http %}
+            <a href="{{ r.sitemap_url }}" target="_blank" rel="noopener noreferrer">{{ r.sitemap_url_short }}</a>
+          {% else %}
+            <code>{{ r.sitemap_url_short }}</code>
+          {% endif %}
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">표시할 라인 없음 (필터/tail 조건).</p>
+{% endif %}
+
+{% endif %}
+{% endblock %}

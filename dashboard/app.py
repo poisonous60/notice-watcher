@@ -23,6 +23,7 @@ from dashboard import actions as act
 from dashboard import bugs_view
 from dashboard import candidates_view
 from dashboard import cases_view
+from dashboard import lastmod_view
 from dashboard import learned_view
 from dashboard import vocab_deferred_view
 from dashboard import clustering
@@ -89,6 +90,7 @@ PAGE_SOURCES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("/candidates",  ("bot_db", "configs")),  # catalog yaml(로컬) × jobs 분포(bot_db) × config 존재(configs)
     ("/bugs",        ("poll_state",)),         # *.BUG.json (poll_state dir)
     ("/learned",     ("learned",)),
+    ("/lastmod",     ("lastmod_log",)),         # ADR 0013 observe-only sitemap lastmod 로그
     # 단일 source
     ("/usage",        ("usage_db",)),
     ("/triage/failed", ("poll_state",)),  # *.FAILED.json 만 봄
@@ -1115,6 +1117,7 @@ candidates_view.register(app, templates, _render)
 learned_view.register(app, templates, _render)
 bugs_view.register(app, templates, _render)
 vocab_deferred_view.register(app, templates, _render)
+lastmod_view.register(app, templates, _render)
 
 
 # --------------------------------------------------------------------------- #

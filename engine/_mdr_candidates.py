@@ -37,6 +37,13 @@ def _simplify_xpath(xpath: str) -> str:
     return re.sub(r"\[\d+\]", "", xpath)
 
 
+# measurement-only 가 build_digest 막지 않게 입력 hard cap. 큰 HTML 에서 xpath 인덱싱이
+# O(N) 메모리 (text-node 마다 부모 xpath 저장) — adversarial 입력 시 OOM 가능. 2026-05-24 codex
+# 2차 리뷰 MED.
+_INPUT_MAX_BYTES = 500_000
+_TEXT_NODE_BUDGET = 20_000
+
+
 def mdr_candidate_xpaths(html: bytes | str, *, top_k: int = 10,
                          encoding: str = "utf8") -> list[dict]:
     """MDR list_candidates 결과 → 상위 K 개 candidate xpath + 자식 row 수.
@@ -48,6 +55,8 @@ def mdr_candidate_xpaths(html: bytes | str, *, top_k: int = 10,
         return []
     if isinstance(html, str):
         html = html.encode(encoding, errors="replace")
+    if len(html) > _INPUT_MAX_BYTES:
+        html = html[:_INPUT_MAX_BYTES]
     try:
         parser = etree.HTMLParser(encoding=encoding, recover=True)
         doc = etree.parse(BytesIO(html), parser)
@@ -59,12 +68,17 @@ def mdr_candidate_xpaths(html: bytes | str, *, top_k: int = 10,
             return []
 
     d: dict[str, list[str]] = {}
+    # text-node budget — adversarial 입력에서 dict 가 무한히 커지는 것 차단.
+    seen = 0
     for e in doc.xpath('//*/text()[normalize-space()]'):
         p = e.getparent()
         if p is None:
             continue
         xpath = doc.getpath(p)
         d.setdefault(_simplify_xpath(xpath), []).append(xpath)
+        seen += 1
+        if seen >= _TEXT_NODE_BUDGET:
+            break
 
     counter: collections.Counter = collections.Counter()
     for _key, elements in d.items():

@@ -49,6 +49,12 @@ def usage_db_path() -> Path:
     return SNAPSHOT_DIR / "usage.sqlite3"
 
 
+def lastmod_log_path() -> Path:
+    """sitemap_lastmod_log.jsonl snapshot (ADR 0013 A 묶음 observe-only 로그).
+    파일 없으면 아직 poll 1회 안 돌았거나 sitemap.json 있는 site 0."""
+    return SNAPSHOT_DIR / "sitemap_lastmod_log.jsonl"
+
+
 def usage_db_path_local() -> Path:
     """dev box 자체에서 호출된 LLM 의 usage (예: `scripts/register_batch.py` 가 부른 register.py).
     snapshot 과 별도 — N100 production runtime 과 dev box 실험을 분리해서 관찰.
