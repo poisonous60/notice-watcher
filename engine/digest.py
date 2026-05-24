@@ -442,7 +442,13 @@ def _html_same_host_row_count(digest: dict) -> int:
         if not isinstance(c, dict):
             continue
         sample = c.get("sample_url") or c.get("href_pattern_guess")
-        if sample and not _same_host(sample, page_host):
+        if not sample or not _same_host(sample, page_host):
+            continue
+        sel = str(c.get("selector") or "").lower()
+        sel_root = sel.split(">", 1)[0].strip() if ">" in sel else sel.strip()
+        if sel_root in ("head", "nav", "footer", "header", "aside"):
+            continue
+        if any(tok in sel for tok in ("> meta", "> link", "> script", "> style", "> svg", "> path")):
             continue
         try:
             n = int(c.get("child_count") or c.get("count") or 1)
