@@ -100,6 +100,9 @@ def _headless_error_result(*, url: str, target: str, started: float, error: str)
 
 
 def _headless_child(kind: str, kwargs: dict, out_q) -> None:
+    # 자식 process 에도 RSS guard 박음 — Phase 9b heavy SPA 누적은 *이 spawn 자식 안에서* 일어남
+    # (probe.py 본체 process 에서는 7.5GB 안 봄). 2026-05-24 podcastindex 재현으로 검증됨.
+    _start_memory_guard()
     try:
         if kind == "capture":
             out_q.put(("ok", fetch_with_capture(**kwargs)))
@@ -149,6 +152,17 @@ def _run_headless_child(kind: str, kwargs: dict, *, cap_s: float, target: str) -
                                     "note": timeout_result.error}
         return timeout_result
 
+    # 자식이 memory guard 로 self-kill (rc=99) — 부모 probe.py 도 같은 rc 로 즉시 종료.
+    # register.py 의 ProbeMemoryGuardError 경로가 capability_blocked rc=5 로 변환.
+    # 안 그러면 probe.py 가 Phase 9b 실패만 기록하고 다른 phase 계속 → digest 진행 → rc=0/1
+    # 으로 끝나 register 가 capability 분류 못 함.
+    if proc.exitcode == _MEMORY_GUARD_RC:
+        sys.stderr.write(
+            f"[probe] ❌ propagating memory guard rc={_MEMORY_GUARD_RC} from headless child "
+            f"(target={target}, url={url}) — probe aborted to protect notice-bot.service.\n"
+        )
+        sys.stderr.flush()
+        os._exit(_MEMORY_GUARD_RC)
     try:
         status, payload = out_q.get_nowait()
     except queue.Empty:
