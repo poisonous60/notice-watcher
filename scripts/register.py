@@ -96,12 +96,58 @@ def _subprocess_creationflags() -> int:
     return 0
 
 
+_PROBE_MEMORY_GUARD_RC = 99
+_REGISTER_MEMORY_GUARD_RC = 5  # capability_blocked 동등 (register 가 직접 보낼 rc)
+
+
+def _read_proc_tree_rss_kb(root_pid: int) -> int:
+    """root_pid + 모든 descendants VmRSS 합산 (KB). /proc/<pid>/task/<pid>/children BFS.
+
+    Linux 전용. /proc 없으면 0 반환 (호출자가 폴 안 함).
+    """
+    def _read(pid: int) -> int:
+        try:
+            for line in open(f"/proc/{pid}/status").read().splitlines():
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1])
+        except (FileNotFoundError, ProcessLookupError, ValueError, PermissionError):
+            return 0
+        return 0
+
+    total = _read(root_pid)
+    pending = [root_pid]
+    seen = {root_pid}
+    while pending:
+        pid = pending.pop()
+        try:
+            children_raw = open(f"/proc/{pid}/task/{pid}/children").read().split()
+        except (FileNotFoundError, ProcessLookupError, PermissionError):
+            continue
+        for c in children_raw:
+            try:
+                cpid = int(c)
+            except ValueError:
+                continue
+            if cpid in seen:
+                continue
+            seen.add(cpid)
+            total += _read(cpid)
+            pending.append(cpid)
+    return total
+
+
 def _run_child_bounded(cmd: list[str], *, env: dict, timeout_s: float, label: str,
                        stream: bool = False) -> tuple[int, str]:
     """자식 process tree 를 timeout 안에 끝내고, 초과 시 전체 tree kill.
 
     Playwright/Chromium/Node driver 가 stdout pipe 를 붙잡은 채 남으면 부모가 EOF 를 못 받는
     케이스가 있어 `subprocess.run(timeout=...)` 대신 Popen + process-tree kill 을 쓴다.
+
+    추가 — RSS guard watchdog thread: 자식 process tree 합산 RSS 가
+    `PROBE_MEMORY_GUARD_MB` (default 3500) 초과 시 즉시 tree-kill. probe.py 내부 self-guard
+    (daemon thread) 가 lxml/playwright C extension 의 GIL 독점으로 안 깨우는 경우가 있어
+    부모(register.py) 가 *외부 polling* 으로 받친다 (2026-05-24 podcastindex 재현 5차로 검증).
+    임계 초과로 죽인 경우 raise ProbeMemoryGuardError → caller 가 rc=5 capability_blocked.
     """
     if timeout_s <= 0:
         raise RegisterTimeoutError(f"{label} 시작 전 wall-clock budget 소진")
@@ -118,6 +164,39 @@ def _run_child_bounded(cmd: list[str], *, env: dict, timeout_s: float, label: st
     if os.name == "nt":
         popen_kwargs["creationflags"] = _subprocess_creationflags()
     proc = subprocess.Popen(cmd, **popen_kwargs)
+
+    memory_killed = {"flag": False, "peak_mb": 0, "trip_mb": 0}
+    threshold_mb = int(os.environ.get("PROBE_MEMORY_GUARD_MB", "3500"))
+    poll_s = float(os.environ.get("PROBE_MEMORY_GUARD_POLL_S", "1.0"))
+
+    def _watchdog() -> None:
+        if not os.path.exists("/proc"):
+            return
+        while True:
+            try:
+                if proc.poll() is not None:
+                    return
+                rss_mb = _read_proc_tree_rss_kb(proc.pid) // 1024
+                if rss_mb > memory_killed["peak_mb"]:
+                    memory_killed["peak_mb"] = rss_mb
+                if rss_mb > threshold_mb:
+                    memory_killed["flag"] = True
+                    memory_killed["trip_mb"] = rss_mb
+                    sys.stderr.write(
+                        f"[register] ❌ MEMORY GUARD: {label} process tree RSS={rss_mb}MB > "
+                        f"threshold={threshold_mb}MB (peak={memory_killed['peak_mb']}MB) — killing.\n"
+                    )
+                    sys.stderr.flush()
+                    _kill_process_tree(proc)
+                    return
+            except Exception:  # noqa: BLE001
+                pass
+            time.sleep(poll_s)
+
+    import threading
+    wt = threading.Thread(target=_watchdog, name=f"register-memory-guard-{label}", daemon=True)
+    wt.start()
+
     try:
         out, _ = proc.communicate(timeout=timeout_s)
     except subprocess.TimeoutExpired as e:
@@ -134,6 +213,11 @@ def _run_child_bounded(cmd: list[str], *, env: dict, timeout_s: float, label: st
                 proc.stdout.close()
     if stream and out:
         print(out, end="" if out.endswith("\n") else "\n")
+    if memory_killed["flag"]:
+        raise ProbeMemoryGuardError(
+            f"{label} RSS guard tripped at {memory_killed['trip_mb']}MB (peak={memory_killed['peak_mb']}MB) "
+            f"— capability_blocked"
+        )
     return proc.returncode if proc.returncode is not None else proc.wait(), out or ""
 
 

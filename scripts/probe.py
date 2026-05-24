@@ -187,24 +187,14 @@ def _poll_child_memory(proc, *, cap_s: float) -> bool:
         return False
     deadline = time.perf_counter() + cap_s
     peak_mb = 0
-    tick_n = 0
-    sys.stderr.write(f"[probe-guard] arm: root_pid={proc.pid} threshold={threshold_mb}MB cap_s={cap_s}s\n")
-    sys.stderr.flush()
     while time.perf_counter() < deadline:
-        tick_n += 1
-        alive = proc.is_alive()
-        if not alive:
-            sys.stderr.write(f"[probe-guard] exit: tick={tick_n} alive=False peak={peak_mb}MB\n")
-            sys.stderr.flush()
+        if not proc.is_alive():
             return False
         try:
             rss_kb = _process_tree_rss_kb(proc.pid)
             rss_mb = rss_kb // 1024
             if rss_mb > peak_mb:
                 peak_mb = rss_mb
-            if tick_n <= 3 or tick_n % 5 == 0:
-                sys.stderr.write(f"[probe-guard] tick={tick_n} alive={alive} root_pid={proc.pid} tree_rss={rss_mb}MB peak={peak_mb}MB\n")
-                sys.stderr.flush()
             if rss_mb > threshold_mb:
                 sys.stderr.write(
                     f"[probe] ❌ MEMORY GUARD: process tree (root pid={proc.pid}) RSS={rss_mb}MB > "
@@ -350,9 +340,7 @@ def _start_memory_guard() -> None:
 
     def _watch() -> None:
         peak_mb = 0
-        tick = 0
         while True:
-            tick += 1
             try:
                 for line in status_path.read_text().splitlines():
                     if line.startswith("VmRSS:"):
@@ -360,9 +348,6 @@ def _start_memory_guard() -> None:
                         rss_mb = rss_kb // 1024
                         if rss_mb > peak_mb:
                             peak_mb = rss_mb
-                        if tick <= 3 or tick % 10 == 0:
-                            sys.stderr.write(f"[probe-guard-self] tick={tick} pid={os.getpid()} rss={rss_mb}MB peak={peak_mb}MB\n")
-                            sys.stderr.flush()
                         if rss_mb > threshold_mb:
                             sys.stderr.write(
                                 f"[probe] ❌ MEMORY GUARD: RSS={rss_mb}MB > threshold={threshold_mb}MB — "
@@ -378,8 +363,6 @@ def _start_memory_guard() -> None:
 
     t = threading.Thread(target=_watch, name="probe-memory-guard", daemon=True)
     t.start()
-    sys.stderr.write(f"[probe-guard-self] armed in pid={os.getpid()} threshold={threshold_mb}MB poll={poll_s}s alive={t.is_alive()}\n")
-    sys.stderr.flush()
 
 
 def main(argv: list[str]) -> int:
