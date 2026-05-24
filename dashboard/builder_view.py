@@ -50,9 +50,11 @@ _SESSION_TTL = 60 * 60
 _MAX_SESSIONS = 50
 
 
-def _our_scripts(root_path: str = "") -> str:
-    """root_path 인식 picker.js URL. codex fix #10 — reverse proxy subpath."""
-    return f'<script type="module" src="{root_path}/static/builder/picker.js"></script>'
+def _our_scripts(script_url: str) -> str:
+    """완전 absolute URL — `<base href="target">` 가 relative path 를 target
+    origin 으로 resolve 시켜 CSP 'self' (=target) 가 우리 script 차단하던 bug fix.
+    호출자가 dashboard origin 기반 absolute URL 전달."""
+    return f'<script type="module" src="{script_url}"></script>'
 
 
 # --------------------------------------------------------------------------- #
@@ -161,7 +163,7 @@ def get_session(sid: str) -> Optional[dict]:
 _BLOCKED_TAGS = {"script", "iframe", "object", "embed", "applet", "frame", "frameset"}
 
 
-def _sanitize_html(html_text: str, base_href: str, root_path: str = "") -> str:
+def _sanitize_html(html_text: str, base_href: str, script_url: str) -> str:
     soup = BeautifulSoup(html_text, "html.parser")
 
     # codex fix #4: <script>, <iframe srcdoc>, <object data>, <embed>, applet,
@@ -216,12 +218,12 @@ def _sanitize_html(html_text: str, base_href: str, root_path: str = "") -> str:
     head.insert(0, soup.new_tag("base", href=base_href))
 
     body = soup.find("body") or soup
-    body.append(BeautifulSoup(_our_scripts(root_path), "html.parser"))
+    body.append(BeautifulSoup(_our_scripts(script_url), "html.parser"))
 
     return str(soup)
 
 
-async def proxy_fetch(sid: str, path: str, root_path: str = "") -> HTMLResponse:
+async def proxy_fetch(sid: str, path: str, script_url: str) -> HTMLResponse:
     sess = get_session(sid)
     if sess is None:
         raise HTTPException(404, "session 만료 또는 무효")
@@ -260,15 +262,20 @@ async def proxy_fetch(sid: str, path: str, root_path: str = "") -> HTMLResponse:
     if "html" not in ct and "xml" not in ct:
         raise HTTPException(400, f"HTML 아님 (content-type={ct})")
 
-    sanitized = _sanitize_html(r.text, base_href=str(r.url), root_path=root_path)
+    sanitized = _sanitize_html(r.text, base_href=str(r.url), script_url=script_url)
 
     return HTMLResponse(
         sanitized,
         headers={
             "Content-Security-Policy": (
-                "default-src 'self' data: blob:; img-src * data: blob:; "
-                "style-src 'self' 'unsafe-inline' data:; "
-                "script-src 'self'; frame-ancestors 'self';"
+                "default-src 'self' data: blob:; "
+                "img-src * data: blob:; "
+                "style-src * 'unsafe-inline' data:; "  # target 외부 stylesheet 허용
+                "font-src * data:; "
+                "script-src 'self'; "  # target script 다 strip, 우리 것만
+                "frame-src 'none'; "  # iframe 다 strip 했으니
+                "connect-src 'none'; "  # XHR/fetch X
+                "frame-ancestors 'self';"
             ),
             "X-Content-Type-Options": "nosniff",
             "Referrer-Policy": "no-referrer",
