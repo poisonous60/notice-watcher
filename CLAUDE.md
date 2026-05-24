@@ -182,7 +182,22 @@ bash scripts/setup-hooks.sh   # 또는 pwsh scripts/setup-hooks.ps1
 
 ## 9. 동시 dev 세션 — 병렬 git etiquette
 
-여러 Claude/codex 세션이 *같은 dev box·같은 로컬 repo·같은 main* 에서 동시 작업 가능 (별도 clone 아님). 흔함 — 한 세션이 batch A, 다른 세션이 batch B. 핵심: **git 상태가 내 것만이 아님**. 2026-05-21 동시 batch 중 오진·혼란으로 박힘.
+여러 Claude/codex 세션이 *같은 dev box·같은 로컬 repo* 에서 동시 작업 가능. 흔함 — 한 세션이 batch A, 다른 세션이 batch B. 핵심: **git 상태가 내 것만이 아님**. 2026-05-21·2026-05-24 동시 batch 중 오진·혼란으로 박힘.
+
+### 9.0. 진입 = worktree 1차 방어선 (ADR 0015)
+
+**동시 세션 가능성 1% 라도 있으면 worktree 의무**. 같은 main 공유 working tree 직접 편집은 *1인 모드 사용자 명시 선언* 시에만 허용. 묵시 추정 X. 표준 진입:
+
+```sh
+bash scripts/session_start.sh <tag>       # 또는 pwsh scripts\session_start.ps1 <tag>
+# → ../nw-session-<tag>/ + branch session-<tag> 생성. cd 후 작업.
+```
+
+종료 = `git merge --no-ff session-<tag>` 또는 `git worktree remove + branch -D` 폐기. 사전 충돌 확인 `git merge-tree $(git merge-base main session-<tag>) main session-<tag> | grep -i conflict`.
+
+codex 위임은 이미 `scripts/codex_handoff.py --worktree` 로 자동 격리 (ADR 0008 §0c). **Claude 본인 세션도 같은 격리 받는다** — 2026-05-24 govedu batch 사고(다른 세션이 내 staged 16 파일을 `git add -A`/`commit -am` 류로 자기 commit 에 흡수, §9b 우회) 직접 대응.
+
+§9a~§9c 는 worktree 안에서도 적용 (worktree 끼리 main 공유, merge·push 시 같은 etiquette). 1인 모드 main 직접 편집 시 §9b 가 유일 방어선 — 조심.
 
 ### 9a. main 이 내 밑에서 advance 한다 (정상)
 - 다른 세션이 main 에 커밋 → `git log`/HEAD 가 내가 모르는 커밋 보임. **정상이지 손상 아님**. 내 커밋은 공유 main 에 안전히 누적.
@@ -214,3 +229,4 @@ bash scripts/setup-hooks.sh   # 또는 pwsh scripts/setup-hooks.ps1
 - `docs/대시보드 가이드.md` — dev 박스 로컬 대시보드
 - `docs/디스코드 메시지 톤 가이드.md` — 봇 사용자 향 메시지 톤·문체·포맷 룰 (해요체·이모지 어휘·체크리스트)
 - `docs/codex 위임 가이드.md` — 일반 작업을 Codex CLI 로 위임하는 기준·절차 (언제 YES/NO·entry/middle/exit·diff 게이트). batch/hand-config 외 작업용. ADR 0008 의 운영 가이드.
+- `docs/adr/0015-worktree-isolation-for-parallel-sessions.md` — 동시 세션 = worktree 의무 (§9.0). 1인 모드 명시 시 main 직접 편집 예외. wrapper = `scripts/session_start.{sh,ps1}`.
