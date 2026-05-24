@@ -79,6 +79,16 @@ def run() -> list[tuple[str, bool, str]]:
                   radiolab.get("kind") == "spa_rendered" and radiolab.get("confidence") == "high",
                   f"got {radiolab!r}"))
 
+    next_page = classify_site_kind({
+        "url": "https://example.com/archive",
+        "notes": ["next page link exists"],
+        "feed_candidates": [],
+        "list_candidates": {"html_repeating_patterns": []},
+    })
+    cases.append(("next_page_text_is_not_js_signal",
+                  next_page.get("kind") == "unknown",
+                  f"got {next_page!r}"))
+
     static = classify_site_kind({
         "url": "https://example.com/news/",
         "feed_candidates": [],
@@ -122,6 +132,36 @@ def run() -> list[tuple[str, bool, str]]:
                   host_known.get("kind") == "rss",
                   f"got {host_known!r}"))
 
+    link_rel = classify_site_kind({
+        "url": "https://example.com/podcast",
+        "feed_candidates": [],
+        "list_candidates": {"rss_feed_urls": [{
+            "url": "https://example.com/feed.xml",
+            "source": "head-alternate",
+            "validated": False,
+        }]},
+    })
+    cases.append(("unvalidated_link_rel_feed_is_rss_med",
+                  link_rel.get("kind") == "rss" and link_rel.get("confidence") == "med"
+                  and link_rel.get("primary_feed_url") == "https://example.com/feed.xml",
+                  f"got {link_rel!r}"))
+
+    backfilled_validated = classify_site_kind({
+        "url": "https://example.com/podcast",
+        "feed_candidates": [],
+        "list_candidates": {"rss_feed_urls": [{
+            "url": "https://example.com/feed.xml",
+            "source": "feed_candidates",
+            "validated": True,
+            "item_count": 2,
+            "root_tag": "rss",
+        }]},
+    })
+    cases.append(("validated_backfill_feed_is_rss_high",
+                  backfilled_validated.get("kind") == "rss"
+                  and backfilled_validated.get("confidence") == "high",
+                  f"got {backfilled_validated!r}"))
+
     enforced = _enforce_site_kind_config(
         {"site": "oxide.computer", "list": {"url_template": "https://oxide.computer/podcast/"},
          "article": {"content": [{"selector": "main"}]}},
@@ -160,6 +200,18 @@ def run() -> list[tuple[str, bool, str]]:
                   processed.get("list", {}).get("url_template") == "https://example.com/feed.xml"
                   and processed.get("article", {}).get("body_empty_acceptable") is True,
                   f"got {processed!r}"))
+
+    med_cfg = _enforce_site_kind_config(
+        {"site": "example", "list": {"url_template": "https://example.com/podcast"}},
+        {"site_kind": {
+            "kind": "rss",
+            "confidence": "med",
+            "primary_feed_url": "https://example.com/feed.xml",
+        }},
+    )
+    cases.append(("rss_med_does_not_enforce_primary_feed",
+                  med_cfg.get("list", {}).get("url_template") == "https://example.com/podcast",
+                  f"got {med_cfg!r}"))
 
     return cases
 

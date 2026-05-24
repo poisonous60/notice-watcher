@@ -465,8 +465,8 @@ def _site_kind_js_signal(digest: dict) -> bool:
         " ".join(digest.get("notes") or []),
     )).lower()
     return any(tok in hay for tok in (
-        "playwright", "s4", "js", "javascript", "spa", "nuxt", "next", "hydration",
-        "빈 shell", "empty shell", "렌더",
+        "playwright", "javascript", "spa", "nuxt", "next.js", "__next_data__", "nextjs",
+        "hydration", "빈 shell", "empty shell", "렌더", "render delta",
     ))
 
 
@@ -500,7 +500,7 @@ def _semantic_feed_match(digest: dict, feeds: list[dict]) -> bool:
 
 def classify_site_kind(digest: dict) -> dict:
     """Classify the digest's primary acquisition shape for prompt/enforcement hints."""
-    feeds = _validated_feed_candidates(digest)
+    feeds, link_rel_feeds = _validated_or_linked_feeds(digest)
     primary = feeds[0].get("url") if feeds else None
     rows = _html_same_host_row_count(digest)
     lc = digest.get("list_candidates") or {}
@@ -513,9 +513,6 @@ def classify_site_kind(digest: dict) -> dict:
     semantic = _semantic_feed_match(digest, feeds)
     js_signal = _site_kind_js_signal(digest)
 
-    # rss_feed_urls (link rel / HAR XML — 청크 A backfill 신호) 가 있으면 *validated 신뢰 없는* feed 후보.
-    # site_kind=rss/podcast 를 med confidence 로 박을 source. F-layer enforcement 는 high 만 작동하므로 안전.
-    link_rel_feeds = lc.get("rss_feed_urls") or [] if not feeds else []
     link_rel_primary = link_rel_feeds[0].get("url") if link_rel_feeds else None
 
     evidence: list[str] = []
@@ -556,6 +553,22 @@ def classify_site_kind(digest: dict) -> dict:
     if rows < 3 and js_signal and not feeds and not link_rel_feeds:
         return {"kind": "spa_rendered", "confidence": "high", "evidence": evidence}
     return {"kind": "unknown", "confidence": "low", "evidence": evidence}
+
+
+def _validated_or_linked_feeds(digest: dict) -> tuple[list[dict], list[dict]]:
+    """Return fetch-validated feed candidates separately from unvalidated link-rel hints."""
+    validated_feeds = _validated_feed_candidates(digest)
+    link_rel: list[dict] = []
+    lc = digest.get("list_candidates") or {}
+    if not validated_feeds:
+        for f in lc.get("rss_feed_urls") or []:
+            if not isinstance(f, dict):
+                continue
+            if f.get("validated") is True:
+                validated_feeds.append(f)
+            else:
+                link_rel.append(f)
+    return validated_feeds, link_rel
 
 
 def build_digest(

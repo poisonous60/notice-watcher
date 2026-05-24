@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import gzip
+import io
 import json
 import re
 import zlib
@@ -19,6 +20,7 @@ from .headers import preset_h2_chrome_min
 
 _FEED_PATHS = ("/rss", "/feed", "/atom.xml", "/rss.xml", "/feed.xml", "/feeds")
 _PAGE_FEED_SUFFIXES = ("/rss.xml", "/feed", "/index.xml", ".rss")
+_MAX_FEED_VALIDATE_CHARS = 1_000_000
 
 # 입력 URL 자체가 RSS/Atom 피드인 경우 path 매칭. catalog 의
 # `bbs.ruliweb.com/news/board/<id>/rss` / `steamcommunity.com/.../rss/` /
@@ -69,18 +71,31 @@ def _xml_root_and_item_count(text: str) -> tuple[Optional[str], Optional[int]]:
     head = text.lstrip()[:256].lower()
     if head.startswith(("<!doctype html", "<html")):
         return "html", None
+    text = text[:_MAX_FEED_VALIDATE_CHARS]
+    root_tag: Optional[str] = None
+    item_count = 0
     try:
-        root = ET.fromstring(text)
+        for event, el in ET.iterparse(io.StringIO(text), events=("start", "end")):
+            tag = _strip_ns(el.tag).lower()
+            if event == "start" and root_tag is None:
+                root_tag = tag
+            if event == "end":
+                if root_tag in ("rss", "rdf") and tag == "item":
+                    item_count += 1
+                elif root_tag == "feed" and tag == "entry":
+                    item_count += 1
+                el.clear()
     except ET.ParseError:
-        return ("html", None) if "<html" in text[:2048].lower() else (None, None)
-    tag = _strip_ns(root.tag).lower()
-    if tag == "rss":
-        return "rss", sum(1 for el in root.iter() if _strip_ns(el.tag).lower() == "item")
-    if tag == "feed":
-        return "feed", sum(1 for el in root if _strip_ns(el.tag).lower() == "entry")
-    if tag == "rdf":
-        return "rss", sum(1 for el in root.iter() if _strip_ns(el.tag).lower() == "item")
-    return "html" if tag == "html" else None, None
+        if "<html" in text[:2048].lower():
+            return "html", None
+        if root_tag in ("rss", "feed", "rdf"):
+            return ("rss" if root_tag == "rdf" else root_tag), item_count
+        return None, None
+    if root_tag == "rdf":
+        return "rss", item_count
+    if root_tag in ("rss", "feed"):
+        return root_tag, item_count
+    return "html" if root_tag == "html" else None, None
 
 
 def validate_feed_candidate(url: str, *, source: str, timeout: float = 10.0,
@@ -130,8 +145,6 @@ def _url_serves_feed(url: str, *, timeout: float = 10.0) -> bool:
 
 
 def _verified_feed_candidate(url: str, *, source: str, timeout: float = 10.0) -> dict | None:
-    if not _url_serves_feed(url, timeout=timeout):
-        return None
     hit = validate_feed_candidate(url, source=source, timeout=timeout)
     if hit.get("validated"):
         return hit
@@ -199,8 +212,10 @@ def discover_feeds(*, page_url: str, page_html: str, out_dir: Path, timeout: flo
         candidates.append(validate_feed_candidate(page_url, source="input-url-feed-path", timeout=timeout))
     elif _body_is_feed(page_html):
         candidates.append(validate_feed_candidate(page_url, source="input-url-feed-content", timeout=timeout))
-    elif _url_serves_feed(page_url, timeout=timeout):
-        candidates.append(validate_feed_candidate(page_url, source="input-url-feed-fetch", timeout=timeout))
+    else:
+        hit = _verified_feed_candidate(page_url, source="input-url-feed-fetch", timeout=timeout)
+        if hit is not None:
+            candidates.append(hit)
 
     soup = BeautifulSoup(page_html or "", "lxml")
     for link in soup.select('link[rel="alternate"]'):

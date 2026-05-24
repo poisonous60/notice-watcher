@@ -65,13 +65,13 @@ def run() -> list[tuple[str, bool, str]]:
 
     # 10~13. _has_verified_feed — HTML BLOCKED 라도 fetch-검증 피드면 등록 진행 (register.py).
     from scripts.register import _has_verified_feed
-    cases.append(("verified_well_known_xml",
+    cases.append(("legacy_well_known_xml_not_verified",
                   _has_verified_feed({"feed_candidates": [
-                      {"source": "well-known-path", "status": 200, "content_type": "application/xml"}]}) is True,
-                  "well-known 200 xml = 검증됨"))
-    cases.append(("verified_input_url_fetch",
-                  _has_verified_feed({"feed_candidates": [{"source": "input-url-feed-fetch", "url": "x"}]}) is True,
-                  "input-url-feed-fetch = 검증됨"))
+                      {"source": "well-known-path", "status": 200, "content_type": "application/xml"}]}) is False,
+                  "legacy well-known 200 xml marker alone = 미검증"))
+    cases.append(("legacy_input_url_fetch_not_verified",
+                  _has_verified_feed({"feed_candidates": [{"source": "input-url-feed-fetch", "url": "x"}]}) is False,
+                  "legacy input-url-feed-fetch marker alone = 미검증"))
     cases.append(("unverified_path_only",
                   _has_verified_feed({"feed_candidates": [{"source": "input-url-feed-path", "url": "x"}]}) is False,
                   "path 모양만 = 미검증"))

@@ -30,6 +30,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+import yaml
+
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))  # bot/ 패키지 import 위해
 
@@ -155,9 +157,15 @@ def _read_case_md_outcome(case_md_slug: Optional[str]) -> Optional[str]:
     end = text.find("\n---", 3)
     if end < 0:
         return None
-    for line in text[3:end].splitlines():
-        if line.strip().startswith("outcome:"):
-            return line.split(":", 1)[1].strip().strip("\"'")
+    try:
+        fm = yaml.safe_load(text[3:end]) or {}
+    except yaml.YAMLError:
+        return None
+    if not isinstance(fm, dict):
+        return None
+    outcome = fm.get("outcome")
+    if isinstance(outcome, str):
+        return outcome.strip() or None
     return None
 
 
