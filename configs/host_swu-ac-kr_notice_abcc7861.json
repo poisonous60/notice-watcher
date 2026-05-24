@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "site": "swu.ac.kr",
+  "board": "notice",
+  "strategy": "httpx_html",
+  "_source_url": "https://www.swu.ac.kr/notice",
+  "_note": "/notice is an image-map landing page. The actual general notice board is the iframe endpoint linked from /www/noticea.html: /front/boardlist.do?bbsConfigFK=8.",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9",
+    "Referer": "https://www.swu.ac.kr/www/noticea.html"
+  },
+  "timeout": 15,
+  "polite_sleep": { "min": 5, "max": 5 },
+  "list": {
+    "url_template": "https://www.swu.ac.kr/front/boardlist.do?bbsConfigFK=8",
+    "pagination": { "kind": "query_param", "page_param": "currentPage" },
+    "row_selector": "table tbody tr",
+    "row_required_selector": "td.title a[onclick*='boardMove']",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "td.title a[onclick*='boardMove']",
+          "attr": "onclick",
+          "transform": [["regex_extract", "'([0-9]+)'"]]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "td.title a[onclick*='boardMove']",
+          "text": true,
+          "transform": [["collapse_ws"], ["strip"]]
+        }
+      ],
+      "url": [
+        {
+          "from": "template",
+          "value": "https://www.swu.ac.kr/front/boardview.do?bbsConfigFK=8&pkid={post_id}"
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "td:nth-last-of-type(2)",
+          "text": true,
+          "transform": [["iso8601", ["%Y.%m.%d"], "+09:00"]]
+        }
+      ]
+    }
+  },
+  "article": {
+    "url_template": "https://www.swu.ac.kr/front/boardview.do?bbsConfigFK=8&pkid={post_id}",
+    "fetch_kind": "html",
+    "content": [
+      { "from": "css", "selector": "div.contents", "html": true },
+      { "from": "css", "selector": "body", "html": true }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "div.title",
+          "text": true,
+          "transform": [["collapse_ws"], ["strip"]]
+        }
+      ]
+    }
+  }
+}

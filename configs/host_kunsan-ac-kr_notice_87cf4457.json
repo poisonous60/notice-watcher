@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "site": "kunsan.ac.kr",
+  "board": "notice",
+  "strategy": "httpx_html",
+  "_source_url": "https://www.kunsan.ac.kr/notice",
+  "_note": "/notice renders the main landing page. The same page menu links 공지사항 to /index.kunsan?menuCd=DOM_000000105001001000, which redirects to boardId=BBS_0000008.",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9",
+    "Referer": "https://www.kunsan.ac.kr/index.kunsan?menuCd=DOM_000000105001001000"
+  },
+  "timeout": 15,
+  "polite_sleep": { "min": 5, "max": 5 },
+  "list": {
+    "url_template": "https://www.kunsan.ac.kr/board/list.kunsan?boardId=BBS_0000008&menuCd=DOM_000000105001001000",
+    "pagination": { "kind": "query_param", "page_param": "startPage" },
+    "row_selector": "table tbody tr",
+    "row_required_selector": "td.tit a[href*='dataSid=']",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "td.tit a[href*='dataSid=']",
+          "attr": "href",
+          "transform": [["regex_extract", "[?&]dataSid=(\\d+)"]]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "td.tit a[href*='dataSid=']",
+          "text": true,
+          "transform": [["collapse_ws"], ["strip"]]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "td.tit a[href*='dataSid=']",
+          "attr": "href",
+          "transform": [["urljoin", "https://www.kunsan.ac.kr"]]
+        }
+      ],
+      "author": [
+        {
+          "from": "css",
+          "selector": "td:nth-of-type(3)",
+          "text": true,
+          "transform": [["collapse_ws"], ["strip"]]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "td:nth-of-type(4)",
+          "text": true,
+          "transform": [["iso8601", ["%Y-%m-%d"], "+09:00"]]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      { "from": "css", "selector": "div.bv_content", "html": true },
+      { "from": "css", "selector": "#content", "html": true }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "div.bv_title",
+          "text": true,
+          "transform": [["collapse_ws"], ["strip"]]
+        }
+      ]
+    }
+  }
+}
