@@ -3,6 +3,8 @@
   "site": "govinfo.gov",
   "board": "root",
   "strategy": "httpx_html",
+  "_source_url": "https://www.govinfo.gov/",
+  "_note": "root portal lacks flat news index; uses govinfo official site-wide RSS (rss.xml) as canonical news feed.",
   "headers": {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
     "Accept": "application/rss+xml, application/xml;q=0.9, text/xml;q=0.8, */*;q=0.7",

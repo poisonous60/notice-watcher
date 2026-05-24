@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "site": "spectrum.ieee.org",
+  "board": "root-rss",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/rss+xml,application/xml,text/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://spectrum.ieee.org/"
+  },
+  "timeout": 20,
+  "polite_sleep": {
+    "min": 5,
+    "max": 6
+  },
+  "list": {
+    "url_template": "https://spectrum.ieee.org/feeds/feed.rss",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "item",
+    "fields": {
+      "post_id": [
+        {
+          "from": "css",
+          "selector": "link",
+          "text": true,
+          "transform": [
+            ["strip_query_fragment"],
+            ["regex_extract", "https?://[^/]+/([^/?#]+)$"]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "title",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ],
+      "url": [
+        {
+          "from": "css",
+          "selector": "link",
+          "text": true,
+          "transform": [
+            ["collapse_ws"],
+            ["strip_query_fragment"]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "pubDate",
+          "text": true,
+          "transform": [
+            ["collapse_ws"],
+            ["iso8601", ["%a, %d %b %Y %H:%M:%S %z"]]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "description",
+          "text": true,
+          "transform": [
+            ["html_unescape"],
+            ["collapse_ws"]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "article",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "body",
+        "html": true
+      }
+    ],
+    "body_empty_acceptable": true
+  },
+  "_source_url": "https://spectrum.ieee.org/",
+  "_note": "handcrafted source remap: root page exposes link rel=alternate application/rss+xml at /feeds/feed.rss. The failed generated root-page config collapsed duplicate/nav IDs; RSS item link/title/description gives stable entries. Some feed links point to external sponsored/event pages, so article body has body fallback and body_empty_acceptable while first Spectrum article currently returns body >100."
+}

@@ -1,0 +1,110 @@
+{
+  "version": 1,
+  "site": "enisa.europa.eu",
+  "board": "news",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.enisa.europa.eu/news"
+  },
+  "timeout": 20,
+  "polite_sleep": {
+    "min": 5,
+    "max": 6
+  },
+  "list": {
+    "url_template": "https://www.enisa.europa.eu/news",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "div.featured-items, div.publications-item",
+    "row_required_selector": "h3 a[href^='/news/']",
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "h3 a",
+          "attr": "href",
+          "transform": [
+            ["strip_query_fragment"],
+            ["strip"],
+            ["regex_extract", "/news/([^/]+)$"]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "h3 a",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "h3 a",
+          "attr": "href",
+          "transform": [
+            ["urljoin", "https://www.enisa.europa.eu"],
+            ["strip_query_fragment"],
+            ["strip"]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "attr",
+          "selector": "time[datetime]",
+          "attr": "datetime",
+          "transform": [["collapse_ws"]]
+        }
+      ],
+      "category": [
+        {
+          "from": "css",
+          "selector": "span.type",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "p:not(.metadata)",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "article",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "main",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "h1",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ]
+    }
+  },
+  "_source_url": "https://www.enisa.europa.eu/news",
+  "_note": "handcrafted: automatic probe picked filter/query navigation under /news?f[0]=... as the first article. The real static rows are div.featured-items and div.publications-item with h3 /news/<slug> links; article pages expose body under article/main."
+}

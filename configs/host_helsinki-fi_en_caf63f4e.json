@@ -1,0 +1,118 @@
+{
+  "version": 1,
+  "site": "helsinki.fi",
+  "board": "news",
+  "strategy": "playwright_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.helsinki.fi/en/news"
+  },
+  "timeout": 25,
+  "headless": true,
+  "nav_timeout_ms": 60000,
+  "idle_timeout_ms": 5000,
+  "quiet_ms": 700,
+  "polite_sleep": {
+    "min": 4,
+    "max": 6
+  },
+  "list": {
+    "url_template": "https://www.helsinki.fi/en/news",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "article.hy-general-list-item",
+    "row_required_selector": "a.hy-general-list-item__link[href*='/en/news/']",
+    "wait_selector": "article.hy-general-list-item a.hy-general-list-item__link[href*='/en/news/']",
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a.hy-general-list-item__link",
+          "attr": "href",
+          "transform": [
+            ["urljoin", "https://www.helsinki.fi"],
+            ["strip_query_fragment"],
+            ["replace", "/index%2Ephp", ""],
+            ["regex_extract", "/en/news/(.+)$"]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "h3.hy-general-list-item__title",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a.hy-general-list-item__link",
+          "attr": "href",
+          "transform": [
+            ["urljoin", "https://www.helsinki.fi"],
+            ["strip_query_fragment"],
+            ["replace", "/index%2Ephp", ""]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": ".hy-genenral-list-item__meta__date",
+          "text": true,
+          "transform": [
+            ["regex_extract", "(\\d{1,2}\\.\\d{1,2}\\.\\d{4})"],
+            ["iso8601", ["%d.%m.%Y"], "+02:00"]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "css",
+          "selector": ".hy-genenral-list-item__meta",
+          "text": true,
+          "transform": [
+            ["regex_extract", "^([^|]+)"],
+            ["collapse_ws"]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "p.hy-general-list-item__description",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "wait_selector": "h1",
+    "content": [
+      {
+        "from": "css",
+        "selector": "body",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "h1",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ]
+    }
+  },
+  "_source_url": "https://www.helsinki.fi/en/news",
+  "_note": "handcrafted: static HTML is a navigation shell, so generic httpx selectors saw faculty/menu links and posts_nonempty 0. The rendered page exposes article.hy-general-list-item cards; use playwright_html and wait for those cards. robots.txt allows /en/news and Crawl-delay is 2, so config keeps a 4-6s floor."
+}

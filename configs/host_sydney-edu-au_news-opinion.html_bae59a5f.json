@@ -1,0 +1,91 @@
+{
+  "version": 1,
+  "site": "sydney.edu.au",
+  "board": "latest-news",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.sydney.edu.au/news-opinion.html"
+  },
+  "timeout": 20,
+  "polite_sleep": {
+    "min": 5,
+    "max": 6
+  },
+  "list": {
+    "url_template": "https://www.sydney.edu.au/news-opinion/latest-news.html",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "div.m-card--featured-news > div[data-link]",
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": ":self",
+          "attr": "data-link",
+          "transform": [
+            ["strip_query_fragment"],
+            ["regex_extract", "/news-opinion/news/(\\d{4}/\\d{2}/\\d{2}/[^.]+)\\.html$"]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "attr",
+          "selector": ":self",
+          "attr": "data-title",
+          "transform": [["collapse_ws"]]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": ":self",
+          "attr": "data-link",
+          "transform": [
+            ["urljoin", "https://www.sydney.edu.au"],
+            ["strip_query_fragment"]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "attr",
+          "selector": ":self",
+          "attr": "data-description",
+          "transform": [["collapse_ws"]]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "div.text",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "main",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "h1",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ]
+    }
+  },
+  "_source_url": "https://www.sydney.edu.au/news-opinion.html",
+  "_note": "handcrafted: submitted page redirects to /news-opinion/latest-news.html. The automatic probe followed the yearly archive navigation link instead of the card data; the current latest-news HTML exposes article card data-link/data-title attributes and article pages expose body text under div.text."
+}
