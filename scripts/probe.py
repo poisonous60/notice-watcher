@@ -350,7 +350,9 @@ def _start_memory_guard() -> None:
 
     def _watch() -> None:
         peak_mb = 0
+        tick = 0
         while True:
+            tick += 1
             try:
                 for line in status_path.read_text().splitlines():
                     if line.startswith("VmRSS:"):
@@ -358,6 +360,9 @@ def _start_memory_guard() -> None:
                         rss_mb = rss_kb // 1024
                         if rss_mb > peak_mb:
                             peak_mb = rss_mb
+                        if tick <= 3 or tick % 10 == 0:
+                            sys.stderr.write(f"[probe-guard-self] tick={tick} pid={os.getpid()} rss={rss_mb}MB peak={peak_mb}MB\n")
+                            sys.stderr.flush()
                         if rss_mb > threshold_mb:
                             sys.stderr.write(
                                 f"[probe] ❌ MEMORY GUARD: RSS={rss_mb}MB > threshold={threshold_mb}MB — "
@@ -373,6 +378,8 @@ def _start_memory_guard() -> None:
 
     t = threading.Thread(target=_watch, name="probe-memory-guard", daemon=True)
     t.start()
+    sys.stderr.write(f"[probe-guard-self] armed in pid={os.getpid()} threshold={threshold_mb}MB poll={poll_s}s alive={t.is_alive()}\n")
+    sys.stderr.flush()
 
 
 def main(argv: list[str]) -> int:
