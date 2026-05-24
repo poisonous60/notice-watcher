@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "site": "news.cornell.edu",
+  "board": "root",
+  "strategy": "playwright_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "Accept-Language": "en-US,en;q=0.9"
+  },
+  "timeout": 20,
+  "headless": true,
+  "nav_timeout_ms": 30000,
+  "idle_timeout_ms": 3000,
+  "list": {
+    "url_template": "https://news.cornell.edu/",
+    "pagination": {
+      "kind": "none"
+    },
+    "wait_selector": "#hp-latest-news .story-xs a[href]",
+    "row_selector": "#hp-latest-news .story-xs",
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a[href]",
+          "attr": "href",
+          "transform": [
+            [
+              "strip_query_fragment"
+            ],
+            [
+              "regex_extract",
+              "/stories/(\\d{4}/\\d{2}/[^/]+)$"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "a[href]",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a[href]",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://news.cornell.edu"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "wait_selector": "article .field--name-body",
+    "content": [
+      {
+        "from": "css",
+        "selector": "article .field--name-body",
+        "html": true
+      }
+    ]
+  }
+}
