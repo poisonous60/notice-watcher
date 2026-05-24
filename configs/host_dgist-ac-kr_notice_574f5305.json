@@ -3,7 +3,7 @@
   "site": "www.dgist.ac.kr",
   "board": "notice",
   "strategy": "playwright_html",
-  "headless": false,
+  "headless": true,
   "nav_timeout_ms": 30000,
   "idle_timeout_ms": 8000,
   "headers": {

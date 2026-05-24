@@ -3,7 +3,7 @@
   "site": "www.deu.ac.kr",
   "board": "deu-notice",
   "strategy": "playwright_html",
-  "headless": false,
+  "headless": true,
   "nav_timeout_ms": 30000,
   "idle_timeout_ms": 8000,
   "headers": {
