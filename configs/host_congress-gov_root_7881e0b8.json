@@ -1,0 +1,115 @@
+{
+  "version": 1,
+  "site": "congress.gov",
+  "board": "notifications",
+  "strategy": "httpx_html",
+  "_source_url": "https://www.congress.gov/",
+  "_note": "anti-bot root workaround: Congress.gov documents official RSS feeds under /get-alerts. This config uses Congress.gov Notifications RSS instead of crawling the protected portal root.",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/rss+xml,application/xml,text/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9,ko;q=0.7",
+    "Referer": "https://www.congress.gov/get-alerts"
+  },
+  "timeout": 20,
+  "polite_sleep": {
+    "min": 5,
+    "max": 5
+  },
+  "list": {
+    "url_template": "https://www.congress.gov/rss/notification.xml",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "item",
+    "fields": {
+      "post_id": [
+        {
+          "from": "css",
+          "selector": "guid",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        },
+        {
+          "from": "css",
+          "selector": "link",
+          "text": true,
+          "transform": [
+            [
+              "strip_query_fragment"
+            ],
+            [
+              "regex_extract",
+              "/([^/?#]+)$"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "css",
+          "selector": "link",
+          "text": true,
+          "transform": [
+            [
+              "strip"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "pubDate",
+          "text": true,
+          "transform": [
+            [
+              "iso8601",
+              [
+                "%a, %d %b %Y %H:%M:%S %z",
+                "%a, %d %b %Y %H:%M:%S %Z"
+              ],
+              "Z"
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "description",
+          "text": true,
+          "transform": [
+            [
+              "html_unescape"
+            ],
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [],
+    "body_empty_acceptable": true
+  }
+}

@@ -1,0 +1,118 @@
+{
+  "version": 1,
+  "site": "u-tokyo.ac.jp",
+  "board": "press-rdf",
+  "strategy": "httpx_html",
+  "_source_url": "https://www.u-tokyo.ac.jp/en/whatsnew/",
+  "_note": "anti-bot/dead entry URL workaround: the submitted /en/whatsnew/ endpoint is no longer usable from this environment, but the official UTokyo press page exposes a stable RSS/RDF feed at /focus/en/press/feed.rdf.",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/rss+xml,application/rdf+xml,application/xml,text/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9,ko;q=0.7",
+    "Referer": "https://www.u-tokyo.ac.jp/focus/en/press/"
+  },
+  "timeout": 30,
+  "polite_sleep": {
+    "min": 5,
+    "max": 5
+  },
+  "list": {
+    "url_template": "https://www.u-tokyo.ac.jp/focus/en/press/feed.rdf",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "item",
+    "fields": {
+      "post_id": [
+        {
+          "from": "css",
+          "selector": "link",
+          "text": true,
+          "transform": [
+            [
+              "strip_query_fragment"
+            ],
+            [
+              "regex_extract",
+              "/focus/en/press/([^/?#]+)\\.html$"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "css",
+          "selector": "link",
+          "text": true,
+          "transform": [
+            [
+              "strip"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "pubDate",
+          "text": true,
+          "transform": [
+            [
+              "iso8601",
+              [
+                "%Y-%m-%dT%H:%M:%S%z"
+              ]
+            ]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "template",
+          "value": "press"
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "article",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "main",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "h1",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  }
+}
