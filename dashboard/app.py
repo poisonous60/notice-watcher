@@ -90,7 +90,7 @@ PAGE_SOURCES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("/candidates",  ("bot_db", "configs")),  # catalog yaml(로컬) × jobs 분포(bot_db) × config 존재(configs)
     ("/bugs",        ("poll_state",)),         # *.BUG.json (poll_state dir)
     ("/learned",     ("learned",)),
-    ("/lastmod",     ("lastmod_log",)),         # ADR 0013 observe-only sitemap lastmod 로그
+    ("/lastmod",     ("lastmod_log", "register_signal_log")),  # ADR 0013 observe-only — sitemap lastmod (polling) + register-side α/θ signal
     # 단일 source
     ("/usage",        ("usage_db",)),
     ("/triage/failed", ("poll_state",)),  # *.FAILED.json 만 봄
