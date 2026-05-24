@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% set active = 'builder' %}
+{% block title %}Picker — {{ target_url }}{% endblock %}
+{% block body %}
+<style>
+  .picker-grid { display:grid; grid-template-columns: 1fr 380px; gap:1rem; height:calc(100vh - 180px); }
+  .picker-frame { position:relative; border:1px solid #ccc; background:#fff; }
+  .picker-frame iframe { width:100%; height:100%; border:0; display:block; }
+  .picker-side { overflow-y:auto; padding-right:0.5rem; font-size:0.9em; }
+  .picker-side fieldset { margin: 0.5em 0; padding: 0.5em 0.7em; }
+  .picker-side fieldset legend { font-size:0.85em; }
+  .picker-side code { font-size: 0.75em; word-break: break-all; display:block; padding:2px 4px; background:#f6f6f6; }
+  .picker-side button[data-mode] { font-size: 0.8em; padding: 2px 8px; margin: 2px 0; }
+  .picker-side .field-row { display:grid; grid-template-columns: 90px 1fr; gap:4px; align-items:start; margin: 2px 0; }
+  #save-result { font-size: 0.75em; max-height: 260px; overflow:auto; background:#f9f9f9; padding: 0.5em; }
+</style>
+
+<div class="picker-grid">
+  <div class="picker-frame">
+    <iframe id="target" src="/builder/p/{{ sid }}/"></iframe>
+  </div>
+  <aside class="picker-side">
+    <h3 style="margin-top:0;">🎯 Picker</h3>
+    <p class="muted" style="font-size:0.8em;">{{ target_url }}</p>
+    <div id="status" class="muted">대기</div>
+
+    <fieldset>
+      <legend><b>1. Row 패턴</b></legend>
+      <p class="muted" style="margin:0;font-size:0.8em;">공지 row 2개를 클릭</p>
+      <button type="button" data-mode="row1">첫 row</button>
+      <button type="button" data-mode="row2">두번째 row</button>
+      <code id="row-selector">—</code>
+    </fieldset>
+
+    <fieldset>
+      <legend><b>2. Field 매핑</b></legend>
+      <p class="muted" style="margin:0 0 4px;font-size:0.8em;">row 안에서 element 클릭</p>
+      <div class="field-row"><button type="button" data-mode="field:title">title</button>     <code data-field="title">—</code></div>
+      <div class="field-row"><button type="button" data-mode="field:link">link</button>       <code data-field="link">—</code></div>
+      <div class="field-row"><button type="button" data-mode="field:post_id">post_id</button> <code data-field="post_id">—</code></div>
+      <div class="field-row"><button type="button" data-mode="field:date">date</button>       <code data-field="date">—</code></div>
+      <div class="field-row"><button type="button" data-mode="field:author">author</button>   <code data-field="author">—</code></div>
+      <div class="field-row"><button type="button" data-mode="field:category">category</button><code data-field="category">—</code></div>
+    </fieldset>
+
+    <fieldset>
+      <legend><b>3. 옵션</b></legend>
+      <label><input type="checkbox" id="include-notices" checked> 공지(pinned) 포함</label>
+      <label>Strategy
+        <select id="strategy">
+          <option value="httpx_html">httpx_html (정적)</option>
+          <option value="playwright_html">playwright_html (SPA)</option>
+        </select>
+      </label>
+    </fieldset>
+
+    <fieldset>
+      <legend><b>4. 저장 + smoke</b></legend>
+      <button type="button" id="save-btn">smoke 검증 + 저장</button>
+      <pre id="save-result"></pre>
+    </fieldset>
+  </aside>
+</div>
+
+<script>
+const sid = {{ sid|tojson }};
+const targetUrl = {{ target_url|tojson }};
+const iframe = document.getElementById('target');
+const statusEl = document.getElementById('status');
+const rowSelEl = document.getElementById('row-selector');
+const saveBtn = document.getElementById('save-btn');
+const saveResult = document.getElementById('save-result');
+
+let row1 = null, row2 = null, rowSelector = null;
+const fields = {};
+
+document.querySelectorAll('button[data-mode]').forEach(b => {
+  b.addEventListener('click', () => {
+    const mode = b.dataset.mode;
+    iframe.contentWindow.postMessage({type: 'picker:mode', mode}, '*');
+    statusEl.textContent = '모드: ' + mode + ' — iframe 에서 element 클릭';
+  });
+});
+
+window.addEventListener('message', (e) => {
+  if (e.source !== iframe.contentWindow) return;
+  const m = e.data || {};
+  if (m.type !== 'picker:picked') return;
+  const mode = m.mode;
+  if (mode === 'row1') {
+    row1 = m;
+    statusEl.textContent = 'row1: ' + m.selector;
+  } else if (mode === 'row2') {
+    row2 = m;
+    rowSelector = generalize(row1 && row1.selector, row2 && row2.selector);
+    rowSelEl.textContent = rowSelector || '추출 실패 — 두 selector 가 너무 다름';
+    statusEl.textContent = 'row pattern: ' + (rowSelector || '추출 실패');
+  } else if (mode.startsWith('field:')) {
+    const f = mode.split(':')[1];
+    fields[f] = {selector: m.selector, attr: f === 'link' ? 'href' : undefined};
+    document.querySelector('code[data-field="' + f + '"]').textContent = m.selector;
+  }
+  iframe.contentWindow.postMessage({type: 'picker:mode', mode: 'idle'}, '*');
+});
+
+function generalize(a, b) {
+  if (!a || !b) return null;
+  const splitSel = s => s.split(/\s*>\s*/);
+  const sa = splitSel(a);
+  const sb = splitSel(b);
+  const min = Math.min(sa.length, sb.length);
+  const out = [];
+  for (let i = 0; i < min; i++) {
+    if (sa[i] === sb[i]) { out.push(sa[i]); continue; }
+    const aa = sa[i].replace(/:nth-(child|of-type)\(\d+\)/g, '');
+    const bb = sb[i].replace(/:nth-(child|of-type)\(\d+\)/g, '');
+    if (aa === bb) { out.push(aa); continue; }
+    break;
+  }
+  return out.length ? out.join(' > ') : null;
+}
+
+saveBtn.addEventListener('click', async () => {
+  if (!rowSelector) { alert('row 패턴 먼저 — row 1+2 선택'); return; }
+  if (!fields.title) { alert('title field 필수'); return; }
+  const payload = {
+    sid,
+    row_selector: rowSelector,
+    include_notices: document.getElementById('include-notices').checked,
+    strategy: document.getElementById('strategy').value,
+    fields,
+  };
+  saveResult.textContent = '저장 중...';
+  try {
+    const r = await fetch('/builder/api/save', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    const j = await r.json();
+    saveResult.textContent = JSON.stringify(j, null, 2);
+  } catch (err) {
+    saveResult.textContent = 'fetch err: ' + err.message;
+  }
+});
+</script>
+{% endblock %}

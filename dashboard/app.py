@@ -34,6 +34,7 @@ from dashboard import user_view
 from dashboard import control_actions as ctrl
 from dashboard import history_view
 from dashboard import tracing_view
+from dashboard import builder_view
 
 HERE = Path(__file__).resolve().parent
 # autoescape 명시: Starlette/FastAPI 버전에 따라 default 가 바뀔 수 있어 직접 Environment 주입.
@@ -153,7 +154,7 @@ async def _preflight_pull(request: Request, call_next):
     실패 시 stale snapshot 으로 fallback + 토픽바에 경고 (`pull_result.ok=False`).
     """
     path = request.url.path
-    skip_prefix = ("/static", "/actions", "/healthz", "/favicon")
+    skip_prefix = ("/static", "/actions", "/healthz", "/favicon", "/builder")
     is_page = (
         request.method == "GET"
         and not path.startswith(skip_prefix)
@@ -1118,6 +1119,42 @@ learned_view.register(app, templates, _render)
 bugs_view.register(app, templates, _render)
 vocab_deferred_view.register(app, templates, _render)
 lastmod_view.register(app, templates, _render)
+
+
+# --------------------------------------------------------------------------- #
+# Builder — click-picker UI. SSRF/CSP gate + smoke validate. dashboard/builder_view.py.
+# preflight middleware skip ("/builder") — snapshot 의존 X, proxy busy path 보호.
+# --------------------------------------------------------------------------- #
+@app.get("/builder", response_class=HTMLResponse)
+def builder_home(request: Request):
+    return templates.TemplateResponse(request, "builder.html", {})
+
+
+@app.post("/builder/start")
+def builder_start(url: str = Form(...)):
+    sid = builder_view.start_session(url)
+    return RedirectResponse(f"/builder/edit/{sid}", status_code=303)
+
+
+@app.get("/builder/edit/{sid}", response_class=HTMLResponse)
+def builder_edit(sid: str, request: Request):
+    sess = builder_view.get_session(sid)
+    if sess is None:
+        raise HTTPException(status_code=404, detail="session 만료")
+    return templates.TemplateResponse(
+        request, "builder_edit.html",
+        {"sid": sid, "target_url": sess["url"]},
+    )
+
+
+@app.get("/builder/p/{sid}/{path:path}", response_class=HTMLResponse)
+async def builder_proxy(sid: str, path: str = ""):
+    return await builder_view.proxy_fetch(sid, path)
+
+
+@app.post("/builder/api/save")
+async def builder_save(payload: dict):
+    return await builder_view.save_config(payload)
 
 
 # --------------------------------------------------------------------------- #
