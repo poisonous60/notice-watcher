@@ -63,10 +63,27 @@ STATE_DIR = ROOT / "output" / "poll_state"
 DEFAULT_WALL_TIMEOUT_S = float(os.environ.get("REGISTER_WALL_TIMEOUT_S", "240"))
 PROBE_TIMEOUT_S = float(os.environ.get("REGISTER_PROBE_TIMEOUT_S", "120"))
 ARTICLE_REPROBE_TIMEOUT_S = float(os.environ.get("REGISTER_ARTICLE_REPROBE_TIMEOUT_S", "45"))
+_GENERATION_HTTP_4XX_BLOCKED_RE = re.compile(
+    r"HTTPStatusError:.*\b(403|429|451)\b", re.IGNORECASE | re.DOTALL
+)
 
 
 class RegisterTimeoutError(RuntimeError):
     """register.py 내부 phase 가 wall-clock budget 을 초과해 clean fail 해야 할 때."""
+
+
+def _generation_error_capability_blocked_reason(e: BaseException) -> Optional[str]:
+    """Selected HTTP 4xx generation failures are access/capability blocks, not gen_fail."""
+    texts = [str(e)]
+    lf = getattr(e, "last_feedback", None)
+    if lf:
+        texts.append(str(lf))
+    blob = "\n".join(texts)
+    m = _GENERATION_HTTP_4XX_BLOCKED_RE.search(blob)
+    if not m:
+        return None
+    code = m.group(1)
+    return f"capability_blocked (HTTP {code} during generation/probe fetch): {blob[:300]}"
 
 
 def _kill_process_tree(proc: subprocess.Popen) -> None:
@@ -311,6 +328,10 @@ def _has_verified_feed(digest: dict) -> bool:
     for c in (digest.get("feed_candidates") or []):
         if not isinstance(c, dict):
             continue
+        if c.get("validated") is True:
+            return True
+        if c.get("validated") is False:
+            continue
         src = c.get("source")
         if src == "input-url-feed-fetch":
             return True
@@ -318,6 +339,26 @@ def _has_verified_feed(digest: dict) -> bool:
         if c.get("status") == 200 and any(tok in ct for tok in ("xml", "rss", "atom")):
             return True
     return False
+
+
+def _count_board_feed_signals(digest: dict, list_candidates: dict) -> int:
+    """Count feed signals that are strong enough to make a page board-shaped."""
+    n = 0
+    for c in digest.get("feed_candidates") or []:
+        if not isinstance(c, dict):
+            continue
+        if c.get("validated") is False:
+            continue
+        if c.get("validated") is True:
+            n += 1
+            continue
+        # Backward compatibility for old probe artifacts before validated/item_count existed.
+        src = c.get("source")
+        ct = (c.get("content_type") or "").lower()
+        if src == "input-url-feed-fetch" or (c.get("status") == 200 and any(tok in ct for tok in ("xml", "rss", "atom"))):
+            n += 1
+    n += len(list_candidates.get("rss_feed_urls") or [])
+    return n
 
 
 def _policy_check(digest: dict, url: str) -> tuple[bool, list[str]]:
@@ -512,7 +553,7 @@ def _single_article_nav_only_check(digest: dict) -> tuple[bool, str]:
     OG/LD 같은 명시 schema 신호 없어도 nav 외부 same-host repeating pattern 0건이면 거부.
     """
     lc = digest.get("list_candidates") or {}
-    if lc.get("rss_feed_urls") or digest.get("feed_candidates"):
+    if _count_board_feed_signals(digest, lc) > 0:
         return True, ""
     nav = lc.get("nav_only_same_host")
     if not isinstance(nav, dict) or not nav.get("nav_only_same_host"):
@@ -699,7 +740,7 @@ def _board_shape_check(digest: dict, url: str) -> tuple[bool, str]:
     n_json = len(lc.get("traffic_json_api_candidates") or [])
     n_inline = len(lc.get("inline_js_data_candidates") or [])
     n_hyd = len(lc.get("hydration_list_candidates") or [])
-    n_feed = len(digest.get("feed_candidates") or []) + len(lc.get("rss_feed_urls") or [])
+    n_feed = _count_board_feed_signals(digest, lc)
     n_html_same = sum(
         1 for p in (lc.get("html_repeating_patterns") or [])
         if _same_host(p.get("href_pattern_guess")) or _same_host(p.get("sample_url"))
@@ -2530,6 +2571,23 @@ def _main_inner(argv) -> int:
     try:
         cfg, rep = _gen(digest, max_attempts=args.max_attempts, model=args.model)
     except GenerationError as e:
+        blocked_reason = _generation_error_capability_blocked_reason(e)
+        if blocked_reason:
+            fp = _save_failed(
+                slug,
+                url,
+                blocked_reason,
+                getattr(e, "last_config", None),
+                f"[BLOCKED] http_4xx_blocked — {blocked_reason}",
+            )
+            print(f"\n[register] ❌ 자동 처리 불가 — 4xx capability_blocked. → {fp}")
+            print(f"  마지막 실패 사유:\n{getattr(e, 'last_feedback', e)}")
+            try:
+                gem_span_cm.__exit__(type(e), e, e.__traceback__)
+                _gem_closed = True
+            except Exception:  # noqa: BLE001
+                _gem_closed = True
+            return 5
         if args.no_escalate:
             _ctx = "--no-escalate: preflight(글페이지 re-probe + probe 신호 hint) 생략, raw lite digest 로 생성한 상태"
         elif digest.get("escalation_hint") or article_url_hint:

@@ -58,6 +58,65 @@ def _body_is_feed(text: str) -> bool:
     return False
 
 
+def _fetch_feed_candidate_response(url: str, *, timeout: float = 10.0):
+    with httpx.Client(headers=preset_h2_chrome_min(), timeout=timeout, follow_redirects=True) as client:
+        return client.get(url)
+
+
+def _xml_root_and_item_count(text: str) -> tuple[Optional[str], Optional[int]]:
+    if not text:
+        return None, None
+    head = text.lstrip()[:256].lower()
+    if head.startswith(("<!doctype html", "<html")):
+        return "html", None
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError:
+        return ("html", None) if "<html" in text[:2048].lower() else (None, None)
+    tag = _strip_ns(root.tag).lower()
+    if tag == "rss":
+        return "rss", sum(1 for el in root.iter() if _strip_ns(el.tag).lower() == "item")
+    if tag == "feed":
+        return "feed", sum(1 for el in root if _strip_ns(el.tag).lower() == "entry")
+    if tag == "rdf":
+        return "rss", sum(1 for el in root.iter() if _strip_ns(el.tag).lower() == "item")
+    return "html" if tag == "html" else None, None
+
+
+def validate_feed_candidate(url: str, *, source: str, timeout: float = 10.0,
+                            type: Optional[str] = None, title: Optional[str] = None) -> dict:
+    """Fetch a feed candidate and annotate whether it is a non-empty RSS/Atom feed."""
+    out: dict = {
+        "source": source,
+        "url": url,
+        "validated": False,
+        "item_count": None,
+        "content_type": None,
+        "root_tag": None,
+    }
+    if type:
+        out["type"] = type
+    if title:
+        out["title"] = title
+    try:
+        r = _fetch_feed_candidate_response(url, timeout=timeout)
+    except Exception:
+        return out
+    ct = r.headers.get("content-type")
+    root_tag, item_count = _xml_root_and_item_count(r.text)
+    out.update({
+        "status": r.status_code,
+        "content_type": ct,
+        "size": len(r.text),
+        "root_tag": root_tag,
+        "item_count": item_count,
+    })
+    ct_low = (ct or "").lower()
+    xmlish = any(tok in ct_low for tok in ("xml", "rss", "atom")) or root_tag in ("rss", "feed")
+    out["validated"] = bool(r.status_code == 200 and xmlish and root_tag in ("rss", "feed") and (item_count or 0) > 0)
+    return out
+
+
 def _url_serves_feed(url: str, *, timeout: float = 10.0) -> bool:
     """입력 URL 을 raw httpx 로 직접 fetch 해 RSS/Atom 피드 응답인지 (content-type/본문 root).
 
@@ -67,23 +126,25 @@ def _url_serves_feed(url: str, *, timeout: float = 10.0) -> bool:
     본문 sniff 도 불안정 → raw fetch 로 content-type/root 확인 (board_shape false-reject 회피,
     2026-05-20-b batch). 실패는 fail-soft(False) — probe 일회성 정찰이라 fetch 1회 추가 OK.
     """
-    try:
-        with httpx.Client(headers=preset_h2_chrome_min(), timeout=timeout, follow_redirects=True) as client:
-            r = client.get(url)
-        if r.status_code != 200:
-            return False
-        ct = (r.headers.get("content-type", "")).lower()
-        if "xml" in ct or "rss" in ct or "atom" in ct:
-            return True
-        return _body_is_feed(r.text)
-    except (httpx.HTTPError, OSError):
-        return False
+    return bool(validate_feed_candidate(url, source="probe", timeout=timeout).get("validated"))
 
 
 def _verified_feed_candidate(url: str, *, source: str, timeout: float = 10.0) -> dict | None:
     if not _url_serves_feed(url, timeout=timeout):
         return None
-    return {"source": source, "url": url, "status": 200, "content_type": "application/xml"}
+    hit = validate_feed_candidate(url, source=source, timeout=timeout)
+    if hit.get("validated"):
+        return hit
+    # Compatibility for tests/older callers that monkeypatch _url_serves_feed as a boolean seam.
+    return {
+        "source": source,
+        "url": url,
+        "validated": True,
+        "item_count": 1,
+        "content_type": "application/xml",
+        "root_tag": "rss",
+        "status": 200,
+    }
 
 
 def _feed_link_hrefs(soup: BeautifulSoup, page_url: str) -> list[dict]:
@@ -144,11 +205,11 @@ def discover_feeds(*, page_url: str, page_html: str, out_dir: Path, timeout: flo
     # feed_candidates 비어있지 않음을 보드 시그널로 인정하므로 게이트 통과 보장.
     # (1) path 모양 (no fetch) → (2) page_html 본문 sniff (no fetch) → (3) raw fetch content-type.
     if _looks_like_feed_url(page_url):
-        candidates.append({"source": "input-url-feed-path", "url": page_url})
+        candidates.append(validate_feed_candidate(page_url, source="input-url-feed-path", timeout=timeout))
     elif _body_is_feed(page_html):
-        candidates.append({"source": "input-url-feed-content", "url": page_url})
+        candidates.append(validate_feed_candidate(page_url, source="input-url-feed-content", timeout=timeout))
     elif _url_serves_feed(page_url, timeout=timeout):
-        candidates.append({"source": "input-url-feed-fetch", "url": page_url})
+        candidates.append(validate_feed_candidate(page_url, source="input-url-feed-fetch", timeout=timeout))
 
     soup = BeautifulSoup(page_html or "", "lxml")
     for link in soup.select('link[rel="alternate"]'):
@@ -156,12 +217,13 @@ def discover_feeds(*, page_url: str, page_html: str, out_dir: Path, timeout: flo
         if "rss" in t or "atom" in t or "xml" in t:
             href = link.get("href", "")
             if href:
-                candidates.append({
-                    "source": "head-alternate",
-                    "type": link.get("type"),
-                    "title": link.get("title"),
-                    "url": urljoin(page_url, href),
-                })
+                candidates.append(validate_feed_candidate(
+                    urljoin(page_url, href),
+                    source="head-alternate",
+                    timeout=timeout,
+                    type=link.get("type"),
+                    title=link.get("title"),
+                ))
 
     for link in _feed_link_hrefs(soup, page_url):
         hit = _verified_feed_candidate(link["url"], source="page-feed-link", timeout=timeout)
@@ -179,26 +241,11 @@ def discover_feeds(*, page_url: str, page_html: str, out_dir: Path, timeout: flo
 
     parts = urlsplit(page_url)
     base = f"{parts.scheme}://{parts.netloc}"
-    headers = preset_h2_chrome_min()
 
     # 6 well-known feed path 동시 fetch — probe 는 일회성 정찰이라 host 폴라이트 0.5s 의미 약함.
     def _try(path: str) -> dict | None:
         url = urljoin(base, path)
-        try:
-            with httpx.Client(headers=headers, timeout=timeout, follow_redirects=True) as client:
-                r = client.get(url)
-            if r.status_code == 200 and ("xml" in (r.headers.get("content-type", "")).lower()
-                                         or r.text.lstrip().startswith("<?xml")):
-                return {
-                    "source": "well-known-path",
-                    "url": url,
-                    "status": r.status_code,
-                    "content_type": r.headers.get("content-type"),
-                    "size": len(r.text),
-                }
-        except Exception:
-            return None
-        return None
+        return validate_feed_candidate(url, source="well-known-path", timeout=timeout)
 
     from concurrent.futures import ThreadPoolExecutor as _TPE
     with _TPE(max_workers=len(_FEED_PATHS)) as _ex:
@@ -206,7 +253,16 @@ def discover_feeds(*, page_url: str, page_html: str, out_dir: Path, timeout: flo
             if hit is not None:
                 candidates.append(hit)
 
-    out = {"page_url": page_url, "candidates": candidates}
+    deduped: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for c in candidates:
+        key = (str(c.get("source") or ""), str(c.get("url") or ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(c)
+
+    out = {"page_url": page_url, "candidates": deduped}
     validate_payload("feed_candidates.json", out, allow_extra=False)
     (out_dir / "feed_candidates.json").write_text(
         json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8"

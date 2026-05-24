@@ -283,6 +283,10 @@ FAIL_CATALOG: tuple[FailKind, ...] = (
                     "probe 가 RSS 임계 초과해 자기-kill (heavy SPA OOM blower 추정). "
                     "stealth 대상 X — root-cause 는 별도 (probe 메모리 누적 지점 tracemalloc 조사).",
                     _has_any("probe_memory_guard", "probe memory guard", name="probe_memory_guard")),
+            Subkind("http_4xx_blocked", "HTTP 4xx 접근 차단",
+                    "403/451/429 등 접근 제한/레이트리밋. URL이 죽은 400/404와 구분해 capability_blocked 로 triage.",
+                    _has_any("http_4xx_blocked", "403 Forbidden", "451 Unavailable", "429 Too Many Requests",
+                             name="http_4xx_blocked")),
             # generic fallback — rc=5 인데 위 토큰 다 미스 (분류 보류 / BLOCKED_BOT/IP/GEO 등). 마지막.
             # blocked_bot/ip/geo 세분화는 policy_reject(legacy rc=2)에만 — rc=5 는 entry_blocked 로 흡수.
             Subkind("entry_blocked", "진입 차단(미분류)",
