@@ -19,6 +19,7 @@ import re
 import sys
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import urlsplit
 
 from bs4 import BeautifulSoup, Comment, Tag
 
@@ -56,7 +57,6 @@ def _sitemap_only_fit_signal(candidates: list) -> dict:
     Returns: {"sitemap_only_fit": bool, "n": int, "post_id_ratio": float, "top_prefix_ratio": float}.
     measurement-only — prompt 안 읽음. 손-adapter 자동화 candidate detection 용 signal.
     """
-    from urllib.parse import urlsplit
     out = {"sitemap_only_fit": False, "n": 0, "post_id_ratio": 0.0, "top_prefix_ratio": 0.0}
     if not candidates:
         return out
@@ -394,6 +394,148 @@ def _backfill_missing_heuristics(list_cands: dict, *, base_url: Optional[str]) -
             list_cands["root_marketing_homepage"] = None
 
 
+def _host_label(host: str) -> str:
+    host = (host or "").lower().split(":", 1)[0]
+    if host.startswith("www."):
+        host = host[4:]
+    parts = [p for p in host.split(".") if p]
+    if len(parts) >= 2:
+        return parts[-2]
+    return parts[0] if parts else ""
+
+
+def _same_host(url: object, page_host: str) -> bool:
+    if not isinstance(url, str) or not url.startswith(("http://", "https://")):
+        return False
+    try:
+        return urlsplit(url).netloc.lower().split(":", 1)[0] == page_host
+    except ValueError:
+        return False
+
+
+def _validated_feed_candidates(digest: dict) -> list[dict]:
+    out: list[dict] = []
+    for c in digest.get("feed_candidates") or []:
+        if not isinstance(c, dict):
+            continue
+        if c.get("validated") is not True:
+            continue
+        if (c.get("item_count") or 0) <= 0:
+            continue
+        if c.get("root_tag") not in ("rss", "feed"):
+            continue
+        out.append(c)
+    return out
+
+
+def _html_same_host_row_count(digest: dict) -> int:
+    page = digest.get("url") or ""
+    try:
+        page_host = urlsplit(page).netloc.lower().split(":", 1)[0]
+    except ValueError:
+        page_host = ""
+    if not page_host:
+        return 0
+    total = 0
+    lc = digest.get("list_candidates") or {}
+    for c in lc.get("html_repeating_patterns") or []:
+        if not isinstance(c, dict):
+            continue
+        sample = c.get("sample_url") or c.get("href_pattern_guess")
+        if sample and not _same_host(sample, page_host):
+            continue
+        try:
+            n = int(c.get("child_count") or c.get("count") or 1)
+        except (TypeError, ValueError):
+            n = 1
+        total += max(n, 0)
+    return total
+
+
+def _site_kind_js_signal(digest: dict) -> bool:
+    hay = " ".join(str(x or "") for x in (
+        digest.get("verdict"),
+        digest.get("recommended_strategy"),
+        " ".join(digest.get("notes") or []),
+    )).lower()
+    return any(tok in hay for tok in (
+        "playwright", "s4", "js", "javascript", "spa", "nuxt", "next", "hydration",
+        "빈 shell", "empty shell", "렌더",
+    ))
+
+
+def _semantic_feed_match(digest: dict, feeds: list[dict]) -> bool:
+    page = digest.get("url") or ""
+    try:
+        sp = urlsplit(page)
+    except ValueError:
+        return False
+    page_host = sp.netloc.lower().split(":", 1)[0]
+    host_label = _host_label(page_host)
+    page_prefix = (sp.scheme + "://" + sp.netloc + (sp.path or "/")).rstrip("/")
+    page_prefix = page_prefix.rsplit("/", 1)[0] if "/" in page_prefix else page_prefix
+
+    for feed in feeds:
+        title = re.sub(r"[^a-z0-9]+", "", str(feed.get("title") or "").lower())
+        if host_label and host_label in title:
+            return True
+        urls: list[object] = []
+        for key in ("first_item_url", "first_item_link", "sample_item_url", "sample_link"):
+            if feed.get(key):
+                urls.append(feed.get(key))
+        for key in ("item_urls", "item_links", "sample_item_urls"):
+            if isinstance(feed.get(key), list):
+                urls.extend(feed.get(key) or [])
+        for u in urls[:5]:
+            if isinstance(u, str) and u.startswith(page_prefix):
+                return True
+    return False
+
+
+def classify_site_kind(digest: dict) -> dict:
+    """Classify the digest's primary acquisition shape for prompt/enforcement hints."""
+    feeds = _validated_feed_candidates(digest)
+    primary = feeds[0].get("url") if feeds else None
+    rows = _html_same_host_row_count(digest)
+    lc = digest.get("list_candidates") or {}
+    audio = lc.get("audio_share_host_detected") or {}
+    structural_audio = (
+        isinstance(audio, dict)
+        and bool(audio.get("audio_share_host_detected") or audio.get("detected"))
+        and audio.get("confidence") == "structural"
+    )
+    semantic = _semantic_feed_match(digest, feeds)
+    js_signal = _site_kind_js_signal(digest)
+
+    evidence: list[str] = []
+    if feeds:
+        evidence.append("feed_semantics:item_count>0")
+    if rows:
+        evidence.append(f"html_same_host_rows:{rows}")
+    if structural_audio:
+        evidence.append("audio_share:structural")
+    elif isinstance(audio, dict) and audio.get("confidence") == "host_known":
+        evidence.append("audio_share:host_known")
+    if semantic:
+        evidence.append("semantic_match:high")
+    if js_signal:
+        evidence.append("js_render_signal")
+
+    if feeds and structural_audio:
+        return {"kind": "podcast", "confidence": "high", "evidence": evidence, "primary_feed_url": primary}
+    if feeds and rows >= 5 and (semantic or rows >= 10):
+        conf = "high" if semantic else "med"
+        return {"kind": "hybrid", "confidence": conf, "evidence": evidence, "primary_feed_url": primary}
+    if feeds and rows < 3:
+        return {"kind": "rss", "confidence": "high", "evidence": evidence, "primary_feed_url": primary}
+    if rows >= 5 and not feeds and not js_signal:
+        conf = "high" if rows >= 10 else "med"
+        return {"kind": "static_html", "confidence": conf, "evidence": evidence}
+    if rows < 3 and js_signal and not feeds:
+        return {"kind": "spa_rendered", "confidence": "high", "evidence": evidence}
+    return {"kind": "unknown", "confidence": "low", "evidence": evidence}
+
+
 def build_digest(
     *,
     slug: Optional[str] = None,
@@ -496,6 +638,7 @@ def build_digest(
         },
         # NOTE: 글 샘플은 현재 1개(probe 가 first_article_url / 클릭 진입 1건만 fetch). 2~3개 확장은 추후 probe 보강 때.
     }
+    digest["site_kind"] = classify_site_kind(digest)
 
     # 클릭 진입 URL 이 직접 GET URL 과 다르면(클라이언트 라우트) — 또는 애초에 href 가 없었으면 — 강하게 알린다.
     # 단, 클릭 결과가 OK 로 분류됐을 때만 (UNKNOWN_ERROR 면 엉뚱한 링크를 클릭했을 수 있음 → 잘못된 hint 를 주지 않는다).

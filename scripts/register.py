@@ -51,7 +51,7 @@ from probe.diagnose import (  # noqa: E402
     STATIC_INSUFFICIENT_REPEAT_PREFIX as _JS_MOSAIC_NOTE_KW,
 )
 from probe.extract import audio_share_signal, rss_feed_urls  # noqa: E402
-from engine.digest import build_digest  # noqa: E402
+from engine.digest import build_digest, classify_site_kind  # noqa: E402
 from engine.recognizers import recognize as recognize_platform, recognize_reject  # noqa: E402
 from engine.tracing import start_trace, current_trace, env_for_child  # noqa: E402
 from generate import generate_config_validated, GenerationError  # noqa: E402
@@ -953,6 +953,7 @@ def _build_digest(slug: str, url: str) -> dict:
         )
     if lc.get("audio_share_host_detected"):
         lc["body_empty_likely"] = True
+    digest["site_kind"] = classify_site_kind(digest)
     return digest
 
 
@@ -1525,8 +1526,43 @@ def _has_structural_audio_share(digest: dict) -> bool:
 
 def _make_cfg_post_processor(digest: dict) -> Callable[[dict], dict]:
     def _post_process(cfg: dict) -> dict:
-        return _enforce_audio_share_config(cfg, digest)
+        return _enforce_site_kind_config(_enforce_audio_share_config(cfg, digest), digest)
     return _post_process
+
+
+def _enforce_site_kind_config(cfg: dict, digest: dict) -> dict:
+    """Apply high-confidence RSS/podcast site_kind hints after config generation."""
+    if not isinstance(cfg, dict):
+        return cfg
+    sk = digest.get("site_kind") or {}
+    if not isinstance(sk, dict):
+        return cfg
+    kind = sk.get("kind")
+    conf = sk.get("confidence")
+    primary = sk.get("primary_feed_url")
+
+    if kind == "podcast" and conf == "high":
+        art = cfg.setdefault("article", {})
+        if not isinstance(art, dict):
+            art = {}
+            cfg["article"] = art
+        art["body_empty_acceptable"] = True
+        art.setdefault("skip_status", [200])
+        if "content" not in art:
+            art["content"] = []
+        if primary:
+            lst = cfg.setdefault("list", {})
+            if not isinstance(lst, dict):
+                lst = {}
+                cfg["list"] = lst
+            lst["url_template"] = primary
+    elif kind == "rss" and conf == "high" and primary:
+        lst = cfg.setdefault("list", {})
+        if not isinstance(lst, dict):
+            lst = {}
+            cfg["list"] = lst
+        lst["url_template"] = primary
+    return cfg
 
 
 def _enforce_audio_share_config(cfg: dict, digest: dict) -> dict:
