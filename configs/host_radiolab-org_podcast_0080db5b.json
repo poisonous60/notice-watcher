@@ -1,0 +1,111 @@
+{
+  "version": 1,
+  "site": "Radiolab",
+  "board": "podcast",
+  "strategy": "playwright_html",
+  "timeout": 20,
+  "nav_timeout_ms": 20000,
+  "idle_timeout_ms": 8000,
+  "quiet_ms": 1000,
+  "polite_sleep": {
+    "min": 5,
+    "max": 8
+  },
+  "list": {
+    "url_template": "https://radiolab.org/podcast?page={page}",
+    "pagination": {
+      "kind": "query_param",
+      "page_param": "page"
+    },
+    "row_selector": "div.radiolab-card.v-card",
+    "wait_selector": "div.radiolab-card.v-card .card-title-link .h2",
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a.card-title-link",
+          "attr": "href",
+          "transform": [
+            [
+              "regex_extract",
+              "/podcast/([^/?#]+)"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": ".card-title-link .h2"
+        },
+        {
+          "from": "attr",
+          "selector": "a.card-title-link",
+          "attr": "aria-label"
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a.card-title-link",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://radiolab.org"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": ".card-eyebrow"
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": ".card-blurb"
+        }
+      ],
+      "cover_image": [
+        {
+          "from": "attr",
+          "selector": "img",
+          "attr": "src",
+          "transform": [
+            [
+              "urljoin",
+              "https://radiolab.org"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "wait_selector": "main",
+    "content": [
+      {
+        "from": "css",
+        "selector": "main .html-formatting",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "main",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "body",
+        "html": true
+      }
+    ]
+  },
+  "_slug_board": "podcast",
+  "_source_url": "https://radiolab.org/podcast",
+  "_note": "Radiolab podcast renders episode cards from the WNYC API after Nuxt hydration. The static/probe HTML only contains skeleton rows, so wait for hydrated .radiolab-card rows and extract title/url from the card-title link. Keep headless default true for N100."
+}
