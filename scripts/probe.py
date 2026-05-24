@@ -144,12 +144,16 @@ def _poll_child_memory(proc, *, cap_s: float) -> bool:
     threshold_mb = int(os.environ.get("PROBE_MEMORY_GUARD_MB", "3500"))
     poll_s = float(os.environ.get("PROBE_MEMORY_GUARD_POLL_S", "1.0"))
     status_path = Path(f"/proc/{proc.pid}/status") if os.path.exists("/proc") else None
+    sys.stderr.write(f"[probe-guard] arm: child_pid={proc.pid} threshold={threshold_mb}MB cap_s={cap_s}s status_exists={status_path is not None}\n")
+    sys.stderr.flush()
     if status_path is None:
         proc.join(cap_s)
         return False
     deadline = time.perf_counter() + cap_s
     peak_mb = 0
+    tick_n = 0
     while time.perf_counter() < deadline:
+        tick_n += 1
         if not proc.is_alive():
             return False
         try:
@@ -161,6 +165,9 @@ def _poll_child_memory(proc, *, cap_s: float) -> bool:
                     rss_mb = int(line.split()[1]) // 1024
                     if rss_mb > peak_mb:
                         peak_mb = rss_mb
+                    if tick_n <= 3 or tick_n % 5 == 0:
+                        sys.stderr.write(f"[probe-guard] tick {tick_n}: pid={proc.pid} rss={rss_mb}MB peak={peak_mb}MB\n")
+                        sys.stderr.flush()
                     if rss_mb > threshold_mb:
                         sys.stderr.write(
                             f"[probe] ❌ MEMORY GUARD: child PID={proc.pid} RSS={rss_mb}MB > "
