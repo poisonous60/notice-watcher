@@ -229,6 +229,7 @@ codex 위임은 이미 `scripts/codex_handoff.py --worktree` 로 자동 격리 (
 - `docs/사이트 어댑터 추가 가이드.md` — 손-adapter 추가 절차
 - `docs/크롤링 지침.md` — 정책 (polite_sleep, robots, 우회 금지)
 - `docs/대시보드 가이드.md` — dev 박스 로컬 대시보드
+- `docs/picker (dashboard).md` — dashboard `/builder` click 기반 사이트 등록 UI (자동등록 30% gap 대안). SSRF/sanitize/CSP, 1-click row + heuristic 매핑, smoke + baseline write, codex review v1~v3 history. 2026-05-24 1차 구현 — UI 손-검증 미완.
 - `docs/디스코드 메시지 톤 가이드.md` — 봇 사용자 향 메시지 톤·문체·포맷 룰 (해요체·이모지 어휘·체크리스트)
 - `docs/codex 위임 가이드.md` — 일반 작업을 Codex CLI 로 위임하는 기준·절차 (언제 YES/NO·entry/middle/exit·diff 게이트). batch/hand-config 외 작업용. ADR 0008 의 운영 가이드.
 - `docs/adr/0015-worktree-isolation-for-parallel-sessions.md` — 동시 세션 = worktree 의무 (§9.0). 1인 모드 명시 시 main 직접 편집 예외. wrapper = `scripts/session_start.{sh,ps1}`.
