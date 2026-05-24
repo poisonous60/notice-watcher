@@ -135,16 +135,7 @@ def _verified_feed_candidate(url: str, *, source: str, timeout: float = 10.0) ->
     hit = validate_feed_candidate(url, source=source, timeout=timeout)
     if hit.get("validated"):
         return hit
-    # Compatibility for tests/older callers that monkeypatch _url_serves_feed as a boolean seam.
-    return {
-        "source": source,
-        "url": url,
-        "validated": True,
-        "item_count": 1,
-        "content_type": "application/xml",
-        "root_tag": "rss",
-        "status": 200,
-    }
+    return None
 
 
 def _feed_link_hrefs(soup: BeautifulSoup, page_url: str) -> list[dict]:
@@ -226,18 +217,15 @@ def discover_feeds(*, page_url: str, page_html: str, out_dir: Path, timeout: flo
                 ))
 
     for link in _feed_link_hrefs(soup, page_url):
-        hit = _verified_feed_candidate(link["url"], source="page-feed-link", timeout=timeout)
-        if hit is not None:
-            if link.get("type"):
-                hit["type"] = link["type"]
-            if link.get("title"):
-                hit["title"] = link["title"]
-            candidates.append(hit)
+        hit = validate_feed_candidate(link["url"], source="page-feed-link", timeout=timeout)
+        if link.get("type"):
+            hit["type"] = link["type"]
+        if link.get("title"):
+            hit["title"] = link["title"]
+        candidates.append(hit)
 
     for url in _page_path_feed_urls(page_url):
-        hit = _verified_feed_candidate(url, source="page-path-fallback", timeout=timeout)
-        if hit is not None:
-            candidates.append(hit)
+        candidates.append(validate_feed_candidate(url, source="page-path-fallback", timeout=timeout))
 
     parts = urlsplit(page_url)
     base = f"{parts.scheme}://{parts.netloc}"
