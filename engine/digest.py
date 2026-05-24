@@ -22,11 +22,69 @@ from typing import Any, Optional
 
 from bs4 import BeautifulSoup, Comment, Tag
 
+from engine._mdr_candidates import mdr_candidate_xpaths
+
 
 # probe 패키지 import 를 위해 프로젝트 루트가 sys.path 에 있어야 함.
 _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
+
+
+def _mdr_candidates_safe(html: Optional[str]) -> list[dict]:
+    """fail-soft wrapper: lxml/encoding 오류 다 빈 list 로 (measurement-only)."""
+    if not html:
+        return []
+    try:
+        return mdr_candidate_xpaths(html, top_k=10)
+    except Exception:
+        return []
+
+
+_SITEMAP_ONLY_MIN_N = 30
+_SITEMAP_POST_ID_RE = re.compile(r"(/\d{3,}/?$|/[\w-]+[-_]\d{3,}/?$|/\d{4}/\d{1,2}/[\w-]+/?$)")
+
+
+def _sitemap_only_fit_signal(candidates: list) -> dict:
+    """θ signal — canva/salesforce 처럼 *sitemap 만으로 polling 가능* 한 사이트 분류기 (signal-only).
+
+    휴리스틱 (셋 다 만족):
+      - candidates >= 30
+      - 80% 이상이 stable post-id 같은 path suffix (`/123/`, `/slug-123/`, `/2026/05/title/` 등)
+      - 동일한 depth-1 path segment 80% 이상 공유 (e.g. 다 `/blog/...`)
+
+    Returns: {"sitemap_only_fit": bool, "n": int, "post_id_ratio": float, "top_prefix_ratio": float}.
+    measurement-only — prompt 안 읽음. 손-adapter 자동화 candidate detection 용 signal.
+    """
+    from urllib.parse import urlsplit
+    out = {"sitemap_only_fit": False, "n": 0, "post_id_ratio": 0.0, "top_prefix_ratio": 0.0}
+    if not candidates:
+        return out
+    n = len(candidates)
+    out["n"] = n
+    if n < _SITEMAP_ONLY_MIN_N:
+        return out
+    n_postid = 0
+    prefixes: dict[str, int] = {}
+    for c in candidates:
+        u = c.get("url") if isinstance(c, dict) else None
+        if not u:
+            continue
+        try:
+            sp = urlsplit(u)
+        except ValueError:
+            continue
+        path = sp.path or ""
+        if _SITEMAP_POST_ID_RE.search(path):
+            n_postid += 1
+        parts = [s for s in path.split("/") if s]
+        prefix = parts[0] if parts else ""
+        prefixes[prefix] = prefixes.get(prefix, 0) + 1
+    out["post_id_ratio"] = n_postid / n
+    if prefixes:
+        out["top_prefix_ratio"] = max(prefixes.values()) / n
+    out["sitemap_only_fit"] = bool(out["post_id_ratio"] >= 0.8 and out["top_prefix_ratio"] >= 0.8)
+    return out
 
 from probe.paths import OUTPUT_ROOT, output_dir, url_to_slug  # noqa: E402
 
@@ -411,6 +469,15 @@ def build_digest(
         "hydration": hydration or None,
         "feed_candidates": (feeds.get("candidates") if isinstance(feeds, dict) else feeds) or [],
         "sitemap_candidates": (sitemap_disc.get("candidates") if isinstance(sitemap_disc, dict) else []) or [],
+        # α minimal (2026-05-24): MDR `list_candidates` 후보. measurement-only — prompt 에서 *읽지 않음*
+        # (`prompts/config_writer.system.txt` 가 이 키 모름). 1주 운영 후 noise 평가로 prompt 통합 여부 결정.
+        # docs/2026-05-24-layer-addition-plan.md A 묶음 #4.
+        "mdr_candidates": _mdr_candidates_safe(raw_list_html),
+        # θ minimal (2026-05-24): sitemap-only-fit signal. canva/salesforce 처럼 sitemap 만으로 polling
+        # 가능한 사이트 분류 signal. measurement-only — prompt 안 읽음. A 묶음 #5.
+        "sitemap_only_fit_signal": _sitemap_only_fit_signal(
+            (sitemap_disc.get("candidates") if isinstance(sitemap_disc, dict) else []) or []
+        ),
         "list_html": {
             "source": str(list_path) if list_path else None,
             "truncated": list_trunc,

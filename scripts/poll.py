@@ -42,6 +42,8 @@ from bot.runtime_config import settings  # noqa: E402
 ROOT = Path(__file__).resolve().parent.parent
 STATE_DIR = ROOT / "output" / "poll_state"
 COLLECTED_DIR = ROOT / "output" / "collected"
+SITEMAP_LASTMOD_LOG = ROOT / "output" / "sitemap_lastmod_log.jsonl"
+PROBE_DIR = ROOT / "output" / "probe"
 
 _STABLE_ID_RE = re.compile(r"^[\w\-./:%]{1,200}$")  # generate/validate.py:_STABLE_ID_RE 와 동기 — URL-slug-as-id 수용.
 # strategy == "handwritten" 이면 adapter 이름을 보고 결정. 여기 들어있는 어댑터만 chromium sem.
@@ -84,6 +86,62 @@ def _cap_seen(ids: set[str], *, keep: set[str]) -> list[str]:
     rest = list(ids - keep)
     room = max(0, cap - len(keep))
     return sorted(keep | set(rest[:room]))
+
+
+_LASTMOD_RE = re.compile(r"<lastmod[^>]*>([^<]+)</lastmod>", re.IGNORECASE)
+
+
+async def _check_sitemap_lastmod(state: dict) -> dict | None:
+    """observe-only sitemap lastmod check (2026-05-24 A 묶음 #2).
+
+    매 cron 사이클에 각 site 당 1회 sitemap.xml Range GET (~2KB) → 첫 <lastmod>
+    추출 → state 의 이전값과 비교 → would_skip 판정 + log line 만 기록.
+
+    **실제 fetch_list skip 안 함** — 1주 logging 후 false_skip_pct/wasted_fetch_pct
+    측정으로 활성화 여부 결정 (`experiments/sitemap-lastmod-bench/observe_only_sketch.md`).
+
+    fail-soft: 어떤 오류든 None 또는 {"lastmod_source":"error",...} — fetch_list 흐름 영향 X.
+    """
+    slug = state.get("slug")
+    if not slug:
+        return None
+    sitemap_path = PROBE_DIR / slug / "sitemap.json"
+    if not sitemap_path.exists():
+        return None
+    try:
+        sm = json.loads(sitemap_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    tried = sm.get("sitemap_urls_tried") or []
+    if not tried:
+        return None
+    sitemap_url = tried[0]
+    prev = state.get("sitemap_lastmod_last_seen")
+    obs = {"sitemap_url": sitemap_url, "prev_lastmod": prev,
+           "current_lastmod": None, "lastmod_source": "missing",
+           "would_skip": False, "error": None}
+    try:
+        import httpx
+        # timeout 2s 짧음 — observe-only 라서 5s 까지 끌 가치 없음. server 가 Range 안 지킬 때
+        # 대비해 body cap (decode 전 bytes 자름). codex bug review (2026-05-24) 보강.
+        async with httpx.AsyncClient(timeout=2.0, follow_redirects=True) as c:
+            r = await c.get(sitemap_url, headers={"Range": "bytes=0-2047",
+                                                    "User-Agent": "notice-watcher/0 (+lastmod-observe)"})
+        body = (r.content[:8192]).decode(r.encoding or "utf-8", errors="replace") if r.content else ""
+        m = _LASTMOD_RE.search(body)
+        if m:
+            obs["current_lastmod"] = m.group(1).strip()
+            obs["lastmod_source"] = "first_url_lastmod"
+        else:
+            hdr = r.headers.get("last-modified")
+            if hdr:
+                obs["current_lastmod"] = hdr
+                obs["lastmod_source"] = "http_last_modified"
+        obs["would_skip"] = bool(prev and obs["current_lastmod"] and prev == obs["current_lastmod"])
+    except Exception as exc:
+        obs["lastmod_source"] = "error"
+        obs["error"] = f"{type(exc).__name__}: {exc}"
+    return obs
 
 
 def _looks_broken(posts: list[NoticePost]) -> tuple[bool, str]:
@@ -241,6 +299,8 @@ async def _process_site(st: dict, *, page_size: int, max_new_articles: int,
         + ("  [lurking — 구독자 0]" if lurking else "")
     ]
     tr = current_trace()
+    # lastmod observe (2026-05-24 A 묶음 #2) — fetch_list 와 *병렬*, observe only.
+    lastmod_task = asyncio.create_task(_check_sitemap_lastmod(st))
     with tr.span("poll.site", attrs={"slug": slug, "strategy": strategy,
                                        "adapter": adapter, "chromium": chromium,
                                        "lurking": lurking}) as ssp:
@@ -251,6 +311,29 @@ async def _process_site(st: dict, *, page_size: int, max_new_articles: int,
         ssp.set_attr("n_new", res.get("n_new", 0))
         ssp.set_attr("broken", bool(res.get("broken")))
     st["last_poll_at"] = _now_iso()
+    # lastmod log — observe 결과 + fetch_list 결과 한 줄 append. fetch_list skip 결정 안 함.
+    # 0.5s short drain — lastmod task 가 fetch_list 보다 늦게 끝나도 wall-clock 에 못 붙게. codex bug
+    # review (2026-05-24) 의 MED 보강. 미완 시 cancel + log skip (이번 cycle 만 손실).
+    try:
+        obs = await asyncio.wait_for(lastmod_task, timeout=0.5)
+    except asyncio.TimeoutError:
+        lastmod_task.cancel()
+        obs = None
+    except Exception:
+        obs = None
+    if obs is not None:
+        try:
+            obs.update({"ts": st["last_poll_at"], "slug": slug,
+                        "fetch_list_n_posts": res.get("n_posts", 0),
+                        "fetch_list_n_new": res.get("n_new", 0),
+                        "fetch_list_status": res.get("status", "")})
+            SITEMAP_LASTMOD_LOG.parent.mkdir(parents=True, exist_ok=True)
+            with SITEMAP_LASTMOD_LOG.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(obs, ensure_ascii=False) + "\n")
+            if obs.get("current_lastmod"):
+                st["sitemap_lastmod_last_seen"] = obs["current_lastmod"]
+        except Exception:
+            pass
 
     if res["broken"]:
         st["consecutive_breakage"] = int(st.get("consecutive_breakage", 0)) + 1

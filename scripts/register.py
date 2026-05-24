@@ -618,9 +618,17 @@ def _board_shape_check(digest: dict, url: str) -> tuple[bool, str]:
     detail = (f"traffic_json={n_json} inline_js={n_inline} hydration={n_hyd} feed={n_feed} "
               f"html_same_host={n_html_same} first_article_same_host={fau_same} clicked_same_host={clicked_same}"
               + (f" clicked_blocked_by_antibot={clicked_url}" if clicked_blocked else ""))
+    # η: sitemap top board-like 후보 가 있으면 사용자에게 안내. 자동 retry 는 X — 사용자가 다른 URL 로
+    # /watch 다시 받게만 한다. sitemap_candidates 는 engine/digest.py:413 에서 이미 digest 에 들어옴.
+    sm_cands = digest.get("sitemap_candidates") or []
+    sm_hint = ""
+    if sm_cands:
+        top = [c.get("url") for c in sm_cands[:3] if isinstance(c, dict) and c.get("url")]
+        if top:
+            sm_hint = "\nsitemap 에서 발견한 board 후보 URL (직접 골라 /watch 다시 시도해 보세요): " + ", ".join(top)
     return False, ("게시판 형식이 아닌 것 같다 — probe 가 같은 호스트로 가는 반복되는 글 링크/목록 API/피드를 하나도 못 찾았다. "
                    "게시판/공지 목록 페이지(글 행이 반복되는 페이지)의 URL 을 주세요. "
-                   f"[신호: {detail}]")
+                   f"[신호: {detail}]" + sm_hint)
 
 
 # --------------------------------------------------------------------------- #
