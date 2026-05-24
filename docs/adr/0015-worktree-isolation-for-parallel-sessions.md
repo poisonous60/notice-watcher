@@ -49,7 +49,7 @@ CLAUDE.md §9b 가 "내가 만든·고친 파일만 명시 stage" 룰을 박았�
 - **신규 세션 진입**: `bash scripts/session_start.sh <tag>` 또는 `pwsh scripts/session_start.ps1 <tag>` — 디렉토리·브랜치 인쇄. cd 후 작업.
 - **codex 위임은 이미 자동**: `scripts/codex_handoff.py --worktree` 옵션 그대로 사용 — 변경 X.
 - **1인 모드 선언 예시**: "다른 세션 없음, main 직접 편집" 사용자가 message 에서 명시. Claude/codex 가 추정 X.
-- **종료 merge**: 사전 충돌 확인 `git merge-tree $(git merge-base main session-<tag>) main session-<tag> | grep -i conflict` (§9a). 충돌 0 → `git merge --no-ff session-<tag>`.
+- **종료 merge**: 사전 충돌 확인 `git merge-tree $(git merge-base main session-<tag>) main session-<tag> | grep -E "^(<<<<<<|>>>>>>)|^CONFLICT"` (§9a — 단어 "conflict" 본문 false positive 피함). 충돌 0 → `git merge --no-ff session-<tag>`. **merge 직전 main working tree 도 clean** 해야 함 (같은 파일 dirty 면 "would be overwritten" 차단 — 내 변경이면 commit/stash, 남이면 §9b 두기).
 - **종료 drop**: 미커밋 변경 폐기 시 `git worktree remove ../nw-session-<tag>; git branch -D session-<tag>`.
 
 ## 업계 precedent
