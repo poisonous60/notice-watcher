@@ -1905,25 +1905,72 @@ def rss_feed_urls(*, html: str, base_url: str, har_path: Optional[Path] = None) 
     return out
 
 
-_AUDIO_SHARE_HOST_SUFFIXES = (
+_AUDIO_SHARE_KNOWN_HOST_SUFFIXES = (
     "transistor.fm",
     "libsyn.com",
     "simplecast.com",
     "art19.com",
     "megaphone.fm",
-    "anchor.fm",
-    "podbean.com",
-    "podtrac.com",
 )
+_AUDIO_SHARE_PATH_RE = re.compile(
+    r"(?:\.(?:mp3|m4a|ogg|oga|wav)(?:$|[?#])|/(?:episodes?|s|e)/[^/?#]+)",
+    re.IGNORECASE,
+)
+_AUDIO_SHARE_AUDIO_CT_RE = re.compile(r"^(?:audio/|video/)|^application/ogg(?:\b|;)", re.IGNORECASE)
+_AUDIO_SHARE_HTML_CT_RE = re.compile(r"^text/html(?:\b|;)", re.IGNORECASE)
 
 
 def _is_audio_share_host(host: str) -> bool:
     h = (host or "").lower().split(":", 1)[0]
-    return any(h == suffix or h.endswith("." + suffix) for suffix in _AUDIO_SHARE_HOST_SUFFIXES)
+    return any(h == suffix or h.endswith("." + suffix) for suffix in _AUDIO_SHARE_KNOWN_HOST_SUFFIXES)
+
+
+def _har_content_type(entry: dict) -> str:
+    resp = entry.get("response") or {}
+    for h in resp.get("headers") or []:
+        if str(h.get("name") or "").lower() == "content-type":
+            return str(h.get("value") or "")
+    return str(((resp.get("content") or {}).get("mimeType") or ""))
+
+
+def _matching_har_entry(har_entries: list[dict], url: str) -> Optional[dict]:
+    target = (url or "").split("#", 1)[0]
+    if not target:
+        return None
+    for entry in har_entries:
+        req = entry.get("request") or {}
+        got = str(req.get("url") or "").split("#", 1)[0]
+        if got == target:
+            return entry
+    return None
+
+
+def _audio_share_structural_evidence(url: str, har_entry: Optional[dict], har_path: Optional[Path]) -> Optional[str]:
+    if har_entry:
+        ct = _har_content_type(har_entry)
+        if _AUDIO_SHARE_AUDIO_CT_RE.search(ct):
+            return "har_content_type_audio"
+        if _AUDIO_SHARE_HTML_CT_RE.search(ct):
+            body = _har_entry_response_text(har_entry, har_path) if har_path else ""
+            size = len(body.encode("utf-8"))
+            content = (har_entry.get("response") or {}).get("content") or {}
+            if not body and isinstance(content.get("size"), int):
+                size = int(content.get("size") or 0)
+            if size < 1024:
+                return "har_tiny_html_player"
+    if _AUDIO_SHARE_PATH_RE.search(urlsplit(url).path or ""):
+        return "url_path_audio_player"
+    return None
 
 
 @heuristic
-def audio_share_host_detected(*, base_url: str, first_article_url: Optional[str], html_candidates: list[dict]) -> Optional[dict]:
+def audio_share_host_detected(
+    *,
+    base_url: str,
+    first_article_url: Optional[str],
+    html_candidates: list[dict],
+    har_path: Optional[Path] = None,
+) -> Optional[dict]:
     """Podcast RSS item link 가 외부 audio share/player host 를 가리키는지 감지한다."""
     base_host = urlsplit(base_url or "").netloc.lower().split(":", 1)[0]
     urls: list[str] = []
@@ -1934,14 +1981,41 @@ def audio_share_host_detected(*, base_url: str, first_article_url: Optional[str]
         if isinstance(sample, str):
             urls.append(sample)
 
+    har_entries: list[dict] = []
+    if har_path and har_path.exists():
+        try:
+            har = json.loads(har_path.read_text(encoding="utf-8", errors="replace"))
+            har_entries = ((har.get("log") or {}).get("entries") or [])
+        except Exception:
+            har_entries = []
+
     for url in urls[:10]:
-        host = urlsplit(urljoin(base_url, url)).netloc.lower().split(":", 1)[0]
-        if host and host != base_host and _is_audio_share_host(host):
+        abs_url = urljoin(base_url, url)
+        host = urlsplit(abs_url).netloc.lower().split(":", 1)[0]
+        if not host or host == base_host:
+            continue
+        evidence = _audio_share_structural_evidence(
+            abs_url,
+            _matching_har_entry(har_entries, abs_url),
+            har_path,
+        )
+        if evidence:
             return {
                 "audio_share_host_detected": True,
                 "host": host,
                 "base_host": base_host,
-                "sample_url": urljoin(base_url, url),
+                "sample_url": abs_url,
+                "confidence": "structural",
+                "evidence": evidence,
+            }
+        if _is_audio_share_host(host):
+            return {
+                "audio_share_host_detected": True,
+                "host": host,
+                "base_host": base_host,
+                "sample_url": abs_url,
+                "confidence": "host_known",
+                "evidence": "known_host_suffix",
             }
     return None
 
@@ -1960,16 +2034,26 @@ def _audio_share_from_feed_urls(*, base_url: str, feeds: list[dict]) -> Optional
                 "base_host": base_host,
                 "sample_url": url,
                 "source": "rss_feed_urls",
+                "confidence": "host_known",
+                "evidence": "known_host_suffix",
             }
     return None
 
 
-def audio_share_signal(*, base_url: str, first_article_url: Optional[str], html_candidates: list[dict], feeds: list[dict]) -> Optional[dict]:
+def audio_share_signal(
+    *,
+    base_url: str,
+    first_article_url: Optional[str],
+    html_candidates: list[dict],
+    feeds: list[dict],
+    har_path: Optional[Path] = None,
+) -> Optional[dict]:
     return (
         audio_share_host_detected(
             base_url=base_url,
             first_article_url=first_article_url,
             html_candidates=html_candidates,
+            har_path=har_path,
         )
         or _audio_share_from_feed_urls(base_url=base_url, feeds=feeds)
     )
@@ -2009,6 +2093,7 @@ def write_list_candidates(
         first_article_url=first_article_url,
         html_candidates=html_candidates,
         feeds=feeds,
+        har_path=har_path,
     )
     # body_empty_likely summary — 본문이 본질적으로 없는 사이트 신호.
     # row_external_host (검색결과/aggregator) OR row_interactive_action (게임/투표/SPA) 중 하나라도 true 면 박힘.
