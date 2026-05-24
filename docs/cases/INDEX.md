@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 290 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 295 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -13,6 +13,7 @@
 | [`host_ucl-ac-uk_news_3ac1ccc2`](host_ucl-ac-uk_news_3ac1ccc2.md) | ✅ 수동 config 등록 준비 (Funnelback JSON path correction) | 2026-05-24 | none | success_when_path, funnelback_json, data_path | https://www.ucl.ac.uk/news/ |
 | [`host_u-tokyo-ac-jp_en_b730db58`](host_u-tokyo-ac-jp_en_b730db58.md) | registered via official UTokyo press RSS/RDF feed | 2026-05-24 | none | capability_blocked, entry_blocked, rss_fallback | https://www.u-tokyo.ac.jp/en/whatsnew/ |
 | [`host_sydney-edu-au_news-opinion.html_bae59a5f`](host_sydney-edu-au_news-opinion.html_bae59a5f.md) | 🧩 수동 config — Sydney latest-news cards로 baseline 2건 등록 | 2026-05-24 | none | posts_nonempty, nav_first_article, archive_link | https://www.sydney.edu.au/news-opinion.html |
+| [`host_swu-ac-kr_notice_abcc7861`](host_swu-ac-kr_notice_abcc7861.md) | ✅ registered - /notice image-map landing routed to SWU board iframe endpoint | 2026-05-24 | none | gen_fail:posts_nonempty, wrong-path:notice-landing | https://www.swu.ac.kr/notice |
 | [`host_spectrum-ieee-o_root_15197eab`](host_spectrum-ieee-o_root_15197eab.md) | 🧩 수동 config — IEEE Spectrum RSS로 baseline 26건 등록 | 2026-05-24 | none | post_id_unique, nav_first_article, rss_feed_available | https://spectrum.ieee.org/ |
 | [`host_schwab-com_resource-center_920e0268`](host_schwab-com_resource-center_920e0268.md) | 🧩 수동 config — Schwab insights 정적 HTML row 로 목록 10건, 본문 추출 확인 | 2026-05-24 | none | schema_invalid_css_selector | https://www.schwab.com/resource-center/insights |
 | [`host_sba-seoul-kr_Pages_1691c5a8`](host_sba-seoul-kr_Pages_1691c5a8.md) | ✅ 수동 config — SBA 기업지원 card_box 목록 추출 | 2026-05-24 | none | posts_nonempty, rendered_cards, javascript_detail | https://www.sba.seoul.kr/Pages/ContentsMenu/Company_Support.aspx |
@@ -23,6 +24,7 @@
 | [`host_mofa-go-jp_announce_9a2e4779`](host_mofa-go-jp_announce_9a2e4779.md) | capability_blocked (Cloudflare) — RSS unavailable, HTML remap policy-rejected | 2026-05-24 | none | capability_blocked, cloudflare, rss_unavailable | https://www.mofa.go.jp/announce/index.html |
 | [`host_manchester-ac-u_discover_9da75f09`](host_manchester-ac-u_discover_9da75f09.md) | 🧩 수동 config — Manchester Newsroom RSS로 baseline 30건 등록 | 2026-05-24 | none | post_id_unique, nav_first_article, rss_feed_available | https://www.manchester.ac.uk/discover/news/ |
 | [`host_londonstockexch_discover_5600c3c7`](host_londonstockexch_discover_5600c3c7.md) | 🧩 손어댑터 — LSE Latest tab public API를 읽어 news-and-insights baseline 등록 | 2026-05-24 | F | posts_nonempty, spa_api_post_refresh | https://www.londonstockexchange.com/discover/news-and-insights |
+| [`host_kunsan-ac-kr_notice_87cf4457`](host_kunsan-ac-kr_notice_87cf4457.md) | ✅ registered - /notice landing routed to 공지사항 boardId=BBS_0000008 | 2026-05-24 | none | gen_fail:posts_nonempty, wrong-path:notice-landing | https://www.kunsan.ac.kr/notice |
 | [`host_kita-net_asocGuidance_6a214a7a`](host_kita-net_asocGuidance_6a214a7a.md) | ✅ 수동 config — KITA pressData redirect board 10건 추출 | 2026-05-24 | none | posts_nonempty, redirect_board_url, javascript_detail | https://www.kita.net/asocGuidance/nesDta/nesDtaList.do |
 | [`host_kiep-go-kr_gallery.es_103af3af`](host_kiep-go-kr_gallery.es_103af3af.md) | ✅ 수동 config — KIEP gallery.es 보고서/공지 목록 10건 추출 | 2026-05-24 | none | gate_reject, false_reject, board_shape_check | https://www.kiep.go.kr/gallery.es?mid=a10501000000&bid=0001 |
 | [`host_kbiz-or-kr_ko_9f121943`](host_kbiz-or-kr_ko_9f121943.md) | ✅ 수동 config — KBIZ mnSeq=207 보도자료 board URL로 12건 추출 | 2026-05-24 | none | posts_nonempty, menu_landing_as_list, javascript_detail | https://www.kbiz.or.kr/ko/contents/contents/contents.do?mnSeq=207 |
@@ -30,8 +32,10 @@
 | [`host_idx-co-id_en_a18762e2`](host_idx-co-id_en_a18762e2.md) | 수동 adapter - IDX Nuxt SSR rowData 사용 | 2026-05-24 | F | posts_nonempty, matches_probe_first_article, count_ballpark, nuxt_ssr_rowdata, cloudflare_api_block | https://www.idx.co.id/en/news/press-release/ |
 | [`host_hkma-gov-hk_eng_48afaf83`](host_hkma-gov-hk_eng_48afaf83.md) | ok - static HKMA press-release list registered | 2026-05-24 | none | probe_timeout | https://www.hkma.gov.hk/eng/news-and-media/press-releases/ |
 | [`host_helsinki-fi_en_caf63f4e`](host_helsinki-fi_en_caf63f4e.md) | 🧩 수동 config — Helsinki rendered news cards로 baseline 3건 등록 | 2026-05-24 | none | posts_nonempty, nav_first_article, rendered_cards | https://www.helsinki.fi/en/news |
+| [`host_hanyang-ac-kr_notice_cec27fd6`](host_hanyang-ac-kr_notice_cec27fd6.md) | ✅ registered - Liferay notice portlet rows parsed with httpx_html | 2026-05-24 | none | gen_fail:posts_nonempty | https://www.hanyang.ac.kr/notice |
 | [`host_gyeongnam-go-kr_board_3c31454e`](host_gyeongnam-go-kr_board_3c31454e.md) | ✅ 수동 config — menuCd/category 보정 후 경남 보도자료 10건 추출 | 2026-05-24 | none | posts_nonempty, missing_menuCd, board_shell | https://www.gyeongnam.go.kr/board/list.gyeong?boardId=BBS_0000060 |
 | [`host_govinfo-gov_root_2458d525`](host_govinfo-gov_root_2458d525.md) | 🔧 손 config (httpx_html, RSS-backed Features list) — root probe picked browse/navigation links before the real feed-backed feature rows | 2026-05-24 | none | posts_nonempty, first_article_nav | https://www.govinfo.gov/ |
+| [`host_gnue-ac-kr_notice_199024b6`](host_gnue-ac-kr_notice_199024b6.md) | ⚪ no_change - /notice returned HTTP Error page; no board URL proven in artifact | 2026-05-24 | none | gen_fail:posts_nonempty, soft-error-page | https://www.gnue.ac.kr/notice |
 | [`host_gnome-org_news_c6b597f7`](host_gnome-org_news_c6b597f7.md) | no_change - GNOME news and feed endpoints remain baseline_blocked from this environment | 2026-05-24 | none | capability_blocked, baseline_blocked, rss_unavailable | https://www.gnome.org/news/ |
 | [`host_gg-go-kr_bbs_912082cf`](host_gg-go-kr_bbs_912082cf.md) | ⏸ deferred — 현재 직접 URL은 존재하지 않는 페이지 alert | 2026-05-24 | none | posts_nonempty, not_found_shell | https://www.gg.go.kr/bbs/board.do?bsIdx=464&menuId=1535 |
 | [`host_fitchratings-co_research_f256080a`](host_fitchratings-co_research_f256080a.md) | 🔧 손어댑터 config (GraphQL POST, baseline 확인) | 2026-05-24 | F | posts_nonempty, matches_probe_first_article | https://www.fitchratings.com/research |
@@ -40,6 +44,7 @@
 | [`host_energy-gov_listings_ccdfe8b8`](host_energy-gov_listings_ccdfe8b8.md) | ✅ 수동 config 등록 준비 (Energy.gov RSS endpoint) | 2026-05-24 | none | probe_timeout, drupal_listing, rss_endpoint | https://www.energy.gov/listings/energy-news |
 | [`host_ecb-europa-eu_press_8a61c6f6`](host_ecb-europa-eu_press_8a61c6f6.md) | 수동 config - ECB press RSS feed 사용 | 2026-05-24 | none | posts_nonempty, matches_probe_first_article, count_ballpark, rss_feed_available, foedb_rendered_list | https://www.ecb.europa.eu/press/html/index.en.html |
 | [`host_ec-europa-eu_commission_8fc8d9c8`](host_ec-europa-eu_commission_8fc8d9c8.md) | ✅ 수동 config 등록 준비 (Press Corner RSS endpoint) | 2026-05-24 | none | probe_timeout, spa_shell, rss_endpoint | https://ec.europa.eu/commission/presscorner/home/en |
+| [`host_dongduk-ac-kr_notice_f00cd658`](host_dongduk-ac-kr_notice_f00cd658.md) | ⚪ no_change - /notice returned empty shell; no board URL proven in artifact | 2026-05-24 | none | gen_fail:posts_nonempty, empty-shell | https://www.dongduk.ac.kr/notice |
 | [`host_daegu-go-kr_icms_60f0b219`](host_daegu-go-kr_icms_60f0b219.md) | ⏸ deferred — 현재 직접 URL은 게시판 설정 없음으로만 응답 | 2026-05-24 | none | posts_nonempty, board_config_missing | https://www.daegu.go.kr/icms/bbs/selectBoardList.do?bbsId=BBS_0000004 |
 | [`host_congress-gov_root_7881e0b8`](host_congress-gov_root_7881e0b8.md) | registered via official Congress.gov Notifications RSS | 2026-05-24 | none | capability_blocked, entry_blocked, rss_fallback | https://www.congress.gov/ |
 | [`host_capitalgroup-co_advisor_cc24afab`](host_capitalgroup-co_advisor_cc24afab.md) | fixed | 2026-05-24 | config | posts_nonempty, static_variant_rows_not_promoted, auth_redirect_article | https://www.capitalgroup.com/advisor/insights.html |
@@ -319,15 +324,15 @@
 | F+C | 3 |
 | adapter | 1 |
 | config | 3 |
-| none | 126 |
+| none | 131 |
 
 ### config_strategy 분포
 
 | strategy | count |
 |---|---|
-| (미기재) | 48 |
+| (미기재) | 50 |
 | handwritten | 31 |
-| httpx_html | 106 |
+| httpx_html | 109 |
 | httpx_json | 24 |
 | httpx_json (미적용 — 콘텐츠 0) | 1 |
 | mixed | 1 |
@@ -337,5 +342,5 @@
 
 ### 최근 90일 (≥ 2026-02-23)
 
-케이스 290 건.
+케이스 295 건.
 
