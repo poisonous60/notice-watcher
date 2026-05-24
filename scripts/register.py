@@ -38,7 +38,7 @@ import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 from urllib.parse import urlsplit
 
 import httpx
@@ -352,11 +352,6 @@ def _count_board_feed_signals(digest: dict, list_candidates: dict) -> int:
         if c.get("validated") is True:
             n += 1
             continue
-        # Backward compatibility for old probe artifacts before validated/item_count existed.
-        src = c.get("source")
-        ct = (c.get("content_type") or "").lower()
-        if src == "input-url-feed-fetch" or (c.get("status") == 200 and any(tok in ct for tok in ("xml", "rss", "atom"))):
-            n += 1
     n += len(list_candidates.get("rss_feed_urls") or [])
     return n
 
@@ -1503,34 +1498,14 @@ def _list_sites(csv_path: Optional[str]) -> int:
 
 
 async def _generate(digest: dict, *, max_attempts: int, model):
-    if not _has_structural_audio_share(digest):
-        return await generate_config_validated(
-            digest, model=model, max_attempts=max_attempts, fetch_articles=1, on_attempt=_attempt_logger,
-        )
-
-    gen_globals = getattr(generate_config_validated, "__globals__", {})
-    original_validate_config = gen_globals.get("validate_config")
-    original_validate_built_config = gen_globals.get("validate_built_config")
-    if original_validate_config is None or original_validate_built_config is None:
-        return await generate_config_validated(
-            digest, model=model, max_attempts=max_attempts, fetch_articles=1, on_attempt=_attempt_logger,
-        )
-
-    def validate_config_enforced(cfg):
-        return original_validate_config(_enforce_audio_share_config(cfg, digest))
-
-    async def validate_built_config_enforced(cfg, *args, **kwargs):
-        return await original_validate_built_config(_enforce_audio_share_config(cfg, digest), *args, **kwargs)
-
-    gen_globals["validate_config"] = validate_config_enforced
-    gen_globals["validate_built_config"] = validate_built_config_enforced
-    try:
-        return await generate_config_validated(
-            digest, model=model, max_attempts=max_attempts, fetch_articles=1, on_attempt=_attempt_logger,
-        )
-    finally:
-        gen_globals["validate_config"] = original_validate_config
-        gen_globals["validate_built_config"] = original_validate_built_config
+    return await generate_config_validated(
+        digest,
+        model=model,
+        max_attempts=max_attempts,
+        fetch_articles=1,
+        on_attempt=_attempt_logger,
+        cfg_post_processor=_make_cfg_post_processor(digest),
+    )
 
 
 def _gen(digest: dict, *, max_attempts: int, model):
@@ -1546,6 +1521,12 @@ def _has_structural_audio_share(digest: dict) -> bool:
         and bool(audio.get("audio_share_host_detected") or audio.get("detected"))
         and audio.get("confidence") == "structural"
     )
+
+
+def _make_cfg_post_processor(digest: dict) -> Callable[[dict], dict]:
+    def _post_process(cfg: dict) -> dict:
+        return _enforce_audio_share_config(cfg, digest)
+    return _post_process
 
 
 def _enforce_audio_share_config(cfg: dict, digest: dict) -> dict:

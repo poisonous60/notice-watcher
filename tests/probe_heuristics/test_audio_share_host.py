@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import tempfile
+import asyncio
 from pathlib import Path
 
 
@@ -11,7 +12,8 @@ covers = ["audio_share_host_detected"]
 
 def run() -> list[tuple[str, bool, str]]:
     from probe.extract import audio_share_host_detected, write_list_candidates
-    from scripts.register import _enforce_audio_share_config
+    import scripts.register as register
+    from scripts.register import _enforce_audio_share_config, _make_cfg_post_processor
 
     cases: list[tuple[str, bool, str]] = []
 
@@ -127,6 +129,40 @@ def run() -> list[tuple[str, bool, str]]:
                        and (enforced.get("article") or {}).get("skip_status") == [200]
                        and (enforced.get("article") or {}).get("content") == [{"selector": "main"}]),
                   f"got {enforced!r}"))
+
+    processor = _make_cfg_post_processor({"list_candidates": {"audio_share_host_detected": {
+        "audio_share_host_detected": True,
+        "confidence": "structural",
+        "host": "www.spreaker.com",
+    }}})
+    processed = processor({"site": "example.com", "article": {}})
+    cases.append(("register_post_processor_enforces_structural_body_empty",
+                  bool((processed.get("article") or {}).get("body_empty_acceptable") is True),
+                  f"got {processed!r}"))
+
+    seen: dict = {}
+    old_generate_config_validated = register.generate_config_validated
+
+    async def fake_generate_config_validated(digest, **kwargs):
+        seen.update(kwargs)
+        return {"site": "example.com", "article": {}}, object()
+
+    register.generate_config_validated = fake_generate_config_validated
+    try:
+        asyncio.run(register._generate(
+            {"list_candidates": {"audio_share_host_detected": {
+                "audio_share_host_detected": True,
+                "confidence": "structural",
+                "host": "www.spreaker.com",
+            }}},
+            max_attempts=1,
+            model=None,
+        ))
+    finally:
+        register.generate_config_validated = old_generate_config_validated
+    cases.append(("register_generate_passes_post_processor_callback",
+                  callable(seen.get("cfg_post_processor")),
+                  f"got kwargs {seen!r}"))
 
     host_known = _enforce_audio_share_config(
         {"site": "example.com", "article": {}},

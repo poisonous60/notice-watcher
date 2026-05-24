@@ -196,10 +196,12 @@ async def generate_config_validated(
     fetch_articles: int = 1,
     inter_attempt_sleep: float = 2.0,
     on_attempt: Optional[Callable[[int, Optional[dict], Optional[ValidationReport], bool, str], None]] = None,
+    cfg_post_processor: Optional[Callable[[dict], dict]] = None,
 ) -> tuple[dict, ValidationReport]:
     """생성 → 실행검증 → 실패 시 피드백 재생성, ≤max_attempts. 성공 (config, report) 반환. 전부 실패 시 GenerationError.
 
     on_attempt(i, cfg_or_None, report_or_None, ok, msg) — 진행 로깅용 콜백.
+    cfg_post_processor(cfg) — LLM 이 만든 cfg 를 스키마/실행 검증 전에 확정 보정.
 
     `client` 가 None 이면 i==1 은 config_generate routing, i>=2 는 config_retry routing 사용 (routing.json).
     `model` 명시되면 모든 attempt 가 그 모델 사용 (CLI override).
@@ -233,6 +235,9 @@ async def generate_config_validated(
                 if i < max_attempts:
                     await asyncio.sleep(inter_attempt_sleep)
                 continue
+
+            if cfg_post_processor:
+                cfg = cfg_post_processor(cfg)
 
             # 스키마 검증
             try:

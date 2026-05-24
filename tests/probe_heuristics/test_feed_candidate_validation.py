@@ -19,6 +19,7 @@ def run() -> list[tuple[str, bool, str]]:
     cases: list[tuple[str, bool, str]] = []
 
     old_fetch = discover._fetch_feed_candidate_response
+    old_url_serves_feed = discover._url_serves_feed
 
     rss_ok = '<rss version="2.0"><channel><item><title>A</title></item><item><title>B</title></item></channel></rss>'
     rss_empty = '<rss version="2.0"><channel><title>empty</title></channel></rss>'
@@ -68,6 +69,15 @@ def run() -> list[tuple[str, bool, str]]:
                       cbs.get("validated") is False and cbs.get("root_tag") == "rss" and cbs.get("item_count") == 0,
                       f"got {cbs!r}"))
 
+        discover._url_serves_feed = lambda url, *, timeout=10.0: True
+        verified_cbs = discover._verified_feed_candidate(
+            "https://www.cbsnews.com/podcasts/rss",
+            source="input-url-feed-fetch",
+        )
+        cases.append(("verified_candidate_rejects_validate_failure",
+                      verified_cbs is None,
+                      f"got {verified_cbs!r}"))
+
         dotnetrocks = discover.validate_feed_candidate("https://www.dotnetrocks.com/RSS", source="input-url-feed-path")
         cases.append(("dotnetrocks_html_spa_fixture_invalid",
                       dotnetrocks.get("validated") is False and dotnetrocks.get("root_tag") == "html",
@@ -93,6 +103,12 @@ def run() -> list[tuple[str, bool, str]]:
                       _count_board_feed_signals(digest, {}) == 0 and _has_verified_feed(digest) is False,
                       f"got digest {digest!r}"))
 
+        legacy_xml = {"source": "input-url-feed-fetch", "status": 200, "content_type": "application/xml"}
+        legacy_digest = {"feed_candidates": [legacy_xml]}
+        cases.append(("legacy_unvalidated_xml_candidate_does_not_count",
+                      _count_board_feed_signals(legacy_digest, {}) == 0,
+                      f"got digest {legacy_digest!r}"))
+
         digest_valid = {"feed_candidates": [ok]}
         cases.append(("validated_candidates_count_for_board_shape",
                       _count_board_feed_signals(digest_valid, {}) == 1 and _has_verified_feed(digest_valid) is True,
@@ -117,6 +133,7 @@ def run() -> list[tuple[str, bool, str]]:
                           f"got {out!r}"))
     finally:
         discover._fetch_feed_candidate_response = old_fetch
+        discover._url_serves_feed = old_url_serves_feed
 
     return cases
 
