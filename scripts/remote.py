@@ -280,10 +280,26 @@ _SLUG_RE = re.compile(r"^[A-Za-z0-9._%-]+$")
 
 def cmd_clear_bug(slug: str) -> int:
     """`.BUG.json` 마커 제거 — bug-fix workflow 마지막 step (대시보드 Clear 버튼).
-    운영 호스트의 `scripts/register.py --clear-bug <slug>` 호출.
-    slug 는 [A-Za-z0-9._%-]+ 만 (path-traversal/injection 차단)."""
+
+    운영 호스트의 `scripts/register.py --clear-bug <slug>` 호출 + dev box 의
+    `output/snapshot/poll_state/<slug>.BUG.json` 도 즉시 제거 (dashboard `/bugs` 가
+    snapshot 읽음 — N100 만 정리하면 stale 표시). 2026-05-24 박힘 — podcast batch 에서
+    bot 측 BUG 해제 후 dashboard 가 1 잔여 표시 (snapshot stale).
+    """
     s = _require(slug, _SLUG_RE, name="slug")
-    return _ssh(_remote_python_cmd("scripts/register.py", "--clear-bug", s))
+    rc = _ssh(_remote_python_cmd("scripts/register.py", "--clear-bug", s))
+    if rc == 0:
+        snap = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "output", "snapshot", "poll_state", f"{s}.BUG.json",
+        )
+        try:
+            if os.path.exists(snap):
+                os.remove(snap)
+                print(f"[remote] dev snapshot BUG marker 도 제거: {snap}")
+        except OSError as e:
+            print(f"[remote] ⚠ dev snapshot BUG marker 제거 실패: {e}", file=sys.stderr)
+    return rc
 
 
 _URL_ARG_RE = re.compile(r"^https?://[A-Za-z0-9._~\-]+(?::\d+)?/[A-Za-z0-9._~%:/?#\[\]@!$&'()*+,;=\-]*$")
