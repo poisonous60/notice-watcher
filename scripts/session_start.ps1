@@ -40,6 +40,14 @@ if ($LASTEXITCODE -eq 0) {
     exit 1
 }
 
+# main working tree dirty 점검 — merge 직전 main 도 clean 해야 충돌 0.
+$dirty = git status --porcelain
+if ($dirty) {
+    Write-Host "[session_start] ⚠ main working tree dirty — worktree 작업 자체엔 영향 X 지만," -ForegroundColor Yellow
+    Write-Host "  merge 직전에 main 의 같은 파일 modified/untracked 가 있으면 'would be overwritten' 차단." -ForegroundColor Yellow
+    Write-Host "  내 변경이면 먼저 commit/stash, 다른 세션이면 그대로 두기 (CLAUDE.md §9b)." -ForegroundColor Yellow
+}
+
 git worktree add $WT_PATH -b $BRANCH main
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -66,7 +74,8 @@ Write-Host "  git push -u origin $BRANCH      # 또는 main 으로 merge"
 Write-Host ""
 Write-Host "main 으로 merge (작업 완료):"
 Write-Host "  cd `"$ROOT`""
-Write-Host "  git merge-tree `$(git merge-base main $BRANCH) main $BRANCH | Select-String -Pattern conflict -SimpleMatch"
+Write-Host "  # 사전 충돌 확인 — 진짜 marker 만 (단어 'conflict' 본문 false positive 피함):"
+Write-Host "  git merge-tree `$(git merge-base main $BRANCH) main $BRANCH | Select-String -Pattern '^(<<<<<<|>>>>>>)|^CONFLICT'"
 Write-Host "  git merge --no-ff $BRANCH"
 Write-Host "  git push origin main"
 Write-Host ""

@@ -193,7 +193,9 @@ bash scripts/session_start.sh <tag>       # 또는 pwsh scripts\session_start.ps
 # → ../nw-session-<tag>/ + branch session-<tag> 생성. cd 후 작업.
 ```
 
-종료 = `git merge --no-ff session-<tag>` 또는 `git worktree remove + branch -D` 폐기. 사전 충돌 확인 `git merge-tree $(git merge-base main session-<tag>) main session-<tag> | grep -i conflict`.
+종료 = `git merge --no-ff session-<tag>` 또는 `git worktree remove + branch -D` 폐기. 사전 충돌 확인 `git merge-tree $(git merge-base main session-<tag>) main session-<tag> | grep -E "^(<<<<<<|>>>>>>)|^CONFLICT"` (단어 "conflict" 본문 false positive 피함).
+
+⚠ **merge 직전 main working tree 도 clean** 해야 함. main 에 같은 파일 modified/untracked 있으면 "would be overwritten" 차단 — 내 변경이면 commit/stash, 남의 변경이면 §9b 그대로 둔다.
 
 codex 위임은 이미 `scripts/codex_handoff.py --worktree` 로 자동 격리 (ADR 0008 §0c). **Claude 본인 세션도 같은 격리 받는다** — 2026-05-24 govedu batch 사고(다른 세션이 내 staged 16 파일을 `git add -A`/`commit -am` 류로 자기 commit 에 흡수, §9b 우회) 직접 대응.
 

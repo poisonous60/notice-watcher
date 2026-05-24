@@ -42,6 +42,14 @@ if git rev-parse --verify "$BRANCH" >/dev/null 2>&1; then
   exit 1
 fi
 
+# main working tree 의 변경 점검 — worktree merge 직전 main 도 clean 해야 충돌 0.
+# dirty 면 경고만 (block X — 다른 세션 작업 가능성, 사용자 판단).
+if [ -n "$(git status --porcelain)" ]; then
+  echo "[session_start] ⚠ main working tree dirty — worktree 작업 자체엔 영향 X 지만," >&2
+  echo "  merge 직전에 main 의 같은 파일 modified/untracked 가 있으면 'would be overwritten' 차단." >&2
+  echo "  내 변경이면 먼저 commit/stash, 다른 세션이면 그대로 두기 (§9b)." >&2
+fi
+
 git worktree add "$WT_PATH" -b "$BRANCH" main
 SH_HOOK="$ROOT/.git/hooks/pre-push"
 WT_HOOK_DIR="$ROOT/.git/worktrees/nw-session-$TAG/hooks"
@@ -65,7 +73,8 @@ cat <<EOF
 
 main 으로 merge (작업 완료):
   cd "$ROOT"
-  git merge-tree \$(git merge-base main $BRANCH) main $BRANCH | grep -i conflict   # 사전 확인
+  # 사전 충돌 확인 — 진짜 conflict marker 만 (단어 "conflict" 본문 false positive 피함):
+  git merge-tree \$(git merge-base main $BRANCH) main $BRANCH | grep -E "^(<<<<<<|>>>>>>)|^CONFLICT"
   git merge --no-ff $BRANCH
   git push origin main
 
