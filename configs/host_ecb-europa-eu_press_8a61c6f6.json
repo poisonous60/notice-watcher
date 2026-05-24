@@ -1,0 +1,133 @@
+{
+  "version": 1,
+  "site": "www.ecb.europa.eu",
+  "board": "pubbydate",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/rss+xml,application/xml,text/xml;q=0.9,text/html;q=0.8,*/*;q=0.7",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.ecb.europa.eu/press/pubbydate/html/index.en.html"
+  },
+  "timeout": 20,
+  "polite_sleep": {
+    "min": 5,
+    "max": 6
+  },
+  "list": {
+    "url_template": "https://www.ecb.europa.eu/rss/press.html",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "item",
+    "fields": {
+      "post_id": [
+        {
+          "from": "css",
+          "selector": "guid",
+          "text": true,
+          "transform": [
+            ["collapse_ws"],
+            ["strip_query_fragment"],
+            ["replace", "https://www.ecb.europa.eu//", "https://www.ecb.europa.eu/"],
+            ["regex_extract", "https://www\\.ecb\\.europa\\.eu/(.+)$"]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "title",
+          "text": true,
+          "transform": [
+            ["collapse_ws"]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "css",
+          "selector": "link",
+          "text": true,
+          "transform": [
+            ["collapse_ws"],
+            ["replace", "https://www.ecb.europa.eu//", "https://www.ecb.europa.eu/"],
+            ["strip_query_fragment"]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "pubDate",
+          "text": true,
+          "transform": [
+            ["collapse_ws"],
+            ["iso8601", ["%a, %d %b %Y %H:%M:%S %z"]]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "template",
+          "value": "ECB press"
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "main > .section",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "main article",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "main",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "main .title h1, h1",
+          "text": true,
+          "transform": [
+            ["collapse_ws"]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "meta[name='citation_online_date']",
+          "attr": "content",
+          "transform": [
+            ["collapse_ws"],
+            ["iso8601", ["%d %B %Y"], "+02:00"]
+          ]
+        },
+        {
+          "from": "css",
+          "selector": ".ecb-publicationDate",
+          "text": true,
+          "transform": [
+            ["collapse_ws"],
+            ["iso8601", ["%d %B %Y"], "+02:00"]
+          ]
+        }
+      ]
+    },
+    "body_empty_acceptable": true
+  },
+  "_source_url": "https://www.ecb.europa.eu/press/html/index.en.html",
+  "_note": "ECB /press/html/index.en.html redirects to the pubbydate archive whose visible list is rendered by the FOEDB plugin. The stable public RSS feed /rss/press.html exposes the latest press-site releases with title/link/guid/pubDate, so this config polls the feed directly. Some feed items link to PDFs; body_empty_acceptable keeps those from becoming hard failures while HTML articles still use main content selectors."
+}

@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "site": "www.idx.co.id",
+  "board": "press-release",
+  "strategy": "handwritten",
+  "adapter": "IdxPressReleaseAdapter",
+  "kwargs": {},
+  "_source_url": "https://www.idx.co.id/en/news/press-release/",
+  "_note": "IDX press release page is a Nuxt SSR route behind Cloudflare. Static DOM candidates are navigation links, while the actual press rows live in window.__NUXT__.fetch[*].table.rowData after browser execution. The adapter reads that SSR payload via Playwright and uses the row Summary as the article body because the linked /api/api/publication/pressrelease/<id> endpoint returns 404/403 outside the site runtime."
+}

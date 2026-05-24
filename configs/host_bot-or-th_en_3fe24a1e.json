@@ -1,0 +1,123 @@
+{
+  "version": 1,
+  "site": "www.bot.or.th",
+  "board": "news",
+  "strategy": "playwright_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9,ko;q=0.8"
+  },
+  "timeout": 20,
+  "nav_timeout_ms": 30000,
+  "idle_timeout_ms": 15000,
+  "list": {
+    "url_template": "https://www.bot.or.th/en/news-and-media/news.html",
+    "pagination": {
+      "kind": "none"
+    },
+    "page_size_max": 20,
+    "wait_selector": "bot-listing-page a[href*='/en/news-and-media/news/']",
+    "row_selector": "bot-listing-page a[href*='/en/news-and-media/news/']",
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": ":self",
+          "attr": "href",
+          "transform": [
+            ["strip_query_fragment"],
+            ["regex_extract", "/en/news-and-media/news/(.+?)\\.html$"]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": ".title h3",
+          "text": true,
+          "transform": [
+            ["collapse_ws"]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": ":self",
+          "attr": "href",
+          "transform": [
+            ["strip_query_fragment"],
+            ["urljoin", "https://www.bot.or.th"]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": ".date-details span",
+          "text": true,
+          "match": "^\\d{1,2} [A-Za-z]{3} \\d{4}$",
+          "transform": [
+            ["iso8601", ["%d %b %Y"], "+07:00"]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "css",
+          "selector": ".tag",
+          "text": true,
+          "transform": [
+            ["collapse_ws"]
+          ]
+        }
+      ],
+      "cover_image": [
+        {
+          "from": "attr",
+          "selector": ".item-image img",
+          "attr": "src",
+          "transform": [
+            ["urljoin", "https://www.bot.or.th"]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "wait_selector": "div.cmp-text",
+    "content": [
+      {
+        "from": "css",
+        "selector": "div.cmp-text",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "h1, h2",
+          "text": true,
+          "transform": [
+            ["collapse_ws"]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "meta[property='article:published_time']",
+          "attr": "content",
+          "transform": [
+            ["iso8601", ["%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S.%f%z"]]
+          ]
+        }
+      ]
+    }
+  },
+  "_source_url": "https://www.bot.or.th/en/news-and-media/news.html",
+  "_note": "Bank of Thailand news list is rendered by the AEM bot-listing-page webcomponent. Static HTML contains only the component shell, so httpx_html selectors see only nav links and fail posts_nonempty. playwright_html waits for rendered news anchors and extracts article bodies from div.cmp-text."
+}

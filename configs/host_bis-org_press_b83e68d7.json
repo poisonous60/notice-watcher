@@ -1,0 +1,138 @@
+{
+  "version": 1,
+  "site": "bis.org",
+  "board": "252",
+  "strategy": "httpx_html",
+  "_source_url": "https://www.bis.org/press/index.htm",
+  "_note": "BIS press releases page renders its list from the all_pressrels document list. The public RSS feed exposes the same press release items without requiring JS.",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+    "Accept": "application/rss+xml,application/xml,text/xml,*/*;q=0.9",
+    "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Referer": "https://www.bis.org/press/pressrels.htm?m=252"
+  },
+  "timeout": 15,
+  "polite_sleep": {
+    "min": 2,
+    "max": 2
+  },
+  "list": {
+    "url_template": "https://www.bis.org/doclist/all_pressrels.rss",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "item",
+    "fields": {
+      "post_id": [
+        {
+          "from": "css",
+          "selector": "link",
+          "text": true,
+          "transform": [
+            [
+              "regex_extract",
+              "https?://www\\.bis\\.org/press/([^/.]+)\\.htm"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "css",
+          "selector": "link",
+          "text": true,
+          "transform": [
+            [
+              "strip"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "date",
+          "text": true,
+          "transform": [
+            [
+              "strip"
+            ]
+          ]
+        }
+      ],
+      "author": [
+        {
+          "from": "css",
+          "selector": "institutionAbbrev",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "description",
+          "text": true,
+          "transform": [
+            [
+              "html_unescape"
+            ],
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "div#cmsContent",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "div.document_container",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "div#center",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "h1",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -21,6 +21,9 @@ from .adobe_creative_cloud import AdobeCreativeCloudFeaturesAdapter
 from .canva_whats_new import CanvaWhatsNewAdapter
 from .salesforce_docs import SalesforceDocsReleaseNotesAdapter
 from .anilist import AniListAiringAdapter, AniListMediaAdapter
+from .london_stock_exchange import LondonStockExchangeNewsAdapter
+from .idx_press_release import IdxPressReleaseAdapter
+from .fitch_ratings import FitchRatingsResearchAdapter
 
 __all__ = [
     "BaseAdapter",
@@ -48,4 +51,7 @@ __all__ = [
     "SalesforceDocsReleaseNotesAdapter",
     "AniListAiringAdapter",
     "AniListMediaAdapter",
+    "LondonStockExchangeNewsAdapter",
+    "IdxPressReleaseAdapter",
+    "FitchRatingsResearchAdapter",
 ]

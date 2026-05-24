@@ -2,10 +2,28 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 242 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 260 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
+| [`host_worldbank-org_en_61b26912`](host_worldbank-org_en_61b26912.md) | 수동 config - World Bank news landing 의 정적 latest news cards 로 등록 | 2026-05-24 | none | posts_nonempty, matches_probe_first_article, count_ballpark | https://www.worldbank.org/en/news |
+| [`host_schwab-com_resource-center_920e0268`](host_schwab-com_resource-center_920e0268.md) | 🧩 수동 config — Schwab insights 정적 HTML row 로 목록 10건, 본문 추출 확인 | 2026-05-24 | none | schema_invalid_css_selector | https://www.schwab.com/resource-center/insights |
+| [`host_rbnz-govt-nz_news-and-events_ada928b5`](host_rbnz-govt-nz_news-and-events_ada928b5.md) | 🧩 수동 config — RBNZ Coveo 목록을 Playwright로 수집 | 2026-05-24 | none | fetch_list_403, article_body_len | https://www.rbnz.govt.nz/news-and-events/news |
+| [`host_nseindia-com_resources_b0248e5e`](host_nseindia-com_resources_b0248e5e.md) | 수동 config - NSE press-release JSON API 사용 | 2026-05-24 | none | fetch_list, posts_nonempty, wrong_first_article | https://www.nseindia.com/resources/exchange-communication-press-releases |
+| [`host_londonstockexch_discover_5600c3c7`](host_londonstockexch_discover_5600c3c7.md) | 🧩 손어댑터 — LSE Latest tab public API를 읽어 news-and-insights baseline 등록 | 2026-05-24 | F | posts_nonempty, spa_api_post_refresh | https://www.londonstockexchange.com/discover/news-and-insights |
+| [`host_imf-org_en_cf2cb594`](host_imf-org_en_cf2cb594.md) | ✅ 수동 config (playwright_html, IMF Latest News 8건 baseline) | 2026-05-24 | none | article_body_len | https://www.imf.org/en/News |
+| [`host_idx-co-id_en_a18762e2`](host_idx-co-id_en_a18762e2.md) | 수동 adapter - IDX Nuxt SSR rowData 사용 | 2026-05-24 | F | posts_nonempty, matches_probe_first_article, count_ballpark, nuxt_ssr_rowdata, cloudflare_api_block | https://www.idx.co.id/en/news/press-release/ |
+| [`host_hkma-gov-hk_eng_48afaf83`](host_hkma-gov-hk_eng_48afaf83.md) | ok - static HKMA press-release list registered | 2026-05-24 | none | probe_timeout | https://www.hkma.gov.hk/eng/news-and-media/press-releases/ |
+| [`host_fitchratings-co_research_f256080a`](host_fitchratings-co_research_f256080a.md) | 🔧 손어댑터 config (GraphQL POST, baseline 확인) | 2026-05-24 | F | posts_nonempty, matches_probe_first_article | https://www.fitchratings.com/research |
+| [`host_ecb-europa-eu_press_8a61c6f6`](host_ecb-europa-eu_press_8a61c6f6.md) | 수동 config - ECB press RSS feed 사용 | 2026-05-24 | none | posts_nonempty, matches_probe_first_article, count_ballpark, rss_feed_available, foedb_rendered_list | https://www.ecb.europa.eu/press/html/index.en.html |
+| [`host_capitalgroup-co_advisor_cc24afab`](host_capitalgroup-co_advisor_cc24afab.md) | fixed | 2026-05-24 | config | posts_nonempty, static_variant_rows_not_promoted, auth_redirect_article | https://www.capitalgroup.com/advisor/insights.html |
+| [`host_bursamalaysia-c_about_bursa_216b55e3`](host_bursamalaysia-c_about_bursa_216b55e3.md) | 🧩 수동 config — Bursa Malaysia media releases PDF 목록 10건 등록 가능 | 2026-05-24 | none | posts_nonempty, cloudflare_challenge, static_stacktable_rows, pdf_only_articles | https://www.bursamalaysia.com/about_bursa/media_centre |
+| [`host_bundesbank-de_en_b89d1d22`](host_bundesbank-de_en_b89d1d22.md) | 🧩 수동 config — Bundesbank Latest RSS feed 로 baseline 10건 등록 | 2026-05-24 | none | article_body_len, wrong_first_article, nav_menu_as_list, rss_feed_available | https://www.bundesbank.de/en/press |
+| [`host_bsp-gov-ph_SitePages_abf3386c`](host_bsp-gov-ph_SitePages_abf3386c.md) | 수동 config - BSP SharePoint JSON API | 2026-05-24 | none | posts_nonempty, sharepoint_list_api | https://www.bsp.gov.ph/SitePages/MediaAndResearch/MediaDisp.aspx |
+| [`host_bot-or-th_en_3fe24a1e`](host_bot-or-th_en_3fe24a1e.md) | ✅ 수동 config 등록 (playwright_html, baseline 5건) | 2026-05-24 | none | posts_nonempty, nav_only_same_host, js_rendered_list | https://www.bot.or.th/en/news-and-media/news.html |
+| [`host_bnm-gov-my_press-release_315ff7ab`](host_bnm-gov-my_press-release_315ff7ab.md) | 🧩 수동 config — BNM Press Releases 실제 목록 경로 /pr 렌더 테이블로 baseline 30건 등록 | 2026-05-24 | none | posts_nonempty, wrong_list_url, waf_js_challenge | https://www.bnm.gov.my/press-release |
+| [`host_bis-org_press_b83e68d7`](host_bis-org_press_b83e68d7.md) | 🧩 수동 config — BIS press releases RSS feed로 baseline 등록 | 2026-05-24 | none | posts_nonempty, nav_menu_false_candidate, document_list_js_render | https://www.bis.org/press/index.htm |
+| [`host_bankofcanada-ca_press_878c0d81`](host_bankofcanada-ca_press_878c0d81.md) | 🧩 수동 config — Bank of Canada press 랜딩의 정적 HTML row 로 baseline 5건 등록 | 2026-05-24 | none | llm_json_parse, wordpress_rest_401 | https://www.bankofcanada.ca/press/ |
 | [`infra_headless_browser_profile_2026-05-22`](infra_headless_browser_profile_2026-05-22.md) | ✅ probe generic 개선 — real Chrome 우선 + CF interstitial 대기 + fingerprint 통일로 anti-bot 오분류 줄이고 target 404/entry blocked 정확히 분류 (S4-first reorder 는 review 에서 revert) | 2026-05-22 | C | capability_blocked, baseline_blocked, entry_blocked, target_not_found | https://www.livechart.me/news |
 | [`host_whonix-org_blog_93c1f6f7`](host_whonix-org_blog_93c1f6f7.md) | ✅ 수동 config (Whonix Discourse News category — forums.whonix.org JSON API) | 2026-05-22 | none | posts_nonempty, article_body_len, discourse_alias_host_mismatch | https://www.whonix.org/blog/ |
 | [`host_toranoana-jp_news_84973d13`](host_toranoana-jp_news_84973d13.md) | ✅ 수동 config (입력 URL은 404, 공식 news.toranoana.jp로 remap) | 2026-05-22 | none | target_not_found, posts_nonempty, url_remap | https://www.toranoana.jp/news/ |
@@ -266,28 +284,28 @@
 | D | 1 |
 | E | 6 |
 | E+A+C+D | 1 |
-| F | 83 |
+| F | 86 |
 | F+A | 1 |
 | F+C | 3 |
 | adapter | 1 |
-| config | 2 |
-| none | 82 |
+| config | 3 |
+| none | 96 |
 
 ### config_strategy 분포
 
 | strategy | count |
 |---|---|
-| (미기재) | 45 |
-| handwritten | 28 |
-| httpx_html | 82 |
-| httpx_json | 21 |
+| (미기재) | 46 |
+| handwritten | 31 |
+| httpx_html | 89 |
+| httpx_json | 23 |
 | httpx_json (미적용 — 콘텐츠 0) | 1 |
 | mixed | 1 |
 | none | 37 |
-| playwright_html | 26 |
+| playwright_html | 31 |
 | rejected | 1 |
 
-### 최근 90일 (≥ 2026-02-22)
+### 최근 90일 (≥ 2026-02-23)
 
-케이스 242 건.
+케이스 260 건.
 

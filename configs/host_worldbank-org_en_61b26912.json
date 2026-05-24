@@ -1,0 +1,122 @@
+{
+  "version": 1,
+  "site": "worldbank.org",
+  "board": "en/news",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9,ko;q=0.8",
+    "Referer": "https://www.worldbank.org/en/news"
+  },
+  "timeout": 15,
+  "list": {
+    "url_template": "https://www.worldbank.org/en/news",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "a[href^='https://www.worldbank.org/en/news/']",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "attr": "href",
+          "transform": [
+            ["strip_query_fragment"],
+            ["regex_extract", "^https://www\\.worldbank\\.org(/en/news/[^/]+/\\d{4}/\\d{2}/\\d{2}/[^?#]+)$"]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "attr",
+          "attr": "title",
+          "transform": [["collapse_ws"]]
+        },
+        {
+          "from": "css",
+          "text": true,
+          "match": "^(?!https?://).+",
+          "transform": [["collapse_ws"]]
+        },
+        {
+          "from": "attr",
+          "attr": "href",
+          "transform": [
+            ["strip_query_fragment"],
+            ["regex_extract", "/en/news/[^/]+/\\d{4}/\\d{2}/\\d{2}/([^/?#]+)$"],
+            ["replace", "-", " "],
+            ["collapse_ws"]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "attr": "href",
+          "transform": [["strip_query_fragment"]]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "attr",
+          "attr": "href",
+          "transform": [
+            ["regex_extract", "/en/news/[^/]+/(\\d{4}/\\d{2}/\\d{2})/"],
+            ["replace", "/", "-"],
+            ["date_only_to_iso", "+00:00"]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "attr",
+          "attr": "href",
+          "transform": [
+            ["regex_extract", "/en/news/([^/]+)/\\d{4}/\\d{2}/\\d{2}/"],
+            ["replace", "-", " "],
+            ["upper"]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "article.lp__body_content",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "div.redesign_static_content article.lp__body_content",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "div.lp__heading h1.h1",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "div.lp__hammer span",
+          "pick": "first_matching",
+          "match": "^[A-Z][a-z]{2,9} \\d{1,2}, \\d{4}$",
+          "text": true,
+          "transform": [["iso8601", ["%B %d, %Y", "%b %d, %Y"], "+00:00"]]
+        }
+      ]
+    }
+  },
+  "_source_url": "https://www.worldbank.org/en/news",
+  "_note": "World Bank news landing exposes dated news links in static HTML. The automatic config selected a non-existent carousel-wrapper root; use dated /en/news/... anchors and the article body selector."
+}

@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "site": "londonstockexchange.com",
+  "board": "discover/news-and-insights",
+  "strategy": "handwritten",
+  "adapter": "LondonStockExchangeNewsAdapter",
+  "kwargs": {
+    "timeout": 20
+  },
+  "polite_sleep": {
+    "min": 5,
+    "max": 8
+  },
+  "_note": "LSE renders News and insights from a public API that requires GET /api/v1/pages followed by POST /api/v1/components/refresh for the Latest tab; generic httpx_json is GET-only."
+}

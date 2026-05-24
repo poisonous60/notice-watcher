@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "site": "fitchratings.com",
+  "board": "research",
+  "strategy": "handwritten",
+  "adapter": "FitchRatingsResearchAdapter",
+  "kwargs": {
+    "timeout": 20
+  },
+  "_source_url": "https://www.fitchratings.com/research",
+  "_note": "Fitch research list is loaded from https://api.fitchratings.com/ GraphQL POST getInsights. The current httpx_json strategy only supports GET, so a small handwritten adapter is used."
+}

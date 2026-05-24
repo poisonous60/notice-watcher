@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "site": "www.bsp.gov.ph",
+  "board": "MediaAndResearch/MediaDisp.aspx",
+  "strategy": "httpx_json",
+  "headers": {
+    "Accept": "application/json;odata=minimalmetadata",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+  },
+  "timeout": 20,
+  "polite_sleep": {"min": 5, "max": 7},
+  "_source_url": "https://www.bsp.gov.ph/SitePages/MediaAndResearch/MediaDisp.aspx",
+  "_note": "Handwritten because the SharePoint page renders no static rows; the public list API is visible in HAR.",
+  "list": {
+    "url_template": "https://www.bsp.gov.ph/_api/web/lists/getByTitle('Media%20Releases%20and%20Advisories')/items?$select=*&$filter=(Tag%20eq%20%27Public%20Advisories%27%20or%20Tag%20eq%20%27Media%20Releases%20and%20Advisories%27)%20and%20OData__ModerationStatus%20eq%200%20and%20Status%20eq%20%272%27&$top={page_size}&$orderby=PDate%20desc",
+    "pagination": {"kind": "none"},
+    "page_size_max": 30,
+    "list_path": ["value"],
+    "fields": {
+      "post_id": [{"from": "json", "path": ["Id"], "transform": [["to_str"]]}],
+      "title": [{"from": "json", "path": ["Title"], "transform": [["html_unescape"], ["collapse_ws"]]}],
+      "url": [{"from": "template", "value": "https://www.bsp.gov.ph/SitePages/MediaAndResearch/MediaDisp.aspx?ItemId={post_id}&MType=MediaReleases"}],
+      "published_at": [{"from": "json", "path": ["PDate"]}],
+      "category": [{"from": "json", "path": ["Tag"], "transform": [["collapse_ws"]]}],
+      "summary": [{"from": "json", "path": ["Title"], "transform": [["html_unescape"], ["collapse_ws"]]}]
+    }
+  },
+  "article": {
+    "fetch_kind": "json",
+    "url_template": "https://www.bsp.gov.ph/_api/web/lists/getByTitle('Media%20Releases%20and%20Advisories')/items?$select=Id,Title,PDate,Content,Tag&$filter=ID%20eq%20%27{post_id}%27%20and%20OData__ModerationStatus%20eq%200%20and%20Status%20eq%20%272%27",
+    "data_path": ["value", 0],
+    "content": [{"from": "json", "path": ["Content"], "transform": [["html_unescape"]]}],
+    "enrich": {
+      "title": [{"from": "json", "path": ["Title"], "transform": [["html_unescape"], ["collapse_ws"]]}],
+      "published_at": [{"from": "json", "path": ["PDate"]}],
+      "category": [{"from": "json", "path": ["Tag"], "transform": [["collapse_ws"]]}]
+    }
+  }
+}

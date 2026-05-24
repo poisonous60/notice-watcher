@@ -1,0 +1,171 @@
+{
+  "version": 1,
+  "site": "www.schwab.com",
+  "board": "insights",
+  "strategy": "httpx_html",
+  "_source_url": "https://www.schwab.com/resource-center/insights",
+  "_note": "Hand config from probe artifact; automatic config used an invalid attribute selector for data-dl-component.title.",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+    "Referer": "https://www.schwab.com/resource-center/insights"
+  },
+  "timeout": 15,
+  "polite_sleep": {
+    "min": 5,
+    "max": 6
+  },
+  "list": {
+    "url_template": "https://www.schwab.com/resource-center/insights",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "div[data-component=\"ArticleTile\"]",
+    "row_required_selector": "a[href^=\"/learn/story/\"]",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "attr": "data-dl-link.id",
+          "match": "^\\d+$"
+        },
+        {
+          "from": "attr",
+          "selector": "a[href^=\"/learn/story/\"]",
+          "attr": "href",
+          "transform": [
+            [
+              "regex_extract",
+              "^/learn/story/([^/?#]+)"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "attr",
+          "attr": "data-dl-link.name",
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        },
+        {
+          "from": "css",
+          "selector": "h3 span",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a[href^=\"/learn/story/\"]",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://www.schwab.com"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "span[data-component=\"LockupDisclosure\"]",
+          "pick": "first_matching",
+          "match": "^[A-Z][a-z]{2} \\d{1,2}, \\d{4}$",
+          "text": true,
+          "transform": [
+            [
+              "iso8601",
+              [
+                "%b %d, %Y"
+              ]
+            ]
+          ]
+        }
+      ],
+      "author": [
+        {
+          "from": "css",
+          "selector": "a[href^=\"/learn/author/\"]",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "div.w-full.max-w-story div[data-component=\"LockupBody\"]",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "div.w-full.max-w-story",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "h1 span",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "div[data-component=\"storyheader-panel\"] div.mt-6.text-xs.leading-4.lg\\:text-sm.lg\\:leading-6",
+          "text": true,
+          "transform": [
+            [
+              "regex_extract",
+              "([A-Z][a-z]{2} \\d{1,2}, \\d{4})"
+            ],
+            [
+              "iso8601",
+              [
+                "%b %d, %Y"
+              ]
+            ]
+          ]
+        }
+      ],
+      "author": [
+        {
+          "from": "css",
+          "selector": "div[data-component=\"storyheader-panel\"] a[href^=\"/learn/author/\"]",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  }
+}

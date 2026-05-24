@@ -1,0 +1,119 @@
+{
+  "version": 1,
+  "site": "www.bnm.gov.my",
+  "board": "press-release",
+  "strategy": "playwright_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9,ko;q=0.8",
+    "Referer": "https://www.bnm.gov.my/home"
+  },
+  "timeout": 25,
+  "polite_sleep": {
+    "min": 5,
+    "max": 6
+  },
+  "list": {
+    "url_template": "https://www.bnm.gov.my/pr",
+    "pagination": {
+      "kind": "none"
+    },
+    "wait_selector": "tbody tr a[href*='/-/']",
+    "row_selector": "tbody tr",
+    "row_required_selector": "a[href*='/-/']",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "td:nth-of-type(2) a[href]",
+          "attr": "href",
+          "transform": [
+            [
+              "strip_query_fragment"
+            ],
+            [
+              "regex_extract",
+              "/-/([^/?#]+)"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "td:nth-of-type(2) a[href]",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "td:nth-of-type(2) a[href]",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://www.bnm.gov.my"
+            ],
+            [
+              "strip_query_fragment"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "td:nth-of-type(1)",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "iso8601",
+              [
+                "%d %b %Y"
+              ],
+              "+08:00"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "wait_selector": ".journal-content-article h2",
+    "content": [
+      {
+        "from": "css",
+        "selector": ".journal-content-article",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": ".journal-content-article h2",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "_source_url": "https://www.bnm.gov.my/press-release",
+  "_note": "The requested /press-release path resolves to a WAF-verified 404; the site navigation points Press Releases to /pr, which redirects to the current yearly press-release page. Use Playwright so the AWS WAF JavaScript challenge can complete before parsing the rendered Liferay table."
+}

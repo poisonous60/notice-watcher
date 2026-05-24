@@ -1,0 +1,134 @@
+{
+  "version": 1,
+  "site": "www.rbnz.govt.nz",
+  "board": "news",
+  "strategy": "playwright_html",
+  "_source_url": "https://www.rbnz.govt.nz/news-and-events/news",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-NZ,en;q=0.9,ko;q=0.7",
+    "Referer": "https://www.rbnz.govt.nz/news-and-events/news"
+  },
+  "timeout": 20,
+  "nav_timeout_ms": 20000,
+  "idle_timeout_ms": 4000,
+  "quiet_ms": 700,
+  "polite_sleep": {
+    "min": 5,
+    "max": 7
+  },
+  "list": {
+    "url_template": "https://www.rbnz.govt.nz/news-and-events/news",
+    "pagination": {
+      "kind": "none"
+    },
+    "wait_selector": "div.coveo-result-list-container div.CoveoResult",
+    "row_selector": "div.coveo-result-list-container.coveo-list-layout-container > div.coveo-list-layout.CoveoResult",
+    "row_required_selector": "a.listing-card.CoveoResultLink[href*='/news-and-events/news/']",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a.listing-card.CoveoResultLink[href*='/news-and-events/news/']",
+          "attr": "href",
+          "transform": [
+            ["regex_extract", "/news-and-events/news/\\d{4}/\\d{2}/([^/?#]+)$"]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "span.listing-card__heading-text",
+          "text": true,
+          "transform": [
+            ["collapse_ws"]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a.listing-card.CoveoResultLink[href*='/news-and-events/news/']",
+          "attr": "href",
+          "transform": [
+            ["urljoin", "https://www.rbnz.govt.nz"]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "span.listing-card__date > span",
+          "text": true,
+          "transform": [
+            ["collapse_ws"],
+            ["iso8601", ["%d %B, %Y"], "+12:00"]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "css",
+          "selector": "span.listing-card__tag",
+          "text": true,
+          "transform": [
+            ["collapse_ws"]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "wait_selector": "#article-content .component.rich-text .component__body",
+    "content": [
+      {
+        "from": "css",
+        "selector": "#article-content .component.rich-text .component__body",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "#article-content",
+        "html": true
+      }
+    ],
+    "body_empty_acceptable": true,
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "h1.hero__heading",
+          "text": true,
+          "transform": [
+            ["collapse_ws"]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "div.hero__metadata-item time",
+          "attr": "datetime",
+          "transform": [
+            ["iso8601", ["%Y-%m-%d"], "+12:00"]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "p.hero__description",
+          "text": true,
+          "transform": [
+            ["collapse_ws"]
+          ]
+        }
+      ]
+    }
+  },
+  "_note": "RBNZ news list is a rendered Coveo result block. Plain httpx can receive 403, generated configs also failed after adding ?page=1, and article selectors were over-specific. Use playwright_html on the canonical list URL only. Direct article navigation can extract rich-text body, but list-then-article in the same browser session may hit a challenge page, so body_empty_acceptable keeps polling usable."
+}

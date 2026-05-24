@@ -1,0 +1,121 @@
+{
+  "version": 1,
+  "site": "www.hkma.gov.hk",
+  "board": "eng",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.hkma.gov.hk/eng/news-and-media/press-releases/"
+  },
+  "timeout": 20,
+  "polite_sleep": {
+    "min": 5,
+    "max": 6
+  },
+  "list": {
+    "url_template": "https://www.hkma.gov.hk/eng/news-and-media/press-releases/",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "#press-release-result > ul",
+    "row_required_selector": "a[href^='/eng/news-and-media/press-releases/']",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a[href^='/eng/news-and-media/press-releases/']",
+          "attr": "href",
+          "transform": [
+            ["strip_query_fragment"],
+            ["strip", "/"],
+            ["regex_extract", "press-releases/(.+)$"]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "a[href^='/eng/news-and-media/press-releases/']",
+          "text": true,
+          "transform": [
+            ["collapse_ws"]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a[href^='/eng/news-and-media/press-releases/']",
+          "attr": "href",
+          "transform": [
+            ["urljoin", "https://www.hkma.gov.hk"],
+            ["strip_query_fragment"]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "li:first-child",
+          "text": true,
+          "transform": [
+            ["collapse_ws"],
+            ["iso8601", ["%d %B %Y"], "+08:00"]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "template",
+          "value": "Press Releases"
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": ".content-area .template-content-area",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": ".content-area .press-release-title",
+          "text": true,
+          "transform": [
+            ["collapse_ws"]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": ".content-area > .date",
+          "text": true,
+          "transform": [
+            ["collapse_ws"],
+            ["iso8601", ["%d %B %Y"], "+08:00"]
+          ]
+        },
+        {
+          "from": "attr",
+          "selector": "meta[name='date']",
+          "attr": "content",
+          "transform": [
+            ["collapse_ws"]
+          ]
+        }
+      ]
+    }
+  },
+  "_source_url": "https://www.hkma.gov.hk/eng/news-and-media/press-releases/",
+  "_note": "HKMA press releases are present in the rendered/static HTML under #press-release-result. The public page also advertises an Open API, but the probe artifact did not capture a list API request; this config uses the stable server-rendered list and excludes the occasional external info.gov.hk row."
+}

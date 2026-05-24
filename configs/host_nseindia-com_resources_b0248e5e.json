@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "site": "www.nseindia.com",
+  "board": "resources/exchange-communication-press-releases",
+  "strategy": "httpx_json",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.nseindia.com/resources/exchange-communication-press-releases"
+  },
+  "timeout": 20,
+  "polite_sleep": {
+    "min": 5,
+    "max": 6
+  },
+  "list": {
+    "url_template": "https://www.nseindia.com/api/press-release-cms20",
+    "pagination": {
+      "kind": "none"
+    },
+    "list_path": [],
+    "fields": {
+      "post_id": [
+        {
+          "from": "json",
+          "path": ["id"],
+          "transform": [["to_str"]]
+        }
+      ],
+      "title": [
+        {
+          "from": "json",
+          "path": ["content", "title"],
+          "transform": [["html_unescape"], ["collapse_ws"]]
+        }
+      ],
+      "url": [
+        {
+          "from": "json",
+          "path": ["content", "field_file_attachement", "url"],
+          "transform": [["strip"], ["strip_query_fragment"]]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "json",
+          "path": ["content", "field_date"],
+          "transform": [["collapse_ws"], ["iso8601", ["%d-%b-%Y"], "+05:30"]]
+        }
+      ],
+      "category": [
+        {
+          "from": "json",
+          "path": ["content", "field_type"],
+          "transform": [["collapse_ws"]]
+        }
+      ],
+      "summary": [
+        {
+          "from": "json",
+          "path": ["content", "body"],
+          "transform": [["html_unescape"], ["collapse_ws"]]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "json",
+    "content": [],
+    "body_empty_acceptable": true
+  },
+  "_source_url": "https://www.nseindia.com/resources/exchange-communication-press-releases",
+  "_note": "NSE renders the visible press-release cards from /api/press-release-cms20. Playwright list validation hit net::ERR_HTTP2_PROTOCOL_ERROR in this environment, while direct HTTP JSON returns the current press-release list. The API items include title/date/category/body summary and attachment URL; individual article pages are not required for new-post detection, so empty article bodies are accepted."
+}
