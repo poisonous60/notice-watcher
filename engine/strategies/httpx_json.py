@@ -9,6 +9,7 @@ from typing import Any, Optional
 
 import httpx
 
+from .._http import build_async_client, get_with_tls_fallback
 from ..base_compat import NoticePost
 from ..extract_helpers import extract_field, extract_row, navigate_json
 from ._common import apply_proxy, build_list_url, check_success, render_template
@@ -17,11 +18,7 @@ from .httpx_html import _copy_post  # 동일 구현 — 한 곳에서 관리(중
 
 async def open_session(adapter) -> None:
     cfg = adapter.cfg
-    adapter._client = httpx.AsyncClient(
-        headers=cfg.get("headers") or {},
-        timeout=float(cfg.get("timeout", 15.0)),
-        follow_redirects=True,
-    )
+    adapter._client = build_async_client(cfg)
 
 
 async def close_session(adapter) -> None:
@@ -32,14 +29,7 @@ async def close_session(adapter) -> None:
 
 
 async def _get(adapter, url: str) -> httpx.Response:
-    client = getattr(adapter, "_client", None)
-    if client is not None:
-        return await client.get(url)
-    cfg = adapter.cfg
-    async with httpx.AsyncClient(
-        headers=cfg.get("headers") or {}, timeout=float(cfg.get("timeout", 15.0)), follow_redirects=True
-    ) as c:
-        return await c.get(url)
+    return await get_with_tls_fallback(adapter, url)
 
 
 async def _get_json(adapter, url: str) -> Any:

@@ -12,7 +12,7 @@ import json
 import re
 from pathlib import Path
 from typing import Any, Optional
-from urllib.parse import urljoin, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urljoin, urlsplit, urlunsplit
 
 from bs4 import BeautifulSoup, Tag
 
@@ -58,6 +58,7 @@ def html_repeating_patterns(html: str, base_url: str, *, min_children: int = 5) 
         return []
     soup = BeautifulSoup(html, "lxml")
     candidates: list[dict] = []
+    js_detail_templates = extract_js_detail_template(html, base_url=base_url)
 
     for parent in soup.find_all(True):
         if not isinstance(parent, Tag):
@@ -101,6 +102,7 @@ def html_repeating_patterns(html: str, base_url: str, *, min_children: int = 5) 
                 "sample_url": sample_url,
                 "href_is_js": href_is_js or None,         # True → 글 링크가 javascript: — post_id/url 은 row_data_attrs / inline_js 에서. handwritten 어댑터 가능성.
                 "row_data_attrs": row_data_attrs or None,  # 행 요소(와 그 안 첫 <a>)의 data-* 속성 샘플 (href 가 js 일 때 post_id 가 보통 여기)
+                "detail_url_template": _match_js_detail_template(hrefs, js_detail_templates),
             })
 
     # 같은 selector 중복 제거 + 큰 순
@@ -112,6 +114,206 @@ def html_repeating_patterns(html: str, base_url: str, *, min_children: int = 5) 
         seen.add(c["selector"])
         deduped.append(c)
     return deduped[:15]
+
+
+_JS_CALL_RE = re.compile(
+    r"(?:javascript:\s*)?([A-Za-z_$][\w$]*)\s*\(\s*['\"]?([A-Za-z0-9_-]+)['\"]?",
+    re.IGNORECASE,
+)
+_FUNC_BODY_RE = re.compile(
+    r"function\s+([A-Za-z_$][\w$]*)\s*\(([^)]*)\)\s*\{(?P<body>.*?)\}",
+    re.IGNORECASE | re.DOTALL,
+)
+_LOCATION_EXPR_RE = re.compile(
+    r"(?:location(?:\.href)?|window\.location(?:\.href)?|document\.location)\s*=\s*(?P<expr>[^;]+)",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _js_string_value(token: str) -> Optional[str]:
+    token = token.strip()
+    if len(token) >= 2 and token[0] in ("'", '"') and token[-1] == token[0]:
+        return token[1:-1]
+    return None
+
+
+def _template_from_js_expr(expr: str, param_name: str) -> Optional[str]:
+    parts = [p.strip() for p in expr.split("+")]
+    if len(parts) < 2:
+        return None
+    out = ""
+    used_param = False
+    for part in parts:
+        sv = _js_string_value(part)
+        if sv is not None:
+            out += sv
+            continue
+        if part == param_name or part.endswith("." + param_name):
+            out += "{post_id}"
+            used_param = True
+            continue
+        return None
+    return out if used_param else None
+
+
+def _js_calls_from_attrs(soup: BeautifulSoup) -> list[dict]:
+    calls: list[dict] = []
+    for el in soup.find_all(True):
+        if not isinstance(el, Tag):
+            continue
+        for attr in ("href", "onclick"):
+            raw = el.get(attr)
+            if not isinstance(raw, str):
+                continue
+            m = _JS_CALL_RE.search(raw)
+            if not m:
+                continue
+            calls.append({"function": m.group(1), "sample_id": m.group(2), "raw": raw})
+    return calls
+
+
+@heuristic
+def extract_js_detail_template(html: str, *, base_url: str) -> list[dict]:
+    """Inline JS `goView(id)`/`goDetailPage(no)` 함수에서 상세 URL template 추출.
+
+    지원 범위는 보수적으로 `location.href = '/path?id=' + id + '&x=1'` 형태만이다.
+    복잡한 조건문/폼 submit 은 handwritten 영역으로 남긴다.
+    """
+    if not html:
+        return []
+    soup = BeautifulSoup(html, "lxml")
+    calls = _js_calls_from_attrs(soup)
+    if not calls:
+        return []
+    wanted = {c["function"] for c in calls}
+    first_id: dict[str, str] = {}
+    for c in calls:
+        first_id.setdefault(c["function"], c["sample_id"])
+    out: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for fm in _FUNC_BODY_RE.finditer(html):
+        fname = fm.group(1)
+        if fname not in wanted:
+            continue
+        params = [p.strip() for p in fm.group(2).split(",") if p.strip()]
+        if not params:
+            continue
+        loc = _LOCATION_EXPR_RE.search(fm.group("body") or "")
+        if not loc:
+            continue
+        tmpl = _template_from_js_expr(loc.group("expr"), params[0])
+        if not tmpl:
+            continue
+        abs_tmpl = urljoin(base_url, tmpl)
+        key = (fname, abs_tmpl)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({
+            "function": fname,
+            "sample_id": first_id.get(fname),
+            "detail_url_template": abs_tmpl,
+        })
+    return out
+
+
+def _match_js_detail_template(hrefs: list[str], templates: list[dict]) -> Optional[str]:
+    if not hrefs or not templates:
+        return None
+    funcs = set()
+    for href in hrefs:
+        m = _JS_CALL_RE.search(href or "")
+        if m:
+            funcs.add(m.group(1))
+    for t in templates:
+        if t.get("function") in funcs:
+            return t.get("detail_url_template")
+    return None
+
+
+_AUTH_REDIRECT_RE = re.compile(r"(권한|인증|로그인|permission|auth|unauthori[sz]ed|alert\s*\()", re.IGNORECASE)
+_EMPTY_SHELL_RE = re.compile(r"(게시판을\s*선택|메뉴를\s*선택|목록이\s*없|등록된\s*게시물이\s*없|no\s+data|no\s+posts)", re.IGNORECASE)
+_MENU_PARAM_NAMES = ("menuid", "menuId", "menuCd", "mId", "mid", "mnSeq")
+_BOARD_PARAM_NAMES = ("bbsId", "boardId", "boardtypeid", "bid")
+
+
+def _query_params(url: str) -> dict[str, str]:
+    return {k: v for k, v in parse_qsl(urlsplit(url).query, keep_blank_values=True)}
+
+
+def _same_url_family(base_url: str, href: str) -> bool:
+    b = urlsplit(base_url)
+    h = urlsplit(urljoin(base_url, href))
+    if b.netloc and h.netloc and b.netloc != h.netloc:
+        return False
+    if b.path and h.path and b.path.rstrip("/") != h.path.rstrip("/"):
+        return False
+    bq = _query_params(base_url)
+    hq = _query_params(urlunsplit((h.scheme, h.netloc, h.path, h.query, "")))
+    shared_board = [k for k in _BOARD_PARAM_NAMES if k in bq and hq.get(k) == bq[k]]
+    return bool(shared_board)
+
+
+@heuristic
+def detect_url_missing_param_pattern(
+    html: str,
+    *,
+    base_url: str,
+    html_candidates: list[dict],
+) -> Optional[dict]:
+    """KR egov board URLs that need menu/mid params in addition to board id.
+
+    The signal is deliberately diagnostic only: current URL has a board id but lacks a menu-ish
+    param, page looks like an auth redirect/empty shell/empty rows, and same-family links expose
+    that missing param.
+    """
+    if not html or not base_url:
+        return None
+    base_params = _query_params(base_url)
+    if not any(k in base_params for k in _BOARD_PARAM_NAMES):
+        return None
+    if any(k in base_params for k in _MENU_PARAM_NAMES):
+        return None
+    if html_candidates:
+        rowish = [c for c in html_candidates if c.get("sample_url") and int(c.get("child_count") or 0) >= 3]
+        if rowish:
+            return None
+
+    text = BeautifulSoup(html, "lxml").get_text(" ", strip=True)
+    symptom: Optional[str] = None
+    if _AUTH_REDIRECT_RE.search(html):
+        symptom = "auth_redirect"
+    elif _EMPTY_SHELL_RE.search(text):
+        symptom = "empty_shell"
+    else:
+        trs = len(re.findall(r"<tr\b", html, re.IGNORECASE))
+        anchors = len(re.findall(r"<a\b", html, re.IGNORECASE))
+        if trs <= 1 and anchors >= 1:
+            symptom = "empty_rows"
+    if symptom is None:
+        return None
+
+    soup = BeautifulSoup(html, "lxml")
+    candidates: list[dict] = []
+    counts: dict[str, int] = {}
+    for a in soup.find_all("a", href=True):
+        href = str(a.get("href") or "")
+        if not _same_url_family(base_url, href):
+            continue
+        full = urljoin(base_url, href)
+        params = _query_params(full)
+        for name in _MENU_PARAM_NAMES:
+            if name in params and name not in base_params:
+                counts[name] = counts.get(name, 0) + 1
+                candidates.append({"url": full, "param": name, "value": params.get(name)})
+    if not counts:
+        return None
+    suggested = sorted(counts.items(), key=lambda kv: (-kv[1], _MENU_PARAM_NAMES.index(kv[0])))[0][0]
+    return {
+        "symptom": symptom,
+        "suggested_param": suggested,
+        "candidates": [c for c in candidates if c["param"] == suggested][:5],
+    }
 
 
 @heuristic
