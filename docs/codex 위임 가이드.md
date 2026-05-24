@@ -51,10 +51,15 @@ batch·hand-config 는 전용 경로(아래 §6 참조)가 따로 있고, 이 �
    ```powershell
    python scripts/codex_watch.py output/codex_generic_<name>_prompt.result.txt --loop
    ```
-4. **검토·배포 (Claude)** — codex 는 commit 전 STOP. Claude 가:
-   - `git diff` 로 **파일셋 = ALLOW-LIST 인지 검증** (codex 명시 제약 위반 전례 — §7 함정).
-   - 변경 코히어런스 확인 + `probe_smoke --stage 3 --stage 5` PASS 재확인.
-   - 통과 시 Claude 가 commit/push → N100 배포 (commit 후 자동 배포 룰).
+4. **검토·배포 (Claude)** — codex 는 commit 전 STOP. Claude 가 **직접 산출물 읽고 audit 의무** (headline 수치·result.md 요약만 보고 바로 commit X — §7 "codex 산출물 신뢰 함정"):
+   - **4a. 파일셋 audit** — `git diff --stat main...HEAD` 로 파일셋 = ALLOW-LIST 인지 검증 (codex 명시 제약 위반 전례 — §7 함정).
+   - **4b. 변경 내용 audit** — 각 변경 파일의 diff 를 *Claude 가 직접 읽는다*. 보는 것:
+     - 로직이 task 요구와 맞나 (codex 가 task 오독·우회·시늉만 한 케이스 검출).
+     - 새 코드의 명백한 버그·dead path·잘못된 예외 처리·구문 오류 (`probe_smoke` 안 잡는 영역).
+     - case body / 산출 문서가 있으면 §회피 게이트 4종 (probe pull skip·일반화 punt·ALLOW-LIST 핑계·`no_change` 정당화 불충분 — 자세히 `feedback-codex-punt-audit` memory) 적용.
+     - codex `result.md` 의 "✓ 완료" 주장이 실제 diff 와 일치하는지 cross-check.
+   - **4c. 기계 검증** — `probe_smoke --stage 3 --stage 5` PASS 재확인. 변경 영역에 unit test 있으면 그것도.
+   - **4d. 통과 시** Claude 가 commit/push → N100 배포 (commit 후 자동 배포 룰). 위반/미흡이면 commit 안 하고 그 자리서 직접 수정 또는 codex 재위임(발견 사실 task 머리에 명시 — 두 번째에 같은 punt 안 하게).
 
 ## 5. 공유 자원은 Claude 직렬
 
@@ -76,6 +81,7 @@ HARD-STOP 프롬프트가 이걸 박지만 — **prompt 제약(soft)** 이라 �
 ## 7. 학습된 함정
 
 - **codex 는 명시 제약도 위반 경향** — commit·over-edit·"하지마" 무시 전례(2026-05-21). → HARD-STOP 프롬프트 + **Claude diff-review 게이트 필수**. codex 결과 맹신 X.
+- **codex 산출물 신뢰 함정 — headline/result.md 만 보고 commit X** — 반복 패턴: codex 가 STOP 후 result.md 에 "8건 ✓ 완료" 적으면 Claude 가 diff 안 까고 바로 commit/push → 후에 버그·punt·task 오독 발견. `result.md` 는 codex 의 *자기 보고* — 검증 아님. **반드시 §4.4b 처럼 Claude 가 직접 diff 와 변경 파일 본문을 읽고 audit**. 영구 게이트 = §4.4b + `feedback-codex-punt-audit` memory + `.claude/skills/hand-config/SKILL.md` §0c step 5d (hand-config 경로). 일반 작업도 같은 의무 — 이 줄로 박음.
 - **여러 codex 세션 = 같은 working tree 공유** (codex_run.ps1 `Set-Location $repo`, 격리 X). 같은 파일 동시 편집 = 디스크 레이스. 일반 작업은 보통 1 세션이라 무관하나, 동시 띄우면 disjoint 파일 배정(ADR 0008 §병렬 위임 규율).
 - **PowerShell `Tee-Object`/`2>&1` 금지** — Tee 는 버퍼링+UTF-16 로 live 모니터 깨짐, `2>&1` 은 native stderr 를 ErrorRecord 로 감싸 전부 빨강. 완료는 `-o` 결과파일로만.
 - **codex-companion broker(`codex:rescue`) 경로 회피** — Claude in-loop(토큰 목표 위배) + Windows stdout-heavy probe 에서 IPC deadlock(#330). 확정 경로 = codex CLI 직접(codex_run.ps1).
