@@ -39,7 +39,8 @@
 | `post_id_stable_shape` | post_id 형태 불안정 | post_id 가 매번 바뀌는 형태 — 새 게시물 감지 X. |
 | `title_nonempty` | 제목 비어 있음 | title selector 가 빈 문자열 반환. |
 | `[FAIL]:<check>` *(dynamic)* | 신규 fail_check 감지 | catalog 미등록 [FAIL] check_name — Subkind 추가 권장. |
-| `gemini_api` | Gemini API 호출 실패 | 429 RESOURCE_EXHAUSTED / UNAVAILABLE / 호출·파싱 실패. |
+| `llm_parse` | LLM 응답 JSON 파싱 실패 | 응답 JSON 파싱 실패 — 모델이 malformed JSON 반환 (보통 codex/큰 응답). prompt schema 강화 / 다른 모델 라우팅 후보. API 호출 자체는 성공. |
+| `llm_api` | LLM API 호출 실패 | 429 RESOURCE_EXHAUSTED / UNAVAILABLE / 네트워크 오류. provider-agnostic. 구 `gemini_api` subkind 의 alias — 옛 DB row 의 'gemini 호출' 토큰도 잡음. |
 
 ### url_dead
 

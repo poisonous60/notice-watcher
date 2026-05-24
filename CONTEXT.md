@@ -124,7 +124,7 @@ marker 보다 한 단계 더 세분화 — `.REJECTED.json` 한 마커가 `polic
 _Avoid_: "fail_category" / "error_type" / "reject_kind" — 어휘 떠다님. "정책 거부"로 captcha 부르지 X (= `capability_blocked`, 능력 부족).
 
 **fail_subkind** (대시보드 `/jobs` 2차 분류, `result_tail` regex 파생):
-fail_kind 안의 sub. gen_fail → `[FAIL] <check>` 이름 (`posts_nonempty` / `article_body_len` / `published_at_iso` / `post_id_*` / `title_nonempty` / `gemini_api`); policy_reject → `login_required` (+ legacy rc=2 `blocked_bot/ip/geo`); capability_blocked → `cloudflare` / `baseline_blocked` / `entry_blocked`(미분류 fallback); gate_reject → `recognizer:<name>` / `nav_only` / `meta_diverging` / `multi_host_hub` / `board_shape`; bug → `chromium_lock_timeout` / `subprocess_timeout` / `subprocess_exception` / `worker_exception`.
+fail_kind 안의 sub. gen_fail → `[FAIL] <check>` 이름 (`posts_nonempty` / `article_body_len` / `published_at_iso` / `post_id_*` / `title_nonempty`) / `llm_parse` (응답 JSON 깨짐) / `llm_api` (API 단 실패 — provider-agnostic, 옛 `gemini_api` 의 후계); policy_reject → `login_required` (+ legacy rc=2 `blocked_bot/ip/geo`); capability_blocked → `cloudflare` / `baseline_blocked` / `entry_blocked`(미분류 fallback); gate_reject → `recognizer:<name>` / `nav_only` / `meta_diverging` / `multi_host_hub` / `board_shape`; bug → `chromium_lock_timeout` / `subprocess_timeout` / `subprocess_exception` / `worker_exception`.
 
 `/jobs` 셀 2줄째에 작은 회색 글로 표시, hover 에 풀 reason text. DB 컬럼 X — `bot/fail_taxonomy.py:classify_fail()` 가 읽을 때 파생 (ADR 0002).
 

@@ -52,6 +52,10 @@ class LLMResponse:
     key_idx: Optional[int] = None  # gemini 직링크 멀티키 라운드로빈에서 어느 키 썼나
     prompt_chars: int = 0
     response_chars: int = 0
+    provider: str = ""             # 응답 *준* 실제 provider — FallbackClient 가 primary/fallback 중
+                                   # 어느 게 응답했는지 caller 가 알 수 있음. base `LLMClient.generate`
+                                   # 가 success path 에서 self.provider 로 채움 (FallbackClient 도
+                                   # 자기 primary/fallback 의 generate() 가 채운 값 그대로 반환).
 
 
 @dataclass
@@ -100,6 +104,7 @@ class LLMClient(ABC):
         resp.latency_ms = elapsed
         resp.prompt_chars = prompt_chars
         resp.response_chars = len(resp.text)
+        resp.provider = self.provider
         if resp.cost_usd is None and self._cost_fn is not None:
             try:
                 resp.cost_usd = self._cost_fn(self.provider, resp.raw_model or self.model,

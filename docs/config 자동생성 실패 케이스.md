@@ -53,10 +53,27 @@
 - **원인**: `post_id` 로 공백 있는 문자열(제목을 잘못 씀)이나 매번 바뀌는 slug 를 씀 / `title` 셀렉터가 빈 값을 줌.
 - **대응**: `post_id` 는 URL·href 안의 안정적인 숫자 ID 를 써라(새 글 감지의 키). 손으로 필드 셀렉터/transform 수정 → `register.py --config`.
 
-### 2e. `생성 실패: gemini 호출/파싱 실패` — Gemini API 문제
-- **`429 / RESOURCE_EXHAUSTED`**: 그 키 quota 소진 — 자동으로 다음 키로 폴백(`output/state/gemini_key_cursor` 로 라운드로빈). *모든* 키가 소진되면 명확히 에러. → `.env` `GEMINI_API_KEYS` 에 키 추가(콤마구분), 또는 유료 키.
-- **`503 UNAVAILABLE "high demand"`**: Google 모델 과부하 — 일시적. 해당 시도 1회를 까먹음. → 잠시 후 재시도. (구조적 실패가 아니라 운 — 다른 [FAIL] 가 같이 안 보이면 그냥 다시 돌리면 됨.)
-- **`스키마 검증 실패` 반복**: Gemini 가 자꾸 잘못된 config JSON 을 냄. 드뭄. → 손작성.
+### 2e. `생성 실패: LLM 호출 실패 (…)` / `LLM 응답 JSON 파싱 실패 (…)` — LLM 단 문제 (provider-agnostic)
+**provider 라벨**:
+- API 실패 시 `client.provider` — `FallbackClient` 라면 `(fallback)` (= primary+fallback 둘 다 실패) 박힘.
+- 응답 본문 JSON 파싱 실패 시 `resp.provider` — `FallbackClient` 라도 실제로 응답 준 쪽 (`codex` / `gemini`) 박힘.
+
+옛 로그는 단일 `gemini 호출/파싱 실패` 로 박혀 있을 수 있지만 (2026-05-24 이전), 분류기는 둘 다 잡음.
+
+두 subkind 로 분기됨:
+
+- **`llm_api` — API 단 실패** (네트워크/quota/공급자 측 장애)
+  - **`429 / RESOURCE_EXHAUSTED`**: gemini key quota 소진 — KeyRing 이 다음 키로 자동 폴백 (`output/state/gemini_key_cursor` 라운드로빈). *모든* 키 소진 시 LLMQuotaError. → `.env` `GEMINI_API_KEYS` 에 키 추가(콤마구분) 또는 유료 키.
+  - **`503 UNAVAILABLE`**: 공급자 측 과부하 — 일시적. 해당 시도 1회 까먹음. → 잠시 후 재시도. 다른 [FAIL] 없으면 운 — 다시 돌리면 됨.
+  - **`Network error`**: httpx 단 실패 (DNS / TLS / connect timeout). transient.
+
+- **`llm_parse` — 응답 JSON 깨짐** (API 는 성공)
+  - 모델이 malformed JSON 을 200 OK 로 반환. `_parse_json_loose` 가 `Expecting ',' delimiter` 등으로 실패. → API 호출은 성공으로 카운트 (usage 로그에 `ok` 로 박힘).
+  - **codex (GPT-5.4-mini) 큰 응답에서 다발** (2026-05-24 govinfo job#1702 케이스: line 1 column 2556 에서 `,` 누락). raw text length ≥ ~2KB 이상이면 자주 발생. → routing.json 에서 해당 call_site 를 `gemini` 로 폴백하거나 `gpt-5.4` (mini 아닌 풀) 로 격상.
+  - **prompt schema 강화**: `generate/prompts.py` 에서 출력 schema 를 더 명시 (필드 순서·escape 룰).
+  - **반복 발생 사이트**: 손작성.
+
+자세히는 [`docs/2026-05-24-llm-label-bug-and-codex-json-parse.md`](2026-05-24-llm-label-bug-and-codex-json-parse.md).
 
 ### 2f. `chromium 락 대기 초과` / `register.py 실행 시간 초과 (10분)` / `재-probe 실패`
 - **원인**: register/poll/다른 `/watch` 가 동시에 chromium 을 쓰려 함 (락 대기) / 사이트가 너무 느림 / probe 가 멈춤.

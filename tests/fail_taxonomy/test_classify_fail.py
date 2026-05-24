@@ -46,11 +46,33 @@ CASES: list[tuple[str, tuple[Optional[str], Optional[int], Optional[str]], str, 
     ("gen_fail_post_id_stable", ("failed", 1, "[FAIL] post_id_stable_shape: ..."),
      "gen_fail", "post_id_stable_shape"),
     ("gen_fail_title_nonempty", ("failed", 1, "[FAIL] title_nonempty: ..."), "gen_fail", "title_nonempty"),
-    ("gen_fail_gemini_429", ("failed", 1, "생성 실패: gemini 호출/파싱 실패 (429 RESOURCE_EXHAUSTED)"),
-     "gen_fail", "gemini_api"),
-    # 구 코드 동작: [FAIL] 라인이 있으면 그 이름 그대로 (gemini 토큰 무시). dynamic passthrough 가
-    # gemini_api 매처 *앞* 에 와야 보존됨 — 회귀 차단용 fixture.
-    ("gen_fail_unknown_fail_beats_gemini_token",
+    # llm_api — API 단 실패 (429/UNAVAILABLE/네트워크). provider-agnostic. 새 split 라벨 + alias 둘 다 잡음.
+    ("gen_fail_llm_api_new_split_label",
+     ("failed", 1, "생성 실패: LLM 호출 실패 (gemini): 429 RESOURCE_EXHAUSTED"),
+     "gen_fail", "llm_api"),
+    ("gen_fail_llm_api_fallback_both_failed",
+     ("failed", 1, "생성 실패: LLM 호출 실패 (fallback): codex network err; gemini 429 RESOURCE_EXHAUSTED"),
+     "gen_fail", "llm_api"),
+    ("gen_fail_llm_api_legacy_gemini_token",
+     ("failed", 1, "생성 실패: gemini 호출/파싱 실패 (429 RESOURCE_EXHAUSTED)"),
+     "gen_fail", "llm_api"),
+    ("gen_fail_llm_api_unavailable",
+     ("failed", 1, "Gemini API 503: UNAVAILABLE"),
+     "gen_fail", "llm_api"),
+    # llm_parse — 응답 JSON 깨짐. 처방 다름 (prompt schema / 모델 강화). codex 큰 응답에서 다발 (2026-05-24).
+    # split 후 라벨 = "LLM 응답 JSON 파싱 실패 (codex)" — provider 가 실제 응답 준 쪽 (FallbackClient 도 정확).
+    ("gen_fail_llm_parse_new_split_label_codex",
+     ("failed", 1,
+      "(직전 시도 생성 실패: LLM 응답 JSON 파싱 실패 (codex): 모델 응답을 JSON 으로 파싱 실패: "
+      "Expecting ',' delimiter: line 1 column 2556 (char 2555)"),
+     "gen_fail", "llm_parse"),
+    ("gen_fail_llm_parse_legacy_gemini_label",
+     ("failed", 1,
+      "생성 실패: gemini 호출/파싱 실패: 모델 응답을 JSON 으로 파싱 실패: Expecting value"),
+     "gen_fail", "llm_parse"),
+    # 구 코드 동작: [FAIL] 라인이 있으면 그 이름 그대로 (LLM 토큰 무시). dynamic passthrough 가
+    # llm_* 매처 *앞* 에 와야 보존됨 — 회귀 차단용 fixture.
+    ("gen_fail_unknown_fail_beats_llm_token",
      ("failed", 1, "[FAIL] foo_bar_baz: 어쩌고 ... RESOURCE_EXHAUSTED ..."),
      "gen_fail", "foo_bar_baz"),
     ("gen_fail_no_match", ("failed", 1, "something else"), "gen_fail", None),

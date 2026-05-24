@@ -300,7 +300,7 @@ dynamic family (`recognizer:*`, `[FAIL]:<check>`) 는 추가 필요 X — 자동
 
 **dynamic Subkind 위치 규칙** — 각 FailKind 의 `subkinds` 튜플 안에서 의도된 우선순위:
 
-- `gen_fail`: fixed `[FAIL]` 매처들 → `[FAIL]:<check>` dynamic passthrough → 토큰 fallback (`gemini_api`). `[FAIL]` 라인이 있으면 그 이름이 항상 토큰 매처를 이긴다 (구 동작 보존).
+- `gen_fail`: fixed `[FAIL]` 매처들 → `[FAIL]:<check>` dynamic passthrough → 토큰 fallback (`llm_parse` 가 `llm_api` 보다 먼저 — 응답 JSON 깨짐이 더 구체적). `[FAIL]` 라인이 있으면 그 이름이 항상 토큰 매처를 이긴다 (구 동작 보존). 옛 `gemini_api` subkind 는 2026-05-24 에 `llm_api` + `llm_parse` 로 분리 (provider-agnostic, codex parse 실패 분리 진단). 옛 DB row 의 'gemini 호출' 토큰도 `llm_api` 가 alias 로 잡음.
 - `gate_reject`: `recognizer:*` dynamic 이 **첫째**. recognizer fast-path 의도 — 다른 게이트 메시지가 같이 있어도 recognizer 우선. 새 fixed gate Subkind 는 dynamic 뒤에 박는다.
 
 새 Subkind 추가 시 *어느 위치에 박는가* 가 결과를 바꿈 — declaration order = matcher 순회 순서.

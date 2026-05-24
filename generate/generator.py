@@ -152,13 +152,21 @@ def _slug_from_digest(digest: dict) -> Optional[str]:
 
 def _generate_raw(digest: dict, *, client: LLMClient, prompt_text: str, temperature: float,
                   call_site: str, attempt: int) -> dict:
+    # API/네트워크/엔벨로프 단 실패 vs *응답 본문* JSON 파싱 실패 를 분리해 surface.
+    # - API 실패 시 `client.provider` — FallbackClient 면 primary+fallback 둘 다 실패한 케이스라
+    #   "(fallback)" 라벨이 의미 있음 ("둘 다 실패").
+    # - parse 실패 시 `resp.provider` — primary 가 200 응답 줬는데 본문이 malformed JSON 인 케이스.
+    #   FallbackClient 라도 실제로 응답 준 provider (codex/gemini) 가 박힘.
     try:
         resp = client.generate(system_instruction=SYSTEM_INSTRUCTION, user_text=prompt_text,
                                temperature=temperature, json_mode=True,
                                call_site=call_site, slug=_slug_from_digest(digest), attempt=attempt)
+    except LLMError as e:
+        raise GenerationError(f"LLM 호출 실패 ({client.provider}): {e}") from e
+    try:
         cfg = _parse_json_loose(resp.text)
     except LLMError as e:
-        raise GenerationError(f"gemini 호출/파싱 실패: {e}") from e
+        raise GenerationError(f"LLM 응답 JSON 파싱 실패 ({resp.provider or client.provider}): {e}") from e
     return _patch_minimal(cfg, digest)
 
 

@@ -190,16 +190,32 @@ FAIL_CATALOG: tuple[FailKind, ...] = (
                     _fail_check("title_nonempty")),
             # ▼ `[FAIL]` 라인 dynamic passthrough — fixed [FAIL] Subkind 다 미스했고 어쨌든 [FAIL] 라인이
             #   하나라도 있으면 그 마지막 이름 surface (catalog 미등록 check name 도). 토큰-기반 매처
-            #   (`gemini_api`) 보다 *앞* 에 와야 구 동작 보존: 구 `classify_fail` 은 `[FAIL]` 가 있으면
-            #   gemini 토큰 무시하고 그 이름 그대로 반환했음.
+            #   (`llm_parse` / `llm_api`) 보다 *앞* 에 와야 구 동작 보존: 구 `classify_fail` 은 `[FAIL]` 가 있으면
+            #   LLM 토큰 무시하고 그 이름 그대로 반환했음.
             Subkind("[FAIL]:<check>", "신규 fail_check 감지",
                     "catalog 미등록 [FAIL] check_name — Subkind 추가 권장.",
                     _fail_check_dynamic, dynamic=True),
             # ▼ 토큰-기반 fallback. `[FAIL]` 라인이 *없을* 때만 도달 (위 dynamic 이 잡지 못함).
-            Subkind("gemini_api", "Gemini API 호출 실패",
-                    "429 RESOURCE_EXHAUSTED / UNAVAILABLE / 호출·파싱 실패.",
-                    _has_any("RESOURCE_EXHAUSTED", "UNAVAILABLE", "gemini 호출",
-                             name="gemini_api")),
+            # ▼▼ `llm_parse` 가 `llm_api` 보다 *먼저* — 응답 JSON 파싱 실패는 보통 두 토큰 다 박힘
+            #     ("LLM 호출/파싱 실패 ... JSON 으로 파싱 실패"). 더 구체적인 진단이 이김.
+            #     (2026-05-24: 옛 `gemini_api` 단일 subkind 가 codex/openrouter 의 parse 실패까지
+            #      삼키던 버그 분리 — provider-agnostic 라벨 + 처방 분리.)
+            Subkind("llm_parse", "LLM 응답 JSON 파싱 실패",
+                    "응답 JSON 파싱 실패 — 모델이 malformed JSON 반환 (보통 codex/큰 응답). "
+                    "prompt schema 강화 / 다른 모델 라우팅 후보. API 호출 자체는 성공.",
+                    _has_any("LLM 응답 JSON 파싱 실패",                # new label (split)
+                             "JSON 으로 파싱 실패",                      # inner _parse_json_loose msg + legacy
+                             "Expecting ',' delimiter",
+                             "Expecting value", "Expecting property name",
+                             name="llm_parse")),
+            Subkind("llm_api", "LLM API 호출 실패",
+                    "429 RESOURCE_EXHAUSTED / UNAVAILABLE / 네트워크 오류. provider-agnostic. "
+                    "구 `gemini_api` subkind 의 alias — 옛 DB row 의 'gemini 호출' 토큰도 잡음.",
+                    _has_any("RESOURCE_EXHAUSTED", "UNAVAILABLE",
+                             "LLM 호출 실패",     # new label (split, API-only)
+                             "LLM 호출",          # transient combined label (이 commit 직전 stage)
+                             "gemini 호출",       # pre-this-session legacy
+                             name="llm_api")),
         ),
     ),
     # url_dead: 입력 URL 자체가 잘못 — 사이트 정책과 무관. 카탈로그 yaml URL 편집이 답 (코드 X).
