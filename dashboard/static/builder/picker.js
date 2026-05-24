@@ -23,7 +23,9 @@ window.addEventListener('message', (e) => {
   if (m.type === 'picker:mode') {
     mode = m.mode || 'idle';
     clearOutline();
-    clearMatchedOutline();
+    // matched outline 은 보존 — parent 가 row pick 후 자동 idle 보내 outline
+    // 즉시 사라지던 bug. 명시적 picker:clear-matched 받을 때만 clear.
+    if (m.clear_matched) clearMatchedOutline();
     try {
       document.body.style.cursor = (mode === 'idle') ? '' : 'crosshair';
     } catch (_) {}
