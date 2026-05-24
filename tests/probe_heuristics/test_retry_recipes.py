@@ -116,10 +116,15 @@ def run() -> list[tuple[str, bool, str]]:
                   isinstance(new_pid, list) and len(new_pid) == 1
                   and new_pid[0].get("selector") == "link",
                   f"got {new_pid!r}"))
-    cases.append(("patch_r1_post_id_has_path_tail_regex",
-                  any("regex_extract" in (t[0] if isinstance(t, list) and t else "")
-                      for t in new_pid[0].get("transform", [])),
-                  f"got {new_pid!r}"))
+    # Recipe 1 patch = link 전체 URL (path 까지 살림). regex_extract 박지 X — TAL 류 promo
+    # 항목의 path tail 이 다른 episode 와 겹쳐 unique 깨지는 이슈 회피 (2026-05-25 N100 real LLM).
+    transforms = new_pid[0].get("transform", []) if new_pid else []
+    cases.append(("patch_r1_post_id_no_regex_extract",
+                  not any(isinstance(t, list) and t and t[0] == "regex_extract" for t in transforms),
+                  f"regex_extract 박힘 (path tail collision 문제): {transforms!r}"))
+    cases.append(("patch_r1_post_id_strips_query_fragment",
+                  any(isinstance(t, list) and t and t[0] == "strip_query_fragment" for t in transforms),
+                  f"strip_query_fragment 없음: {transforms!r}"))
 
     # R-H3 critical — prev_cfg 안 덮어씀
     cases.append(("patch_r1_prev_cfg_not_mutated",
@@ -240,6 +245,17 @@ def run() -> list[tuple[str, bool, str]]:
                   "feedback section 에 JSON snippet 박힘 — build_retry_prompt 와 중복"))
     cases.append(("section_empty_when_no_recipe",
                   _build_recipe_feedback_section([], None) == "", ""))
+
+    # patched=None 이어도 recipes 있으면 text hint 박힘 (Radiolab 류 — 이미 playwright_html 인 cfg
+    # 에 Recipe 2 trigger 되면 strategy switch 가 no-op → patched None. 그래도 진단 + 가이드 text 는
+    # LLM 한테 전달돼야 함. 2026-05-25 N100 검증에서 발견된 bug 의 회귀 가드.)
+    sec_no_patch = _build_recipe_feedback_section(["spa_rendered_retry"], None)
+    cases.append(("section_text_hint_when_patched_none",
+                  "spa_rendered_retry" in sec_no_patch and "발동" in sec_no_patch,
+                  f"got {sec_no_patch[:200]!r}"))
+    cases.append(("section_no_patch_uses_no_op_phrasing",
+                  "patch 적용할 자리는 없" in sec_no_patch,
+                  f"got {sec_no_patch[:200]!r}"))
 
     # ── build_retry_prompt with starting_candidate ─────────────────────────
     # 최소 digest — build_user_prompt 가 안 깨질 정도

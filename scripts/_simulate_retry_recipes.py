@@ -58,17 +58,20 @@ def _simulate(slug: str, prev_cfg: dict, fail_history: list[list[str]], label: s
 
     # Step 2: patch
     patched = _apply_recipe_patch(prev_cfg, recipes, digest)
-    print(f"  → _apply_recipe_patch ok: strategy={patched.get('strategy')!r}")
-    new_pid = (patched.get("list") or {}).get("fields", {}).get("post_id")
-    if new_pid:
-        print(f"    list.fields.post_id = {json.dumps(new_pid, ensure_ascii=False)[:200]}")
-    new_wait = (patched.get("list") or {}).get("wait_selector")
-    if new_wait:
-        print(f"    list.wait_selector = {new_wait!r}")
+    if patched is None:
+        print("  → _apply_recipe_patch = None (no-op — text hint only path)")
+    else:
+        print(f"  → _apply_recipe_patch ok: strategy={patched.get('strategy')!r}")
+        new_pid = (patched.get("list") or {}).get("fields", {}).get("post_id")
+        if new_pid:
+            print(f"    list.fields.post_id = {json.dumps(new_pid, ensure_ascii=False)[:200]}")
+        new_wait = (patched.get("list") or {}).get("wait_selector")
+        if new_wait:
+            print(f"    list.wait_selector = {new_wait!r}")
 
-    # R-H3 — prev_cfg mutation 확인
-    prev_pid = (prev_cfg.get("list") or {}).get("fields", {}).get("post_id")
-    print(f"    prev_cfg.list.fields.post_id 보존? {prev_pid == [{'from': 'css', 'selector': 'guid', 'text': True}] if prev_pid else 'N/A'}")
+        # R-H3 — prev_cfg mutation 확인
+        prev_pid = (prev_cfg.get("list") or {}).get("fields", {}).get("post_id")
+        print(f"    prev_cfg.list.fields.post_id 보존? {prev_pid == [{'from': 'css', 'selector': 'guid', 'text': True}] if prev_pid else 'N/A'}")
 
     # Step 3: recipe text section
     section = _build_recipe_feedback_section(recipes, patched)
@@ -157,6 +160,14 @@ def main() -> int:
     _simulate("host_radiolab-org_podcast_0080db5b", rl_prev,
               [["posts_nonempty"], ["title_nonempty"]],
               "Radiolab — Recipe 2 (posts_nonempty + title_nonempty)")
+
+    # === Radiolab no-op 시나리오 — 실제 N100 register flow (2026-05-25) ===
+    # LLM 이 attempt 1 부터 playwright_html 박은 경우. Recipe 2 patch 가 strategy switch
+    # 라 prev_cfg 이미 playwright_html 이면 patched=None. text hint *만* 박혀야 함 (bug fix #1).
+    rl_prev_pw = dict(rl_prev, strategy="playwright_html")
+    _simulate("host_radiolab-org_podcast_0080db5b", rl_prev_pw,
+              [["posts_nonempty"], ["posts_nonempty"]],
+              "Radiolab no-op — LLM 이 이미 playwright_html (text hint only)")
     return 0
 
 

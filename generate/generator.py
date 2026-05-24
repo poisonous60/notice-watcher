@@ -33,15 +33,26 @@ def _build_recipe_feedback_section(recipes: list[str], patched_candidate: Option
 
     JSON snippet 은 여기서 안 박는다 — build_retry_prompt 의 별도 starting_candidate block 이 박음.
     여긴 *왜 inject 했는지* + *어떻게 따라가야 하는지* text hint 만.
-    patched_candidate=None 또는 recipes 없으면 빈 string.
+
+    patched_candidate=None 도 OK — recipe selected 됐는데 patch 가 no-op 인 경우 (예: Recipe 2 가
+    이미 playwright_html 인 cfg 에 trigger 됐을 때 strategy switch 가 의미 없음). text hint *는*
+    여전히 박힘 — LLM 한테 진단 정보 + 휴리스틱 가이드 전달용 (plan §2a Recipe 2 "이미 playwright_html
+    이면 text hint 만").
+    recipes 자체가 빈 경우만 빈 string.
     """
-    if not recipes or not patched_candidate:
+    if not recipes:
         return ""
     lines = ["\n### D-layer recipe 발동 (반복 실패 봉합 룰 inject)"]
-    lines.append(
-        "같은 hard fail 이 2회+ 반복됨. 자연어 hint 만으로 봉합 안 돼 결정론 룰 강제 inject. "
-        "아래 hint + prompt 의 `### 추천 수정 starting point` 블록 cfg 따라가라."
-    )
+    if patched_candidate:
+        lines.append(
+            "같은 hard fail 이 2회+ 반복됨. 자연어 hint 만으로 봉합 안 돼 결정론 룰 강제 inject. "
+            "아래 hint + prompt 의 `### 추천 수정 starting point` 블록 cfg 따라가라."
+        )
+    else:
+        lines.append(
+            "같은 hard fail 이 2회+ 반복됨. recipe 의 결정론 patch 적용할 자리는 없지만 "
+            "(이미 권장 strategy/selector 박음), 아래 hint 의 진단 + 휴리스틱 가이드 따라 *방향* 을 바꿔라."
+        )
     for r in recipes:
         hint = _RECIPE_TEXT_HINTS.get(r)
         if hint:
@@ -218,13 +229,16 @@ def _recipe_2_applies(cfg: dict, digest: dict) -> bool:
     return sk.get("kind") == "spa_rendered" and sk.get("confidence") == "high"
 
 
-# Recipe 1 patch: list.fields.post_id = link path tail (RSS 표준 봉합 — thisamericanlife 류)
+# Recipe 1 patch: list.fields.post_id = link 전체 URL (path 까지 살림, query/fragment 만 제거).
+# path tail 추출 (plan §2a 원안) 은 TAL 류 podcast feed 에서 일부 promo episode 의 path tail 이
+# 다른 episode 와 겹쳐 unique 깨짐 — N100 real LLM 검증 (2026-05-25) 에서 14→2건 부분 회복만.
+# URL 전체는 모든 RSS link 가 unique URL 인 한 무조건 unique. post_id 가 길어지나 기능 OK.
 _RECIPE_1_POST_ID_PATCH = [
     {
         "from": "css",
         "selector": "link",
         "text": True,
-        "transform": [["strip"], ["strip_query_fragment"], ["regex_extract", "/([^/?#]+)/?$"]],
+        "transform": [["strip"], ["strip_query_fragment"]],
     }
 ]
 
@@ -332,9 +346,9 @@ def _apply_recipe_patch(prev_cfg: dict, recipes: list[str], digest: dict) -> Opt
 _RECIPE_TEXT_HINTS = {
     "rss_post_id_from_link": (
         "**Recipe rss_post_id_from_link** — `post_id_unique`/`post_id_stable_shape` 반복 실패. "
-        "RSS item 의 `<guid>` 가 불안정 ID (공백/긴 문장/원문 URL 결합). `link` path tail 을 post_id 로 써라. "
-        "위 starting point 의 `list.fields.post_id` 정확히 그 transform chain 그대로 박아라 — "
-        "다른 selector 미세 변형 X."
+        "RSS item 의 `<guid>` 가 불안정 ID (공백/긴 문장/원문 URL 결합). `link` 전체 URL 을 post_id 로 써라 "
+        "(query/fragment 만 strip, path tail 추출 X — 일부 RSS 의 promo 항목 path tail 이 겹쳐 unique 깨짐). "
+        "위 starting point 의 `list.fields.post_id` 정확히 그 transform chain 그대로 박아라."
     ),
     "spa_rendered_retry": (
         "**Recipe spa_rendered_retry** — `posts_nonempty`/`title_nonempty` 반복 실패 + SPA. "
