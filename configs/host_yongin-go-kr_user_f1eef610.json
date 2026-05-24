@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "site": "www.yongin.go.kr",
+  "board": "1001",
+  "strategy": "playwright_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8"
+  },
+  "timeout": 25,
+  "nav_timeout_ms": 30000,
+  "idle_timeout_ms": 5000,
+  "list": {
+    "url_template": "https://www.yongin.go.kr/user/bbs/BD_selectBbsList.do?q_bbsCode={board}",
+    "pagination": {"kind": "none"},
+    "wait_selector": "table tbody tr a[href*='q_bbscttSn=']",
+    "row_selector": "table tbody tr",
+    "row_required_selector": "a[href*='q_bbscttSn=']",
+    "fields": {
+      "post_id": [
+        {"from": "attr", "selector": "a[href*='q_bbscttSn=']", "attr": "href", "transform": [["regex_extract", "[?&]q_bbscttSn=([^&]+)"]]}
+      ],
+      "title": [
+        {"from": "css", "selector": "a[href*='q_bbscttSn=']", "text": true, "transform": [["collapse_ws"]]}
+      ],
+      "url": [
+        {"from": "attr", "selector": "a[href*='q_bbscttSn=']", "attr": "href", "transform": [["urljoin", "https://www.yongin.go.kr/user/bbs/BD_selectBbsList.do?q_bbsCode=1001"]]}
+      ],
+      "published_at": [
+        {"from": "css", "selector": "td:nth-last-of-type(2)", "text": true, "transform": [["collapse_ws"], ["date_only_to_iso", "+09:00"]]}
+      ],
+      "author": [
+        {"from": "css", "selector": "td:nth-last-of-type(3)", "text": true, "transform": [["collapse_ws"]]}
+      ],
+      "category": [
+        {"from": "css", "selector": "td:nth-of-type(2)", "text": true, "transform": [["collapse_ws"]]}
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "wait_selector": "body",
+    "content": [
+      {"from": "css", "selector": "body", "html": true}
+    ]
+  },
+  "_source_url": "https://www.yongin.go.kr/user/bbs/BD_selectBbsList.do?q_bbsCode=1001",
+  "_note": "Python/httpx TLS handshake fails locally, but Chromium renders the board. Use playwright_html for the list and detail pages."
+}

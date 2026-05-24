@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "site": "www.gyeongnam.go.kr",
+  "board": "BBS_0000060",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+    "Referer": "https://www.gyeongnam.go.kr/"
+  },
+  "timeout": 20,
+  "list": {
+    "url_template": "https://www.gyeongnam.go.kr/board/list.gyeong?boardId={board}&menuCd=DOM_000000135002001000&paging=ok&startPage=1&searchType=&searchOperation=AND&keyword=&categoryCode1=A",
+    "pagination": {"kind": "none"},
+    "row_selector": "table tbody tr",
+    "row_required_selector": "td.title a[href*='dataSid=']",
+    "fields": {
+      "post_id": [
+        {"from": "attr", "selector": "td.title a", "attr": "href", "transform": [["regex_extract", "[?&]dataSid=(\\d+)"]]}
+      ],
+      "title": [
+        {"from": "css", "selector": "td.title a", "text": true, "transform": [["collapse_ws"]]}
+      ],
+      "url": [
+        {"from": "attr", "selector": "td.title a", "attr": "href", "transform": [["urljoin", "https://www.gyeongnam.go.kr/board/list.gyeong"]]}
+      ],
+      "published_at": [
+        {"from": "css", "selector": "td.date", "text": true, "transform": [["collapse_ws"], ["iso8601", ["%y.%m.%d"], "+09:00"]]}
+      ],
+      "author": [
+        {"from": "css", "selector": "td:nth-of-type(5)", "text": true, "transform": [["collapse_ws"]]}
+      ],
+      "category": [
+        {"from": "css", "selector": "td:nth-of-type(2)", "text": true, "transform": [["collapse_ws"]]}
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {"from": "css", "selector": "#content", "html": true},
+      {"from": "css", "selector": "body", "html": true}
+    ]
+  },
+  "_source_url": "https://www.gyeongnam.go.kr/board/list.gyeong?boardId=BBS_0000060",
+  "_note": "Original URL omits menuCd and returns a minimal board shell. The public 보도자료 board requires menuCd=DOM_000000135002001000 and categoryCode1=A."
+}

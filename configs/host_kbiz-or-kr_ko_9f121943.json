@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "site": "www.kbiz.or.kr",
+  "board": "207",
+  "strategy": "playwright_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+    "Referer": "https://www.kbiz.or.kr/ko/contents/bbs/list.do?mnSeq=207"
+  },
+  "timeout": 25,
+  "nav_timeout_ms": 30000,
+  "idle_timeout_ms": 5000,
+  "list": {
+    "url_template": "https://www.kbiz.or.kr/ko/contents/bbs/list.do?mnSeq={board}",
+    "pagination": {"kind": "none"},
+    "wait_selector": ".board-list li a[onclick*='goView']",
+    "row_selector": ".board-list li",
+    "row_required_selector": "a[onclick*='goView']",
+    "fields": {
+      "post_id": [
+        {"from": "attr", "selector": "a[onclick*='goView']", "attr": "onclick", "transform": [["regex_extract", "goView\\((\\d+)\\)"]]}
+      ],
+      "title": [
+        {"from": "css", "selector": "p.tit", "text": true, "transform": [["collapse_ws"]]}
+      ],
+      "url": [
+        {"from": "template", "value": "https://www.kbiz.or.kr/ko/contents/bbs/view.do?seq={post_id}&mnSeq={board}"}
+      ],
+      "published_at": [
+        {"from": "css", "selector": "span.date", "text": true, "transform": [["collapse_ws"], ["iso8601", ["%Y.%m.%d"], "+09:00"]]}
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {"from": "css", "selector": "body", "html": true}
+    ]
+  },
+  "_source_url": "https://www.kbiz.or.kr/ko/contents/contents/contents.do?mnSeq=207",
+  "_note": "Submitted contents.do URL is a menu landing page. The same mnSeq exposes the actual KBIZ 보도자료 board at /ko/contents/bbs/list.do?mnSeq=207. Use playwright_html because the raw page has malformed duplicate html tags that lxml drops around the board-list section."
+}

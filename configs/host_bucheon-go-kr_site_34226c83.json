@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "site": "www.bucheon.go.kr",
+  "board": "26736",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+    "Referer": "https://www.bucheon.go.kr/"
+  },
+  "timeout": 20,
+  "list": {
+    "url_template": "https://www.bucheon.go.kr/site/program/board/basicboard/list?boardtypeid={board}&menuid=148002001001&pagesize=20",
+    "pagination": {"kind": "none"},
+    "row_selector": "table tbody tr",
+    "row_required_selector": "td.td-lf a[href*='./view']",
+    "fields": {
+      "post_id": [
+        {"from": "attr", "selector": "td.td-lf a", "attr": "href", "transform": [["regex_extract", "[?&]encid=([^&]+)"]]}
+      ],
+      "title": [
+        {"from": "css", "selector": "td.td-lf a", "text": true, "transform": [["collapse_ws"]]}
+      ],
+      "url": [
+        {"from": "attr", "selector": "td.td-lf a", "attr": "href", "transform": [["urljoin", "https://www.bucheon.go.kr/site/program/board/basicboard/list?boardtypeid=26736&menuid=148002001001&pagesize=20"]]}
+      ],
+      "published_at": [
+        {"from": "css", "selector": "td:nth-of-type(4)", "text": true, "transform": [["collapse_ws"], ["date_only_to_iso", "+09:00"]]}
+      ],
+      "author": [
+        {"from": "css", "selector": "td:nth-of-type(3)", "text": true, "transform": [["collapse_ws"]]}
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {"from": "css", "selector": "#contents", "html": true},
+      {"from": "css", "selector": "body", "html": true}
+    ]
+  },
+  "_source_url": "https://www.bucheon.go.kr/site/program/board/basicboard/list?boardtypeid=26736",
+  "_note": "Original URL without menuid redirects to an auth error. Adding menuid=148002001001 opens the same boardtypeid 새소식 list with 20 stable table rows."
+}

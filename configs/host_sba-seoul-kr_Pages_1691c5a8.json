@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "site": "www.sba.seoul.kr",
+  "board": "company-support",
+  "strategy": "playwright_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8"
+  },
+  "timeout": 25,
+  "nav_timeout_ms": 30000,
+  "idle_timeout_ms": 5000,
+  "list": {
+    "url_template": "https://www.sba.seoul.kr/Pages/ContentsMenu/Company_Support.aspx",
+    "pagination": {"kind": "none"},
+    "wait_selector": "div.card_box a[href*='contentsDetail']",
+    "row_selector": "div.card_box",
+    "row_required_selector": "a[href*='contentsDetail']",
+    "fields": {
+      "post_id": [
+        {"from": "attr", "selector": "a[href*='contentsDetail']", "attr": "href", "transform": [["regex_extract", "contentsDetail\\('([^']+)'"]]}
+      ],
+      "title": [
+        {"from": "css", "selector": "h3.ellipsis_any", "text": true, "transform": [["collapse_ws"]]}
+      ],
+      "url": [
+        {"from": "template", "value": "https://www.sba.seoul.kr/Pages/ContentsMenu/Company_Support_Detail.aspx?RID={post_id}"}
+      ],
+      "author": [
+        {"from": "css", "selector": "dl.bottom_info dt", "text": true, "transform": [["collapse_ws"]]}
+      ],
+      "category": [
+        {"from": "css", "selector": "span.label.gray", "text": true, "transform": [["collapse_ws"]]}
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "wait_selector": "body",
+    "content": [
+      {"from": "css", "selector": "body", "html": true}
+    ],
+    "body_empty_acceptable": true
+  },
+  "_source_url": "https://www.sba.seoul.kr/Pages/ContentsMenu/Company_Support.aspx",
+  "_note": "SBA company support cards are rendered into div.card_box and use javascript contentsDetail(RID). Detail content is dynamic and sometimes sparse, so list extraction is the primary signal."
+}
