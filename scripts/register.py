@@ -766,6 +766,40 @@ def _extract_display_title(slug: str) -> Optional[str]:
     return None
 
 
+REGISTER_SIGNAL_LOG = ROOT / "output" / "register_signal_log.jsonl"
+
+
+def _append_register_signal_log(slug: str, url: str, outcome: str, reason: Optional[str] = None) -> None:
+    """ADR 0013 A 묶음 — register-side observe-only log (polling lastmod 와 평행).
+
+    매 register 종료 (registered/rejected/failed) 1줄 append: digest 의 α/θ 측정 + outcome.
+    1주 후 distribution 본 후 prompt/gate 통합 결정 근거. fail-soft — 어떤 오류든 silent skip
+    (register 본 흐름 영향 X)."""
+    try:
+        mdr_n = 0
+        sitemap_only_fit = False
+        try:
+            digest_path = output_dir(slug) / "digest.json"
+            if digest_path.exists():
+                d = json.loads(digest_path.read_text(encoding="utf-8"))
+                mdr_n = len(d.get("mdr_candidates") or [])
+                sof = d.get("sitemap_only_fit_signal") or {}
+                sitemap_only_fit = bool(sof.get("sitemap_only_fit", False))
+        except Exception:
+            pass
+        line = {
+            "ts": _now_iso(), "slug": slug, "url": url,
+            "outcome": outcome,
+            "mdr_n": mdr_n, "sitemap_only_fit": sitemap_only_fit,
+            "reason": (reason or "")[:200],
+        }
+        REGISTER_SIGNAL_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with REGISTER_SIGNAL_LOG.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(line, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
 def _save_state(slug: str, url: str, config_path: Path, post_ids: list[str],
                 body_empty_at_baseline: Optional[bool] = None,
                 display_title: Optional[str] = None) -> Path:
@@ -808,6 +842,7 @@ def _save_state(slug: str, url: str, config_path: Path, post_ids: list[str],
             print(f"[register] learned_blacklist: 매칭 패턴 자동 회수 — id={removed} (등록 성공 = 패턴 작동 증거)")
     except Exception as e:  # noqa: BLE001
         print(f"[register] ⚠ learned_blacklist 자동 회수 실패 — 등록은 성공: {e}", file=sys.stderr)
+    _append_register_signal_log(slug, url, "registered")
     return p
 
 
@@ -1046,6 +1081,7 @@ def _save_rejected(slug: str, url: str, reason: str, note: Optional[str] = None,
             _learn_pattern(url, reason, slug=slug)
         except Exception as e:  # noqa: BLE001
             print(f"[register] ⚠ learned_blacklist 학습 실패 — REJECTED 마커는 박힘: {e}", file=sys.stderr)
+    _append_register_signal_log(slug, url, "rejected", reason)
     return p
 
 
@@ -1203,6 +1239,7 @@ def _save_failed(slug: str, url: str, reason: str, last_config, last_feedback: s
         "slug": slug, "url": url, "failed_at": _now_iso(),
         "reason": reason, "last_config": last_config, "last_feedback": last_feedback,
     }, ensure_ascii=False, indent=2), encoding="utf-8")
+    _append_register_signal_log(slug, url, "failed", reason)
     return p
 
 

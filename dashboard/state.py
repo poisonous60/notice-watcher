@@ -55,6 +55,12 @@ def lastmod_log_path() -> Path:
     return SNAPSHOT_DIR / "sitemap_lastmod_log.jsonl"
 
 
+def register_signal_log_path() -> Path:
+    """register_signal_log.jsonl snapshot (ADR 0013 A 묶음 register-side observe-only 로그).
+    파일 없으면 아직 register 1회 안 돌았거나 register.py 옛 버전."""
+    return SNAPSHOT_DIR / "register_signal_log.jsonl"
+
+
 def usage_db_path_local() -> Path:
     """dev box 자체에서 호출된 LLM 의 usage (예: `scripts/register_batch.py` 가 부른 register.py).
     snapshot 과 별도 — N100 production runtime 과 dev box 실험을 분리해서 관찰.

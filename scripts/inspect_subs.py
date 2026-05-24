@@ -91,7 +91,7 @@ def _snapshot_paths() -> inspector.InspectorPaths:
 # --------------------------------------------------------------------------- #
 # source = 데이터 카테고리. dashboard 가 페이지별로 *필요한 source 만* 가져오기 위해 분리.
 # 각 puller 는 ok(bool) 반환. cmd_pull 은 5개 모두 호출.
-SOURCE_NAMES = ("bot_db", "poll_state", "configs", "usage_db", "learned", "lastmod_log")
+SOURCE_NAMES = ("bot_db", "poll_state", "configs", "usage_db", "learned", "lastmod_log", "register_signal_log")
 
 
 def _ensure_dirs() -> None:
@@ -225,6 +225,28 @@ def pull_lastmod_log() -> bool:
     return True
 
 
+def pull_register_signal_log() -> bool:
+    """register_signal_log.jsonl — register-side observe-only 로그 (ADR 0013 A 묶음).
+
+    매 register 종료 시 append 되는 JSONL. 없으면 정상 skip (아직 register 1회 안 돌았거나
+    register.py 옛 버전)."""
+    _ensure_dirs()
+    dst = SNAPSHOT_DIR / "register_signal_log.jsonl"
+    if dst.exists():
+        try:
+            dst.unlink()
+        except OSError:
+            pass
+    host = _require_deploy_host()
+    rc, out = _run(["scp", "-q",
+                    f"{host}:{DEPLOY_PATH}/output/register_signal_log.jsonl",
+                    str(dst)])
+    if rc != 0 and not any(s in out for s in ("No such file", "matches no files", "not match")):
+        sys.stderr.write(f"[inspect pull] register_signal_log scp 실패 (rc={rc}): {out}\n")
+        return False
+    return True
+
+
 PULLERS = {
     "bot_db":      pull_bot_db,
     "poll_state":  pull_poll_state,
@@ -232,6 +254,7 @@ PULLERS = {
     "usage_db":    pull_usage_db,
     "learned":     pull_learned,
     "lastmod_log": pull_lastmod_log,
+    "register_signal_log": pull_register_signal_log,
 }
 
 
@@ -246,7 +269,7 @@ def fetch_markers() -> dict[str, str]:
 
     ssh hang 시 빈 dict 반환 — 호출자가 보수적으로 처리 (cache hit 유지).
     """
-    # SOURCE_NAMES 순서 (bot_db, poll_state, configs, usage_db, learned, lastmod_log) 와 동일 line 순서로 출력.
+    # SOURCE_NAMES 순서 (bot_db, poll_state, configs, usage_db, learned, lastmod_log, register_signal_log) 와 동일 line 순서로 출력.
     script = (
         f"cd {DEPLOY_PATH} 2>/dev/null && "
         '{ '
@@ -267,6 +290,9 @@ def fetch_markers() -> dict[str, str]:
         '| { read x; if [ -z "$x" ]; then echo "(none)"; else echo "$x"; fi; }; '
         # 6) lastmod_log
         'stat -c "%Y %s" output/sitemap_lastmod_log.jsonl 2>/dev/null '
+        '| { read x; if [ -z "$x" ]; then echo "(none)"; else echo "$x"; fi; }; '
+        # 7) register_signal_log
+        'stat -c "%Y %s" output/register_signal_log.jsonl 2>/dev/null '
         '| { read x; if [ -z "$x" ]; then echo "(none)"; else echo "$x"; fi; }; '
         '}'
     )
@@ -302,10 +328,12 @@ def cmd_pull() -> int:
             n_learned = 0
     lastmod_log_dst = SNAPSHOT_DIR / "sitemap_lastmod_log.jsonl"
     n_lastmod_bytes = lastmod_log_dst.stat().st_size if lastmod_log_dst.exists() else 0
+    reg_log_dst = SNAPSHOT_DIR / "register_signal_log.jsonl"
+    n_reg_bytes = reg_log_dst.stat().st_size if reg_log_dst.exists() else 0
     print(f"[inspect pull] {DEPLOY_HOST or '(unset)'}:{DEPLOY_PATH} → {SNAPSHOT_DIR} + {CONFIGS_SNAPSHOT}")
     print(f"  bot.sqlite3: {n_db:,} bytes   usage.sqlite3: {n_usage:,} bytes   "
           f"poll_state: {n_states}개   configs: {n_cfgs}개   learned: {n_learned}건   "
-          f"lastmod_log: {n_lastmod_bytes:,} bytes")
+          f"lastmod_log: {n_lastmod_bytes:,} bytes   register_signal_log: {n_reg_bytes:,} bytes")
     fails = [name for name, ok in ok_flags.items() if not ok]
     if fails:
         print(f"  [경고] 실패 source: {', '.join(fails)}", file=sys.stderr)

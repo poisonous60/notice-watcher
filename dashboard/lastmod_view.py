@@ -140,6 +140,50 @@ def _row_to_view(d: dict) -> dict[str, Any]:
     return out
 
 
+def _aggregate_register(rows: list[dict]) -> dict[str, Any]:
+    """register-side observe-only log 집계 (ADR 0013 α/θ measurement).
+
+    outcome ∈ {registered, rejected, failed} 별 count + α mdr_n / θ sitemap_only_fit
+    distribution. 1주 후 mdr_n>0 비율 / sitemap_only_fit=True 비율 보고 prompt 통합 결정 근거.
+    """
+    n_total = len(rows)
+    by_outcome: dict[str, int] = defaultdict(int)
+    n_mdr_pos = 0
+    n_sof_pos = 0
+    sum_mdr_n = 0
+    for r in rows:
+        by_outcome[r.get("outcome") or "?"] += 1
+        mdr_n = int(r.get("mdr_n") or 0)
+        sum_mdr_n += mdr_n
+        if mdr_n > 0:
+            n_mdr_pos += 1
+        if r.get("sitemap_only_fit"):
+            n_sof_pos += 1
+
+    def _pct(num: int, den: int) -> float:
+        return (100.0 * num / den) if den else 0.0
+
+    return {
+        "n_total": n_total,
+        "n_registered": by_outcome.get("registered", 0),
+        "n_rejected": by_outcome.get("rejected", 0),
+        "n_failed": by_outcome.get("failed", 0),
+        "n_mdr_pos": n_mdr_pos,
+        "mdr_pos_pct": _pct(n_mdr_pos, n_total),
+        "mean_mdr_n": (sum_mdr_n / n_total) if n_total else 0.0,
+        "n_sof_pos": n_sof_pos,
+        "sof_pos_pct": _pct(n_sof_pos, n_total),
+    }
+
+
+def _row_to_view_register(d: dict) -> dict[str, Any]:
+    out = dict(d)
+    out["ts_short"] = (d.get("ts") or "")[:19]
+    out["url_short"] = (d.get("url") or "")[:80]
+    out["reason_short"] = (d.get("reason") or "")[:80]
+    return out
+
+
 def register(app, templates, _render):  # noqa: ARG001
     @app.get("/lastmod", response_class=HTMLResponse)
     async def lastmod_page(request: Request,
@@ -154,6 +198,15 @@ def register(app, templates, _render):  # noqa: ARG001
             rows = [r for r in rows if r.get("slug") == slug]
         agg = _aggregate(rows)
         view_rows = [_row_to_view(r) for r in reversed(rows)]
+
+        # register-side observe-only log (ADR 0013 α/θ) — 같은 page 의 별 section.
+        reg_path = state.register_signal_log_path()
+        reg_rows, reg_total = _read_lines(reg_path, tail=tail)
+        if slug:
+            reg_rows = [r for r in reg_rows if r.get("slug") == slug]
+        reg_agg = _aggregate_register(reg_rows)
+        reg_view_rows = [_row_to_view_register(r) for r in reversed(reg_rows)]
+
         return _render("lastmod.html", request,
                        active="lastmod",
                        present=path.exists(),
@@ -162,4 +215,9 @@ def register(app, templates, _render):  # noqa: ARG001
                        slug_filter=slug or "",
                        agg=agg,
                        rows=view_rows,
-                       log_path=str(path))
+                       log_path=str(path),
+                       reg_present=reg_path.exists(),
+                       reg_total=reg_total,
+                       reg_agg=reg_agg,
+                       reg_rows=reg_view_rows,
+                       reg_log_path=str(reg_path))
