@@ -513,9 +513,16 @@ def classify_site_kind(digest: dict) -> dict:
     semantic = _semantic_feed_match(digest, feeds)
     js_signal = _site_kind_js_signal(digest)
 
+    # rss_feed_urls (link rel / HAR XML — 청크 A backfill 신호) 가 있으면 *validated 신뢰 없는* feed 후보.
+    # site_kind=rss/podcast 를 med confidence 로 박을 source. F-layer enforcement 는 high 만 작동하므로 안전.
+    link_rel_feeds = lc.get("rss_feed_urls") or [] if not feeds else []
+    link_rel_primary = link_rel_feeds[0].get("url") if link_rel_feeds else None
+
     evidence: list[str] = []
     if feeds:
         evidence.append("feed_semantics:item_count>0")
+    if link_rel_feeds:
+        evidence.append("rss_feed_urls:link_rel")
     if rows:
         evidence.append(f"html_same_host_rows:{rows}")
     if structural_audio:
@@ -527,6 +534,7 @@ def classify_site_kind(digest: dict) -> dict:
     if js_signal:
         evidence.append("js_render_signal")
 
+    # validated feed 우선 (high confidence)
     if feeds and structural_audio:
         return {"kind": "podcast", "confidence": "high", "evidence": evidence, "primary_feed_url": primary}
     if feeds and rows >= 5 and (semantic or rows >= 10):
@@ -534,10 +542,18 @@ def classify_site_kind(digest: dict) -> dict:
         return {"kind": "hybrid", "confidence": conf, "evidence": evidence, "primary_feed_url": primary}
     if feeds and rows < 3:
         return {"kind": "rss", "confidence": "high", "evidence": evidence, "primary_feed_url": primary}
-    if rows >= 5 and not feeds and not js_signal:
+    # link_rel 만 있는 경우 (옛 probe artifact validate 안 됨) — med confidence, F enforcement 작동 X
+    if link_rel_feeds and structural_audio:
+        return {"kind": "podcast", "confidence": "med", "evidence": evidence, "primary_feed_url": link_rel_primary}
+    if link_rel_feeds and rows < 3:
+        return {"kind": "rss", "confidence": "med", "evidence": evidence, "primary_feed_url": link_rel_primary}
+    if link_rel_feeds and rows >= 5:
+        return {"kind": "hybrid", "confidence": "med", "evidence": evidence, "primary_feed_url": link_rel_primary}
+    # feed 신호 없음
+    if rows >= 5 and not feeds and not link_rel_feeds and not js_signal:
         conf = "high" if rows >= 10 else "med"
         return {"kind": "static_html", "confidence": conf, "evidence": evidence}
-    if rows < 3 and js_signal and not feeds:
+    if rows < 3 and js_signal and not feeds and not link_rel_feeds:
         return {"kind": "spa_rendered", "confidence": "high", "evidence": evidence}
     return {"kind": "unknown", "confidence": "low", "evidence": evidence}
 
