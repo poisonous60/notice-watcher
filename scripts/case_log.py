@@ -140,6 +140,27 @@ def _split_csv(s: Optional[str]) -> Optional[list[str]]:
     return parts or None
 
 
+def _read_case_md_outcome(case_md_slug: Optional[str]) -> Optional[str]:
+    if not case_md_slug:
+        return None
+    p = ROOT / "docs" / "cases" / f"{case_md_slug}.md"
+    if not p.exists():
+        return None
+    try:
+        text = p.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    if not text.startswith("---"):
+        return None
+    end = text.find("\n---", 3)
+    if end < 0:
+        return None
+    for line in text[3:end].splitlines():
+        if line.strip().startswith("outcome:"):
+            return line.split(":", 1)[1].strip().strip("\"'")
+    return None
+
+
 def cmd_log(args: argparse.Namespace) -> int:
     outcome = args.outcome
     if outcome not in OUTCOMES:
@@ -166,6 +187,13 @@ def cmd_log(args: argparse.Namespace) -> int:
     # case .md 는 관례상 docs/cases/<slug>.md → 미지정 시 slug 로 기본 (dashboard /cases md 링크가
     # case_md_slug 컬럼으로 .md 를 찾음 — null 이면 md 안 보임). 다른 .md 명이면 --case-md-slug 명시.
     case_md_slug = args.case_md_slug or args.slug
+    md_outcome = _read_case_md_outcome(case_md_slug)
+    if md_outcome and md_outcome != outcome:
+        print(
+            f"⚠ case .md frontmatter outcome={md_outcome} 와 log outcome={outcome} 불일치 — "
+            "case .md 또는 --outcome 중 하나를 확인하세요.",
+            file=sys.stderr,
+        )
 
     conn = _ensure_db()
     try:

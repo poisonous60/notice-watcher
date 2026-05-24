@@ -91,7 +91,7 @@ git status --short -- prompts/ engine/ probe/ generate/ engine/recognizers/
 
 ---
 
-## 0b-2. gen_fail screen-out — "진짜 게시판 아님" 2종 먼저 (content-as-list 오탐 · soft-404 미검출)
+## 0b-2. gen_fail screen-out — "진짜 게시판 아님" 3종 먼저 (content-as-list 오탐 · soft-404 미검출 · empty/fake feed)
 
 gen_fail(rc=1) 큐로 *새는* false-negative 2종. 둘 다 진짜 게시판이 아니라 **수동 config 작성 X** — 영구 게이트로 봉합(CLAUDE.md §8a) + 그 slug 거부. §1 진단 진입 *전* 각 gen_fail slug 에 먼저 분류. (gate_reject(rc=3 분류기 content)·soft-404 *검출됨*(rc=4)은 이미 자동 거부 → 큐에 없음. 여기 대상은 게이트를 *빠져나가* gen_fail 로 떨어진 것.)
 
@@ -105,7 +105,13 @@ gen_fail(rc=1) 큐로 *새는* false-negative 2종. 둘 다 진짜 게시판이 
 - **신호**: `list.html`/`article.html` 의 title/h1 이 "없는 페이지"/"삭제됨"/"404"/타 언어 not-found 인데 등록 진행/gen_fail. (classify 결과는 FAILED.json 미영속 — stdout `[register] 🔴 not_found`/없으면 미분류.)
 - **fix (영구 게이트 = A-layer)**: `prompts/classify.system.txt` 의 *not_found 측 판별* 보강 — 이 유형이 not_found 로 안 갈린 이유를 1줄 룰로. **게이트 휴리스틱/regex 추가 X** (분류기 layer 의 일, [[project-llm-veto-reject-gates]]). 그 뒤 `register.py --reuse-probe "<URL>"` → 분류기가 not_found→rc=4 거부 확인 → slug `rejected`. outcome=`improved`(분류기 generic 개선).
 
-둘 다 매칭 0 → 정상 gen_fail → §1 진단 정상 진입. P1/P2 매칭이면 §1 수동 config 트랙 skip — 거부 + 게이트 1줄이 결과물. §2 진입 전 강제 인용 대신 case body 에 `screen-out: P1|P2 — <신호 1줄>` 명시.
+### (P3) empty/fake feed — RSS feed_candidates 후보지만 RSS XML 아니거나 item 0개
+- **왜 샘**: probe `feed_candidates` 의 `well-known-path` / `input-url-feed-path` source 가 *URL 모양*만 보고 RSS 후보가 됨. 빈 feed(item=0) 또는 HTML shell(Blazor SPA 등)이 *RSS endpoint* 로 오인되면 board_shape 를 통과하고 LLM 이 config 를 억지 생성하다 gen_fail 로 떨어짐.
+- **신호**: `probe/extract.py:validate_feed_candidate` 또는 `probe/discover.py:validate_feed_candidate` 가 `validated=false`, `item_count==0`, `root_tag=html|null` 로 표시한 candidate. raw fetch(curl) 본문 = HTML SPA / empty channel.
+- **fix (영구 게이트 = A-layer)**: `prompts/classify.system.txt` 의 *not_found* 또는 *content* 정의에 “빈/가짜 RSS feed endpoint 는 게시판 목록이 아니다” 를 추가. 단일 사이트 config 작성 X.
+- **잔여 처리**: 현재 slug 는 `triage.py park-gate-fail <slug> --reason="<빈/가짜 feed 신호>"` 로 보류. 분류기 개선 뒤 sweep 으로 재판정.
+
+셋 다 매칭 0 → 정상 gen_fail → §1 진단 정상 진입. P1/P2/P3 매칭이면 §1 수동 config 트랙 skip — 거부 + 게이트 1줄이 결과물. §2 진입 전 강제 인용 대신 case body 에 `screen-out: P1|P2|P3 — <신호 1줄>` 명시.
 
 ---
 
@@ -132,6 +138,10 @@ while true; do
 done
 ```
 ⚠ **`grep -oP '...\K...'` Perl regex 금지** — Git Bash on Windows 는 non-UTF-8 locale 기본 → `grep: -P supports only unibyte and UTF-8 locales` 로 *조용히 빈 stdout* 반환 → condition 영영 안 걸려 monitor 무한 hang (2026-05-24 podcast batch 박음). POSIX-portable: `grep -oE` + 2-stage 또는 `awk -F=` 또는 위처럼 python 한 줄 (locale-independent).
+
+**task 품질 게이트 — list hardcode 금지 / F-layer enforcement**:
+- **list hardcode 금지**: codex 에게 *list of known X*(host suffix list, keyword list, regex list) 를 주는 task 는 금지. 먼저 구조 신호(host mismatch, MIME type, body length, URL path pattern, response shape) 로 판별한다. known list 는 bootstrap fallback(4~6 entry, confidence 낮음) 으로만 허용. 예: `_AUDIO_SHARE_HOST_SUFFIXES` 9-host hardcode 는 나쁜 예 — C 후속은 host list 를 5개 이하 bootstrap 으로 줄이고 structural signal 을 우선해야 한다.
+- **A-layer 신호만 주입 금지**: prompt/system_writer 지시만 추가하면 LLM 이 retry feedback 을 무시하고 같은 실패를 반복할 수 있다. 신호가 확정적이면 `register.py` post-LLM override 같은 **F-layer enforcement** 를 함께 설계한다. allow-list 때문에 F-layer 를 못 건드리면 case/result 의 escalate 섹션에 “F-layer 필요 이유” 를 남긴다.
 
 **절차**:
 1. `python scripts/triage.py pull --skip-later` — N100 → 로컬 (FAILED + probe).
@@ -160,10 +170,12 @@ done
 2. **일반화 신호 punt** — 청크 안에 2+ slug 가 같은 패턴(URL 누락 파라미터·JS detail 함수·TLS handshake 실패·platform CMS 동형) 보이는데 case body §일반화 후보 섹션이 비었거나 "사이트별 매핑이라 일반화 X" 1줄. (2026-05-24 krpublic: KR egov `menuid`/`menuCd` 누락 4건 동일 + `goView(seq)` JS detail 3건 동일 punt.)
 3. **ALLOW-LIST 밖 punt** — fix layer 가 engine/probe/prompts 인데 "allow-list 밖이라 안 함" 1줄로 끝남 (후속 chunk 에 정보 전달 X). 정상은: 단일 site config 는 ALLOW-LIST 안에서 진행 + escalate 섹션에 분석 완전 적기.
 4. **`no_change` 정당화 불충분** — 시도/차단신호(verbatim)/진짜 해결 경로 3개 중 빠진 게 있음.
+5. **`no_change` layer 오판** — LLM retry 3/3 fail 이고 generic layer 를 못 찾았는데 `no_change escalate` 로 끝냄. 이 경우 §2 의 최종 트랙은 §2e(수동/handwritten config) 검토다. generic improvement 부재는 site outcome 이 아니며, case outcome 은 그 사이트에 실제로 한 조치 기준으로 기록한다.
 
 **Claude 의 audit 절차** (각 chunk merge 전):
 - 모든 case body 를 grep: `일반화 안 되는 이유` + `allow-list` + `보류` 라인 등장 빈도. 청크 멤버 수 대비 절반 이상이면 §0c-회피 2/3 의심.
 - 같은 청크 안에서 failure_keys 또는 fix surface 가 겹치는 slug 쌍 검색 — 일반화 후보 섹션 있는지 확인.
+- `no_change` case .md 의 `fix_layer` 를 audit: §2a~§2d 근거 없이 끝난 case 는 §2e(configs/host_*.json 또는 handwritten adapter) 검토가 있었는지 확인.
 - 위반 잡으면 발견 사실을 다음 chunk 의 task 입력 머리에 명시 (codex 가 두 번째에도 같은 punt 안 하게).
 
 ---
@@ -356,6 +368,7 @@ dynamic family (`recognizer:*`, `[FAIL]:<check>`) 는 추가 필요 X — 자동
      --reason "<1-3줄>" [--fix-layer <C+D>] [--failure-keys <k1,k2>] [--case-md-slug <slug>]
    ```
    이 시점 HEAD = 본 case 의 commit → `commit_sha` 와 `files_changed` 정확. commit 전 실행하면 stderr 에 `⚠ staged/working tree 변경 있음 — commit 후 호출 권장` 경고만 박고 진행 (derive 부정확 가능). outcome 분류는 §6 step 5 표 참조. 잊어도 push 차단 X (~10% gap). dashboard `/cases` 에서 표시.
+   **일반 개선 X (LLM retry 3/3 fail) 면 §2e 검토 필수**: 새 layer(§2a~§2d) 를 못 찾았다는 이유로 case outcome `no_change escalate` 로 끝내지 않는다. generic improvement 부재는 site outcome 이 아니라 “추가 공통 개선 없음”일 뿐이다. §2a~§2d 가 전부 아니면 §2e(수동 config/handwritten) 로 진행하고, `case_log log --case-md-slug` 의 `--outcome` 은 case .md frontmatter outcome 과 맞춘다.
 
 8. **N100 배포** (운영 메모 §8 SoT) — `ssh <user>@<host> 'cd ~/notice-watcher && git pull --ff-only && .venv/bin/python scripts/register.py --config "configs/<slug>.json"'`.
    - **`adapters/`·`engine/`·`scripts/notify.py`·`bot/` 변경 시 뒤에 `&& systemctl --user restart notice-bot.service`** — 봇 import 캐시. 안 하면 `make_adapter() ValueError`.
