@@ -37,9 +37,10 @@ document.addEventListener('mouseover', (e) => {
   clearOutline();
   const t = e.target;
   if (!t || !t.style) return;
+  if (matchedOutlineRows.indexOf(t) !== -1) return;  // matched 색 보존
   lastHovered = t;
-  t.style.outline = '2px solid #f60';
-  t.style.outlineOffset = '-2px';
+  // outline → target CSS 의 `outline:0` reset 에 묻힘. box-shadow inset 으로 강제 표시.
+  t.style.setProperty('box-shadow', 'inset 0 0 0 2px #f60', 'important');
 }, true);
 
 function _normalizeSelector(sel) {
@@ -68,17 +69,30 @@ function _heuristicFields(rowEl) {
       out.title = aSel;
       out.link = aSel;
     } catch (_) {}
-    // post_id heuristic — href 의 흔한 key
+    // post_id heuristic 1: href query string 의 흔한 key
     const href = titleA.getAttribute('href') || '';
-    const keys = ['pkid', 'id', 'seq', 'no', 'nttId', 'articleNo', 'bbsSeq', 'documentSrl'];
+    const keys = [
+      'pkid', 'id', 'seq', 'no', 'nttId', 'articleNo', 'bbsSeq', 'documentSrl',
+      'gid', 'idx', 'num', 'code', 'articleId', 'article_id', 'newsId', 'news_id',
+      'view_id', 'boardSeq', 'cntntsId', 'bbsId', 'pid', 'aid',
+    ];
     for (const k of keys) {
       const re = new RegExp('[?&]' + k + '=([^&#]+)');
       const m = href.match(re);
       if (m) {
-        out.post_id = out.title;  // 같은 element, attr=href + transform 후속
+        out.post_id = out.title;
         out.post_id_attr = 'href';
         out.post_id_regex = '[?&]' + k + '=([^&#]+)';
         break;
+      }
+    }
+    // post_id heuristic 2: path 의 마지막 숫자 segment (예: /news/view/123456)
+    if (!out.post_id) {
+      const pathMatch = href.match(/\/(\d{3,})(?:[/?#]|$)/);
+      if (pathMatch) {
+        out.post_id = out.title;
+        out.post_id_attr = 'href';
+        out.post_id_regex = '/(\\d{3,})(?:[/?#]|$)';
       }
     }
   }
@@ -109,23 +123,45 @@ function _heuristicFields(rowEl) {
 }
 
 function _outlineMatched(rows) {
+  // target page CSS 가 `outline: 0` 박는 흔한 reset 때문에 outline 안 보임 → box-shadow
+  // inset + background 으로 강제 표시. setProperty(... , 'important') 로 우선순위 ↑.
   clearMatchedOutline();
   for (const r of rows) {
     if (!r.style) continue;
-    r.style.outline = '2px dashed #2a7';
-    r.style.outlineOffset = '-2px';
+    r.style.setProperty('box-shadow', 'inset 0 0 0 2px #2a7', 'important');
+    r.style.setProperty('background-color', 'rgba(42,170,119,0.12)', 'important');
     matchedOutlineRows.push(r);
   }
 }
 
 function clearMatchedOutline() {
   for (const r of matchedOutlineRows) {
-    if (r && r.style) r.style.outline = '';
+    if (r && r.style) {
+      r.style.removeProperty('box-shadow');
+      r.style.removeProperty('background-color');
+    }
   }
   matchedOutlineRows = [];
 }
 
-function _handleRowClick(t) {
+function _ascendToRow(t) {
+  // 안쪽 text/icon click 했을 때도 *row-like* ancestor 로 ascent.
+  // 룰: list-item tag (tr/li/article/section) OR class 에 list/item/row/post/article
+  // 단어 포함. 가장 가까운 ancestor 사용. 없으면 t 자체.
+  const tagRe = /^(tr|li|article|section)$/i;
+  const clsRe = /(list|item|row|post|article|entry|notice|news)/i;
+  let cur = t;
+  for (let depth = 0; depth < 10 && cur; depth++) {
+    if (tagRe.test(cur.tagName || '')) return cur;
+    const cls = cur.className || '';
+    if (typeof cls === 'string' && clsRe.test(cls)) return cur;
+    cur = cur.parentElement;
+  }
+  return t;
+}
+
+function _handleRowClick(rawT) {
+  const t = _ascendToRow(rawT);
   let rawSel = '';
   try { rawSel = finder(t); }
   catch (err) {
@@ -142,6 +178,7 @@ function _handleRowClick(t) {
     raw_selector: rawSel,
     row_selector: rowSel,
     n_matched: matched.length,
+    ascended: t !== rawT,
     fields,
   }, '*');
 }
@@ -195,7 +232,9 @@ document.addEventListener('submit', (e) => {
 
 function clearOutline() {
   if (lastHovered && lastHovered.style) {
-    lastHovered.style.outline = '';
+    // box-shadow 가 matched outline 과 겹칠 수 있어 hover 만 clear — matchedOutlineRows
+    // 의 box-shadow 는 _outlineMatched 가 다시 박는다.
+    lastHovered.style.removeProperty('box-shadow');
     lastHovered = null;
   }
 }
