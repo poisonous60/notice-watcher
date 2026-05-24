@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 295 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 302 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -15,9 +15,11 @@
 | [`host_sydney-edu-au_news-opinion.html_bae59a5f`](host_sydney-edu-au_news-opinion.html_bae59a5f.md) | 🧩 수동 config — Sydney latest-news cards로 baseline 2건 등록 | 2026-05-24 | none | posts_nonempty, nav_first_article, archive_link | https://www.sydney.edu.au/news-opinion.html |
 | [`host_swu-ac-kr_notice_abcc7861`](host_swu-ac-kr_notice_abcc7861.md) | ✅ registered - /notice image-map landing routed to SWU board iframe endpoint | 2026-05-24 | none | gen_fail:posts_nonempty, wrong-path:notice-landing | https://www.swu.ac.kr/notice |
 | [`host_spectrum-ieee-o_root_15197eab`](host_spectrum-ieee-o_root_15197eab.md) | 🧩 수동 config — IEEE Spectrum RSS로 baseline 26건 등록 | 2026-05-24 | none | post_id_unique, nav_first_article, rss_feed_available | https://spectrum.ieee.org/ |
+| [`host_smu-ac-kr_notice_0fd72603`](host_smu-ac-kr_notice_0fd72603.md) | ✅ config registered from official SMU notice board | 2026-05-24 | none | capability_blocked, catalog_notice_path_noise, wrong_board_url | https://www.smu.ac.kr/notice |
 | [`host_schwab-com_resource-center_920e0268`](host_schwab-com_resource-center_920e0268.md) | 🧩 수동 config — Schwab insights 정적 HTML row 로 목록 10건, 본문 추출 확인 | 2026-05-24 | none | schema_invalid_css_selector | https://www.schwab.com/resource-center/insights |
 | [`host_sba-seoul-kr_Pages_1691c5a8`](host_sba-seoul-kr_Pages_1691c5a8.md) | ✅ 수동 config — SBA 기업지원 card_box 목록 추출 | 2026-05-24 | none | posts_nonempty, rendered_cards, javascript_detail | https://www.sba.seoul.kr/Pages/ContentsMenu/Company_Support.aspx |
 | [`host_rbnz-govt-nz_news-and-events_ada928b5`](host_rbnz-govt-nz_news-and-events_ada928b5.md) | 🧩 수동 config — RBNZ Coveo 목록을 Playwright로 수집 | 2026-05-24 | none | fetch_list_403, article_body_len | https://www.rbnz.govt.nz/news-and-events/news |
+| [`host_pusan-ac-kr_notice_88427aed`](host_pusan-ac-kr_notice_88427aed.md) | ✅ config registered from official PNU notice board | 2026-05-24 | none | capability_blocked, catalog_notice_path_noise, wrong_board_url | https://www.pusan.ac.kr/notice |
 | [`host_nseindia-com_resources_b0248e5e`](host_nseindia-com_resources_b0248e5e.md) | 수동 config - NSE press-release JSON API 사용 | 2026-05-24 | none | fetch_list, posts_nonempty, wrong_first_article | https://www.nseindia.com/resources/exchange-communication-press-releases |
 | [`host_nps-or-kr_jsppage_ffd1ade5`](host_nps-or-kr_jsppage_ffd1ade5.md) | capability_blocked (entry_blocked) — RSS unavailable, HTML remap policy-rejected | 2026-05-24 | none | capability_blocked, entry_blocked, rss_unavailable | https://www.nps.or.kr/jsppage/main.jsp |
 | [`host_news-cornell-ed_root_5ab391ee`](host_news-cornell-ed_root_5ab391ee.md) | 🔧 손 config (playwright_html) — browser-rendered/latest-news selector works; httpx gets 403 from Cornell | 2026-05-24 | none | posts_nonempty, httpx_403, first_article_ok | https://news.cornell.edu/ |
@@ -44,9 +46,14 @@
 | [`host_energy-gov_listings_ccdfe8b8`](host_energy-gov_listings_ccdfe8b8.md) | ✅ 수동 config 등록 준비 (Energy.gov RSS endpoint) | 2026-05-24 | none | probe_timeout, drupal_listing, rss_endpoint | https://www.energy.gov/listings/energy-news |
 | [`host_ecb-europa-eu_press_8a61c6f6`](host_ecb-europa-eu_press_8a61c6f6.md) | 수동 config - ECB press RSS feed 사용 | 2026-05-24 | none | posts_nonempty, matches_probe_first_article, count_ballpark, rss_feed_available, foedb_rendered_list | https://www.ecb.europa.eu/press/html/index.en.html |
 | [`host_ec-europa-eu_commission_8fc8d9c8`](host_ec-europa-eu_commission_8fc8d9c8.md) | ✅ 수동 config 등록 준비 (Press Corner RSS endpoint) | 2026-05-24 | none | probe_timeout, spa_shell, rss_endpoint | https://ec.europa.eu/commission/presscorner/home/en |
+| [`host_dongseoul-ac-kr_notice_b47e373b`](host_dongseoul-ac-kr_notice_b47e373b.md) | ⚪ no change — requested host connection refused/no reliable board URL | 2026-05-24 | none | capability_blocked, baseline_blocked, connection_refused, catalog_notice_path_noise | https://www.dongseoul.ac.kr/notice |
 | [`host_dongduk-ac-kr_notice_f00cd658`](host_dongduk-ac-kr_notice_f00cd658.md) | ⚪ no_change - /notice returned empty shell; no board URL proven in artifact | 2026-05-24 | none | gen_fail:posts_nonempty, empty-shell | https://www.dongduk.ac.kr/notice |
+| [`host_dhc-ac-kr_notice_af9d1dee`](host_dhc-ac-kr_notice_af9d1dee.md) | ⚪ no change — www host has not-found shell; department subdomain out of scope | 2026-05-24 | none | capability_blocked, entry_blocked, catalog_notice_path_noise, not_found_shell | https://www.dhc.ac.kr/notice |
+| [`host_dgist-ac-kr_notice_574f5305`](host_dgist-ac-kr_notice_574f5305.md) | ✅ config registered from official DGIST Notice board | 2026-05-24 | none | capability_blocked, catalog_notice_path_noise, wrong_board_url | https://www.dgist.ac.kr/notice |
+| [`host_deu-ac-kr_notice_1a0bea61`](host_deu-ac-kr_notice_1a0bea61.md) | ✅ config registered from official DEU notice board | 2026-05-24 | none | capability_blocked, catalog_notice_path_noise, wrong_board_url | https://www.deu.ac.kr/notice |
 | [`host_daegu-go-kr_icms_60f0b219`](host_daegu-go-kr_icms_60f0b219.md) | ⏸ deferred — 현재 직접 URL은 게시판 설정 없음으로만 응답 | 2026-05-24 | none | posts_nonempty, board_config_missing | https://www.daegu.go.kr/icms/bbs/selectBoardList.do?bbsId=BBS_0000004 |
 | [`host_congress-gov_root_7881e0b8`](host_congress-gov_root_7881e0b8.md) | registered via official Congress.gov Notifications RSS | 2026-05-24 | none | capability_blocked, entry_blocked, rss_fallback | https://www.congress.gov/ |
+| [`host_chonbuk-ac-kr_notice_d98e54a6`](host_chonbuk-ac-kr_notice_d98e54a6.md) | ⚪ no change — Cloudflare/403 blocks requested host | 2026-05-24 | none | capability_blocked, cloudflare_protected_site, catalog_notice_path_noise | https://www.chonbuk.ac.kr/notice |
 | [`host_capitalgroup-co_advisor_cc24afab`](host_capitalgroup-co_advisor_cc24afab.md) | fixed | 2026-05-24 | config | posts_nonempty, static_variant_rows_not_promoted, auth_redirect_article | https://www.capitalgroup.com/advisor/insights.html |
 | [`host_canada-ca_en_a89e35ea`](host_canada-ca_en_a89e35ea.md) | 🧩 수동 config — Canada.ca advanced news results로 baseline 10건 등록 | 2026-05-24 | none | posts_nonempty, nav_first_article, landing_page | https://www.canada.ca/en/news.html |
 | [`host_caltech-edu_about_c4979536`](host_caltech-edu_about_c4979536.md) | 🧩 수동 config — Caltech news static teasers로 baseline 10건 등록 | 2026-05-24 | none | article_body_len, nav_first_article, selector_scope | https://www.caltech.edu/about/news |
@@ -324,23 +331,23 @@
 | F+C | 3 |
 | adapter | 1 |
 | config | 3 |
-| none | 131 |
+| none | 138 |
 
 ### config_strategy 분포
 
 | strategy | count |
 |---|---|
-| (미기재) | 50 |
+| (미기재) | 53 |
 | handwritten | 31 |
 | httpx_html | 109 |
 | httpx_json | 24 |
 | httpx_json (미적용 — 콘텐츠 0) | 1 |
 | mixed | 1 |
 | none | 41 |
-| playwright_html | 37 |
+| playwright_html | 41 |
 | rejected | 1 |
 
 ### 최근 90일 (≥ 2026-02-23)
 
-케이스 295 건.
+케이스 302 건.
 
