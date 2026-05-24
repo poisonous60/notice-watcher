@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 302 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 307 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -19,7 +19,9 @@
 | [`host_schwab-com_resource-center_920e0268`](host_schwab-com_resource-center_920e0268.md) | 🧩 수동 config — Schwab insights 정적 HTML row 로 목록 10건, 본문 추출 확인 | 2026-05-24 | none | schema_invalid_css_selector | https://www.schwab.com/resource-center/insights |
 | [`host_sba-seoul-kr_Pages_1691c5a8`](host_sba-seoul-kr_Pages_1691c5a8.md) | ✅ 수동 config — SBA 기업지원 card_box 목록 추출 | 2026-05-24 | none | posts_nonempty, rendered_cards, javascript_detail | https://www.sba.seoul.kr/Pages/ContentsMenu/Company_Support.aspx |
 | [`host_rbnz-govt-nz_news-and-events_ada928b5`](host_rbnz-govt-nz_news-and-events_ada928b5.md) | 🧩 수동 config — RBNZ Coveo 목록을 Playwright로 수집 | 2026-05-24 | none | fetch_list_403, article_body_len | https://www.rbnz.govt.nz/news-and-events/news |
+| [`host_radiolab-org_podcast_0080db5b`](host_radiolab-org_podcast_0080db5b.md) | 🧩 수동 config — Nuxt skeleton row 대신 hydrated Radiolab episode card를 기다려 title/url 추출 | 2026-05-24 | F | title_nonempty, skeleton_rows, nuxt_hydration | https://radiolab.org/podcast |
 | [`host_pusan-ac-kr_notice_88427aed`](host_pusan-ac-kr_notice_88427aed.md) | ✅ config registered from official PNU notice board | 2026-05-24 | none | capability_blocked, catalog_notice_path_noise, wrong_board_url | https://www.pusan.ac.kr/notice |
+| [`host_oxide-computer_podcast_9f69bff0`](host_oxide-computer_podcast_9f69bff0.md) | ⚠ 추론 개선 적용 — 등록은 LLM key 0개로 escalated | 2026-05-24 | C+A+D | article_body_len, audio_share_host | https://oxide.computer/podcast/rss.xml |
 | [`host_nseindia-com_resources_b0248e5e`](host_nseindia-com_resources_b0248e5e.md) | 수동 config - NSE press-release JSON API 사용 | 2026-05-24 | none | fetch_list, posts_nonempty, wrong_first_article | https://www.nseindia.com/resources/exchange-communication-press-releases |
 | [`host_nps-or-kr_jsppage_ffd1ade5`](host_nps-or-kr_jsppage_ffd1ade5.md) | capability_blocked (entry_blocked) — RSS unavailable, HTML remap policy-rejected | 2026-05-24 | none | capability_blocked, entry_blocked, rss_unavailable | https://www.nps.or.kr/jsppage/main.jsp |
 | [`host_news-cornell-ed_root_5ab391ee`](host_news-cornell-ed_root_5ab391ee.md) | 🔧 손 config (playwright_html) — browser-rendered/latest-news selector works; httpx gets 403 from Cornell | 2026-05-24 | none | posts_nonempty, httpx_403, first_article_ok | https://news.cornell.edu/ |
@@ -41,11 +43,13 @@
 | [`host_gnome-org_news_c6b597f7`](host_gnome-org_news_c6b597f7.md) | no_change - GNOME news and feed endpoints remain baseline_blocked from this environment | 2026-05-24 | none | capability_blocked, baseline_blocked, rss_unavailable | https://www.gnome.org/news/ |
 | [`host_gg-go-kr_bbs_912082cf`](host_gg-go-kr_bbs_912082cf.md) | ⏸ deferred — 현재 직접 URL은 존재하지 않는 페이지 alert | 2026-05-24 | none | posts_nonempty, not_found_shell | https://www.gg.go.kr/bbs/board.do?bsIdx=464&menuId=1535 |
 | [`host_fitchratings-co_research_f256080a`](host_fitchratings-co_research_f256080a.md) | 🔧 손어댑터 config (GraphQL POST, baseline 확인) | 2026-05-24 | F | posts_nonempty, matches_probe_first_article | https://www.fitchratings.com/research |
+| [`host_feeds-thisameri_talpodcast_c725ed7a`](host_feeds-thisameri_talpodcast_c725ed7a.md) | ⚠ 프롬프트 개선 적용 — 등록은 LLM key 0개로 escalated | 2026-05-24 | A | post_id_stable_shape, rss_post_id | https://feeds.thisamericanlife.org/talpodcast |
 | [`host_ethz-ch_en_7733150b`](host_ethz-ch_en_7733150b.md) | 🔧 손 config (httpx_html, Atom feed) — static page has an empty newsfeed container and points to an ETH feed/API source | 2026-05-24 | none | posts_nonempty, first_article_nav, js_feed_container | https://ethz.ch/en/news-and-events/eth-news.html |
 | [`host_enisa-europa-eu_news_9ab433c4`](host_enisa-europa-eu_news_9ab433c4.md) | 🧩 수동 config — ENISA static news cards로 baseline 14건 등록 | 2026-05-24 | none | posts_nonempty, nav_first_article, filter_url | https://www.enisa.europa.eu/news |
 | [`host_energy-gov_listings_ccdfe8b8`](host_energy-gov_listings_ccdfe8b8.md) | ✅ 수동 config 등록 준비 (Energy.gov RSS endpoint) | 2026-05-24 | none | probe_timeout, drupal_listing, rss_endpoint | https://www.energy.gov/listings/energy-news |
 | [`host_ecb-europa-eu_press_8a61c6f6`](host_ecb-europa-eu_press_8a61c6f6.md) | 수동 config - ECB press RSS feed 사용 | 2026-05-24 | none | posts_nonempty, matches_probe_first_article, count_ballpark, rss_feed_available, foedb_rendered_list | https://www.ecb.europa.eu/press/html/index.en.html |
 | [`host_ec-europa-eu_commission_8fc8d9c8`](host_ec-europa-eu_commission_8fc8d9c8.md) | ✅ 수동 config 등록 준비 (Press Corner RSS endpoint) | 2026-05-24 | none | probe_timeout, spa_shell, rss_endpoint | https://ec.europa.eu/commission/presscorner/home/en |
+| [`host_dotnetrocks-com_RSS_7682fe1a`](host_dotnetrocks-com_RSS_7682fe1a.md) | ⚠ 추론 개선 적용 — 등록은 LLM key 0개로 escalated | 2026-05-24 | C+A+D | posts_nonempty, rss_feed_urls | https://www.dotnetrocks.com/RSS |
 | [`host_dongseoul-ac-kr_notice_b47e373b`](host_dongseoul-ac-kr_notice_b47e373b.md) | ⚪ no change — requested host connection refused/no reliable board URL | 2026-05-24 | none | capability_blocked, baseline_blocked, connection_refused, catalog_notice_path_noise | https://www.dongseoul.ac.kr/notice |
 | [`host_dongduk-ac-kr_notice_f00cd658`](host_dongduk-ac-kr_notice_f00cd658.md) | ⚪ no_change - /notice returned empty shell; no board URL proven in artifact | 2026-05-24 | none | gen_fail:posts_nonempty, empty-shell | https://www.dongduk.ac.kr/notice |
 | [`host_dhc-ac-kr_notice_af9d1dee`](host_dhc-ac-kr_notice_af9d1dee.md) | ⚪ no change — www host has not-found shell; department subdomain out of scope | 2026-05-24 | none | capability_blocked, entry_blocked, catalog_notice_path_noise, not_found_shell | https://www.dhc.ac.kr/notice |
@@ -54,6 +58,7 @@
 | [`host_daegu-go-kr_icms_60f0b219`](host_daegu-go-kr_icms_60f0b219.md) | ⏸ deferred — 현재 직접 URL은 게시판 설정 없음으로만 응답 | 2026-05-24 | none | posts_nonempty, board_config_missing | https://www.daegu.go.kr/icms/bbs/selectBoardList.do?bbsId=BBS_0000004 |
 | [`host_congress-gov_root_7881e0b8`](host_congress-gov_root_7881e0b8.md) | registered via official Congress.gov Notifications RSS | 2026-05-24 | none | capability_blocked, entry_blocked, rss_fallback | https://www.congress.gov/ |
 | [`host_chonbuk-ac-kr_notice_d98e54a6`](host_chonbuk-ac-kr_notice_d98e54a6.md) | ⚪ no change — Cloudflare/403 blocks requested host | 2026-05-24 | none | capability_blocked, cloudflare_protected_site, catalog_notice_path_noise | https://www.chonbuk.ac.kr/notice |
+| [`host_cbs-co-kr_podcast_0c51c954`](host_cbs-co-kr_podcast_0c51c954.md) | ⚠ 추론 개선 적용 — 등록은 LLM key 0개로 escalated | 2026-05-24 | C+A+D | posts_nonempty, rss_feed_urls | https://www.cbs.co.kr/podcast/ |
 | [`host_capitalgroup-co_advisor_cc24afab`](host_capitalgroup-co_advisor_cc24afab.md) | fixed | 2026-05-24 | config | posts_nonempty, static_variant_rows_not_promoted, auth_redirect_article | https://www.capitalgroup.com/advisor/insights.html |
 | [`host_canada-ca_en_a89e35ea`](host_canada-ca_en_a89e35ea.md) | 🧩 수동 config — Canada.ca advanced news results로 baseline 10건 등록 | 2026-05-24 | none | posts_nonempty, nav_first_article, landing_page | https://www.canada.ca/en/news.html |
 | [`host_caltech-edu_about_c4979536`](host_caltech-edu_about_c4979536.md) | 🧩 수동 config — Caltech news static teasers로 baseline 10건 등록 | 2026-05-24 | none | article_body_len, nav_first_article, selector_scope | https://www.caltech.edu/about/news |
@@ -316,9 +321,11 @@
 | layer | count |
 |---|---|
 | (미기재) | 36 |
+| A | 1 |
 | B | 1 |
 | C | 17 |
 | C+A | 1 |
+| C+A+D | 3 |
 | C+D | 2 |
 | C+F | 2 |
 | C+F+A | 1 |
@@ -326,7 +333,7 @@
 | D | 1 |
 | E | 6 |
 | E+A+C+D | 1 |
-| F | 86 |
+| F | 87 |
 | F+A | 1 |
 | F+C | 3 |
 | adapter | 1 |
@@ -337,17 +344,17 @@
 
 | strategy | count |
 |---|---|
-| (미기재) | 53 |
+| (미기재) | 57 |
 | handwritten | 31 |
 | httpx_html | 109 |
 | httpx_json | 24 |
 | httpx_json (미적용 — 콘텐츠 0) | 1 |
 | mixed | 1 |
 | none | 41 |
-| playwright_html | 41 |
+| playwright_html | 42 |
 | rejected | 1 |
 
 ### 최근 90일 (≥ 2026-02-23)
 
-케이스 302 건.
+케이스 307 건.
 
