@@ -3,16 +3,21 @@
 {% block title %}Picker — {{ target_url }}{% endblock %}
 {% block body %}
 <style>
-  .picker-grid { display:grid; grid-template-columns: 1fr 380px; gap:1rem; height:calc(100vh - 180px); }
+  .picker-grid { display:grid; grid-template-columns: 1fr 400px; gap:1rem; height:calc(100vh - 180px); }
   .picker-frame { position:relative; border:1px solid #ccc; background:#fff; }
   .picker-frame iframe { width:100%; height:100%; border:0; display:block; }
   .picker-side { overflow-y:auto; padding-right:0.5rem; font-size:0.9em; }
   .picker-side fieldset { margin: 0.5em 0; padding: 0.5em 0.7em; }
   .picker-side fieldset legend { font-size:0.85em; }
-  .picker-side code { font-size: 0.75em; word-break: break-all; display:block; padding:2px 4px; background:#f6f6f6; }
-  .picker-side button[data-mode] { font-size: 0.8em; padding: 2px 8px; margin: 2px 0; }
-  .picker-side .field-row { display:grid; grid-template-columns: 90px 1fr; gap:4px; align-items:start; margin: 2px 0; }
+  .picker-side code { font-size: 0.72em; word-break: break-all; display:inline-block; padding:1px 4px; background:#f6f6f6; max-width:240px; vertical-align:middle; }
+  .picker-side button { font-size: 0.8em; padding: 2px 8px; margin: 0; }
+  .picker-side .row { display:grid; grid-template-columns: 72px 1fr 44px; gap:4px; align-items:center; margin: 3px 0; }
+  .picker-side .row .lbl { font-weight: 600; font-size: 0.85em; }
+  .picker-side .row .req { color: #c00; }
   #save-result { font-size: 0.75em; max-height: 260px; overflow:auto; background:#f9f9f9; padding: 0.5em; }
+  #row-info { font-size: 0.8em; }
+  #row-info .ok { color: #080; }
+  #row-info .warn { color: #f60; }
 </style>
 
 <div class="picker-grid">
@@ -21,26 +26,27 @@
   </div>
   <aside class="picker-side">
     <h3 style="margin-top:0;">🎯 Picker</h3>
-    <p class="muted" style="font-size:0.8em;">{{ target_url }}</p>
-    <div id="status" class="muted">대기</div>
+    <p class="muted" style="font-size:0.8em;margin:0 0 0.5em;">{{ target_url }}</p>
+    <div id="status" class="muted" style="min-height:1.4em;">대기 — "Row 짚기" 누른 후 iframe 의 공지 row 1개 클릭</div>
 
     <fieldset>
-      <legend><b>1. Row 패턴</b></legend>
-      <p class="muted" style="margin:0;font-size:0.8em;">공지 row 2개를 클릭</p>
-      <button type="button" data-mode="row1">첫 row</button>
-      <button type="button" data-mode="row2">두번째 row</button>
-      <code id="row-selector">—</code>
+      <legend><b>1. Row 짚기 (1-click)</b></legend>
+      <button type="button" id="btn-row">Row 짚기</button>
+      <div id="row-info" style="margin-top:6px;">
+        row_selector: <code id="row-selector">—</code><br>
+        매칭: <span id="row-count">—</span>
+      </div>
     </fieldset>
 
     <fieldset>
-      <legend><b>2. Field 매핑</b></legend>
-      <p class="muted" style="margin:0 0 4px;font-size:0.8em;">row 안에서 element 클릭</p>
-      <div class="field-row"><button type="button" data-mode="field:title">title</button>     <code data-field="title">—</code></div>
-      <div class="field-row"><button type="button" data-mode="field:link">link</button>       <code data-field="link">—</code></div>
-      <div class="field-row"><button type="button" data-mode="field:post_id">post_id</button> <code data-field="post_id">—</code></div>
-      <div class="field-row"><button type="button" data-mode="field:date">date</button>       <code data-field="date">—</code></div>
-      <div class="field-row"><button type="button" data-mode="field:author">author</button>   <code data-field="author">—</code></div>
-      <div class="field-row"><button type="button" data-mode="field:category">category</button><code data-field="category">—</code></div>
+      <legend><b>2. Field 자동 매핑 (틀린 것만 "수정" click)</b></legend>
+      <div class="row"><span class="lbl">title<span class="req">*</span></span><code data-field="title">—</code><button type="button" data-edit="title">수정</button></div>
+      <div class="row"><span class="lbl">link</span>                              <code data-field="link">—</code>   <button type="button" data-edit="link">수정</button></div>
+      <div class="row"><span class="lbl">post_id</span>                           <code data-field="post_id">—</code><button type="button" data-edit="post_id">수정</button></div>
+      <div class="row"><span class="lbl">date</span>                              <code data-field="date">—</code>   <button type="button" data-edit="date">수정</button></div>
+      <div class="row"><span class="lbl">author</span>                            <code data-field="author">—</code> <button type="button" data-edit="author">수정</button></div>
+      <div class="row"><span class="lbl">category</span>                          <code data-field="category">—</code><button type="button" data-edit="category">수정</button></div>
+      <p class="muted" style="font-size:0.75em;margin:4px 0 0;">* = 필수. post_id 가 자동 매핑되면 transforms (regex) 도 같이 박힘.</p>
     </fieldset>
 
     <fieldset>
@@ -68,30 +74,59 @@ const targetUrl = {{ target_url|tojson }};
 const iframe = document.getElementById('target');
 const statusEl = document.getElementById('status');
 const rowSelEl = document.getElementById('row-selector');
+const rowCountEl = document.getElementById('row-count');
 const saveBtn = document.getElementById('save-btn');
 const saveResult = document.getElementById('save-result');
 
-let row1 = null, row2 = null, rowSelector = null;
-const fields = {};
+let rowSelector = null;
+const fieldsData = {};  // { name: {selector, attr?, transforms?} }
 
 let pendingMode = null;
 let ackTimer = null;
-document.querySelectorAll('button[data-mode]').forEach(b => {
-  b.addEventListener('click', () => {
-    const mode = b.dataset.mode;
-    pendingMode = mode;
-    iframe.contentWindow.postMessage({type: 'picker:mode', mode}, '*');
-    statusEl.textContent = '⏳ ' + mode + ' 활성화 시도...';
-    statusEl.style.color = '';
-    if (ackTimer) clearTimeout(ackTimer);
-    ackTimer = setTimeout(() => {
-      if (pendingMode === mode) {
-        statusEl.textContent = '⚠ picker.js 응답 없음 — F12 콘솔 에러 확인 (모듈 load 실패 의심)';
-        statusEl.style.color = '#c00';
-      }
-    }, 1500);
-  });
+
+function _activate(mode) {
+  pendingMode = mode;
+  iframe.contentWindow.postMessage({type: 'picker:mode', mode}, '*');
+  statusEl.textContent = '⏳ ' + mode + ' 활성화...';
+  statusEl.style.color = '';
+  if (ackTimer) clearTimeout(ackTimer);
+  ackTimer = setTimeout(() => {
+    if (pendingMode === mode) {
+      statusEl.textContent = '⚠ picker.js 응답 없음 — F12 콘솔 에러 확인';
+      statusEl.style.color = '#c00';
+    }
+  }, 1500);
+}
+
+document.getElementById('btn-row').addEventListener('click', () => _activate('row'));
+document.querySelectorAll('button[data-edit]').forEach(b => {
+  b.addEventListener('click', () => _activate('field:' + b.dataset.edit));
 });
+
+function _setFieldDisplay(name, value) {
+  const el = document.querySelector('code[data-field="' + name + '"]');
+  if (el) el.textContent = value || '—';
+}
+
+function _applyAutoFields(autoFields) {
+  // picker.js 의 _heuristicFields flat dict → fieldsData nested + UI 표시
+  for (const name of ['title', 'link', 'date', 'author', 'category']) {
+    if (autoFields[name]) {
+      const spec = {selector: autoFields[name]};
+      if (name === 'link') spec.attr = 'href';
+      fieldsData[name] = spec;
+      _setFieldDisplay(name, autoFields[name]);
+    }
+  }
+  if (autoFields.post_id) {
+    const spec = {selector: autoFields.post_id};
+    if (autoFields.post_id_attr) spec.attr = autoFields.post_id_attr;
+    if (autoFields.post_id_regex) spec.transforms = [['regex_extract', autoFields.post_id_regex]];
+    fieldsData.post_id = spec;
+    const txt = autoFields.post_id + (autoFields.post_id_regex ? ' [regex]' : '');
+    _setFieldDisplay('post_id', txt);
+  }
+}
 
 window.addEventListener('message', (e) => {
   if (e.source !== iframe.contentWindow) return;
@@ -109,76 +144,49 @@ window.addEventListener('message', (e) => {
     return;
   }
   if (m.type === 'picker:nomode') {
-    statusEl.textContent = '⚠ 먼저 좌측 모드 버튼 ("첫 row" / "field:title" 등) 눌러주세요';
+    statusEl.textContent = '⚠ 먼저 우측 "Row 짚기" 또는 field "수정" 버튼 누르세요';
     statusEl.style.color = '#f60';
     return;
   }
-  if (m.type !== 'picker:picked') return;
-  statusEl.style.color = '';
-  const mode = m.mode;
-  if (mode === 'row1') {
-    row1 = m;
-    statusEl.textContent = 'row1: ' + m.selector;
-  } else if (mode === 'row2') {
-    row2 = m;
-    rowSelector = generalize(row1 && row1.selector, row2 && row2.selector);
-    rowSelEl.textContent = rowSelector || '추출 실패 — 두 selector 가 너무 다름';
-    statusEl.textContent = 'row pattern: ' + (rowSelector || '추출 실패');
-  } else if (mode.startsWith('field:')) {
-    const f = mode.split(':')[1];
-    fields[f] = {selector: m.selector, attr: f === 'link' ? 'href' : undefined};
-    document.querySelector('code[data-field="' + f + '"]').textContent = m.selector;
+  if (m.type === 'picker:err') {
+    statusEl.textContent = '⚠ ' + m.error;
+    statusEl.style.color = '#c00';
+    return;
   }
-  iframe.contentWindow.postMessage({type: 'picker:mode', mode: 'idle'}, '*');
+  if (m.type === 'picker:row-auto') {
+    rowSelector = m.row_selector;
+    rowSelEl.textContent = rowSelector;
+    rowCountEl.innerHTML = m.n_matched + ' 개 매칭 ' +
+      (m.n_matched >= 2 ? '<span class="ok">(녹색 점선 outline 확인)</span>' :
+       '<span class="warn">(1개만 — 다른 row 직접 클릭 권장)</span>');
+    _applyAutoFields(m.fields || {});
+    iframe.contentWindow.postMessage({type: 'picker:mode', mode: 'idle'}, '*');
+    statusEl.textContent = '✓ row + 자동 field 매핑 완료. 틀린 field 만 "수정" click';
+    statusEl.style.color = '#080';
+    return;
+  }
+  if (m.type === 'picker:field') {
+    const name = m.field;
+    const spec = {selector: m.selector};
+    if (name === 'link') spec.attr = 'href';
+    fieldsData[name] = spec;
+    _setFieldDisplay(name, m.selector);
+    iframe.contentWindow.postMessage({type: 'picker:mode', mode: 'idle'}, '*');
+    statusEl.textContent = '✓ ' + name + ' 수정됨';
+    statusEl.style.color = '#080';
+    return;
+  }
 });
 
-function generalize(a, b) {
-  // codex review fix #6: class 불일치 (li.notice vs li.regular) 시 그냥 break 하면
-  // parent selector 로 후퇴해 row 자체를 잃음. tag 같으면 common class 만 유지로
-  // row element 보존.
-  if (!a || !b) return null;
-  const splitSel = s => s.split(/\s*>\s*/);
-  const sa = splitSel(a);
-  const sb = splitSel(b);
-  const min = Math.min(sa.length, sb.length);
-  const out = [];
-  const norm = s => s.replace(/:nth-(child|of-type)\(\d+\)/g, '').trim();
-  const parse = s => {
-    const tagMatch = s.match(/^([a-z][a-z0-9-]*)/i);
-    return {
-      tag: tagMatch ? tagMatch[1] : '',
-      classes: [...s.matchAll(/\.([a-zA-Z0-9_-]+)/g)].map(m => m[1]),
-      ids: [...s.matchAll(/#([a-zA-Z0-9_-]+)/g)].map(m => m[1]),
-    };
-  };
-  for (let i = 0; i < min; i++) {
-    const ai = norm(sa[i]);
-    const bi = norm(sb[i]);
-    if (ai === bi) { out.push(ai); continue; }
-    const pa = parse(ai);
-    const pb = parse(bi);
-    if (pa.tag && pa.tag === pb.tag && JSON.stringify(pa.ids) === JSON.stringify(pb.ids)) {
-      const commonCls = pa.classes.filter(c => pb.classes.includes(c));
-      let token = pa.tag;
-      if (pa.ids.length) token += '#' + pa.ids.join('#');
-      if (commonCls.length) token += '.' + commonCls.join('.');
-      out.push(token);
-      continue;
-    }
-    break;
-  }
-  return out.length ? out.join(' > ') : null;
-}
-
 saveBtn.addEventListener('click', async () => {
-  if (!rowSelector) { alert('row 패턴 먼저 — row 1+2 선택'); return; }
-  if (!fields.title) { alert('title field 필수'); return; }
+  if (!rowSelector) { alert('Row 짚기 먼저'); return; }
+  if (!fieldsData.title) { alert('title 매핑 안 됨 — row 안 가장 긴 anchor 가 없는 듯. "수정" 으로 직접 짚으세요'); return; }
   const payload = {
     sid,
     row_selector: rowSelector,
     include_notices: document.getElementById('include-notices').checked,
     strategy: document.getElementById('strategy').value,
-    fields,
+    fields: fieldsData,
   };
   saveResult.textContent = '저장 중...';
   try {

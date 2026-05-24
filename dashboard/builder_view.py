@@ -66,6 +66,8 @@ _FIELD_NAMES = Literal["title", "link", "post_id", "date", "author", "category"]
 class FieldSpec(BaseModel):
     selector: str = Field(..., min_length=1, max_length=500)
     attr: Optional[str] = Field(None, max_length=50)
+    # 자동 매핑이 박는 transform — 예: [["regex_extract", "[?&]pkid=([^&#]+)"]]
+    transforms: Optional[list[list]] = Field(None, max_length=8)
 
 
 class SavePayload(BaseModel):
