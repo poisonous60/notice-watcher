@@ -318,9 +318,8 @@ def _policy_reject_is_host_wide(verdict: str) -> bool:
 def _has_verified_feed(digest: dict) -> bool:
     """digest 의 feed_candidates 에 *fetch-검증된* RSS/Atom 피드가 있나.
 
-    검증 = (a) 후보가 status 200 + content-type xml/rss/atom, 또는 (b) 입력 URL 직접 fetch
-    로 확인된 source `input-url-feed-fetch` (probe/discover._url_serves_feed). path 모양만으로
-    추측한 `input-url-feed-path` 는 미검증 (제외).
+    검증 = probe/discover.validate_feed_candidate 가 validated=true 로 표시한 후보.
+    legacy source/status/content-type 만으로는 더 이상 검증된 feed 로 승격하지 않는다.
 
     Cloudflare 가 HTML 페이지만 챌린지하고 RSS 는 열어두는 사이트 (smashingmagazine 류) — HTML
     BLOCKED 라도 피드가 실재 200 이면 피드로 등록 가능 (차단 우회 X — 공개 피드 그대로 수집).
@@ -329,14 +328,6 @@ def _has_verified_feed(digest: dict) -> bool:
         if not isinstance(c, dict):
             continue
         if c.get("validated") is True:
-            return True
-        if c.get("validated") is False:
-            continue
-        src = c.get("source")
-        if src == "input-url-feed-fetch":
-            return True
-        ct = (c.get("content_type") or "").lower()
-        if c.get("status") == 200 and any(tok in ct for tok in ("xml", "rss", "atom")):
             return True
     return False
 
@@ -922,13 +913,7 @@ def _build_digest(slug: str, url: str) -> dict:
         har_path = probe_dir / "traffic.list.har"
     if "rss_feed_urls" not in lc:
         feeds = []
-        # 1순위: list.html 의 link rel + HAR XML — 사이트가 명시한 RSS feed URL (가장 신뢰)
-        feeds.extend(rss_feed_urls(
-            html=list_html,
-            base_url=url,
-            har_path=har_path if har_path.exists() else None,
-        ))
-        # 2순위: feed_candidates 중 *validated=true* 만 — 새 probe artifact 의 검증된 후보
+        # 1순위: feed_candidates 중 *validated=true* 만 — 새 probe artifact 의 검증된 후보
         for c in digest.get("feed_candidates") or []:
             if not isinstance(c, dict):
                 continue
@@ -936,7 +921,21 @@ def _build_digest(slug: str, url: str) -> dict:
                 continue
             cu = c.get("url")
             if cu:
-                feeds.append({"url": cu, "source": c.get("source") or "feed_candidates", "type": c.get("type")})
+                feeds.append({
+                    "url": cu,
+                    "source": c.get("source") or "feed_candidates",
+                    "type": c.get("type"),
+                    "validated": True,
+                })
+        # 2순위: list.html 의 link rel + HAR XML — 사이트가 명시한 후보지만 fetch 검증은 아님
+        for f in rss_feed_urls(
+            html=list_html,
+            base_url=url,
+            har_path=har_path if har_path.exists() else None,
+        ):
+            if isinstance(f, dict):
+                f["validated"] = False
+                feeds.append(f)
         # 3순위: 위 둘 다 0이면 옛 feed_candidates fallback — input-url 추측은 *마지막*
         if not feeds:
             for c in digest.get("feed_candidates") or []:
@@ -948,7 +947,12 @@ def _build_digest(slug: str, url: str) -> dict:
                     continue
                 cu = c.get("url")
                 if cu:
-                    feeds.append({"url": cu, "source": src or "feed_candidates", "type": c.get("type")})
+                    feeds.append({
+                        "url": cu,
+                        "source": src or "feed_candidates",
+                        "type": c.get("type"),
+                        "validated": False,
+                    })
         seen = set()
         lc["rss_feed_urls"] = [
             f for f in feeds

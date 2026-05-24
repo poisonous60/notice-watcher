@@ -20,6 +20,7 @@ def run() -> list[tuple[str, bool, str]]:
 
     old_fetch = discover._fetch_feed_candidate_response
     old_url_serves_feed = discover._url_serves_feed
+    fetch_counts: dict[str, int] = {}
 
     rss_ok = '<rss version="2.0"><channel><item><title>A</title></item><item><title>B</title></item></channel></rss>'
     rss_empty = '<rss version="2.0"><channel><title>empty</title></channel></rss>'
@@ -38,6 +39,7 @@ def run() -> list[tuple[str, bool, str]]:
     }
 
     def fake_fetch(url: str, *, timeout: float = 10.0):
+        fetch_counts[url] = fetch_counts.get(url, 0) + 1
         if url == "https://example.com/down.xml":
             raise RuntimeError("boom")
         return responses[url]
@@ -64,12 +66,18 @@ def run() -> list[tuple[str, bool, str]]:
                       atom.get("validated") is True and atom.get("root_tag") == "feed" and atom.get("item_count") == 1,
                       f"got {atom!r}"))
 
+        large_rss = "<rss><channel>" + "".join("<item><title>x</title></item>" for _ in range(50_000)) + "</channel></rss>"
+        root_tag, item_count = discover._xml_root_and_item_count(large_rss)
+        cases.append(("large_feed_parse_is_capped_but_counted",
+                      root_tag == "rss" and isinstance(item_count, int) and item_count > 0,
+                      f"got {(root_tag, item_count)!r}"))
+
         cbs = discover.validate_feed_candidate("https://www.cbsnews.com/podcasts/rss", source="well-known-path")
         cases.append(("cbs_empty_feed_fixture_invalid",
                       cbs.get("validated") is False and cbs.get("root_tag") == "rss" and cbs.get("item_count") == 0,
                       f"got {cbs!r}"))
 
-        discover._url_serves_feed = lambda url, *, timeout=10.0: True
+        fetch_counts.clear()
         verified_cbs = discover._verified_feed_candidate(
             "https://www.cbsnews.com/podcasts/rss",
             source="input-url-feed-fetch",
@@ -77,6 +85,9 @@ def run() -> list[tuple[str, bool, str]]:
         cases.append(("verified_candidate_rejects_validate_failure",
                       verified_cbs is None,
                       f"got {verified_cbs!r}"))
+        cases.append(("verified_candidate_fetches_once",
+                      fetch_counts.get("https://www.cbsnews.com/podcasts/rss") == 1,
+                      f"got counts {fetch_counts!r}"))
 
         dotnetrocks = discover.validate_feed_candidate("https://www.dotnetrocks.com/RSS", source="input-url-feed-path")
         cases.append(("dotnetrocks_html_spa_fixture_invalid",
@@ -106,7 +117,8 @@ def run() -> list[tuple[str, bool, str]]:
         legacy_xml = {"source": "input-url-feed-fetch", "status": 200, "content_type": "application/xml"}
         legacy_digest = {"feed_candidates": [legacy_xml]}
         cases.append(("legacy_unvalidated_xml_candidate_does_not_count",
-                      _count_board_feed_signals(legacy_digest, {}) == 0,
+                      _count_board_feed_signals(legacy_digest, {}) == 0
+                      and _has_verified_feed(legacy_digest) is False,
                       f"got digest {legacy_digest!r}"))
 
         digest_valid = {"feed_candidates": [ok]}
