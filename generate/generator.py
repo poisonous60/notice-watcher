@@ -7,7 +7,9 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
+import re
 from typing import Callable, Optional
 from urllib.parse import urlsplit
 
@@ -26,7 +28,29 @@ class GenerationError(RuntimeError):
     pass
 
 
-def _enrich_retry_feedback(rep, prev_cfg: Optional[dict], digest: dict, attempt_history: list[dict]) -> str:
+def _build_recipe_feedback_section(recipes: list[str], patched_candidate: Optional[dict]) -> str:
+    """D-layer recipe text hint section — feedback text 뒤에 박힘.
+
+    JSON snippet 은 여기서 안 박는다 — build_retry_prompt 의 별도 starting_candidate block 이 박음.
+    여긴 *왜 inject 했는지* + *어떻게 따라가야 하는지* text hint 만.
+    patched_candidate=None 또는 recipes 없으면 빈 string.
+    """
+    if not recipes or not patched_candidate:
+        return ""
+    lines = ["\n### D-layer recipe 발동 (반복 실패 봉합 룰 inject)"]
+    lines.append(
+        "같은 hard fail 이 2회+ 반복됨. 자연어 hint 만으로 봉합 안 돼 결정론 룰 강제 inject. "
+        "아래 hint + prompt 의 `### 추천 수정 starting point` 블록 cfg 따라가라."
+    )
+    for r in recipes:
+        hint = _RECIPE_TEXT_HINTS.get(r)
+        if hint:
+            lines.append("- " + hint)
+    return "\n".join(lines)
+
+
+def _enrich_retry_feedback(rep, prev_cfg: Optional[dict], digest: dict, attempt_history: list[dict],
+                            *, recipe_section: str = "") -> str:
     """retry prompt 에 들어갈 풍부한 feedback. rep.feedback_text() 베이스 + 네 가지 보강.
 
     1. 직전 시도 cfg 의 list/article 전체 JSON echo — LLM 이 자기가 뭐 박았는지 잊지 않도록.
@@ -125,7 +149,202 @@ def _enrich_retry_feedback(rep, prev_cfg: Optional[dict], digest: dict, attempt_
             )
         parts.append("\n".join(lines))
 
+    # (5) D-layer recipe hint — 호출부에서 계산해 주입
+    if recipe_section:
+        parts.append(recipe_section)
+
     return "\n".join(parts) if parts else ""
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# D-layer retry feedback dynamic injection (MVP recipes)
+#
+# 같은 hard-fail key 가 2회+ 반복되면, prompt 의 자연어 hint 만으로는 LLM 이 봉합 못 함.
+# (RSS post_id 룰 / spa_rendered hint 가 prompts/config_writer.system.txt 에 박혀 있음에도
+#  LLM 이 무시한 경험 — docs/cases/_session_retro_2026-05-24_podcast.md §7d/§7f).
+#
+# 룰: 결정론 봉합 룰을 *완성된 cfg snippet* 또는 *strategy switch* 로 retry prompt 에 inject.
+# prev_cfg 자체는 안 덮어쓴다 (R-H3) — 별도 `### 추천 수정 starting point` block 으로 전달.
+# 실제 patch 키는 engine 이 읽는 키만 (R-H10) — wait_selector / strategy 등.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# RSS/Atom row selector 인지 판단 — Recipe 1 의 applies_to.
+_RSS_ROW_SELECTOR_RE = re.compile(r"\b(channel\s*>\s*item|^item$|>\s*item\b|feed\s*>\s*entry|^entry$|>\s*entry\b)", re.IGNORECASE)
+
+
+def _count_fail_key(attempt_history: list[dict], key: str) -> int:
+    """attempt_history 의 fails (validation check name) 중 key 등장 횟수 (exact match)."""
+    n = 0
+    for h in attempt_history:
+        fails = h.get("fails") or []
+        if key in fails:
+            n += 1
+    return n
+
+
+def _recipe_1_applies(cfg: dict, digest: dict) -> bool:
+    """Recipe 1 applies_to — RSS post_id 불안정 봉합 대상.
+
+    조건: strategy=httpx_html + row_selector 가 RSS/Atom pattern + (site_kind 가 rss/podcast/hybrid
+    또는 validated XML feed 후보 1+).
+    """
+    if (cfg.get("strategy") or "") != "httpx_html":
+        return False
+    lst = cfg.get("list") or {}
+    row_sel = str(lst.get("row_selector") or "")
+    if not _RSS_ROW_SELECTOR_RE.search(row_sel):
+        return False
+    sk = (digest.get("site_kind") or {}).get("kind")
+    if sk in ("rss", "podcast", "hybrid"):
+        return True
+    # site_kind 없거나 unknown 이어도 validated feed 후보 1+ 면 OK
+    feeds = digest.get("feed_candidates") or []
+    for f in feeds:
+        if isinstance(f, dict) and f.get("validated") is True:
+            return True
+    lc = digest.get("list_candidates") or {}
+    for f in lc.get("rss_feed_urls") or []:
+        if isinstance(f, dict) and f.get("validated") is True:
+            return True
+    return False
+
+
+def _recipe_2_applies(cfg: dict, digest: dict) -> bool:
+    """Recipe 2 applies_to — SPA rendered 봉합 대상.
+
+    조건: site_kind.kind=spa_rendered AND confidence=high.
+    """
+    sk = digest.get("site_kind") or {}
+    return sk.get("kind") == "spa_rendered" and sk.get("confidence") == "high"
+
+
+# Recipe 1 patch: list.fields.post_id = link path tail (RSS 표준 봉합 — thisamericanlife 류)
+_RECIPE_1_POST_ID_PATCH = [
+    {
+        "from": "css",
+        "selector": "link",
+        "text": True,
+        "transform": [["strip"], ["strip_query_fragment"], ["regex_extract", "/([^/?#]+)/?$"]],
+    }
+]
+
+
+# nav/header/footer/skeleton/loading 등 *chrome* selector 차단 — wait_selector 가 가짜 element
+# 까지 대기하면 무한 wait + post 추출 0건. selector text token 단위 매칭 — word boundary 는
+# `\w` 만 사용 (hyphen 은 separator 취급 → `.header-nav-item` 의 `nav` 도 reject).
+# 단 `navigate`, `headerless` 같은 *어휘 일부* 는 reject 안 됨 (token 자체가 `navigate`/`headerless` 임).
+_SPA_WAIT_SELECTOR_BLOCKLIST_RE = re.compile(
+    r"(?<!\w)(nav|navbar|navigation|header|footer|sidebar|menu|menubar|"
+    r"breadcrumb|breadcrumbs|skeleton|loading|placeholder|spinner|shimmer)(?!\w)",
+    re.IGNORECASE,
+)
+
+
+def _pick_spa_wait_selector(digest: dict, host: Optional[str]) -> Optional[str]:
+    """probe html_repeating_patterns 중 same-host 글 URL 패턴인 top 1 의 selector.
+
+    nav/skeleton/footer 같은 chrome/loading 후보 회피용 보수 필터 (R-H10):
+    1. sample_url same-host 또는 href_pattern_guess 가 relative path
+    2. selector text 에 chrome/skeleton/loading token 없음
+    못 찾으면 None — patch 에서 wait_selector 안 박고 strategy switch 만 함.
+    """
+    lc = digest.get("list_candidates") or {}
+    pats = lc.get("html_repeating_patterns") or []
+    cands = []
+    for p in pats:
+        if not isinstance(p, dict):
+            continue
+        sel = p.get("selector")
+        if not sel or not isinstance(sel, str):
+            continue
+        # chrome/loading token reject (R-H10) — selector 자체에 nav/skeleton 박힌 후보는 skip
+        if _SPA_WAIT_SELECTOR_BLOCKLIST_RE.search(sel):
+            continue
+        # same-host 글 URL 패턴 신호 — sample_url 의 host 가 같거나, href_pattern_guess 가 relative path
+        sample = p.get("sample_url") or ""
+        href_guess = p.get("href_pattern_guess") or ""
+        same_host = False
+        if host and sample:
+            try:
+                if urlsplit(sample).netloc == host:
+                    same_host = True
+            except Exception:
+                pass
+        if not same_host and isinstance(href_guess, str) and href_guess.startswith("/"):
+            same_host = True
+        if not same_host:
+            continue
+        cands.append((int(p.get("child_count") or 0), sel))
+    if not cands:
+        return None
+    cands.sort(key=lambda t: t[0], reverse=True)
+    return cands[0][1]
+
+
+def _select_retry_recipes(cfg: dict, digest: dict, attempt_history: list[dict]) -> list[str]:
+    """attempt_history + cfg + digest 보고 적용 가능한 recipe name list 반환."""
+    selected: list[str] = []
+    # Recipe 1: post_id_unique OR post_id_stable_shape 가 2회+ + applies_to
+    n_pid = _count_fail_key(attempt_history, "post_id_unique") + _count_fail_key(attempt_history, "post_id_stable_shape")
+    if n_pid >= 2 and _recipe_1_applies(cfg, digest):
+        selected.append("rss_post_id_from_link")
+    # Recipe 2: posts_nonempty OR title_nonempty 가 2회+ + applies_to
+    n_spa = _count_fail_key(attempt_history, "posts_nonempty") + _count_fail_key(attempt_history, "title_nonempty")
+    if n_spa >= 2 and _recipe_2_applies(cfg, digest):
+        selected.append("spa_rendered_retry")
+    return selected
+
+
+def _apply_recipe_patch(prev_cfg: dict, recipes: list[str], digest: dict) -> Optional[dict]:
+    """선택된 recipe 들 prev_cfg 의 deepcopy 에 적용 → patched candidate.
+
+    prev_cfg 자체 절대 안 건드림 (R-H3). recipe 가 비어있거나 patch 적용할 게 없으면 None.
+    """
+    if not recipes or not isinstance(prev_cfg, dict):
+        return None
+    patched = copy.deepcopy(prev_cfg)
+    changed = False
+
+    if "rss_post_id_from_link" in recipes:
+        lst = patched.setdefault("list", {})
+        fields = lst.setdefault("fields", {})
+        fields["post_id"] = copy.deepcopy(_RECIPE_1_POST_ID_PATCH)
+        changed = True
+
+    if "spa_rendered_retry" in recipes:
+        # strategy=httpx_html → playwright_html. 이미 playwright_html 이면 patch 없음 (text hint 만).
+        if (patched.get("strategy") or "") == "httpx_html":
+            patched["strategy"] = "playwright_html"
+            host = None
+            try:
+                host = urlsplit(digest.get("url") or "").netloc or None
+            except Exception:
+                host = None
+            wait_sel = _pick_spa_wait_selector(digest, host)
+            if wait_sel:
+                lst = patched.setdefault("list", {})
+                lst["wait_selector"] = wait_sel
+            changed = True
+
+    return patched if changed else None
+
+
+_RECIPE_TEXT_HINTS = {
+    "rss_post_id_from_link": (
+        "**Recipe rss_post_id_from_link** — `post_id_unique`/`post_id_stable_shape` 반복 실패. "
+        "RSS item 의 `<guid>` 가 불안정 ID (공백/긴 문장/원문 URL 결합). `link` path tail 을 post_id 로 써라. "
+        "위 starting point 의 `list.fields.post_id` 정확히 그 transform chain 그대로 박아라 — "
+        "다른 selector 미세 변형 X."
+    ),
+    "spa_rendered_retry": (
+        "**Recipe spa_rendered_retry** — `posts_nonempty`/`title_nonempty` 반복 실패 + SPA. "
+        "server-rendered HTML 에 skeleton/loading row 만 박혀있고 진짜 row 는 hydration 후. "
+        "starting point 의 `strategy=playwright_html` + `list.wait_selector` 그대로 시도. "
+        "wait_selector 가 비어있으면 list_html (정적) 의 진짜 row container selector "
+        "(h2/h3/.card-title/.post 류 — *실제 title element*) 를 직접 박아라. "
+        "`a[href]` 단순 wait 는 nav/menu 까지 잡혀 부족하다."
+    ),
+}
 
 
 def _patch_minimal(cfg: dict, digest: dict) -> dict:
@@ -209,6 +428,7 @@ async def generate_config_validated(
     override = f"gemini:{model}" if model else None
     prev_cfg: Optional[dict] = None
     prev_feedback: str = ""
+    prev_starting_candidate: Optional[dict] = None  # D-layer recipe — retry round 별도 인자 (R-H3: prev_cfg 안 덮어씀)
     attempt_history: list[dict] = []  # _enrich_retry_feedback (3) — 누적 시도 strategy/selector/fails
     tr = current_trace()
 
@@ -218,7 +438,10 @@ async def generate_config_validated(
             if i == 1:
                 prompt_text = build_user_prompt(digest)
             else:
-                prompt_text = build_retry_prompt(digest, prev_cfg or {}, prev_feedback)
+                prompt_text = build_retry_prompt(
+                    digest, prev_cfg or {}, prev_feedback,
+                    starting_candidate=prev_starting_candidate,
+                )
 
             # i==1 은 신규 생성, i>=2 는 retry 라운드 (다른 모델 라우팅 가능하도록 call_site 분리).
             call_site = "config_generate" if i == 1 else "config_retry"
@@ -287,7 +510,11 @@ async def generate_config_validated(
                 "fails_detail": [f"{c.name}: {(c.detail or '')[:80]}" for c in rep.hard_failures()],
             })
             prev_cfg = cfg
-            prev_feedback = _enrich_retry_feedback(rep, prev_cfg, digest, attempt_history)
+            # D-layer recipe 계산 — 같은 fail key 2회+ 반복 시 결정론 봉합 룰 inject (R-H3: prev_cfg 안 덮어씀)
+            recipes = _select_retry_recipes(cfg, digest, attempt_history)
+            prev_starting_candidate = _apply_recipe_patch(cfg, recipes, digest) if recipes else None
+            recipe_section = _build_recipe_feedback_section(recipes, prev_starting_candidate)
+            prev_feedback = _enrich_retry_feedback(rep, prev_cfg, digest, attempt_history, recipe_section=recipe_section)
             if i < max_attempts:
                 await asyncio.sleep(inter_attempt_sleep)
 

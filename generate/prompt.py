@@ -96,12 +96,40 @@ def build_user_prompt(digest: dict, *, max_html_chars: int = 120_000) -> str:
     )
 
 
-def build_retry_prompt(digest: dict, prev_config: dict, feedback_text: str, *, max_html_chars: int = 120_000) -> str:
-    """재시도용: 원래 digest/HTML + 이전 config + 검증 실패 내역 → *수정된* config 요청."""
+def build_retry_prompt(
+    digest: dict,
+    prev_config: dict,
+    feedback_text: str,
+    *,
+    starting_candidate: Optional[dict] = None,
+    max_html_chars: int = 120_000,
+) -> str:
+    """재시도용: 원래 digest/HTML + 이전 config + 검증 실패 내역 → *수정된* config 요청.
+
+    starting_candidate (D-layer recipe): 같은 fail 가 반복돼 결정론 봉합 룰을 inject 한 *후보* cfg.
+    prev_config 와 별개로 prompt 끝에 `### 추천 수정 starting point` block 으로 렌더 — prev_config 안 덮어씀 (R-H3).
+    None 이면 기존 동작.
+    """
     base = build_user_prompt(digest, max_html_chars=max_html_chars)
-    return render_prompt(
+    base_prompt = render_prompt(
         "config_writer.retry_skeleton",
         base=base,
         prev_config=json.dumps(prev_config, ensure_ascii=False, indent=2),
         feedback=feedback_text,
     )
+    if not starting_candidate:
+        return base_prompt
+    lst = starting_candidate.get("list") or {}
+    art = starting_candidate.get("article") or {}
+    strat = starting_candidate.get("strategy")
+    snippet = {"strategy": strat, "list": lst, "article": art}
+    block = (
+        "\n\n### 추천 수정 starting point (D-layer recipe — 결정론 봉합)\n"
+        "위 feedback 의 D-layer recipe 발동 알림에 따른 *시작점 cfg* (list/article/strategy 만 발췌). "
+        "직전 실패 config 가 아니라 *반복 실패 봉합용 candidate* — 이 방향대로 가라. "
+        "실제 digest 와 안 맞는 부분만 조정하되, **patch 박힌 selector/strategy 는 임의 변형 X**.\n"
+        "```json\n"
+        f"{json.dumps(snippet, ensure_ascii=False, indent=2)}\n"
+        "```"
+    )
+    return base_prompt + block
