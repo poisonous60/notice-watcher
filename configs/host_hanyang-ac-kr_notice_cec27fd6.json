@@ -1,0 +1,93 @@
+{
+  "version": 1,
+  "site": "hanyang.ac.kr",
+  "board": "notice",
+  "strategy": "httpx_html",
+  "_source_url": "https://www.hanyang.ac.kr/notice",
+  "_note": "Hanyang Liferay notice-board portlet. The useful rows are div.hyu-list-body-item entries with entryId detail URLs.",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9",
+    "Referer": "https://www.hanyang.ac.kr/notice"
+  },
+  "timeout": 15,
+  "polite_sleep": { "min": 5, "max": 5 },
+  "list": {
+    "url_template": "https://www.hanyang.ac.kr/notice",
+    "pagination": { "kind": "none" },
+    "row_selector": "div.hyu-list-body-inner > div.hyu-list-body-item",
+    "row_required_selector": "h4 a[href*='entryId=']",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "h4 a[href*='entryId=']",
+          "attr": "href",
+          "transform": [["regex_extract", "[?&]_kr_ac_hanyang_noticeBoard_web_portlet_NoticeBoardPortlet_entryId=(\\d+)"]]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "h4 a[href*='entryId=']",
+          "text": true,
+          "transform": [["collapse_ws"], ["strip"]]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "h4 a[href*='entryId=']",
+          "attr": "href",
+          "transform": [["urljoin", "https://www.hanyang.ac.kr"]]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "span.date",
+          "text": true,
+          "transform": [
+            ["regex_extract", "(\\d{4}\\.\\s*\\d{1,2}\\.\\s*\\d{1,2})"],
+            ["iso8601", ["%Y. %m. %d"], "+09:00"]
+          ]
+        }
+      ],
+      "author": [
+        {
+          "from": "css",
+          "selector": "p span:nth-of-type(4)",
+          "text": true,
+          "transform": [["collapse_ws"], ["strip"]]
+        }
+      ],
+      "category": [
+        {
+          "from": "css",
+          "selector": "span.badge-light:not(.custom-bg)",
+          "text": true,
+          "transform": [["collapse_ws"], ["strip"]]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      { "from": "css", "selector": "div.hyu-list-body", "html": true },
+      { "from": "css", "selector": "#content", "html": true }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "div.hyu-list-body-item h4",
+          "text": true,
+          "transform": [["collapse_ws"], ["strip"]]
+        }
+      ]
+    }
+  }
+}
