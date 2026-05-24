@@ -1,0 +1,121 @@
+{
+  "version": 1,
+  "site": "ethz.ch",
+  "board": "eth-news-en",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "Accept": "application/atom+xml, application/xml;q=0.9, text/xml;q=0.8, */*;q=0.7",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://ethz.ch/en/news-and-events/eth-news.html"
+  },
+  "timeout": 20,
+  "list": {
+    "url_template": "https://www.ethz.ch/en/news-und-veranstaltungen/eth-news/news/_jcr_content.feed.html",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "entry",
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "link",
+          "attr": "href",
+          "transform": [
+            [
+              "strip_query_fragment"
+            ],
+            [
+              "regex_extract",
+              "/news/(\\d{4}/\\d{2}/[^/]+)\\.html$"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "html_unescape"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "link",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://ethz.ch"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "published",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "author": [
+        {
+          "from": "css",
+          "selector": "author name",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "attr",
+          "selector": "category",
+          "attr": "term"
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "summary",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "html_unescape"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "content": [
+      {
+        "from": "css",
+        "selector": ".content-main",
+        "html": true
+      }
+    ]
+  }
+}

@@ -1,0 +1,83 @@
+{
+  "version": 1,
+  "site": "anu.edu.au",
+  "board": "news",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.anu.edu.au/news"
+  },
+  "timeout": 20,
+  "list": {
+    "url_template": "https://www.anu.edu.au/news",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": ".equal .layout__region--first .views-element-container div[class^=\"js-view-dom-id\"] > div > div, .equal .layout__region--second .views-element-container .row",
+    "row_required_selector": "a[href*=\"/news/all-news/\"]",
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a[href*=\"/news/all-news/\"]",
+          "attr": "href",
+          "transform": [
+            [
+              "strip_query_fragment"
+            ],
+            [
+              "regex_extract",
+              "/news/all-news/([^/]+)$"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "h3 a[href]",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        },
+        {
+          "from": "css",
+          "selector": "h4 a[href]",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a[href*=\"/news/all-news/\"]",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://www.anu.edu.au"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "content": [
+      {
+        "from": "css",
+        "selector": "main article",
+        "html": true
+      }
+    ]
+  }
+}
