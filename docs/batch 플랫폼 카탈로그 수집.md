@@ -30,8 +30,16 @@ N100 동기는 `scripts/remote.py batch-register` 의 atomic scp.
 | `2026-05-21-code` | 100 | 98 | **코드호스팅·패키지레지스트리·배포판** — GitLab·Gitea·Forgejo·SourceForge·Launchpad·PyPI·crates·npm·distros 25+·언어/툴 news | 4차 |
 | `2026-05-21-fedi` | 100 | 100 | **연합 SNS + Q&A + 상태페이지** — Mastodon 40+·Lemmy 20+·PeerTube·Pixelfed·Misskey·mbin·StackExchange·statuspage/Instatus·Tildes/ProductHunt/Slashdot | 4차 |
 | `2026-05-21-govedu` | 100 | 100 | **정부/표준기구/재단/해외대학** — GOV.UK·US연방기관·각국정부·W3C/IETF/ISO·재단(Mozilla/FSF/EFF/Apache)·해외대학 40+ | 4차 |
+| `2026-05-24-games-kr` | 100 | 50 | **한국 게임 회사·서비스** — NCsoft(plaync sub)·Krafton·Pearl Abyss·Webzen·Com2uS·Gravity·Neowiz·Kakao Games·Wemade·Devsisters·Netmarble·Smilegate·Shift Up·Haegin·NHN·Line Games 등 | 5차 |
+| `2026-05-24-games-jp` | 100 | 50 | **일본 게임 회사·콘솔·모바일** — Square Enix·Bandai Namco·Konami·Capcom·Koei Tecmo·Sega·Atlus·Cygames·MIXI·DeNA·GREE·Aniplex·GungHo·FromSoftware·Level-5·Falcom·SNK·Yostar JP·NEXON JP·Marvelous 등 | 5차 |
+| `2026-05-24-games-cn` | 100 | 50 | **중국 게임 회사·플랫폼** — Tencent(qq.com sub)·NetEase(163.com sub)·miHoYo/HoYoverse·Perfect World·Lilith·4399·XD/TapTap·bilibili games·IGG·FunPlus·37 Games·Yoozoo·Century·Kuro Games·Hypergryph 등 | 5차 |
+| `2026-05-24-games-us` | 100 | 50 | **미국/서양 게임** — Blizzard·Riot·Epic·EA·Activision·Bungie·Bethesda·Ubisoft·2K·Rockstar·CD Projekt·Larian·Paradox·Wargaming·Roblox·Mojang·WotC·Innersloth·Hello Games·Devolver·Annapurna·343 Industries 등 | 5차 |
+| `2026-05-24-games-mobile` | 100 | 50 | **모바일 cross-region** — Supercell·King·Zynga·Scopely·Playrix·Plarium·Habby·Garena·Krafton mobile·COM2US Hive·Yostar global·Aniplex·Pokémon·GungHo·Niantic·Outfit7·Rovio 등 | 5차 |
+| `2026-05-24-games-indie` | 100 | 50 | **인디 스튜디오·게임 매체/스토어** — itch.io·GOG·Humble·Klei·Re-Logic·Team Cherry·Iron Gate·Subset·PocketPair·Mintrocket·gamespot·ign·polygon·kotaku·eurogamer·pcgamer·rps·vg247·gamesindustry 등 | 5차 |
 
 **4차(05-21) 합계: 500 링크 / 497 distinct host.** 1~3차에서 소진한 플랫폼(Discourse·GitHub·Arca·DCinside·Reddit·Steam·Wikipedia·Fandom·Inven·클리앙류)은 host 통째 배제.
+
+**5차(05-24-games) 합계: 600 링크 / 300 distinct host (각 100 / 50 host = host당 2 fully exploited).** legacy(nexon/onstove/하요랩/루리웹/인벤/DC/아카/카페·블로그/스팀/닌텐도) host 통째 배제. 빌더 = `output/candidates/_build_2026-05-24-games.py`, prior 자동 glob 로드. codex 위임으로 6 THEMES 채움.
 
 ## 3. 생성/확장 방법
 
