@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% set active = 'builder' %}
+{% block title %}Builder — picker{% endblock %}
+{% block body %}
+<h1>🎯 Picker — 사이트 등록</h1>
+<p class="muted">자동등록 실패 사이트에서 row 를 마우스로 짚어 config 를 만듭니다.</p>
+<form action="/builder/start" method="post" style="display:flex;gap:0.5rem;align-items:center;max-width:800px;margin-top:1rem;">
+  <input type="url" name="url" placeholder="https://www.swu.ac.kr/notice" required style="flex:1;">
+  <button type="submit">시작</button>
+</form>
+<details style="margin-top:1.5rem;">
+  <summary>한계 / 안내</summary>
+  <ul style="font-size:0.9em;">
+    <li>로그인 필요 사이트 X (cookie 안 보냄)</li>
+    <li>SPA — JS strip 후 iframe 빈 화면 가능. row 가 안 보이면 "playwright_html" 옵션</li>
+    <li>Cloudflare/captcha — fetch 실패시 에러 메시지</li>
+    <li>fetch 는 dev box → 외부 (N100 아님). 1 회 fetch 만</li>
+    <li>SSRF 가드: private/loopback/link-local IP 차단</li>
+  </ul>
+</details>
+{% endblock %}
