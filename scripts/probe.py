@@ -129,60 +129,83 @@ def _terminate_process_tree(proc) -> None:
     proc.terminate()
 
 
+def _read_rss_kb(pid: int) -> int:
+    """단일 pid 의 VmRSS (KB). 못 읽으면 0."""
+    try:
+        for line in Path(f"/proc/{pid}/status").read_text().splitlines():
+            if line.startswith("VmRSS:"):
+                return int(line.split()[1])
+    except (FileNotFoundError, ProcessLookupError, ValueError, PermissionError):
+        return 0
+    return 0
+
+
+def _process_tree_rss_kb(root_pid: int) -> int:
+    """root_pid + 모든 descendants 의 VmRSS 합산. /proc/<pid>/task/<pid>/children BFS."""
+    total = _read_rss_kb(root_pid)
+    pending = [root_pid]
+    seen = {root_pid}
+    while pending:
+        pid = pending.pop()
+        try:
+            children_raw = Path(f"/proc/{pid}/task/{pid}/children").read_text().split()
+        except (FileNotFoundError, ProcessLookupError, PermissionError):
+            continue
+        for c in children_raw:
+            try:
+                cpid = int(c)
+            except ValueError:
+                continue
+            if cpid in seen:
+                continue
+            seen.add(cpid)
+            total += _read_rss_kb(cpid)
+            pending.append(cpid)
+    return total
+
+
 def _poll_child_memory(proc, *, cap_s: float) -> bool:
-    """부모 process 가 자식 RSS 폴링 → 임계 초과 시 terminate. proc.join(cap_s) 대체.
+    """부모 process 가 자식 *전체 process tree* RSS 폴링 → 임계 초과 시 terminate.
 
-    2026-05-24 박힘 — 자식 안 daemon thread 가 playwright greenlet 의 GIL 독점으로 안 깨우는
-    문제 (podcastindex.org Phase 9b 재현). 부모는 free CPU 라 polling 이 정상.
+    2026-05-24 박힘:
+    (1) 자식 안 daemon thread 가 playwright greenlet 의 GIL 독점으로 안 깨우는 문제
+        (podcastindex.org Phase 9b 재현 1차) — 부모-side 폴링으로 옮김.
+    (2) proc.pid 단독은 python launcher RSS 만 (60MB) — 실제 7GB blower 는 **chromium**
+        손자 process (proc.pid → node driver → chromium). 단독 폴은 못 잡음 — process
+        tree 전체 합산 필수. podcastindex 재현 3차로 확정.
 
-    임계 = `PROBE_MEMORY_GUARD_MB` env (default 3500MB). N100 12GB - baseline 5GB = 7GB 여유의
-    50% 선. concurrency 5 정상 case 와 충돌 X.
+    임계 = `PROBE_MEMORY_GUARD_MB` env (default 3500MB). N100 12GB - baseline 5GB = 7GB
+    여유의 50% 선. concurrency 5 정상 case 와 충돌 X.
 
     Returns True if killed by memory guard, False if completed normally (또는 timeout 만남 —
     그 경우 caller 가 proc.is_alive() 로 후속 처리).
     """
     threshold_mb = int(os.environ.get("PROBE_MEMORY_GUARD_MB", "3500"))
     poll_s = float(os.environ.get("PROBE_MEMORY_GUARD_POLL_S", "1.0"))
-    status_path = Path(f"/proc/{proc.pid}/status") if os.path.exists("/proc") else None
-    sys.stderr.write(f"[probe-guard] arm: child_pid={proc.pid} threshold={threshold_mb}MB cap_s={cap_s}s status_exists={status_path is not None}\n")
-    sys.stderr.flush()
-    if status_path is None:
+    if not os.path.exists("/proc"):
         proc.join(cap_s)
         return False
     deadline = time.perf_counter() + cap_s
     peak_mb = 0
-    tick_n = 0
     while time.perf_counter() < deadline:
-        tick_n += 1
         if not proc.is_alive():
             return False
         try:
-            if not status_path.exists():
-                # 자식 이미 사라짐
-                return False
-            for line in status_path.read_text().splitlines():
-                if line.startswith("VmRSS:"):
-                    rss_mb = int(line.split()[1]) // 1024
-                    if rss_mb > peak_mb:
-                        peak_mb = rss_mb
-                    if tick_n <= 3 or tick_n % 5 == 0:
-                        sys.stderr.write(f"[probe-guard] tick {tick_n}: pid={proc.pid} rss={rss_mb}MB peak={peak_mb}MB\n")
-                        sys.stderr.flush()
-                    if rss_mb > threshold_mb:
-                        sys.stderr.write(
-                            f"[probe] ❌ MEMORY GUARD: child PID={proc.pid} RSS={rss_mb}MB > "
-                            f"threshold={threshold_mb}MB (peak={peak_mb}MB) — terminating.\n"
-                        )
-                        sys.stderr.flush()
-                        _terminate_process_tree(proc)
-                        proc.join(3)
-                        return True
-                    break
-        except (FileNotFoundError, ProcessLookupError):
-            return False
+            rss_kb = _process_tree_rss_kb(proc.pid)
+            rss_mb = rss_kb // 1024
+            if rss_mb > peak_mb:
+                peak_mb = rss_mb
+            if rss_mb > threshold_mb:
+                sys.stderr.write(
+                    f"[probe] ❌ MEMORY GUARD: process tree (root pid={proc.pid}) RSS={rss_mb}MB > "
+                    f"threshold={threshold_mb}MB (peak={peak_mb}MB) — terminating.\n"
+                )
+                sys.stderr.flush()
+                _terminate_process_tree(proc)
+                proc.join(3)
+                return True
         except Exception:  # noqa: BLE001
             pass
-        # 짧게 sleep 후 재폴 — proc.join 으로 cap_s 까지 한 번에 기다리면 폴링 못함.
         proc.join(timeout=poll_s)
     return False
 
