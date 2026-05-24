@@ -30,15 +30,47 @@ OUT = ROOT / "output"
 HARD_STOP = """\
 ## 절대 금지 (HARD STOP — 사람/Claude 검토 후 배포)
 - `git add` / `git commit` / `git push` 금지.
-- N100 ssh / systemctl / git pull / 배포 금지.
+- N100 ssh 으로 systemctl / git pull / 배포 금지. (단 N100 probe artifact 의 *read-only* tar pull 은 허용 — 아래 §게이트 1.)
 - 변경은 working tree 에 남겨둬라. commit·배포는 검토 후 Claude 가 한다.
 - triage 큐(output/triage_queue.*)·이미 등록된 configs/·poll_state/ 는 작업 대상 외엔 건드리지 마라.
 - `scripts/cases_index.py` 실행 / `--backfill-db output/cases.sqlite3` / `docs/cases/INDEX.md` 갱신 **금지** — 공유 인덱스·DB 는 Claude 가 청크 수집 후 *직렬* backfill 한다. 병렬 codex 가 동시에 backfill 하면 SQLite lock race 로 case_runs row 가 유실된다. 너는 `docs/cases/<slug>.md` 파일만 만든다 (INDEX·DB 는 Claude 몫).
+
+## 회피 게이트 (ALLOW-LIST 가 일반화 회피 핑계 X — 2026-05-24 박음)
+
+ALLOW-LIST 는 *편집 권한 제한*이지 *분석 권한 제한*이 아니다. 다음 4종 punt 패턴은 task 위반 — 위반 시 Claude 가 review 단계에서 reject (worktree merge X).
+
+**게이트 1 — "probe artifact 없음" defer 금지**
+- task 에 `ssh aaaa@n100-noticewatcher 'tar czf - ...'` 류 N100 probe pull 명령이 있는데 *시도하지 않고* `no_change` defer = 위반.
+- 다른 dev box 환경 (예: 사용자가 직접 본 슬러그 등) 에서 pull 이 명시 안 됐어도 `triage.py pull --slug <slug>` 또는 N100 tar pull 시도 1회 의무. 그 다음에도 artifact 못 받으면 그제서야 defer + 그 사실 case body 에 명시 ("ssh tar pull 시도 → 결과: <stderr 1줄>").
+- 기존 등록된 다른 board 로 *URL 을 바꿔* 등록하는 건 **scope 오염** — 절대 금지 (사용자가 요청한 URL 의 board 만 등록).
+
+**게이트 2 — 일반화 신호 발견 시 case body 에 의무 분석**
+- 같은 청크 안에 2+ slug 가 같은 패턴(URL 누락 파라미터·JS detail 함수·TLS handshake 실패·platform CMS 동형 등) 보이면 → 일반화 후보 = case body `## 일반화 후보` 섹션에 다음 4줄 명시:
+  - **패턴**: 1줄 (예: "KR egov: 제출 URL 에 `menuid`/`menuCd`/`mId` 누락 시 auth_redirect/empty shell")
+  - **신호**: 같은 청크 내 같은 패턴 slug 목록
+  - **fix layer 후보**: C (probe heuristic) / B (few-shot) / A (system prompt) / F (engine) 중
+  - **이번 chunk 박을까**: yes (같은 PR 에 박음) / no (ALLOW-LIST 밖, escalate 필요)
+- "사이트별 메뉴 매핑이라 일반화 X" 같은 1줄 punt 는 **2+ slug 동일 패턴인 경우 부적합** — 그건 *정의상* 일반화 가능. 진짜 site-specific 인 사유 (예: "이 사이트 전용 ID 체계 + 다른 사이트 0건") 면 그 1줄 정당화.
+
+**게이트 3 — ALLOW-LIST 밖 필요하면 STOP + escalate (defer 아님)**
+- 게이트 2 의 fix 가 ALLOW-LIST 밖 (engine/probe/prompts/recognizer 등) 이면 *그 패턴은 별도 chunk 로* Claude 가 처리. 너는:
+  - 분석은 case body §일반화 후보 에 완전히 적기 (다음 chunk 가 그걸로 시작하게)
+  - 단일 site config 는 ALLOW-LIST 안에서 작업 진행 (둘 다 하는 게 정상)
+  - 결과 보고에 `## escalate (allow-list 밖 일반화 후보)` 섹션으로 모아 명시
+- 단순히 "allow-list 밖이라 안 함" 1줄 = 위반. 후속 chunk 에 정보 전달 안 됨.
+
+**게이트 4 — `no_change`/`deferred` outcome 정당화 의무**
+- `outcome: no_change` 박을 때 case body 에 다음 3개 명시:
+  - 시도한 정확한 작업 (probe pull 결과 / register 결과 1줄)
+  - 정확한 차단 신호 (alert 문구 / HTTP 코드 / traceback 1줄 verbatim)
+  - 진짜 해결 경로 (예: "사용자 catalog 수정 필요" / "engine TLS 강화 필요" — 무엇이 와야 풀리나)
+- "config 작성 보류" 만 적고 차단 신호 verbatim 없으면 위반.
 
 ## 마무리 (이 블록을 마지막 메시지로)
 - 무엇을 진단/수정했나 (root-cause 1-2줄)
 - 작성/수정한 파일 목록
 - 검증 결과 (probe_smoke / 재현 명령 등 — pass/fail 그대로)
+- **일반화 후보 escalate 모음** (있으면 — §게이트 3)
 - 사람이 배포 전 확인할 점
 """
 

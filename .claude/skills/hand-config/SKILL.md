@@ -132,11 +132,25 @@ dashboard `/triage` 의 "FAILED 큐 codex 위임 처리" 프롬프트를 붙여�
    - **모델 = gpt-5.5 medium(default) 유지** — `--profile`/`--reasoning` 속도노브는 *순수 기계적 청크*에만 opt-in (hand-config/batch 는 그대로).
    - codex 가 ALLOW-LIST 밖 파일이 필요하면 → **STOP + 보고**(escape hatch). Claude 가 중재(직접 wiring / 재배정).
 4. **wave 의 모든 result 를 한 watcher 로 묶어** 완료/타임아웃 감지: `python scripts/codex_watch.py <r1> <r2> ... --loop` (창은 사용자 view, result 파일은 Claude 완료신호). result 파일마다 watcher 따로 띄우지 X — 멀티파일 인자로 한 번에. ⚠ **반드시 harness 백그라운드(run_in_background)로 실행** — shell `&` 로 띄우면 그 Bash 호출 종료 시 watcher 프로세스가 죽어 *완료 알림이 안 온다* (2026-05-22 batch 유실 관측, codex_watch.py docstring 에도 박음).
-5. **각 청크 검토 게이트**: worktree 모드면 `git diff main...codex-wt/<branch>` (**three-dot** — merge-base 기준 = codex 실제 변경만) + result. ⚠ **two-dot `main..branch` 금지** — 병렬 세션이 worktree 생성 *후* main 을 advance 시키면 그 새 커밋들이 branch 입장에서 "삭제"로 잘못 표시됨(2026-05-21 오진, `docs/codex 위임 가이드.md` §7). 미사용이면 `git diff <청크 파일>` (ALLOW-LIST 는 soft → 파일셋 직접 확인). 검토: (a) HARD-STOP/진단 §2 타당, (b) **auto-discovery semantic 충돌**(새 recognizer PATTERNS 가 타 플랫폼 URL 가로채 기존 테스트 깸 — `probe_smoke --stage 5`), (c) over-edit. 문제면 worktree 버림(merge X)/revert/재위임.
+5. **각 청크 검토 게이트**: worktree 모드면 `git diff main...codex-wt/<branch>` (**three-dot** — merge-base 기준 = codex 실제 변경만) + result. ⚠ **two-dot `main..branch` 금지** — 병렬 세션이 worktree 생성 *후* main 을 advance 시키면 그 새 커밋들이 branch 입장에서 "삭제"로 잘못 표시됨(2026-05-21 오진, `docs/codex 위임 가이드.md` §7). 미사용이면 `git diff <청크 파일>` (ALLOW-LIST 는 soft → 파일셋 직접 확인). 검토: (a) HARD-STOP/진단 §2 타당, (b) **auto-discovery semantic 충돌**(새 recognizer PATTERNS 가 타 플랫폼 URL 가로채 기존 테스트 깸 — `probe_smoke --stage 5`), (c) over-edit, (d) **§0c-회피 게이트 4종** (아래) — codex 가 ALLOW-LIST 핑계로 분석 punt 했는지 audit. (a)~(c) 문제면 worktree 버림(merge X)/revert/재위임. (d) 문제면: clean wins 만 cherry-pick + 일반화 후보는 별도 후속 chunk 로.
 6. **merge·인덱스·배포는 Claude 직렬**: worktree 모드 — 통과 청크 `git merge --no-ff codex-wt/<branch>` 직렬 → `git worktree remove <path>; git branch -D codex-wt/<branch>`. **merge 안전** — merge-base 3-way 라 disjoint 변경이면 main 의 병렬 세션 커밋도 보존(삭제 0). 충돌은 공유 파일(INDEX.md 양쪽 regen)뿐 → 다음 줄 `cases_index --backfill-db` 가 재생성 해결. 사전 확인: `git merge-tree $(git merge-base main <branch>) main <branch> | grep -i conflict`. 그 후 `probe_smoke --stage 3 --stage 5` exit 0 → `cases_index --backfill-db` → push(hook) → N100 배포 → `case_log log`(commit 후). (worktree 미사용이면 settled 트리서 **청크별 `git add <청크 파일만>`, `-A` 금지** 후 동일.)
 7. **batch 후 `python scripts/triage.py prune-orphans --execute`** — recognizer 추가가 url_to_slug 를 바꿔 옛 host_ FAILED/triage_queue 마커가 orphan 으로 남음 (hash 매칭으로 prune).
 
 단건이거나 codex 위임이 과한 경우 (단순 selector 한 줄)엔 Claude 가 직접 §1~§5 해도 됨 — 위임은 *큐가 크거나 quota 절약 필요할 때* 의 도구. **무제한 병렬**(공유 파일 직렬화 제거)이 필요하면 worktree 격리 또는 detect-dispatch auto-discovery refactor — ADR 0008 §병렬 위임(미구현, 직렬화 병목 시). 하네스 상세 = ADR 0008, AGENTS.md §6.
+
+### §0c-회피 게이트 4종 (2026-05-24 박음 — `codex_handoff.py:HARD_STOP` 의 dev 박스 측 mirror)
+
+`codex_handoff.py` 가 빌드하는 모든 위임 프롬프트에 박힌 "회피 게이트" 4종. Claude 가 review 단계(§0c step 5d)에서 **case body + result 의 다음 패턴 audit** — 발견 시 그 chunk 는 cherry-pick + 후속 chunk:
+
+1. **probe artifact 없음 defer 위반** — task 에 N100 tar pull 명시되어 있는데 시도 없이 `outcome: no_change` defer. 또는 사용자가 요청한 URL 의 board 가 빈 shell 인데 *다른 board ID* 로 등록(scope 오염). (2026-05-24 krpublic 의 daegu·gg·ulsan 사례.)
+2. **일반화 신호 punt** — 청크 안에 2+ slug 가 같은 패턴(URL 누락 파라미터·JS detail 함수·TLS handshake 실패·platform CMS 동형) 보이는데 case body §일반화 후보 섹션이 비었거나 "사이트별 매핑이라 일반화 X" 1줄. (2026-05-24 krpublic: KR egov `menuid`/`menuCd` 누락 4건 동일 + `goView(seq)` JS detail 3건 동일 punt.)
+3. **ALLOW-LIST 밖 punt** — fix layer 가 engine/probe/prompts 인데 "allow-list 밖이라 안 함" 1줄로 끝남 (후속 chunk 에 정보 전달 X). 정상은: 단일 site config 는 ALLOW-LIST 안에서 진행 + escalate 섹션에 분석 완전 적기.
+4. **`no_change` 정당화 불충분** — 시도/차단신호(verbatim)/진짜 해결 경로 3개 중 빠진 게 있음.
+
+**Claude 의 audit 절차** (각 chunk merge 전):
+- 모든 case body 를 grep: `일반화 안 되는 이유` + `allow-list` + `보류` 라인 등장 빈도. 청크 멤버 수 대비 절반 이상이면 §0c-회피 2/3 의심.
+- 같은 청크 안에서 failure_keys 또는 fix surface 가 겹치는 slug 쌍 검색 — 일반화 후보 섹션 있는지 확인.
+- 위반 잡으면 발견 사실을 다음 chunk 의 task 입력 머리에 명시 (codex 가 두 번째에도 같은 punt 안 하게).
 
 ---
 
