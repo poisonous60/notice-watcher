@@ -262,7 +262,7 @@ handwritten 만 가능: 클릭/스크롤로만 글이 뜨는 SPA, 강한 anti-bo
    - **이미 그 사이트 손어댑터가 `adapters/` 에 있으면** → 가장 간단. `strategy:"handwritten"`, `adapter:"<클래스명>"`, `kwargs:{...}` 만. (네이버 카페·아카라이브·디시·SKKU 등이 여기.)
    - 정적 HTML 목록 + 정적 HTML 본문 → `httpx_html`. `list_candidates.json`·HAR 로 `row_selector`·각 field selector 작성.
    - 목록 또는 본문이 JSON XHR → 목록이면 `httpx_json`(+`list_path`), 본문이면 `article.fetch_kind:"json"`(+`data_path`). HAR 에서 API URL·응답 트리 확인.
-   - JS 렌더인데 `goto`+networkidle 로 잡힘 → `playwright_html` + `wait_selector`.
+   - JS 렌더인데 `goto`+networkidle 로 잡힘 → `playwright_html` + `wait_selector`. ⚠ **`"headless": false` 박지 마라** — N100 (운영) 은 X server 없는 Linux 데몬, headed Chrome 이 `TargetClosedError` 로 즉시 죽음. dev 박스만 통과하고 N100 배포 시 100% 실패 (2026-05-24 kruniv-cap 박힘). `headless` 키 생략 = default true (안전). anti-bot 은 stealth library 가 자동 적용 (`engine/strategies/playwright_html.py`).
    - 클릭/스크롤 후에야 뜨거나 Cloudflare 챌린지 강함 → `docs/사이트 어댑터 추가 가이드.md` 따라 손어댑터 신규 작성 → handwritten config 로 감쌈.
 4. **config 작성** — `configs/<slug>.json`. 필수 키: `version`(1)·`site`·`board`·`strategy`. httpx_*/playwright 면 `list.url_template` + `list.fields.{post_id,title}` 필수. `_source_url` 에 원본 URL. `_note` 에 손작성 이유 한 줄. 레퍼런스 config 베껴 시작.
 5. **스키마 검증** — `python -c "import json; from engine.config_schema import validate_config; validate_config(json.load(open(r'configs/<slug>.json',encoding='utf-8'))); print('OK')"`

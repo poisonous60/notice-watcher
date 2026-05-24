@@ -66,6 +66,12 @@ ALLOW-LIST 는 *편집 권한 제한*이지 *분석 권한 제한*이 아니다.
   - 진짜 해결 경로 (예: "사용자 catalog 수정 필요" / "engine TLS 강화 필요" — 무엇이 와야 풀리나)
 - "config 작성 보류" 만 적고 차단 신호 verbatim 없으면 위반.
 
+## 배포 환경 의무 (configs/ 작성 시 N100 = Linux headless 서버)
+
+- `strategy: "playwright_html"` config 에 **`"headless": false` 박지 마라**. N100 (운영 서버) 는 X server 없는 Linux 데몬이라 headed Chrome 이 `TargetClosedError: Missing X server or $DISPLAY` 로 즉시 죽는다. dev 박스 (Windows) 에선 통과하지만 N100 배포 시 100% 실패. (2026-05-24 kruniv-cap 배치에서 한 차례 박힘.)
+- anti-bot 우회는 **stealth library 단독 사용** (이미 `engine/strategies/playwright_html.py` 가 모든 context 에 `playwright_stealth` 자동 적용). 그래도 부족하면 `storage_state_path` (로그인 세션 재사용) 또는 별도 어댑터 — `headless: false` 는 선택지가 아니다.
+- `headless` 키 생략하면 default = `true` (playwright_html.py:83). 명시 안 하면 안전.
+
 ## 마무리 (이 블록을 마지막 메시지로)
 - 무엇을 진단/수정했나 (root-cause 1-2줄)
 - 작성/수정한 파일 목록
