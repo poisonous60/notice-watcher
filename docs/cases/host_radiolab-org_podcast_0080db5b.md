@@ -109,3 +109,46 @@ article_len 2752
 5. **outcome=handcrafted**: selector와 wait 조건을 손으로 고른 단일 사이트 config다.
 6. **fixture**: 새 strategy/engine 변경이 아니므로 fixture 추가 없음.
 7. **트랙 B 0건 사유**: 위 일반화 검토 참조.
+
+---
+
+## 2026-05-25 추가 — D-layer recipe 시도 + 한계
+
+`docs/cases/_plan_retry_recipes_2026-05-25.md` 의 Recipe 2 (`spa_rendered_retry`) 가 이 사이트
+대상으로 만들어짐. trigger = `posts_nonempty`/`title_nonempty` 반복 + site_kind=spa_rendered/high.
+N100 register --force --reuse-probe --max-attempts 5 결과:
+
+```
+시도 1-5 모두: FAIL — 하드 실패: posts_nonempty(0건)
+```
+
+자동 회복 안 됨. handcrafted config 그대로 보존 (register 가 LLM 자동 등록 다 실패 시 기존
+config 안 덮어씀).
+
+### 왜 D-layer 만으로 안 됨
+
+LLM 이 시도 1 부터 strategy=playwright_html 박음 (Recipe 2 의 patch 가 strategy switch 만이라
+이미 그 strategy 면 patch no-op). text hint *는* 박혀 LLM 한테 진단 정보 전달 됐지만 진짜
+row selector (`.radiolab-card .card-title-link .h2`) 못 추측:
+
+- 진짜 selector 는 *hydration 후* DOM 에만 존재.
+- probe 의 정적 list.html 에는 `.radiolab-card` 등 component class 가 **inline `<style>` 의
+  CSS rule** 안에만 박혀있음 — DOM element 로는 없음.
+- `engine/digest.py:clean_html` 가 `<style>` 다 제거 → LLM prompt 에 component class 단서 X.
+- probe 의 `html_repeating_patterns` 후보는 skeleton row (`div.col-12.mb-6`) 만 잡음 — top
+  candidate 인데 _pick_spa_wait_selector 의 nav/skeleton blocklist 에 안 걸려 함정.
+
+### 후속 plan 후보 (이번 plan 외)
+
+1. **digest CSS component class extract** — `engine/digest.py:build_digest` 가 raw list.html 의
+   `<style>` 블록 또는 fetched CSS 에서 자주 등장하는 component class 추출 → 새 키
+   `list_candidates.css_component_classes`. Recipe 2 의 `_pick_spa_wait_selector` 가 이 후보도
+   참고. 가능한 false-positive: nav/footer/utility class.
+2. **probe hydration capture** — 정적 httpx 외 playwright_html 로 hydrated DOM 캡처 → 별도
+   `list.hydrated.html` 파일. digest 가 별도 키로 LLM 에 전달. 비용 큼.
+3. **skeleton row blocklist 확장** — `validate.py` 또는 probe 의 row pattern 후보 점수에서
+   `*-skeleton`, `loading`, `placeholder` 류 class reject. probe artifact 의 false
+   "top repeating pattern" 정정.
+
+handcrafted config (이 case §해결) 가 정답인 사이트. recipe 가 모든 SPA 회복 가능한 건 아님 —
+정보 부족 사이트는 hand-config 필요.

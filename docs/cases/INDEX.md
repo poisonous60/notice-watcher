@@ -7,6 +7,7 @@
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
 | [`host_oxide-computer_podcast_9f69bff0`](host_oxide-computer_podcast_9f69bff0.md) | ✅ 자동생성 성공 (옵션 A site_kind=hybrid med — N100 register 시도 2 PASS 30건). handcrafted config 도 보존 | 2026-05-25 | C+A+D+F | article_body_len, audio_share_host | https://oxide.computer/podcast/rss.xml |
+| [`host_feeds-thisameri_talpodcast_c725ed7a`](host_feeds-thisameri_talpodcast_c725ed7a.md) | ✅ D-layer recipe 회복 — 자동 등록 완료 (15건) | 2026-05-25 | D | post_id_stable_shape, post_id_unique, rss_post_id | https://feeds.thisamericanlife.org/talpodcast |
 | [`host_yongin-go-kr_user_f1eef610`](host_yongin-go-kr_user_f1eef610.md) | ✅ 수동 config — Playwright로 용인 시정소식 10건 추출 | 2026-05-24 | none | posts_nonempty, tls_handshake, playwright_required | https://www.yongin.go.kr/user/bbs/BD_selectBbsList.do?q_bbsCode=1001 |
 | [`host_worldbank-org_en_61b26912`](host_worldbank-org_en_61b26912.md) | 수동 config - World Bank news landing 의 정적 latest news cards 로 등록 | 2026-05-24 | none | posts_nonempty, matches_probe_first_article, count_ballpark | https://www.worldbank.org/en/news |
 | [`host_ulsan-go-kr_u_cdf4ac30`](host_ulsan-go-kr_u_cdf4ac30.md) | ⏸ deferred — 원 board 빈 shell, 다른 bbsId 등록은 scope 오염 | 2026-05-24 | none | posts_nonempty, empty_board, scope_pollution_risk | https://www.ulsan.go.kr/u/rep/bbs/list.ulsan?bbsId=BBS_0000000000000001 |
@@ -43,7 +44,6 @@
 | [`host_gnome-org_news_c6b597f7`](host_gnome-org_news_c6b597f7.md) | no_change - GNOME news and feed endpoints remain baseline_blocked from this environment | 2026-05-24 | none | capability_blocked, baseline_blocked, rss_unavailable | https://www.gnome.org/news/ |
 | [`host_gg-go-kr_bbs_912082cf`](host_gg-go-kr_bbs_912082cf.md) | ⏸ deferred — 현재 직접 URL은 존재하지 않는 페이지 alert | 2026-05-24 | none | posts_nonempty, not_found_shell | https://www.gg.go.kr/bbs/board.do?bsIdx=464&menuId=1535 |
 | [`host_fitchratings-co_research_f256080a`](host_fitchratings-co_research_f256080a.md) | 🔧 손어댑터 config (GraphQL POST, baseline 확인) | 2026-05-24 | F | posts_nonempty, matches_probe_first_article | https://www.fitchratings.com/research |
-| [`host_feeds-thisameri_talpodcast_c725ed7a`](host_feeds-thisameri_talpodcast_c725ed7a.md) | ⚠ 프롬프트 개선 적용 — 등록은 LLM key 0개로 escalated | 2026-05-24 | A | post_id_stable_shape, rss_post_id | https://feeds.thisamericanlife.org/talpodcast |
 | [`host_ethz-ch_en_7733150b`](host_ethz-ch_en_7733150b.md) | 🔧 손 config (httpx_html, Atom feed) — static page has an empty newsfeed container and points to an ETH feed/API source | 2026-05-24 | none | posts_nonempty, first_article_nav, js_feed_container | https://ethz.ch/en/news-and-events/eth-news.html |
 | [`host_enisa-europa-eu_news_9ab433c4`](host_enisa-europa-eu_news_9ab433c4.md) | 🧩 수동 config — ENISA static news cards로 baseline 14건 등록 | 2026-05-24 | none | posts_nonempty, nav_first_article, filter_url | https://www.enisa.europa.eu/news |
 | [`host_energy-gov_listings_ccdfe8b8`](host_energy-gov_listings_ccdfe8b8.md) | ✅ 수동 config 등록 준비 (Energy.gov RSS endpoint) | 2026-05-24 | none | probe_timeout, drupal_listing, rss_endpoint | https://www.energy.gov/listings/energy-news |
@@ -321,7 +321,6 @@
 | layer | count |
 |---|---|
 | (미기재) | 36 |
-| A | 1 |
 | B | 1 |
 | C | 17 |
 | C+A | 1 |
@@ -331,7 +330,7 @@
 | C+F | 2 |
 | C+F+A | 1 |
 | C+config | 2 |
-| D | 1 |
+| D | 2 |
 | E | 6 |
 | E+A+C+D | 1 |
 | F | 87 |
@@ -345,9 +344,9 @@
 
 | strategy | count |
 |---|---|
-| (미기재) | 56 |
+| (미기재) | 55 |
 | handwritten | 31 |
-| httpx_html | 110 |
+| httpx_html | 111 |
 | httpx_json | 24 |
 | httpx_json (미적용 — 콘텐츠 0) | 1 |
 | mixed | 1 |
