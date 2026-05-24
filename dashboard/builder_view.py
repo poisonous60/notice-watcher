@@ -26,23 +26,53 @@ import json
 import secrets
 import socket
 import time
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Literal, Optional
 from urllib.parse import urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
 from fastapi import HTTPException
 from fastapi.responses import HTMLResponse
+from pydantic import BaseModel, Field
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIGS_DIR = ROOT / "configs"
+POLL_STATE_DIR = ROOT / "output" / "poll_state"
 
+# codex fix #7: in-memory process-local. uvicorn workers>1 시 worker 사이 안 공유 →
+# /builder/start 가 worker A 에 sid 만들고 /builder/edit 이 worker B 도달 시 404.
+# scripts/dashboard.py 는 workers 명시 안 줘서 기본 1 → 현재 안 깨짐. workers>1 운영
+# 시 SQLite/signed-cookie/session-affinity 로 교체 필요.
 _SESSIONS: dict[str, dict] = {}
 _SESSION_TTL = 60 * 60
 _MAX_SESSIONS = 50
 
-_OUR_SCRIPTS = '<script type="module" src="/static/builder/picker.js"></script>'
+
+def _our_scripts(root_path: str = "") -> str:
+    """root_path 인식 picker.js URL. codex fix #10 — reverse proxy subpath."""
+    return f'<script type="module" src="{root_path}/static/builder/picker.js"></script>'
+
+
+# --------------------------------------------------------------------------- #
+# Pydantic models — codex fix #9. raw dict 받지 X. shape/size 한계 명시.
+# --------------------------------------------------------------------------- #
+_FIELD_NAMES = Literal["title", "link", "post_id", "date", "author", "category"]
+
+
+class FieldSpec(BaseModel):
+    selector: str = Field(..., min_length=1, max_length=500)
+    attr: Optional[str] = Field(None, max_length=50)
+
+
+class SavePayload(BaseModel):
+    sid: str = Field(..., min_length=1, max_length=64)
+    row_selector: str = Field(..., min_length=1, max_length=500)
+    include_notices: bool = True
+    strategy: Literal["httpx_html", "playwright_html"] = "httpx_html"
+    board: Optional[str] = Field(None, max_length=100)
+    fields: dict[_FIELD_NAMES, FieldSpec] = Field(default_factory=dict)
 
 
 def _is_blocked_ip(ip_str: str) -> bool:
@@ -61,15 +91,25 @@ def _is_blocked_ip(ip_str: str) -> bool:
 
 
 def _resolve_and_guard(host: str) -> None:
+    """codex fix #3: any blocked → 전체 reject. DNS rebinding / alternate-address
+    bypass 방어. 이전에는 1개라도 public 이면 통과시켜 httpx 가 재-resolve 시 다른
+    blocked IP 로 connect 가능했음."""
     try:
         infos = socket.getaddrinfo(host, None)
     except socket.gaierror as e:
         raise HTTPException(400, f"DNS 실패: {host} ({e})")
+    if not infos:
+        raise HTTPException(400, f"DNS 결과 없음: {host}")
+    public_seen = False
     for info in infos:
         ip = info[4][0]
-        if not _is_blocked_ip(ip):
-            return
-    raise HTTPException(400, f"{host} → private/loopback IP 만 — 차단 (SSRF)")
+        if _is_blocked_ip(ip):
+            raise HTTPException(
+                400, f"{host} resolved IP 中 blocked 포함 ({ip}) — SSRF 차단"
+            )
+        public_seen = True
+    if not public_seen:
+        raise HTTPException(400, f"{host} → public IP 없음 — 차단")
 
 
 def _validate_target_url(url: str) -> str:
@@ -118,11 +158,24 @@ def get_session(sid: str) -> Optional[dict]:
     return sess
 
 
-def _sanitize_html(html_text: str, base_href: str) -> str:
+_BLOCKED_TAGS = {"script", "iframe", "object", "embed", "applet", "frame", "frameset"}
+
+
+def _sanitize_html(html_text: str, base_href: str, root_path: str = "") -> str:
     soup = BeautifulSoup(html_text, "html.parser")
 
-    for s in soup.find_all("script"):
-        s.decompose()
+    # codex fix #4: <script>, <iframe srcdoc>, <object data>, <embed>, applet,
+    # frame/frameset 모두 제거. SVG 안 <script> 도 동일 태그명 매칭으로 잡힘.
+    for tag_name in _BLOCKED_TAGS:
+        for s in soup.find_all(tag_name):
+            s.decompose()
+
+    # meta http-equiv=refresh 제거 — JS 없이 redirect 가능
+    for m in soup.find_all("meta"):
+        he = m.get("http-equiv") or ""
+        if isinstance(he, str) and he.lower() == "refresh":
+            m.decompose()
+
     for ln in soup.find_all("link"):
         rel = ln.get("rel") or []
         if isinstance(rel, list):
@@ -138,12 +191,16 @@ def _sanitize_html(html_text: str, base_href: str) -> str:
             if lk.startswith("on"):
                 del tag.attrs[attr]
                 continue
-            if lk in ("href", "src", "action", "formaction"):
+            if lk in ("href", "src", "action", "formaction", "srcdoc", "data", "background", "ping"):
                 val = tag.attrs.get(attr)
                 if isinstance(val, str):
                     v = val.lstrip().lower()
-                    if v.startswith("javascript:") or v.startswith("data:text/html") or v.startswith("vbscript:"):
+                    if v.startswith(("javascript:", "data:text/html", "vbscript:", "data:application/xhtml")):
                         del tag.attrs[attr]
+                        continue
+            if lk == "srcdoc":
+                # iframe srcdoc 자체가 위험 — 위에서 iframe 제거하지만 다른 태그 srcdoc 잔존 방지
+                del tag.attrs[attr]
 
     for f in soup.find_all("form"):
         f.attrs["onsubmit"] = "return false;"
@@ -159,12 +216,12 @@ def _sanitize_html(html_text: str, base_href: str) -> str:
     head.insert(0, soup.new_tag("base", href=base_href))
 
     body = soup.find("body") or soup
-    body.append(BeautifulSoup(_OUR_SCRIPTS, "html.parser"))
+    body.append(BeautifulSoup(_our_scripts(root_path), "html.parser"))
 
     return str(soup)
 
 
-async def proxy_fetch(sid: str, path: str) -> HTMLResponse:
+async def proxy_fetch(sid: str, path: str, root_path: str = "") -> HTMLResponse:
     sess = get_session(sid)
     if sess is None:
         raise HTTPException(404, "session 만료 또는 무효")
@@ -203,7 +260,7 @@ async def proxy_fetch(sid: str, path: str) -> HTMLResponse:
     if "html" not in ct and "xml" not in ct:
         raise HTTPException(400, f"HTML 아님 (content-type={ct})")
 
-    sanitized = _sanitize_html(r.text, base_href=str(r.url))
+    sanitized = _sanitize_html(r.text, base_href=str(r.url), root_path=root_path)
 
     return HTMLResponse(
         sanitized,
@@ -344,18 +401,42 @@ async def smoke_validate(cfg: dict) -> dict:
         }
         for p in posts[:3]
     ]
-    return {"ok": True, "n_posts": len(posts), "sample": sample}
+    post_ids = [
+        (getattr(p, "post_id", "") or "").strip()
+        for p in posts
+        if (getattr(p, "post_id", "") or "").strip()
+    ]
+    return {"ok": True, "n_posts": len(posts), "sample": sample, "post_ids": post_ids}
 
 
-async def save_config(payload: dict) -> dict:
-    sid = payload.get("sid")
-    if not sid:
-        raise HTTPException(400, "sid 없음")
-    sess = get_session(sid)
+def _write_baseline(slug: str, target_url: str, config_path: Path, post_ids: list[str]) -> str:
+    """codex fix #8: save 직후 baseline 안 만들면 첫 polling 에 기존 N 항목 전부
+    신규 알림 폭주. smoke 통과한 post_id 를 seen 으로 박음."""
+    POLL_STATE_DIR.mkdir(parents=True, exist_ok=True)
+    path = POLL_STATE_DIR / f"{slug}.json"
+    payload = {
+        "slug": slug,
+        "url": target_url,
+        "config_path": str(config_path),
+        "registered_at": datetime.now(timezone.utc).isoformat(),
+        "last_poll_at": None,
+        "last_status": "registered",
+        "consecutive_breakage": 0,
+        "n_baseline": len(post_ids),
+        "seen_post_ids": post_ids,
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return str(path.relative_to(ROOT))
+
+
+async def save_config(payload: "SavePayload") -> dict:
+    """codex fix #9: SavePayload Pydantic 으로 type/size 검증 후 받음."""
+    sess = get_session(payload.sid)
     if sess is None:
         raise HTTPException(404, "session 만료")
     target_url = sess["url"]
-    cfg = _config_from_picker(payload, target_url)
+    p_dict: dict[str, Any] = payload.model_dump()
+    cfg = _config_from_picker(p_dict, target_url)
 
     smoke = await smoke_validate(cfg)
     if not smoke["ok"]:
@@ -373,8 +454,10 @@ async def save_config(payload: dict) -> dict:
             "config_preview": cfg,
         }
     out_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    baseline_path = _write_baseline(slug, target_url, out_path, smoke.get("post_ids", []))
     return {
         "ok": True,
         "config_path": str(out_path.relative_to(ROOT)),
+        "baseline_path": baseline_path,
         "smoke": smoke,
     }

@@ -60,6 +60,9 @@
     <main class="content">
       <header class="topbar">
         <div class="snap">
+          {% if active == 'builder' %}
+          <span class="muted" title="picker 페이지는 N100 snapshot 미사용 — 외부 사이트 직접 fetch">snapshot 미사용 (picker)</span>
+          {% else %}
           <span class="muted">snapshot:</span> <code>{{ snapshot_ts }}</code>
           {% if pull_result %}
             {% if pull_result.ok %}
@@ -78,6 +81,7 @@
                 ⚠ Pull 실패 — stale 데이터
               </span>
             {% endif %}
+          {% endif %}
           {% endif %}
         </div>
       </header>

@@ -104,17 +104,38 @@ window.addEventListener('message', (e) => {
 });
 
 function generalize(a, b) {
+  // codex review fix #6: class 불일치 (li.notice vs li.regular) 시 그냥 break 하면
+  // parent selector 로 후퇴해 row 자체를 잃음. tag 같으면 common class 만 유지로
+  // row element 보존.
   if (!a || !b) return null;
   const splitSel = s => s.split(/\s*>\s*/);
   const sa = splitSel(a);
   const sb = splitSel(b);
   const min = Math.min(sa.length, sb.length);
   const out = [];
+  const norm = s => s.replace(/:nth-(child|of-type)\(\d+\)/g, '').trim();
+  const parse = s => {
+    const tagMatch = s.match(/^([a-z][a-z0-9-]*)/i);
+    return {
+      tag: tagMatch ? tagMatch[1] : '',
+      classes: [...s.matchAll(/\.([a-zA-Z0-9_-]+)/g)].map(m => m[1]),
+      ids: [...s.matchAll(/#([a-zA-Z0-9_-]+)/g)].map(m => m[1]),
+    };
+  };
   for (let i = 0; i < min; i++) {
-    if (sa[i] === sb[i]) { out.push(sa[i]); continue; }
-    const aa = sa[i].replace(/:nth-(child|of-type)\(\d+\)/g, '');
-    const bb = sb[i].replace(/:nth-(child|of-type)\(\d+\)/g, '');
-    if (aa === bb) { out.push(aa); continue; }
+    const ai = norm(sa[i]);
+    const bi = norm(sb[i]);
+    if (ai === bi) { out.push(ai); continue; }
+    const pa = parse(ai);
+    const pb = parse(bi);
+    if (pa.tag && pa.tag === pb.tag && JSON.stringify(pa.ids) === JSON.stringify(pb.ids)) {
+      const commonCls = pa.classes.filter(c => pb.classes.includes(c));
+      let token = pa.tag;
+      if (pa.ids.length) token += '#' + pa.ids.join('#');
+      if (commonCls.length) token += '.' + commonCls.join('.');
+      out.push(token);
+      continue;
+    }
     break;
   }
   return out.length ? out.join(' > ') : null;
