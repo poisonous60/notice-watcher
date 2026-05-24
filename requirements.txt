@@ -10,3 +10,4 @@ crawl4ai>=0.4
 discord.py>=2.3
 PyYAML>=6.0
 trafilatura>=2.0
+json_repair>=0.59

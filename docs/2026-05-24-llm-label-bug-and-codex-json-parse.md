@@ -70,15 +70,15 @@ backward-compat: 옛 DB row 의 `gemini 호출` 토큰도 `llm_api` 가 alias �
 ### 후보 픽스 (택일 또는 조합)
 
 1. **routing 폴백**: `config_generate` / `config_retry` 가 `codex:gpt-5.4-mini` → `gemini:gemini-2.5-flash` 로 fallback. 이미 `FallbackClient` ([generate/routing.py:155](../generate/routing.py#L155)) 인프라 있음 — routing.json 값을 `codex:gpt-5.4-mini#low` 대신 별도 wrapper 로 바꿔야 함. 현재는 codex provider 1개만 라우팅 시 native wrapper 적용.
-2. **모델 격상**: `gpt-5.4-mini` → `gpt-5.4` (full) 풀버전. mini 가 큰 응답에서 JSON 깨먹는다는 가설. 비용 ~3x.
+2. **모델 격상**: `gpt-5.4-mini` → `gpt-5.4` (full) 풀버전, 또는 `#low` → `#medium`/`#high` (reasoning effort). mini 가 큰 응답에서 JSON 깨먹는다는 가설. 비용 ~3x.
 3. **prompt schema 강화**: [generate/prompts.py](../generate/prompts.py) 의 출력 schema 에 "JSON 외 텍스트 금지", escape 룰 명시. 효과 불확실 (모델 따라).
-4. **JSON 복구 시도**: `_parse_json_loose` 에 partial-JSON repair (예: `json-repair` pip 라이브러리) 박기. malformed delimiter 1~2개는 살릴 수도. transient 픽스.
+4. **JSON 복구 시도** *(2026-05-24 박음)*: [`generate/gemini.py:_parse_json_loose`](../generate/gemini.py) 에 `json_repair` pip 라이브러리 2차 fallback. `Expecting ',' delimiter` / trailing comma / 닫히지 않은 brace 등 1~몇 글자 누락은 자동 회수. 빈 dict / `""` 반환은 채택 X (garbage 가 schema validate 우회하지 않도록). 운영자 가시성 위해 복구 성공 시 `[json_repair]` print. 테스트: [`tests/llm/test_json_repair.py`](../tests/llm/test_json_repair.py) (9/9 pass — 정상 / fence / outer-brace-cut / missing comma / trailing comma / unclosed brace / garbage reject / empty dict pass / blank reject).
 
-권장 순서: (1) 먼저 — 인프라 이미 있고 비용 안 늘림. 안 풀리면 (2) 다음 batch 케이스로 검증.
+남은 순서: (4) 효과를 1-2 batch 측정 → 회수율 낮으면 (1) 또는 (2) 박기.
 
 ### 사용자 결정 필요
 
-이 문서는 *현황 + 라벨 픽스* 까지. 후속 (1)~(4) 중 어느 것 박을지는 다음 세션.
+(1)~(3) 중 어느 것 추가로 박을지는 (4) 효과 측정 후. 일부 실패는 1글자 누락 이상의 깊은 깨짐이라 repair 도 못 살림 — 그 비율이 의미 있으면 routing/모델 손봐야.
 
 ## 메모: usage 로그의 `http_error` 38건은 자동등록 무관
 

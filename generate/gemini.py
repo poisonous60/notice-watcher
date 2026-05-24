@@ -252,11 +252,30 @@ def _parse_json_loose(text: str) -> Any:
         t = body.strip().rstrip("`").strip()
     try:
         return json.loads(t)
-    except json.JSONDecodeError as e:
+    except json.JSONDecodeError as first_err:
+        # 1차 fallback: outer braces 만 잘라 재시도 (prose 둘러싸인 케이스).
         i, j = t.find("{"), t.rfind("}")
         if 0 <= i < j:
             try:
                 return json.loads(t[i:j + 1])
             except json.JSONDecodeError:
                 pass
-        raise LLMParseError(f"모델 응답을 JSON 으로 파싱 실패: {e}\n--- 응답 앞부분 ---\n{text[:800]}")
+        # 2차 fallback: json_repair — 빠진 `,` / 닫히지 않은 `"`/`{`/`[` / trailing comma 등
+        # 1~몇 글자 누락 복구. codex(gpt-5.4-mini) 가 큰 응답에서 자주 깨는 케이스 회수용
+        # (2026-05-24 govinfo job#1702: line 1 col 2556 `,` 누락 같은 사례).
+        # 위험: 복구 결과가 모델 의도와 미세하게 다를 수 있음 — `[json_repair]` print 로 surface
+        # 해서 운영자가 확인 가능. validate 단계가 schema 위반 잡으면 retry round 로 회복.
+        try:
+            import json_repair  # 지연 import — 의존성 없는 환경에서도 1차 path 살림.
+        except ImportError:
+            json_repair = None
+        if json_repair is not None:
+            try:
+                repaired = json_repair.loads(t)
+            except Exception:  # noqa: BLE001 — repair 자체 예외도 그냥 fall through
+                repaired = None
+            # repair 가 garbage 받으면 `""` 반환 — dict/list 그리고 비어있지 않은 것만 채택.
+            if isinstance(repaired, (dict, list)) and repaired:
+                print(f"  [json_repair] 모델 응답 JSON 복구 성공 (orig err: {first_err.msg} @ char {first_err.pos})")
+                return repaired
+        raise LLMParseError(f"모델 응답을 JSON 으로 파싱 실패: {first_err}\n--- 응답 앞부분 ---\n{text[:800]}")
