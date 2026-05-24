@@ -15,8 +15,12 @@ EnvironmentFile=/home/<user>/notice-watcher/.env
 ExecStart=/home/<user>/notice-watcher/.venv/bin/python -m bot.main
 Restart=on-failure
 RestartSec=5
-# 메모리 폭주 방지 (필요 시 조정 / 제거)
-# MemoryMax=2G
+# 메모리 폭주 방지 — cgroup limit. 넘으면 kernel global OOM 대신 *이 service 만* OOM-kill 후
+# Restart=on-failure 가 재기동 (다른 system process 보호: tailscaled 등). 2026-05-24 박힘 —
+# probe.py Phase 9b heavy SPA (podcastindex.org) 가 python RSS 7.5GB 폭주시켜 N100 12GB
+# kernel global OOM 발동 + tailscaled victim. probe.py:_start_memory_guard (3.5GB self-kill)
+# 가 1차 방어선이지만 그게 *못 잡는* 갑작스런 누적도 cgroup 이 받친다.
+MemoryMax=10G
 
 [Install]
 WantedBy=multi-user.target

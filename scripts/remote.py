@@ -18,6 +18,8 @@
     python scripts/remote.py batch-register --catalog <name> --failed       # gen_fail+bug retry
     python scripts/remote.py batch-register --catalog <name> --rc 1,-99     # 특정 rc retry
     python scripts/remote.py batch-register --catalog <name> --force        # catalog 전체 retry
+    python scripts/remote.py jobs [--kind register] [--since 60] [--min-id N]
+                                                                            # bot.sqlite3 jobs 상태 카운트 (SSH+sqlite3 인용 직접 작성 X)
     python scripts/remote.py list                                           # 허용 명령 출력
 
 dashboard 가 subprocess 로 호출. stdout 그대로 캡처해 토스트/박스에 표시.
@@ -66,6 +68,7 @@ _BASE64_RE = re.compile(r"^[A-Za-z0-9+/=]{1,200000}$")         # base64 문자�
 _TRACE_ID_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")          # tracing.valid_trace_id 와 동일 — path-traversal 차단
 _TRACE_KIND_RE = re.compile(r"^[a-z0-9_]{1,32}$")
 _PATTERN_ID_RE = re.compile(r"^[a-f0-9]{1,12}$")              # learned_blacklist pattern id (sha1 12자)
+_JOB_KIND_RE = re.compile(r"^[a-z_]{1,32}$")                  # bot.sqlite3 jobs.kind 컬럼 — 영소문자+_
 _TARGET_KIND = ("dm", "channel")
 
 
@@ -427,6 +430,48 @@ def cmd_announce_scoped(b64: str) -> int:
     return _ssh(_remote_python_cmd("scripts/announce.py", "--base64", b64))
 
 
+def cmd_jobs(kind: str, since_minutes: int, min_id: int) -> int:
+    """운영 호스트 `output/bot.sqlite3` jobs 테이블의 상태별 카운트.
+
+    batch drain 모니터링용. ad-hoc `ssh ... 'sqlite3 ... "SELECT ... WHERE kind=\"register\""'`
+    형태로 직접 쓰면 SSH/PowerShell/Bash/SQL 4중 인용이 꼬여 SQL 이 `"register"` 를
+    *identifier(컬럼명)* 로 해석하는 사고가 잘 난다 (2026-05-24 박음). 이 helper 가
+    SQL 문자열 인용(=single-quote)·shell 인용을 한 자리에 박는다 — 호출자는 인용 X.
+
+    인자는 모두 regex/int 로 검증 → SSH command 안전 interpolation. SQL 안의 값은
+    int(고정 변환)·whitelisted kind 만 들어가므로 injection 표면 0.
+    """
+    _require(kind, _JOB_KIND_RE, name="kind")
+    if since_minutes < 0 or since_minutes > 60 * 24 * 30:
+        print(f"[remote] since 범위 0..43200 분 (30일): {since_minutes!r}", file=sys.stderr)
+        return 4
+    if min_id < 0 or min_id > 10_000_000:
+        print(f"[remote] min-id 범위 0..10000000: {min_id!r}", file=sys.stderr)
+        return 4
+    where = f"kind='{kind}' AND created_at > datetime('now', '-{int(since_minutes)} minutes')"
+    if min_id > 0:
+        where += f" AND id >= {int(min_id)}"
+    sql = (
+        f".headers on\n.mode column\n"
+        f"SELECT status, COUNT(*) AS n FROM jobs WHERE {where} GROUP BY status ORDER BY status;\n"
+        f"SELECT 'total' AS status, COUNT(*) AS n FROM jobs WHERE {where};\n"
+    )
+    # SQL 을 sqlite3 의 stdin 으로 파이프 → shell quoting layer 0 (한 줄도 안 escape).
+    remote = f"cd {DEPLOY_PATH_RAW} && sqlite3 output/bot.sqlite3"
+    p = subprocess.run(
+        ["ssh", _require_deploy_host(), remote],
+        input=sql,
+        capture_output=True,
+        text=True,
+        errors="replace",
+    )
+    if p.stdout:
+        sys.stdout.write(p.stdout)
+    if p.stderr:
+        sys.stderr.write(p.stderr)
+    return p.returncode
+
+
 def cmd_read(alias: str) -> int:
     if alias not in READABLE:
         print(f"[remote] 알 수 없는 read alias: {alias!r}. 허용: {sorted(READABLE)}", file=sys.stderr)
@@ -452,6 +497,8 @@ def list_actions() -> int:
     print("  announce-scoped <base64-json>                  좁힌 공지 발송")
     print("  batch-register --catalog <name>[...] [--url URL ...] [--failed|--rc 1,-99|--force]")
     print("                                                 catalog/url scope × filter (rev5)")
+    print("  jobs [--kind register] [--since 60] [--min-id N]")
+    print("                                                 bot.sqlite3 jobs 상태 카운트 (drain 모니터링)")
     print("  unlearn <pattern_id>                           learned_blacklist 패턴 제거")
     print("  clear-bug <slug>                               .BUG.json 마커 제거 (bug-fix workflow)")
     print("  trace-index <kind>                             output/traces/index.<kind>.jsonl tail")
@@ -493,6 +540,10 @@ def main(argv: Optional[list[str]] = None) -> int:
                     help="rc filter (comma-list). e.g. --rc 1,-99")
     sp.add_argument("--force", action="store_true",
                     help="jobs / marker 다 무시 (filter override)")
+    sp = sub.add_parser("jobs", help="bot.sqlite3 jobs 상태 카운트 (drain 모니터링; SSH+sqlite3 인용 wrap)")
+    sp.add_argument("--kind", default="register", help="jobs.kind 컬럼 (영소문자+_, default: register)")
+    sp.add_argument("--since", type=int, default=60, help="최근 N분 (default: 60)")
+    sp.add_argument("--min-id", type=int, default=0, dest="min_id", help="id >= N filter (batch 시작 id 부터 보고 싶을 때)")
     sp = sub.add_parser("unlearn"); sp.add_argument("pattern_id", help="learned_blacklist pattern id ([a-f0-9]{1,12})")
     sp = sub.add_parser("clear-bug"); sp.add_argument("slug", help="`.BUG.json` 마커가 박힌 slug")
     sp = sub.add_parser("trace-index"); sp.add_argument("kind", help="poll|notify|notify_idle|probe ...")
@@ -525,6 +576,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         return cmd_announce_scoped(args.base64_payload)
     if args.cmd == "batch-register":
         return cmd_batch_register(args.catalog, args.url, args.failed, args.rc, args.force)
+    if args.cmd == "jobs":
+        return cmd_jobs(args.kind, args.since, args.min_id)
     if args.cmd == "unlearn":
         return cmd_unlearn(args.pattern_id)
     if args.cmd == "clear-bug":

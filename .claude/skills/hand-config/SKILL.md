@@ -119,6 +119,20 @@ dashboard `/triage` 의 "FAILED 큐 codex 위임 처리" 프롬프트를 붙여�
 
 **병렬이 기본** (2026-05-21-fedi 검증, ADR 0008 §병렬 위임). 여러 codex 세션을 동시에 띄워 throughput 을 올린다. **단 codex 세션은 같은 working tree 공유**(codex_run.ps1 격리 X) → 두 세션이 *같은 파일* 동시 편집 = 디스크 레이스. 이걸 막는 게 핵심 규율.
 
+**drain 모니터링** (batch enqueue 후 worker 큐 비기 기다릴 때): `python scripts/remote.py jobs --since <분> --min-id <batch 시작 id>` — `bot.sqlite3` jobs 상태 카운트 (status × n 표, total 포함). ⚠ **ad-hoc `ssh ... 'sqlite3 ... "SELECT ... WHERE kind=\"register\""'` 형태로 직접 쓰지 X** — SSH/PowerShell/Bash/SQL 4중 인용이 꼬여 SQL 이 `"register"` 를 *identifier(컬럼명)* 로 해석 → `Error: in prepare, no such column: "register"`. SQL 표준: `"..."`=식별자, `'...'`=문자열. helper 가 SQL/shell 인용을 다 박음.
+
+Monitor (background polling) 패턴 — `remote.py jobs` 출력 parse + `pending|running` 0 검출:
+```bash
+while true; do
+  out=$(python scripts/remote.py jobs --since <분> --min-id <id> 2>&1)
+  printf '%s\n---\n' "$out"
+  # pending/running 행이 없으면 drain 완료. awk 로 그 두 row 만 보고 break.
+  python -c "import sys,re; t=sys.stdin.read(); m=re.findall(r'(pending|running)\s+(\d+)', t); sys.exit(0 if all(int(n)==0 for _,n in m) and m else 1)" <<<"$out" && { echo DRAIN COMPLETE; break; }
+  sleep 30
+done
+```
+⚠ **`grep -oP '...\K...'` Perl regex 금지** — Git Bash on Windows 는 non-UTF-8 locale 기본 → `grep: -P supports only unibyte and UTF-8 locales` 로 *조용히 빈 stdout* 반환 → condition 영영 안 걸려 monitor 무한 hang (2026-05-24 podcast batch 박음). POSIX-portable: `grep -oE` + 2-stage 또는 `awk -F=` 또는 위처럼 python 한 줄 (locale-independent).
+
 **절차**:
 1. `python scripts/triage.py pull --skip-later` — N100 → 로컬 (FAILED + probe).
 2. **청크 분할 = disjoint 파일 소유** (자동 `codex_batch.py plan` 은 플랫폼/host 기준 분할 — 단서). Claude 가 각 청크의 *편집 파일 집합* 을 정한다:

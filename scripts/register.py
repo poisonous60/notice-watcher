@@ -152,6 +152,10 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+class ProbeMemoryGuardError(Exception):
+    """probe.py 의 RSS watchdog 이 임계 초과 자기-kill 한 rc=99. capability_blocked 로 분류."""
+
+
 def _run_probe(url: str, *, lite: bool, timeout_s: float) -> None:
     import os
     print("[PHASE] probe", flush=True)
@@ -166,6 +170,12 @@ def _run_probe(url: str, *, lite: bool, timeout_s: float) -> None:
         # → phase 들이 형제로 떠 dashboard 에서 collapse 불가.
         child_env = {**os.environ, **env_for_child()}
         rc, _ = _run_child_bounded(cmd, env=child_env, timeout_s=timeout_s, label="probe", stream=True)
+    if rc == 99:
+        # probe.py:_start_memory_guard 가 RSS 임계 넘어 self-kill. 2026-05-24 박힘
+        # (podcastindex.org Phase 9b heavy SPA → python RSS 7.5GB → kernel global OOM 방어).
+        raise ProbeMemoryGuardError(
+            f"probe RSS 임계 초과 self-kill — 이 사이트는 capability_blocked (heavy SPA OOM blower)"
+        )
     if rc != 0:
         raise SystemExit(f"probe 실패 (rc={rc})")
 
@@ -1907,6 +1917,21 @@ def _main_inner(argv) -> int:
                                   last_feedback=f"[FAIL] probe_timeout: {e}")
                 print(f"[register] ❌ 자동 처리 불가 — probe timeout. → {fp}")
                 return 1
+            except ProbeMemoryGuardError as e:
+                # rc=5 capability_blocked 경로로 일치 — anti-bot 차단과 동일 의미 (능력 부족, 정책 아님).
+                # 2026-05-24 박힘: podcastindex.org 류 heavy SPA OOM blower 격리. stealth 트랙 대상 X
+                # (메모리 한계는 stealth 로 안 풀림) — root-cause 별도 (tracemalloc 위임 중).
+                try:
+                    fp = _save_failed(slug, url,
+                                      reason=f"capability_blocked (probe memory guard): {e}",
+                                      last_config=None,
+                                      last_feedback=f"[BLOCKED] probe_memory_guard — heavy SPA OOM blower "
+                                                    f"(probe.py:_start_memory_guard self-kill rc=99). "
+                                                    f"root-cause: tracemalloc 조사 별도.")
+                    print(f"[register] ❌ 등록 불가 — probe memory guard. → {fp}")
+                except Exception as save_e:  # noqa: BLE001
+                    print(f"[register] ⚠ FAILED 마커 저장 실패 (probe memory guard): {save_e}", file=sys.stderr)
+                return 5
 
     print("[PHASE] digest", flush=True)
     print(f"[register] digest 구성: slug={slug}")

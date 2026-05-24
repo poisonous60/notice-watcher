@@ -112,6 +112,9 @@ CASES: list[tuple[str, tuple[Optional[str], Optional[int], Optional[str]], str, 
     ("cap_entry_blocked_unclassified",
      ("failed", 5, "[register] 목록 페이지에 정적으로도 headless 로도 접근 실패 (verdict='분류 보류'). anti-bot/captcha 차단 — 능력 부족(정책 아님)."),
      "capability_blocked", "entry_blocked"),
+    ("cap_probe_memory_guard",
+     ("failed", 5, "[register] ❌ 등록 불가 — probe memory guard. [BLOCKED] probe_memory_guard — heavy SPA OOM blower (probe.py:_start_memory_guard self-kill rc=99). root-cause: tracemalloc 조사 별도."),
+     "capability_blocked", "probe_memory_guard"),
 
     # gate_reject (rc=3) ----
     ("gate_recognizer",

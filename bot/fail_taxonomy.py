@@ -276,6 +276,13 @@ FAIL_CATALOG: tuple[FailKind, ...] = (
             Subkind("baseline_blocked", "정적·headless 진입 차단",
                     "static·headless 둘 다 차단 — anti-bot 의심. stealth 재도전.",
                     _has_any("BASELINE_BLOCKED", name="baseline_blocked")),
+            # 2026-05-24 박힘 — probe.py:_start_memory_guard RSS watchdog self-kill (rc=99 → register rc=5).
+            # podcastindex.org 류 heavy SPA Phase 9b OOM blower 격리. stealth 트랙 대상 X (메모리는 stealth 로 안 풀림).
+            # root-cause 별도 (tracemalloc 위임). 같은 패턴 재발 시 case body 에 "probe_memory_guard" 토큰 기대.
+            Subkind("probe_memory_guard", "probe RSS watchdog self-kill",
+                    "probe 가 RSS 임계 초과해 자기-kill (heavy SPA OOM blower 추정). "
+                    "stealth 대상 X — root-cause 는 별도 (probe 메모리 누적 지점 tracemalloc 조사).",
+                    _has_any("probe_memory_guard", "probe memory guard", name="probe_memory_guard")),
             # generic fallback — rc=5 인데 위 토큰 다 미스 (분류 보류 / BLOCKED_BOT/IP/GEO 등). 마지막.
             # blocked_bot/ip/geo 세분화는 policy_reject(legacy rc=2)에만 — rc=5 는 entry_blocked 로 흡수.
             Subkind("entry_blocked", "진입 차단(미분류)",

@@ -65,6 +65,7 @@
 |---|---|---|
 | `cloudflare` | Cloudflare 챌린지 | Cloudflare anti-bot 챌린지 — stealth 어댑터로 재도전. |
 | `baseline_blocked` | 정적·headless 진입 차단 | static·headless 둘 다 차단 — anti-bot 의심. stealth 재도전. |
+| `probe_memory_guard` | probe RSS watchdog self-kill | probe 가 RSS 임계 초과해 자기-kill (heavy SPA OOM blower 추정). stealth 대상 X — root-cause 는 별도 (probe 메모리 누적 지점 tracemalloc 조사). |
 | `entry_blocked` | 진입 차단(미분류) | anti-bot/captcha 추정 — verdict 미분류. stealth 재도전 후보. |
 
 ### gate_reject

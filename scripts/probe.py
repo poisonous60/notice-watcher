@@ -13,6 +13,7 @@ import queue
 import re
 import subprocess
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -206,7 +207,60 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
+_MEMORY_GUARD_RC = 99
+
+
+def _start_memory_guard() -> None:
+    """probe 프로세스 RSS 가 임계 초과하면 os._exit(99) — N100 12GB OOM 방어선.
+
+    2026-05-24 podcast batch 박힘: podcastindex.org probe Phase 9b (heavy SPA article-by-click)
+    가 python(playwright sync API) RSS 를 +18s 200MB → +54s 7459MB 직선 누적시켜 kernel global
+    OOM 발동 → notice-bot.service `oom-kill` (tailscaled 도 함께 victim). 정확 leak 지점은 별도
+    조사(tracemalloc) 필요하나, 그 결과와 *무관하게* 한 사이트가 service 전체를 죽이지 못하게
+    하는 첫 방어선이 필요.
+
+    임계 = `PROBE_MEMORY_GUARD_MB` env (default 3500MB). N100(12GB total - 5GB baseline = 7GB
+    여유) 의 50% 선. concurrency 5 정상 case (각 ~200MB) 와는 충돌 X, podcastindex 류 폭주
+    case 만 차단.
+
+    daemon thread 라 normal exit 시 자동 소멸. Linux 만 동작 (/proc/self/status) — Windows/macOS
+    는 silently skip (개발 박스 OOM 없음).
+    """
+    threshold_mb = int(os.environ.get("PROBE_MEMORY_GUARD_MB", "3500"))
+    poll_s = float(os.environ.get("PROBE_MEMORY_GUARD_POLL_S", "1.0"))
+    status_path = Path("/proc/self/status")
+    if not status_path.exists():
+        return  # non-Linux
+
+    def _watch() -> None:
+        peak_mb = 0
+        while True:
+            try:
+                for line in status_path.read_text().splitlines():
+                    if line.startswith("VmRSS:"):
+                        rss_kb = int(line.split()[1])
+                        rss_mb = rss_kb // 1024
+                        if rss_mb > peak_mb:
+                            peak_mb = rss_mb
+                        if rss_mb > threshold_mb:
+                            sys.stderr.write(
+                                f"[probe] ❌ MEMORY GUARD: RSS={rss_mb}MB > threshold={threshold_mb}MB — "
+                                f"probe killed cleanly to protect notice-bot.service (peak={peak_mb}MB). "
+                                f"이 사이트는 OOM blower (heavy SPA 추정) — capability_blocked 분류.\n"
+                            )
+                            sys.stderr.flush()
+                            os._exit(_MEMORY_GUARD_RC)
+                        break
+            except Exception:
+                pass
+            time.sleep(poll_s)
+
+    t = threading.Thread(target=_watch, name="probe-memory-guard", daemon=True)
+    t.start()
+
+
 def main(argv: list[str]) -> int:
+    _start_memory_guard()
     args = parse_args(argv)
     url: str = args.url
     slug = url_to_slug(url)
