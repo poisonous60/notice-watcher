@@ -49,6 +49,13 @@ N100 동기는 `scripts/remote.py batch-register` 의 atomic scp.
 
 **5차 b(05-24-games 2nd wave) 합계: 600 링크 / 300 distinct host (각 100 / 50).** 인디·모바일 양 부족 보강 — 가챠·casual·strategy·서구 인디·아시아 인디·매체 6 세분. 빌더 = `output/candidates/_build_2026-05-24-games2.py`, 5차 1st 산출물까지 prior 로드. codex 위임. 합산 5차(1st+2nd) = 1200 링크 / 600 distinct host.
 
+| `2026-05-24-games-official` | 100 | 50 | **게임 자체 official (게임명.com)** — terraria/valheim/balatro/vampire-survivors/factorio/rimworld/satisfactory/palworld/witcher/halo/forza/seaofthieves/warthunder/darktide/pathofexile/warframe/dota2/marvelrivals/residentevil/monsterhunter/persona 등 | 5차 c |
+| `2026-05-24-games-crowdfund` | 100 | 4 | **펀딩 캠페인** — Kickstarter games(개별 캠페인 다수)·Fig·Indiegogo·BackerKit. host_cap 풀림(같은 host 안 캠페인 path 정상) | 5차 c |
+| `2026-05-24-games-db-wiki` | 100 | 6 | **게임 DB/wiki/트래커** — GameFAQs 게임별 board·MobyGames·IGDB·HowLongToBeat·Backloggd·PCGamingWiki·SteamDB·TVTropes·fandom subdomain. host_cap=60 | 5차 c |
+| `2026-05-24-games-mods-hub` | 100 | 5 | **mod hub** — NexusMods 게임별(40+)·Modrinth·CurseForge 게임별·GameBanana·Thunderstore 게임별·UESP. host_cap=60 | 5차 c |
+
+**5차 c(05-24-games 3rd wave) 합계: 400 링크 / 65 distinct host.** 사용자 피드백 반영 — "회사 본사 마케팅 페이지" 빼고 *게임 단위 official + 펀딩 + DB + mod hub*. 빌더 = `output/candidates/_build_2026-05-24-games3.py`, per-theme host_cap (official=2, crowdfund=100, db/mods=60) + ignore_prior_hosts (kickstarter/nexusmods/igdb 등 prior 우회). 합산 5차(1st+2nd+3rd) = 1600 링크 / 665 distinct host.
+
 ## 3. 생성/확장 방법
 
 4차 5개 카탈로그는 손-YAML 대신 빌더로 생성:
