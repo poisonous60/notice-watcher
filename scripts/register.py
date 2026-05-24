@@ -50,6 +50,7 @@ from probe.diagnose import (  # noqa: E402
     STATIC_INSUFFICIENT_SIZE_PREFIX as _BLANK_SHELL_NOTE_KW,
     STATIC_INSUFFICIENT_REPEAT_PREFIX as _JS_MOSAIC_NOTE_KW,
 )
+from probe.extract import audio_share_signal, rss_feed_urls  # noqa: E402
 from engine.digest import build_digest  # noqa: E402
 from engine.recognizers import recognize as recognize_platform, recognize_reject  # noqa: E402
 from engine.tracing import start_trace, current_trace, env_for_child  # noqa: E402
@@ -511,6 +512,8 @@ def _single_article_nav_only_check(digest: dict) -> tuple[bool, str]:
     OG/LD 같은 명시 schema 신호 없어도 nav 외부 same-host repeating pattern 0건이면 거부.
     """
     lc = digest.get("list_candidates") or {}
+    if lc.get("rss_feed_urls") or digest.get("feed_candidates"):
+        return True, ""
     nav = lc.get("nav_only_same_host")
     if not isinstance(nav, dict) or not nav.get("nav_only_same_host"):
         return True, ""
@@ -696,7 +699,7 @@ def _board_shape_check(digest: dict, url: str) -> tuple[bool, str]:
     n_json = len(lc.get("traffic_json_api_candidates") or [])
     n_inline = len(lc.get("inline_js_data_candidates") or [])
     n_hyd = len(lc.get("hydration_list_candidates") or [])
-    n_feed = len(digest.get("feed_candidates") or [])
+    n_feed = len(digest.get("feed_candidates") or []) + len(lc.get("rss_feed_urls") or [])
     n_html_same = sum(
         1 for p in (lc.get("html_repeating_patterns") or [])
         if _same_host(p.get("href_pattern_guess")) or _same_host(p.get("sample_url"))
@@ -858,6 +861,62 @@ def _extract_display_title(slug: str) -> Optional[str]:
         if title:
             return title[:200]
     return None
+
+
+def _build_digest(slug: str, url: str) -> dict:
+    """build_digest + 새 probe 휴리스틱의 old-artifact backfill.
+
+    --reuse-probe 는 기존 output/probe/<slug> 파일을 그대로 쓰므로, 새 list_candidates 키가 없는
+    오래된 artifact 에서도 LLM/gate 가 최신 RSS/audio 신호를 볼 수 있게 digest 에만 보강한다.
+    """
+    digest = build_digest(slug=slug, url=url)
+    lc = digest.setdefault("list_candidates", {})
+    probe_dir = output_dir(slug)
+    list_html = ""
+    for name in ("list.html", "s4.html", "s1.html"):
+        p = probe_dir / name
+        if p.exists():
+            try:
+                list_html = p.read_text(encoding="utf-8", errors="replace")
+                break
+            except OSError:
+                pass
+    har_path = probe_dir / "traffic.har"
+    if not har_path.exists():
+        har_path = probe_dir / "traffic.list.har"
+    if "rss_feed_urls" not in lc:
+        feeds = []
+        for c in digest.get("feed_candidates") or []:
+            if not isinstance(c, dict) or not str(c.get("source") or "").startswith("input-url"):
+                continue
+            cu = c.get("url")
+            if cu:
+                feeds.append({"url": cu, "source": c.get("source") or "feed_candidates", "type": c.get("type")})
+        feeds.extend(rss_feed_urls(
+            html=list_html,
+            base_url=url,
+            har_path=har_path if har_path.exists() else None,
+        ))
+        if not feeds and digest.get("feed_candidates"):
+            for c in digest.get("feed_candidates") or []:
+                cu = c.get("url") if isinstance(c, dict) else None
+                if cu:
+                    feeds.append({"url": cu, "source": c.get("source") or "feed_candidates", "type": c.get("type")})
+        seen = set()
+        lc["rss_feed_urls"] = [
+            f for f in feeds
+            if not (f.get("url") in seen or seen.add(f.get("url")))
+        ]
+    if "audio_share_host_detected" not in lc:
+        lc["audio_share_host_detected"] = audio_share_signal(
+            base_url=url,
+            first_article_url=lc.get("first_article_url") or (digest.get("article_sample") or {}).get("url"),
+            html_candidates=lc.get("html_repeating_patterns") or [],
+            feeds=lc.get("rss_feed_urls") or [],
+        )
+    if lc.get("audio_share_host_detected"):
+        lc["body_empty_likely"] = True
+    return digest
 
 
 REGISTER_SIGNAL_LOG = ROOT / "output" / "register_signal_log.jsonl"
@@ -1606,6 +1665,7 @@ def _extra_signal_hints(digest: dict) -> list[str]:
           piku 류: static_ok_preset=S1.H2 라 `_list_strategy_hint` 가 None 반환 → hint 안 박혔던 케이스.
       (B) list_candidates.body_empty_likely — 본문 없는 사이트 (row_interactive_action 게임/투표/SPA
           또는 row_external_host 검색결과/aggregator). article.body_empty_acceptable: true 권고.
+      (C) list_candidates.rss_feed_urls / audio_share_host_detected — RSS URL 추측 금지와 podcast 본문 skip 권고.
     """
     out: list[str] = []
     notes = digest.get("notes") or []
@@ -1648,6 +1708,22 @@ def _extra_signal_hints(digest: dict) -> list[str]:
             "알림은 제목+URL 만 나가도 OK."
         )
 
+    rss_urls = lc.get("rss_feed_urls") or []
+    if rss_urls:
+        out.append(
+            f"⚠ probe: **RSS/Atom feed URL 후보 발견** — list.url_template 은 추측하지 말고 "
+            f"list_candidates.rss_feed_urls[0].url={rss_urls[0].get('url')!r} 를 그대로 써라. "
+            "RSS 는 row_selector='channel > item' 또는 'item', Atom 은 'entry'."
+        )
+
+    audio = lc.get("audio_share_host_detected") or {}
+    if isinstance(audio, dict) and audio.get("audio_share_host_detected"):
+        out.append(
+            f"⚠ probe: **podcast audio share host** ({audio.get('host')}) — RSS item link 는 본문 페이지가 아니라 "
+            "오디오 플레이어다. article.body_empty_acceptable=true, article.skip_status=[200], article.content=[] 로 두고 "
+            "제목/URL/날짜/요약은 RSS item 에서만 추출해라."
+        )
+
     return out
 
 
@@ -1678,7 +1754,7 @@ def _preflight(slug: str, url: Optional[str], digest: dict, *, no_escalate: bool
         n_api = _reprobe_article(slug, art, timeout_s=article_timeout_s)  # playwright 없으면 article_candidates.json=[] 쓰고 0 반환(조용)
         # _reprobe_article 이 article.html(렌더 DOM) / article_candidates.json 을 갱신했을 수 있으니 digest 재구성.
         # (playwright 미설치라 아무것도 못 바꿨어도 결과는 동일 — 무해.)
-        digest = build_digest(slug=slug, url=url)
+        digest = _build_digest(slug=slug, url=url)
         if n_api:
             print(f"[register]   → 본문 JSON API 후보 {n_api}건, 프롬프트에 ⚡ 블록으로 첨부됨 (단, gemini 가 진짜 본문인지 확인하게 함)")
     elif art:
@@ -2028,7 +2104,7 @@ def _main_inner(argv) -> int:
         return 1
     tr = current_trace()
     with tr.span("build_digest", attrs={"slug": slug}):
-        digest = build_digest(slug=slug, url=url)
+        digest = _build_digest(slug=slug, url=url)
     url = url or digest.get("url") or ""
 
     ok_policy, msgs = _policy_check(digest, url)
@@ -2353,7 +2429,7 @@ def _main_inner(argv) -> int:
                 print(f"[register] --article-url 힌트: {article_url_hint} — first_article_url 교정 + 그 글페이지 render+HAR re-probe")
                 _set_first_article_url(slug, article_url_hint)
                 n_api = _reprobe_article(slug, article_url_hint, timeout_s=article_timeout)
-                digest = build_digest(slug=slug, url=url)
+                digest = _build_digest(slug=slug, url=url)
                 hint = _article_hint_text(article_url_hint, n_api)
                 lh = _list_strategy_hint(digest)        # 목록이 JS-gated 면 httpx_json/playwright_html 전환 hint 도 함께
                 digest["escalation_hint"] = (hint + "\n\n" + lh) if lh else hint
