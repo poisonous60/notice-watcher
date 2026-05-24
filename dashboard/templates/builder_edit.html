@@ -74,18 +74,47 @@ const saveResult = document.getElementById('save-result');
 let row1 = null, row2 = null, rowSelector = null;
 const fields = {};
 
+let pendingMode = null;
+let ackTimer = null;
 document.querySelectorAll('button[data-mode]').forEach(b => {
   b.addEventListener('click', () => {
     const mode = b.dataset.mode;
+    pendingMode = mode;
     iframe.contentWindow.postMessage({type: 'picker:mode', mode}, '*');
-    statusEl.textContent = '모드: ' + mode + ' — iframe 에서 element 클릭';
+    statusEl.textContent = '⏳ ' + mode + ' 활성화 시도...';
+    statusEl.style.color = '';
+    if (ackTimer) clearTimeout(ackTimer);
+    ackTimer = setTimeout(() => {
+      if (pendingMode === mode) {
+        statusEl.textContent = '⚠ picker.js 응답 없음 — F12 콘솔 에러 확인 (모듈 load 실패 의심)';
+        statusEl.style.color = '#c00';
+      }
+    }, 1500);
   });
 });
 
 window.addEventListener('message', (e) => {
   if (e.source !== iframe.contentWindow) return;
   const m = e.data || {};
+  if (m.type === 'picker:mode-ack') {
+    pendingMode = null;
+    if (ackTimer) { clearTimeout(ackTimer); ackTimer = null; }
+    if (m.mode === 'idle') {
+      statusEl.textContent = '대기';
+      statusEl.style.color = '';
+    } else {
+      statusEl.textContent = '✓ 활성: ' + m.mode + ' — iframe element 클릭';
+      statusEl.style.color = '#080';
+    }
+    return;
+  }
+  if (m.type === 'picker:nomode') {
+    statusEl.textContent = '⚠ 먼저 좌측 모드 버튼 ("첫 row" / "field:title" 등) 눌러주세요';
+    statusEl.style.color = '#f60';
+    return;
+  }
   if (m.type !== 'picker:picked') return;
+  statusEl.style.color = '';
   const mode = m.mode;
   if (mode === 'row1') {
     row1 = m;
