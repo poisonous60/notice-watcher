@@ -16,6 +16,13 @@ window.addEventListener('message', (e) => {
   if (m.type === 'picker:mode') {
     mode = m.mode || 'idle';
     clearOutline();
+    // visual: active 시 crosshair cursor — 사용자 mode 활성 확인
+    try {
+      document.body.style.cursor = (mode === 'idle') ? '' : 'crosshair';
+    } catch (_) {}
+    // ack — parent 가 picker.js 살아있는지 + mode 받았는지 확인
+    window.parent.postMessage({type: 'picker:mode-ack', mode}, '*');
+    console.log('[picker] mode →', mode);
   }
 });
 
@@ -30,9 +37,14 @@ document.addEventListener('mouseover', (e) => {
 }, true);
 
 function pickAndPost(e) {
-  if (mode === 'idle') return;
+  // idle 일 때도 navigate 차단 — 사용자가 mode 안 누른 채 click 시 페이지 떠나는
+  // 혼란 방지. parent 에 nomode 알림 → status panel 안내.
   e.preventDefault();
   e.stopImmediatePropagation();
+  if (mode === 'idle') {
+    window.parent.postMessage({type: 'picker:nomode'}, '*');
+    return;
+  }
   const t = e.target;
   if (!t) return;
   let sel = '';
@@ -59,6 +71,9 @@ document.addEventListener('keydown', (e) => {
     e.stopImmediatePropagation();
   }
 }, true);
+
+// load 확인용 console log — F12 console 에 안 보이면 picker.js 자체 load 실패
+console.log('[picker] loaded — mode=idle (모드 버튼 누르세요)');
 
 document.addEventListener('submit', (e) => {
   e.preventDefault();
