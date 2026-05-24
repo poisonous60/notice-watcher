@@ -23,6 +23,7 @@ list:
   pagination   : {kind:"query_param"|"offset"|"none", page_param?, size_param?,
                   offset_param?, page_unit?(int), extra_params_when_paged?:dict}
   page_size_max: int (선택; 서버가 page_size 를 cap 하는 경우)
+  tls_fallback : "playwright" | "none" (선택; httpx TLS handshake 실패 시 playwright_html 로 재생성 힌트)
   # --- httpx_html / playwright_html ---
   row_selector : "tr.ub-content"
   exclude_selector : "..."        (선택; 이 selector 에 매칭되는 행 제거)
@@ -103,6 +104,7 @@ CONFIG_JSON_SCHEMA: dict = {
                 "type_allow": {"type": "array"},
                 "success_when": {"type": "object"},
                 "script_root": {"type": "object"},
+                "tls_fallback": {"enum": ["playwright", "none"]},
                 "fields": {"type": "object"},
             },
         },
