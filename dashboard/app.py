@@ -1148,12 +1148,13 @@ def builder_edit(sid: str, request: Request):
 
 
 @app.get("/builder/p/{sid}/{path:path}", response_class=HTMLResponse)
-async def builder_proxy(sid: str, path: str = ""):
-    return await builder_view.proxy_fetch(sid, path)
+async def builder_proxy(sid: str, request: Request, path: str = ""):
+    root_path = request.scope.get("root_path", "")
+    return await builder_view.proxy_fetch(sid, path, root_path)
 
 
 @app.post("/builder/api/save")
-async def builder_save(payload: dict):
+async def builder_save(payload: builder_view.SavePayload):
     return await builder_view.save_config(payload)
 
 
