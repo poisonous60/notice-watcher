@@ -1,0 +1,13 @@
+# 일 1회 04:30 KST (N100 system TZ = Asia/Seoul).
+# notice-poll.timer 매시 :20 와 안 겹치는 시각.
+# Persistent=true → N100 껐다 켜면 missed run catch-up.
+[Unit]
+Description=Daily backup of notice-watcher runtime state
+
+[Timer]
+OnCalendar=*-*-* 04:30:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

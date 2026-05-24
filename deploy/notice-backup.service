@@ -1,0 +1,20 @@
+# N100 runtime 상태 백업 → Google Drive (rclone). 일 1회. ADR 0014, docs/운영 메모.md §6b.
+# 설치 (--user 모드):
+#   mkdir -p ~/.config/systemd/user
+#   cp deploy/notice-backup.service deploy/notice-backup.timer ~/.config/systemd/user/
+#   # 위 파일들 안의 /home/<user>/notice-watcher 를 실제 경로로 치환
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now notice-backup.timer
+# 즉시 1회 실행: systemctl --user start notice-backup.service
+# 로그: journalctl --user-unit notice-backup.service -n 50
+# 사전 조건: rclone 설치 + `rclone config` 로 'gdrive' remote OAuth 완료 (docs/운영 메모.md §6b setup).
+[Unit]
+Description=Notice runtime state backup → Google Drive (one shot, daily)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/<user>/notice-watcher
+Environment=REPO_ROOT=/home/<user>/notice-watcher
+ExecStart=/usr/bin/bash /home/<user>/notice-watcher/scripts/backup_runtime.sh
