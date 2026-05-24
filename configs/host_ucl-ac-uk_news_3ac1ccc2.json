@@ -1,0 +1,222 @@
+{
+  "version": 1,
+  "site": "ucl.ac.uk",
+  "board": "news",
+  "strategy": "httpx_json",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Referer": "https://www.ucl.ac.uk/news/"
+  },
+  "timeout": 20,
+  "list": {
+    "url_template": "https://cms-feed.ucl.ac.uk/s/search.json?collection=drupal-push-news-news&meta_UclAudience_not=staff&meta_UclAudience_not=students&meta_UclOrgUnit=%22UCL+News%22&num_ranks=20",
+    "pagination": {
+      "kind": "none"
+    },
+    "success_when": {
+      "path": [
+        "response",
+        "returnCode"
+      ],
+      "equals": 0
+    },
+    "list_path": [
+      "response",
+      "resultPacket",
+      "results"
+    ],
+    "fields": {
+      "post_id": [
+        {
+          "from": "json",
+          "path": [
+            "liveUrl"
+          ],
+          "transform": [
+            [
+              "strip_query_fragment"
+            ],
+            [
+              "regex_extract",
+              "https?://[^/]+/(.+)$"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "json",
+          "path": [
+            "metaData",
+            "FeedTitle"
+          ],
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        },
+        {
+          "from": "json",
+          "path": [
+            "title"
+          ],
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "json",
+          "path": [
+            "liveUrl"
+          ],
+          "transform": [
+            [
+              "strip_query_fragment"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "json",
+          "path": [
+            "metaData",
+            "PublishedDate"
+          ],
+          "transform": [
+            [
+              "iso8601",
+              [
+                "%Y-%m-%dT%H:%M:%S%z"
+              ]
+            ]
+          ]
+        },
+        {
+          "from": "json",
+          "path": [
+            "metaData",
+            "d"
+          ],
+          "transform": [
+            [
+              "iso8601",
+              [
+                "%Y-%m-%dT%H:%M:%S%z"
+              ]
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "json",
+          "path": [
+            "summary"
+          ],
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        },
+        {
+          "from": "json",
+          "path": [
+            "metaData",
+            "c"
+          ],
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "json",
+          "path": [
+            "metaData",
+            "UclCommunicationType"
+          ]
+        }
+      ],
+      "cover_image": [
+        {
+          "from": "json",
+          "path": [
+            "metaData",
+            "I"
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "url_template": "https://cms-feed.ucl.ac.uk/s/search.json?collection=drupal-push-news-news&meta_UclAudience_not=staff&meta_UclAudience_not=students&meta_UclOrgUnit=%22UCL+News%22&num_ranks=1&text={post_id}",
+    "fetch_kind": "json",
+    "success_when": {
+      "path": [
+        "response",
+        "returnCode"
+      ],
+      "equals": 0
+    },
+    "data_path": [
+      "response",
+      "resultPacket",
+      "results",
+      0
+    ],
+    "content": [
+      {
+        "from": "json",
+        "path": [
+          "summary"
+        ],
+        "transform": [
+          [
+            "collapse_ws"
+          ]
+        ]
+      },
+      {
+        "from": "json",
+        "path": [
+          "metaData",
+          "c"
+        ],
+        "transform": [
+          [
+            "collapse_ws"
+          ]
+        ]
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "json",
+          "path": [
+            "metaData",
+            "FeedTitle"
+          ],
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "_source_url": "https://www.ucl.ac.uk/news/",
+  "_note": "UCL News embeds Funnelback feeds in the static page. The previous config used a non-existent success_when path; the working JSON contract is response.returnCode == 0 and response.resultPacket.results. Article fetch uses the same Funnelback index for per-item summaries because httpx_json cannot fetch HTML article pages."
+}

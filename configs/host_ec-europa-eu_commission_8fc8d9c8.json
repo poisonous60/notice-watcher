@@ -1,0 +1,129 @@
+{
+  "version": 1,
+  "site": "ec.europa.eu",
+  "board": "presscorner-en",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/rss+xml,application/xhtml+xml,application/xml;q=0.9,text/html;q=0.8,*/*;q=0.7",
+    "Referer": "https://ec.europa.eu/commission/presscorner/home/en"
+  },
+  "timeout": 20,
+  "list": {
+    "url_template": "https://ec.europa.eu/commission/presscorner/api/rss?language=en",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "item",
+    "fields": {
+      "post_id": [
+        {
+          "from": "css",
+          "selector": "guid",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "strip_query_fragment"
+            ],
+            [
+              "regex_extract",
+              "https?://[^/]+/.+/([^/]+)$"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "css",
+          "selector": "link",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "strip_query_fragment"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "pubDate",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "iso8601",
+              [
+                "%a, %d %b %Y %H:%M:%S %Z"
+              ],
+              "Z"
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "description",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "attr",
+        "selector": "meta[name=\"description\"]",
+        "attr": "content",
+        "transform": [
+          [
+            "collapse_ws"
+          ]
+        ]
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "attr",
+          "selector": "meta[property=\"twitter:title\"]",
+          "attr": "content",
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "_source_url": "https://ec.europa.eu/commission/presscorner/home/en",
+  "_note": "Press Corner home is an Angular shell and the failed run timed out in Playwright. Use the public Press Corner RSS endpoint instead; article pages expose enough body text in meta[name=description]."
+}
