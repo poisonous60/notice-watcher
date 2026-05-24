@@ -129,6 +129,57 @@ def _terminate_process_tree(proc) -> None:
     proc.terminate()
 
 
+def _poll_child_memory(proc, *, cap_s: float) -> bool:
+    """부모 process 가 자식 RSS 폴링 → 임계 초과 시 terminate. proc.join(cap_s) 대체.
+
+    2026-05-24 박힘 — 자식 안 daemon thread 가 playwright greenlet 의 GIL 독점으로 안 깨우는
+    문제 (podcastindex.org Phase 9b 재현). 부모는 free CPU 라 polling 이 정상.
+
+    임계 = `PROBE_MEMORY_GUARD_MB` env (default 3500MB). N100 12GB - baseline 5GB = 7GB 여유의
+    50% 선. concurrency 5 정상 case 와 충돌 X.
+
+    Returns True if killed by memory guard, False if completed normally (또는 timeout 만남 —
+    그 경우 caller 가 proc.is_alive() 로 후속 처리).
+    """
+    threshold_mb = int(os.environ.get("PROBE_MEMORY_GUARD_MB", "3500"))
+    poll_s = float(os.environ.get("PROBE_MEMORY_GUARD_POLL_S", "1.0"))
+    status_path = Path(f"/proc/{proc.pid}/status") if os.path.exists("/proc") else None
+    if status_path is None:
+        proc.join(cap_s)
+        return False
+    deadline = time.perf_counter() + cap_s
+    peak_mb = 0
+    while time.perf_counter() < deadline:
+        if not proc.is_alive():
+            return False
+        try:
+            if not status_path.exists():
+                # 자식 이미 사라짐
+                return False
+            for line in status_path.read_text().splitlines():
+                if line.startswith("VmRSS:"):
+                    rss_mb = int(line.split()[1]) // 1024
+                    if rss_mb > peak_mb:
+                        peak_mb = rss_mb
+                    if rss_mb > threshold_mb:
+                        sys.stderr.write(
+                            f"[probe] ❌ MEMORY GUARD: child PID={proc.pid} RSS={rss_mb}MB > "
+                            f"threshold={threshold_mb}MB (peak={peak_mb}MB) — terminating.\n"
+                        )
+                        sys.stderr.flush()
+                        _terminate_process_tree(proc)
+                        proc.join(3)
+                        return True
+                    break
+        except (FileNotFoundError, ProcessLookupError):
+            return False
+        except Exception:  # noqa: BLE001
+            pass
+        # 짧게 sleep 후 재폴 — proc.join 으로 cap_s 까지 한 번에 기다리면 폴링 못함.
+        proc.join(timeout=poll_s)
+    return False
+
+
 def _run_headless_child(kind: str, kwargs: dict, *, cap_s: float, target: str) -> Result | tuple[Result, dict]:
     started = time.perf_counter()
     url = str(kwargs.get("url") or kwargs.get("list_url") or "")
@@ -141,7 +192,18 @@ def _run_headless_child(kind: str, kwargs: dict, *, cap_s: float, target: str) -
     out_q = ctx.Queue(maxsize=1)
     proc = ctx.Process(target=_headless_child, args=(kind, kwargs, out_q), daemon=True)
     proc.start()
-    proc.join(cap_s)
+    # 부모가 자식 RSS 폴링 — 자식 안 daemon thread guard 는 playwright greenlet 이 GIL 독점 시
+    # 안 깨우는 문제 (2026-05-24 podcastindex 재현으로 검증). 부모는 free CPU 라 정상 작동.
+    memory_killed = _poll_child_memory(proc, cap_s=cap_s)
+    if memory_killed:
+        # 자식 RSS 임계 초과 → 부모가 kill. 부모 probe.py 도 rc=99 로 즉시 종료 (register 가
+        # ProbeMemoryGuardError 경로로 capability_blocked rc=5 분류).
+        sys.stderr.write(
+            f"[probe] ❌ MEMORY GUARD (parent-side poll): child RSS exceeded threshold — "
+            f"probe aborted (target={target}, url={url}).\n"
+        )
+        sys.stderr.flush()
+        os._exit(_MEMORY_GUARD_RC)
     if proc.is_alive():
         _terminate_process_tree(proc)
         proc.join(3)
