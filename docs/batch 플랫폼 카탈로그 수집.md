@@ -36,10 +36,18 @@ N100 동기는 `scripts/remote.py batch-register` 의 atomic scp.
 | `2026-05-24-games-us` | 100 | 50 | **미국/서양 게임** — Blizzard·Riot·Epic·EA·Activision·Bungie·Bethesda·Ubisoft·2K·Rockstar·CD Projekt·Larian·Paradox·Wargaming·Roblox·Mojang·WotC·Innersloth·Hello Games·Devolver·Annapurna·343 Industries 등 | 5차 |
 | `2026-05-24-games-mobile` | 100 | 50 | **모바일 cross-region** — Supercell·King·Zynga·Scopely·Playrix·Plarium·Habby·Garena·Krafton mobile·COM2US Hive·Yostar global·Aniplex·Pokémon·GungHo·Niantic·Outfit7·Rovio 등 | 5차 |
 | `2026-05-24-games-indie` | 100 | 50 | **인디 스튜디오·게임 매체/스토어** — itch.io·GOG·Humble·Klei·Re-Logic·Team Cherry·Iron Gate·Subset·PocketPair·Mintrocket·gamespot·ign·polygon·kotaku·eurogamer·pcgamer·rps·vg247·gamesindustry 등 | 5차 |
+| `2026-05-24-games-mobile-gacha` | 100 | 50 | **모바일 가챠/CCG** — Sumzap·Akatsuki·Applibot·KLab·Pokelabo·Cygames sub·Aniplex 게임별·Bandai 게임별 sub·Yostar global·Manjuu·Sunborn·Kuro sub·Hypergryph sub·Infold·Shift Up nikke 글로벌·epic7 onstove·Crunchyroll Games 등 | 5차 b |
+| `2026-05-24-games-mobile-casual` | 100 | 50 | **모바일 hyper-casual/match-3** — Voodoo·Lion·Homa·Crazy Labs·Rollic·SayGames·Azur·AppLovin·Playgendary·Gismart·Easybrain·MAG·Big Fish·Wooga·Tactile·Storm8·Pocket Gems·Yodo1·FRVR·ZeptoLab·Halfbrick·Ohayoo·Tripledot·Dream·Peak·Metacore·Socialpoint 등 | 5차 b |
+| `2026-05-24-games-mobile-strategy-rpg` | 100 | 50 | **모바일 4X/SLG/midcore** — Plarium 게임별·Scopely 게임별·FunPlus 게임별·IGG 게임별·37Games·Century·Stillfront 자회사·InnoGames·Travian·Pixonic·Lilith 전략·Camel·Yotta·Joycity·Kabam·Glu·Skillz·Nexters Hero Wars·Topwar·Whiteout 등 | 5차 b |
+| `2026-05-24-games-indie-studios-western` | 100 | 50 | **서구 인디 스튜디오** — Mossmouth·Whitethorn·Coffee Stain·Ghost Town·Megacrit·Maddy Makes·Tribute·Brace Yourself·Sokpop·Inkle·Failbetter·Bithell·Hopoo·Vlambeer·Crows Crows Crows·Nicalis·ZA/UM·Tarsier·Massive Monster·Necrosoft·Outersloth 등 | 5차 b |
+| `2026-05-24-games-indie-studios-asia` | 100 | 50 | **JP/KR/CN/SEA 인디·doujin** — TYPE-MOON·07th Expansion·Liar-soft·Yuzusoft·Visual Arts·Nitroplus·DANGEN·Playism·Acquire·Eastasiasoft·Project Moon limbus·슈퍼크리에이티브·슈퍼플랜·RoyalCrow·TipsWorks·Pathea·Lemonsky·Mighty Bear·Toge·Mojiken 등 | 5차 b |
+| `2026-05-24-games-indie-media-store` | 100 | 50 | **게임 매체/인디 큐레이션/소형 store** — IndieDB·ModDB·OpenCritic·MetaCritic·Giant Bomb·Destructoid·GameRant·Gematsu·Siliconera·Automaton·4Gamer·Famitsu·Game*Spark·디스이즈게임·게임메카·게임샷·17173·Duowan·Gamersky·3DMGame·Indienova·GamersGate·IndieGala 등 | 5차 b |
 
 **4차(05-21) 합계: 500 링크 / 497 distinct host.** 1~3차에서 소진한 플랫폼(Discourse·GitHub·Arca·DCinside·Reddit·Steam·Wikipedia·Fandom·Inven·클리앙류)은 host 통째 배제.
 
 **5차(05-24-games) 합계: 600 링크 / 300 distinct host (각 100 / 50 host = host당 2 fully exploited).** legacy(nexon/onstove/하요랩/루리웹/인벤/DC/아카/카페·블로그/스팀/닌텐도) host 통째 배제. 빌더 = `output/candidates/_build_2026-05-24-games.py`, prior 자동 glob 로드. codex 위임으로 6 THEMES 채움.
+
+**5차 b(05-24-games 2nd wave) 합계: 600 링크 / 300 distinct host (각 100 / 50).** 인디·모바일 양 부족 보강 — 가챠·casual·strategy·서구 인디·아시아 인디·매체 6 세분. 빌더 = `output/candidates/_build_2026-05-24-games2.py`, 5차 1st 산출물까지 prior 로드. codex 위임. 합산 5차(1st+2nd) = 1200 링크 / 600 distinct host.
 
 ## 3. 생성/확장 방법
 
