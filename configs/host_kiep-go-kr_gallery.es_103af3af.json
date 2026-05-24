@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "site": "www.kiep.go.kr",
+  "board": "gallery-0001",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+    "Referer": "https://www.kiep.go.kr/gallery.es?mid=a10501000000&bid=0001"
+  },
+  "timeout": 20,
+  "list": {
+    "url_template": "https://www.kiep.go.kr/gallery.es?mid=a10501000000&bid=0001",
+    "pagination": {"kind": "none"},
+    "row_selector": "div.board_list li",
+    "fields": {
+      "post_id": [
+        {"from": "attr", "selector": "a[href*='act=view']", "attr": "href", "transform": [["regex_extract", "[?&]list_no=(\\d+)"]]}
+      ],
+      "title": [
+        {"from": "css", "selector": "a[href*='act=view']", "text": true, "transform": [["collapse_ws"]]}
+      ],
+      "url": [
+        {"from": "attr", "selector": "a[href*='act=view']", "attr": "href", "transform": [["urljoin", "https://www.kiep.go.kr/gallery.es?mid=a10501000000&bid=0001"]]}
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {"from": "css", "selector": "div.board_view", "html": true},
+      {"from": "css", "selector": "#contents", "html": true}
+    ]
+  },
+  "_source_url": "https://www.kiep.go.kr/gallery.es?mid=a10501000000&bid=0001",
+  "_note": "gate_reject false-reject: KIEP gallery.es is a real report/notice board. Static HTML has div.board_list li rows with stable list_no detail links."
+}

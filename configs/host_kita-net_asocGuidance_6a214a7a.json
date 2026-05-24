@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "site": "www.kita.net",
+  "board": "pressData",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+    "Referer": "https://www.kita.net/asocGuidance/nesDta/nesDtaList.do"
+  },
+  "timeout": 20,
+  "list": {
+    "url_template": "https://www.kita.net/asocGuidance/nesDta/nesDtaList.do",
+    "pagination": {"kind": "none"},
+    "row_selector": ".board-list li",
+    "row_required_selector": "a[onclick*='goDetailPage']",
+    "fields": {
+      "post_id": [
+        {"from": "attr", "selector": "a[onclick*='goDetailPage']", "attr": "onclick", "transform": [["regex_extract", "goDetailPage\\('(\\d+)'\\)"]]}
+      ],
+      "title": [
+        {"from": "attr", "selector": "a[onclick*='goDetailPage']", "attr": "title", "transform": [["collapse_ws"]]},
+        {"from": "css", "selector": "a[onclick*='goDetailPage']", "text": true, "transform": [["collapse_ws"]]}
+      ],
+      "url": [
+        {"from": "template", "value": "https://www.kita.net/board/pressData/pressDataDetail.do?no={post_id}"}
+      ],
+      "published_at": [
+        {"from": "css", "selector": "span.date", "text": true, "transform": [["collapse_ws"], ["iso8601", ["%Y.%m.%d"], "+09:00"]]}
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {"from": "css", "selector": "body", "html": true}
+    ]
+  },
+  "_source_url": "https://www.kita.net/asocGuidance/nesDta/nesDtaList.do",
+  "_note": "The submitted asocGuidance URL redirects to the pressData board. Rows use javascript goDetailPage(no); detail pages are reachable by GET no=<id>."
+}
