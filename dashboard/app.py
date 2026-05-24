@@ -1149,8 +1149,11 @@ def builder_edit(sid: str, request: Request):
 
 @app.get("/builder/p/{sid}/{path:path}", response_class=HTMLResponse)
 async def builder_proxy(sid: str, request: Request, path: str = ""):
+    # absolute script URL — <base href="target"> 가 relative path 를 target origin
+    # 으로 resolve 시켜 CSP 'self' (=target) 가 우리 picker.js 차단하던 bug fix.
     root_path = request.scope.get("root_path", "")
-    return await builder_view.proxy_fetch(sid, path, root_path)
+    script_url = f"{request.url.scheme}://{request.url.netloc}{root_path}/static/builder/picker.js"
+    return await builder_view.proxy_fetch(sid, path, script_url)
 
 
 @app.post("/builder/api/save")
