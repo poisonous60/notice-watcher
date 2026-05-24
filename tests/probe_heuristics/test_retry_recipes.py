@@ -112,19 +112,30 @@ def run() -> list[tuple[str, bool, str]]:
     patched_1 = _apply_recipe_patch(prev_cfg, ["rss_post_id_from_link"], digest_rss_kind)
     cases.append(("patch_r1_returns_dict", isinstance(patched_1, dict), ""))
     new_pid = (patched_1 or {}).get("list", {}).get("fields", {}).get("post_id", [])
-    cases.append(("patch_r1_post_id_uses_link",
-                  isinstance(new_pid, list) and len(new_pid) == 1
-                  and new_pid[0].get("selector") == "link",
+    # fallback chain (guid number prefix + link 전체) — 두 source 모두 박혀야
+    cases.append(("patch_r1_post_id_has_link_source",
+                  isinstance(new_pid, list)
+                  and any(s.get("selector") == "link" for s in new_pid if isinstance(s, dict)),
                   f"got {new_pid!r}"))
-    # Recipe 1 patch = link 전체 URL (path 까지 살림). regex_extract 박지 X — TAL 류 promo
-    # 항목의 path tail 이 다른 episode 와 겹쳐 unique 깨지는 이슈 회피 (2026-05-25 N100 real LLM).
-    transforms = new_pid[0].get("transform", []) if new_pid else []
-    cases.append(("patch_r1_post_id_no_regex_extract",
-                  not any(isinstance(t, list) and t and t[0] == "regex_extract" for t in transforms),
-                  f"regex_extract 박힘 (path tail collision 문제): {transforms!r}"))
-    cases.append(("patch_r1_post_id_strips_query_fragment",
-                  any(isinstance(t, list) and t and t[0] == "strip_query_fragment" for t in transforms),
-                  f"strip_query_fragment 없음: {transforms!r}"))
+    # Recipe 1 patch = fallback chain: 1순위 guid number prefix + 2순위 link 전체 URL.
+    # 2026-05-25 N100 검증에서 link 만 박은 패치는 TAL RSS feed 의 진짜 link 중복
+    # (promo item 의 lifepartners/root URL) 때문에 회복 X. guid number 가 진짜 fix.
+    cases.append(("patch_r1_post_id_fallback_chain_len",
+                  isinstance(new_pid, list) and len(new_pid) == 2,
+                  f"got len={len(new_pid) if isinstance(new_pid, list) else 'N/A'}, expect 2"))
+    cases.append(("patch_r1_post_id_first_is_guid_number",
+                  isinstance(new_pid, list) and len(new_pid) >= 1
+                  and new_pid[0].get("selector") == "guid"
+                  and any(isinstance(t, list) and t and t[0] == "regex_extract"
+                          and (t[1].startswith("^") if len(t) >= 2 and isinstance(t[1], str) else False)
+                          for t in new_pid[0].get("transform", [])),
+                  f"got first source: {new_pid[0] if new_pid else 'N/A'}"))
+    cases.append(("patch_r1_post_id_second_is_link",
+                  isinstance(new_pid, list) and len(new_pid) >= 2
+                  and new_pid[1].get("selector") == "link"
+                  and any(isinstance(t, list) and t and t[0] == "strip_query_fragment"
+                          for t in new_pid[1].get("transform", [])),
+                  f"got second source: {new_pid[1] if isinstance(new_pid, list) and len(new_pid) >= 2 else 'N/A'}"))
 
     # R-H3 critical — prev_cfg 안 덮어씀
     cases.append(("patch_r1_prev_cfg_not_mutated",

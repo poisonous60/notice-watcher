@@ -229,17 +229,28 @@ def _recipe_2_applies(cfg: dict, digest: dict) -> bool:
     return sk.get("kind") == "spa_rendered" and sk.get("confidence") == "high"
 
 
-# Recipe 1 patch: list.fields.post_id = link 전체 URL (path 까지 살림, query/fragment 만 제거).
-# path tail 추출 (plan §2a 원안) 은 TAL 류 podcast feed 에서 일부 promo episode 의 path tail 이
-# 다른 episode 와 겹쳐 unique 깨짐 — N100 real LLM 검증 (2026-05-25) 에서 14→2건 부분 회복만.
-# URL 전체는 모든 RSS link 가 unique URL 인 한 무조건 unique. post_id 가 길어지나 기능 OK.
+# Recipe 1 patch: fallback chain — guid 의 number prefix 우선, link 전체 URL fallback.
+#
+# 1순위 (guid number prefix): TAL 류 podcast 의 guid 가 `"46156 at https://..."` 형식 —
+#   number 만 unique stable ID. regex_extract 매칭 X 면 None → fallback 으로 넘어감.
+# 2순위 (link 전체): 대부분 RSS feed 에서 link 자체가 unique URL. path tail 추출 X (TAL 같이
+#   일부 promo item 의 path tail 이 다른 episode 와 겹치는 경우 회피).
+#
+# 2026-05-25 N100 검증에서 link 전체만 박은 패치는 TAL RSS feed 의 *진짜 link 중복*
+# (`lifepartners` 2번, root URL 2번 — promo item) 때문에 회복 X. guid number prefix 가 진짜 fix.
 _RECIPE_1_POST_ID_PATCH = [
+    {
+        "from": "css",
+        "selector": "guid",
+        "text": True,
+        "transform": [["regex_extract", r"^(\d+)"]],
+    },
     {
         "from": "css",
         "selector": "link",
         "text": True,
         "transform": [["strip"], ["strip_query_fragment"]],
-    }
+    },
 ]
 
 
@@ -346,9 +357,10 @@ def _apply_recipe_patch(prev_cfg: dict, recipes: list[str], digest: dict) -> Opt
 _RECIPE_TEXT_HINTS = {
     "rss_post_id_from_link": (
         "**Recipe rss_post_id_from_link** — `post_id_unique`/`post_id_stable_shape` 반복 실패. "
-        "RSS item 의 `<guid>` 가 불안정 ID (공백/긴 문장/원문 URL 결합). `link` 전체 URL 을 post_id 로 써라 "
-        "(query/fragment 만 strip, path tail 추출 X — 일부 RSS 의 promo 항목 path tail 이 겹쳐 unique 깨짐). "
-        "위 starting point 의 `list.fields.post_id` 정확히 그 transform chain 그대로 박아라."
+        "RSS guid 가 `'<number> at <url>'` 류 불안정 형식이고, link 자체에도 promo 항목 중복이 있을 수 있음. "
+        "fallback chain 으로 박아라: 1순위 = guid 의 number prefix (`regex_extract \"^(\\d+)\"`), "
+        "2순위 = link 전체 URL (strip + strip_query_fragment). 위 starting point 의 `list.fields.post_id` "
+        "*두 source 다* 정확히 그 transform 으로 박아라 — 한 source 만 박지 마라."
     ),
     "spa_rendered_retry": (
         "**Recipe spa_rendered_retry** — `posts_nonempty`/`title_nonempty` 반복 실패 + SPA. "
