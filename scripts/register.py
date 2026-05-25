@@ -696,29 +696,33 @@ def _root_marketing_homepage_check(digest: dict, url: str) -> tuple[bool, str]:
 
 
 def _heterogeneous_hub_check(digest: dict, url: str) -> Optional[str]:
-    """이질 카드 hub 구조 신호 (gen_fail post-mortem 용). 사람이 봤을 때 "카드 종류를
-    한 줄로 못 묶는" 페이지 — 섹션별 카테고리 hub (espn.com/soccer · si.com/nba 류).
+    """*글 행이 반복되는가* 검사 (gen_fail post-mortem 용). 사람이 봤을 때 "카드 종류를
+    한 줄로 못 묶는" 페이지 = 섹션 카탈로그 hub. 게시판 본질 = *content (글) 행이 N번 반복*.
 
     분류기가 body 우세로 index false-accept 하는 케이스 봉합 (2026-05-25 sports batch).
     pre-LLM 적용은 SPA 게시판 false-reject 위험 → gen_fail 직후 post-mortem 만.
 
-    트리거 (AND):
-      - 같은-호스트 반복 cluster (cc≥3) 의 path prefix ≥ 5종
-      - 그 cluster 중 *글-링크 모양* (path 깊이 ≥ 2 AND 마지막 segment 가 slug/ID — 길이 ≥ 8
-        + dash 多 또는 mixed alnum random ID 또는 placeholder `{n}` 가 마지막 segment) 0종
+    트리거 (= 거부): 같은-호스트 반복 cluster 중 *글-링크 모양 + cc ≥ 5* 인 게 0종.
+      "글-링크 모양" = path 깊이 ≥ 2 AND 마지막 segment 가
+        (a) placeholder `{n}`/`{slug}` 또는
+        (b) slug 모양 (len ≥ 8 + dash ≥ 2 — `/news/<title-with-dashes>`) 또는
+        (c) mixed alphanumeric ID 모양 (len ≥ 8 + 숫자+알파 혼합, alnum only — `8TS3tSgirGsIb` `12345abcdef`).
+      cc ≥ 5 = "여러번 반복" — 1-2 carousel hero 만으로는 board 단정 X.
 
     트리거 X (= 등록 진행 OK):
-      - 글-링크 cluster ≥ 1종 (SPA 게시판 가능 — LLM 이 실패해도 hub 단정 X)
-      - prefix < 4 (좁은 섹션)
+      - 글-링크 모양 cluster cc ≥ 5 가 ≥ 1종 (board 본질 신호 — LLM 이 selector 잘못 골랐어도 페이지는 board)
 
     return: 거부 사유 (1줄) 또는 None.
+
+    임계 cc=5 근거: html_repeating_patterns 의 min_children=5 기본 (extract.py) 와 일치.
+    cc<5 cluster 는 hero/carousel/featured 1-4개 — 게시판 본질 신호 아님.
     """
     host = (urlsplit(url).netloc or "").lower()
     if not host:
         return None
     lc = digest.get("list_candidates") or {}
-    prefixes: set[str] = set()
-    has_article_cluster = False
+    article_clusters: list[tuple[int, str]] = []  # (cc, sample_path) — cc>=5 + article-shape
+    nav_clusters: list[tuple[int, str]] = []      # (cc, sample_path) — 거부 사유 알림용
     for p in (lc.get("html_repeating_patterns") or []):
         hp = p.get("href_pattern_guess") or p.get("sample_url") or ""
         if not hp:
@@ -732,30 +736,25 @@ def _heterogeneous_hub_check(digest: dict, url: str) -> Optional[str]:
             continue
         path = urlsplit(hp).path or hp
         segs = [s for s in path.split("/") if s]
-        # placeholder `{n}` 가 path 어딘가 있고 마지막 segment 가 placeholder/길지 않은 token 일 수도
-        # → article cluster 인지 좁게 판정: depth ≥ 2 AND (마지막 segment 가 placeholder 또는 길고 dash 많음 또는 mixed alnum).
+        is_article = False
         if len(segs) >= 2:
             last = segs[-1]
-            last_no_placeholder = "{" not in last and "}" not in last
-            # 글-링크 모양: placeholder 마지막 OR (len ≥ 8 AND (dash ≥ 2 OR mixed alnum ID))
-            is_article = (
-                ("{" in last and "}" in last)
-                or (last_no_placeholder and len(last) >= 8 and (
-                    last.count("-") >= 2
-                    or (any(c.isdigit() for c in last) and any(c.isalpha() for c in last) and last.isalnum())
-                ))
-            )
-            if is_article:
-                has_article_cluster = True
-        first_seg = segs[0] if segs else ""
-        prefixes.add("/" + first_seg)
-    if has_article_cluster:
-        return None
-    if len(prefixes) < 5:
-        return None
-    return (f"path prefix {len(prefixes)}종 ({sorted(prefixes)[:6]}) 다양 + 글-링크 모양 cluster 0종 "
-            "→ 섹션별 카테고리 hub (heterogeneous). 사람이 카드 종류 한 줄로 못 묶는 페이지. "
-            "card hub root 대신 board-shape sub-URL 또는 RSS 권장.")
+            has_pl = "{" in last and "}" in last
+            slug_shape = len(last) >= 8 and last.count("-") >= 2
+            id_shape = (len(last) >= 8 and last.replace(".", "").isalnum()
+                        and any(c.isdigit() for c in last) and any(c.isalpha() for c in last))
+            is_article = has_pl or slug_shape or id_shape
+        if is_article and cc >= 5:
+            article_clusters.append((cc, path))
+        else:
+            nav_clusters.append((cc, path))
+    if article_clusters:
+        return None  # 글-행 반복 ≥ 5 — board 본질 신호. 등록 진행.
+    nav_clusters.sort(reverse=True)
+    nav_sample = "; ".join(f"cc={cc} {p[:50]}" for cc, p, in nav_clusters[:4])
+    return (f"글-링크 모양 cluster (cc≥5) 0종 — content 행이 반복되는 게시판 본질 신호 없음. "
+            f"nav/section/picker cluster 만 있음 (top: {nav_sample or '없음'}). "
+            "이질 카드 hub 또는 정적 HTML 없는 SPA — card hub root 대신 board-shape sub-URL 또는 RSS 권장.")
 
 
 def _board_shape_check(digest: dict, url: str) -> tuple[bool, str]:
