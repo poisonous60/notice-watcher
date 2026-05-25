@@ -127,17 +127,15 @@ dashboard `/triage` 의 "FAILED 큐 codex 위임 처리" 프롬프트를 붙여�
 
 **drain 모니터링** (batch enqueue 후 worker 큐 비기 기다릴 때): `python scripts/remote.py jobs --since <분> --min-id <batch 시작 id>` — `bot.sqlite3` jobs 상태 카운트 (status × n 표, total 포함). ⚠ **ad-hoc `ssh ... 'sqlite3 ... "SELECT ... WHERE kind=\"register\""'` 형태로 직접 쓰지 X** — SSH/PowerShell/Bash/SQL 4중 인용이 꼬여 SQL 이 `"register"` 를 *identifier(컬럼명)* 로 해석 → `Error: in prepare, no such column: "register"`. SQL 표준: `"..."`=식별자, `'...'`=문자열. helper 가 SQL/shell 인용을 다 박음.
 
-Monitor (background polling) 패턴 — `remote.py jobs` 출력 parse + `pending|running` 0 검출:
+Monitor (background polling) — **`remote.py jobs --wait` 내장 사용**:
 ```bash
-while true; do
-  out=$(python scripts/remote.py jobs --since <분> --min-id <id> 2>&1)
-  printf '%s\n---\n' "$out"
-  # pending/running 행이 없으면 drain 완료. awk 로 그 두 row 만 보고 break.
-  python -c "import sys,re; t=sys.stdin.read(); m=re.findall(r'(pending|running)\s+(\d+)', t); sys.exit(0 if all(int(n)==0 for _,n in m) and m else 1)" <<<"$out" && { echo DRAIN COMPLETE; break; }
-  sleep 30
-done
+python scripts/remote.py jobs --since <분> --min-id <batch 시작 id> --wait --interval 60 --max-wait 3600
+# pending+running=0 검출 시 exit 0 + 'DRAIN COMPLETE' 출력. max-wait 초과 시 exit 2.
+# harness 백그라운드(run_in_background=true)로 띄우면 완료 시 알림 옴.
 ```
-⚠ **`grep -oP '...\K...'` Perl regex 금지** — Git Bash on Windows 는 non-UTF-8 locale 기본 → `grep: -P supports only unibyte and UTF-8 locales` 로 *조용히 빈 stdout* 반환 → condition 영영 안 걸려 monitor 무한 hang (2026-05-24 podcast batch 박음). POSIX-portable: `grep -oE` + 2-stage 또는 `awk -F=` 또는 위처럼 python 한 줄 (locale-independent).
+⚠ **인라인 regex 패턴 금지** — 옛 패턴 `re.findall(r'(pending|running)\s+(\d+)', t)` 은 drain 완료 시 0행 row 가 `remote.py jobs` 출력에서 *사라지면* match 0건 → `bool([])=False` → exit 1 → **무한 loop** (2026-05-25 sports batch 박음). `--wait` 는 SQL count 를 직접 읽어 0행을 0 으로 정확히 인식.
+
+⚠ **`grep -oP '...\K...'` Perl regex 금지** — Git Bash on Windows 는 non-UTF-8 locale 기본 → `grep: -P supports only unibyte and UTF-8 locales` 로 *조용히 빈 stdout* 반환 → condition 영영 안 걸려 monitor 무한 hang (2026-05-24 podcast batch 박음). POSIX-portable: `grep -oE` + 2-stage 또는 `awk -F=` 또는 python 한 줄 (locale-independent). 단 `--wait` 박힌 지금은 monitor 자체를 직접 짤 일 없음.
 
 **task 품질 게이트 — list hardcode 금지 / F-layer enforcement**:
 - **list hardcode 금지**: codex 에게 *list of known X*(host suffix list, keyword list, regex list) 를 주는 task 는 금지. 먼저 구조 신호(host mismatch, MIME type, body length, URL path pattern, response shape) 로 판별한다. known list 는 bootstrap fallback(4~6 entry, confidence 낮음) 으로만 허용. 예: `_AUDIO_SHARE_HOST_SUFFIXES` 9-host hardcode 는 나쁜 예 — C 후속은 host list 를 5개 이하 bootstrap 으로 줄이고 structural signal 을 우선해야 한다.

@@ -39,6 +39,7 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 from typing import Optional
 
 
@@ -446,13 +447,71 @@ def cmd_announce_scoped(b64: str) -> int:
     return _ssh(_remote_python_cmd("scripts/announce.py", "--base64", b64))
 
 
-def cmd_jobs(kind: str, since_minutes: int, min_id: int) -> int:
+_IN_FLIGHT_STATUSES = ("pending", "running")
+
+
+def _jobs_query(kind: str, since_minutes: int, min_id: int) -> tuple[int, str, str, dict[str, int], int]:
+    """jobs 테이블 1회 조회. returns (rc, stdout_human, stderr, status_counts, total).
+
+    stdout_human = column-formatted (사용자 view). status_counts = parsed dict.
+    total = `total` row 의 count (있으면, 없으면 sum).
+    """
+    where = f"kind='{kind}' AND created_at > datetime('now', '-{int(since_minutes)} minutes')"
+    if min_id > 0:
+        where += f" AND id >= {int(min_id)}"
+    # 두 SQL 한 ssh 호출에 묶음 — 사람 view (column) + 파싱 view (pipe-list).
+    sql = (
+        f".headers on\n.mode column\n"
+        f"SELECT status, COUNT(*) AS n FROM jobs WHERE {where} GROUP BY status ORDER BY status;\n"
+        f"SELECT 'total' AS status, COUNT(*) AS n FROM jobs WHERE {where};\n"
+        f".headers off\n.mode list\n.separator '|'\n"
+        f"SELECT '__parse__';\n"
+        f"SELECT status, COUNT(*) FROM jobs WHERE {where} GROUP BY status;\n"
+        f"SELECT '__total__', COUNT(*) FROM jobs WHERE {where};\n"
+    )
+    remote = f"cd {DEPLOY_PATH_RAW} && sqlite3 output/bot.sqlite3"
+    p = subprocess.run(
+        ["ssh", _require_deploy_host(), remote],
+        input=sql,
+        capture_output=True,
+        text=True,
+        errors="replace",
+    )
+    counts: dict[str, int] = {}
+    total = 0
+    human = p.stdout or ""
+    if "__parse__" in human:
+        human, _, tail = human.partition("__parse__")
+        human = human.rstrip() + "\n"
+        for line in tail.splitlines():
+            line = line.strip()
+            if not line or "|" not in line:
+                continue
+            k, _, v = line.partition("|")
+            try:
+                n = int(v.strip())
+            except ValueError:
+                continue
+            if k == "__total__":
+                total = n
+            else:
+                counts[k.strip()] = n
+    return p.returncode, human, (p.stderr or ""), counts, total
+
+
+def cmd_jobs(kind: str, since_minutes: int, min_id: int, *,
+             wait: bool = False, interval: int = 60, max_wait: int = 3600) -> int:
     """운영 호스트 `output/bot.sqlite3` jobs 테이블의 상태별 카운트.
 
     batch drain 모니터링용. ad-hoc `ssh ... 'sqlite3 ... "SELECT ... WHERE kind=\"register\""'`
     형태로 직접 쓰면 SSH/PowerShell/Bash/SQL 4중 인용이 꼬여 SQL 이 `"register"` 를
     *identifier(컬럼명)* 로 해석하는 사고가 잘 난다 (2026-05-24 박음). 이 helper 가
     SQL 문자열 인용(=single-quote)·shell 인용을 한 자리에 박는다 — 호출자는 인용 X.
+
+    `--wait` 모드: pending+running=0 될 때까지 polling, exit 0. 2026-05-25 박음
+    — 이전 인라인 regex 패턴(`(pending|running)\\s+(\\d+)` findall) 은 drain
+    완료 시 0행 row 가 출력에서 사라지면 매칭 0건 → `bool([])=False` → 무한 loop 버그.
+    이 helper 는 SQL count 직접 본다(0행도 0 으로 알림).
 
     인자는 모두 regex/int 로 검증 → SSH command 안전 interpolation. SQL 안의 값은
     int(고정 변환)·whitelisted kind 만 들어가므로 injection 표면 0.
@@ -464,28 +523,37 @@ def cmd_jobs(kind: str, since_minutes: int, min_id: int) -> int:
     if min_id < 0 or min_id > 10_000_000:
         print(f"[remote] min-id 범위 0..10000000: {min_id!r}", file=sys.stderr)
         return 4
-    where = f"kind='{kind}' AND created_at > datetime('now', '-{int(since_minutes)} minutes')"
-    if min_id > 0:
-        where += f" AND id >= {int(min_id)}"
-    sql = (
-        f".headers on\n.mode column\n"
-        f"SELECT status, COUNT(*) AS n FROM jobs WHERE {where} GROUP BY status ORDER BY status;\n"
-        f"SELECT 'total' AS status, COUNT(*) AS n FROM jobs WHERE {where};\n"
-    )
-    # SQL 을 sqlite3 의 stdin 으로 파이프 → shell quoting layer 0 (한 줄도 안 escape).
-    remote = f"cd {DEPLOY_PATH_RAW} && sqlite3 output/bot.sqlite3"
-    p = subprocess.run(
-        ["ssh", _require_deploy_host(), remote],
-        input=sql,
-        capture_output=True,
-        text=True,
-        errors="replace",
-    )
-    if p.stdout:
-        sys.stdout.write(p.stdout)
-    if p.stderr:
-        sys.stderr.write(p.stderr)
-    return p.returncode
+    if wait:
+        if interval < 5 or interval > 600:
+            print(f"[remote] --interval 범위 5..600 초: {interval!r}", file=sys.stderr)
+            return 4
+        if max_wait < interval or max_wait > 60 * 60 * 24:
+            print(f"[remote] --max-wait 범위 {interval}..86400 초: {max_wait!r}", file=sys.stderr)
+            return 4
+        elapsed = 0
+        while True:
+            rc, human, stderr, counts, total = _jobs_query(kind, since_minutes, min_id)
+            if rc != 0:
+                sys.stdout.write(human)
+                sys.stderr.write(stderr)
+                print(f"[remote] jobs query failed rc={rc}; abort wait", file=sys.stderr)
+                return rc
+            sys.stdout.write(human)
+            in_flight = sum(counts.get(s, 0) for s in _IN_FLIGHT_STATUSES)
+            sys.stdout.write(f"[remote] elapsed={elapsed}s in_flight={in_flight} total={total}\n---\n")
+            sys.stdout.flush()
+            if in_flight == 0 and total > 0:
+                print("DRAIN COMPLETE", flush=True)
+                return 0
+            if elapsed >= max_wait:
+                print(f"[remote] --max-wait {max_wait}s 도달, 여전히 in_flight={in_flight}", file=sys.stderr)
+                return 2
+            time.sleep(interval)
+            elapsed += interval
+    rc, human, stderr, _counts, _total = _jobs_query(kind, since_minutes, min_id)
+    sys.stdout.write(human)
+    sys.stderr.write(stderr)
+    return rc
 
 
 def cmd_read(alias: str) -> int:
@@ -560,6 +628,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     sp.add_argument("--kind", default="register", help="jobs.kind 컬럼 (영소문자+_, default: register)")
     sp.add_argument("--since", type=int, default=60, help="최근 N분 (default: 60)")
     sp.add_argument("--min-id", type=int, default=0, dest="min_id", help="id >= N filter (batch 시작 id 부터 보고 싶을 때)")
+    sp.add_argument("--wait", action="store_true",
+                    help="drain 완료(pending+running=0)까지 polling, exit 0. 인라인 regex 패턴 대체 (drain 시 0행 표시→regex 0매칭→무한loop 버그 회피).")
+    sp.add_argument("--interval", type=int, default=60,
+                    help="--wait polling 간격(s, default: 60)")
+    sp.add_argument("--max-wait", type=int, default=3600, dest="max_wait",
+                    help="--wait 최대 대기(s, default: 3600). 초과 시 exit 2.")
     sp = sub.add_parser("unlearn"); sp.add_argument("pattern_id", help="learned_blacklist pattern id ([a-f0-9]{1,12})")
     sp = sub.add_parser("clear-bug"); sp.add_argument("slug", help="`.BUG.json` 마커가 박힌 slug")
     sp = sub.add_parser("trace-index"); sp.add_argument("kind", help="poll|notify|notify_idle|probe ...")
@@ -593,7 +667,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     if args.cmd == "batch-register":
         return cmd_batch_register(args.catalog, args.url, args.failed, args.rc, args.force)
     if args.cmd == "jobs":
-        return cmd_jobs(args.kind, args.since, args.min_id)
+        return cmd_jobs(args.kind, args.since, args.min_id,
+                        wait=args.wait, interval=args.interval, max_wait=args.max_wait)
     if args.cmd == "unlearn":
         return cmd_unlearn(args.pattern_id)
     if args.cmd == "clear-bug":
