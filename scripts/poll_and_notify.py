@@ -1,6 +1,9 @@
 """폴링 1회 (systemd notice-poll.service 가 호출). 이름은 legacy — 발송은 안 한다 (ADR 0006).
 
-- poll.py 가 chromium 을 띄움 (playwright_html / handwritten 사이트, 재-probe) → chromium_lock 안.
+- poll.py 가 chromium 을 띄움 (playwright_html / handwritten 사이트, 재-probe) → poll.py 내부에서
+  사이트별로 `chromium_lock_async(slots=settings.chromium_lock.slots)` 잡음 (ADR 0019 Phase 1).
+  이 wrapper 자체는 lock 안 잡음 — 옛 outer wrapper 는 새 per-site lock 과 self-deadlock (parent
+  가 slot 통째 점유) 라 ADR 0019 Phase 1 에서 제거됨.
 - 새 글은 posts 캐시 + collected/<ts>/<slug>.new.json 에 떨어짐.
 - 발송은 *분리* (ADR 0006): 봇 내부 1분 tick(bot/delivery_tick.py)이 수신처 발송 시각 도래 시
   scripts/deliver_due.py 로 요약·필터·발송. 이 스크립트는 폴링만 — 즉시 발송 폐지.
@@ -19,8 +22,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts._chromium_lock import chromium_lock  # noqa: E402
-from bot.runtime_config import settings  # noqa: E402
 from engine.tracing import start_trace, env_for_child  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -45,26 +46,16 @@ def main(argv: list[str]) -> int:
     _ping(hc, "/start")
 
     with start_trace("poll_and_notify", attrs={"argv": list(argv)}) as tr:
-        rc = 0
-        try:
-            with tr.span("chromium_lock_acquire"):
-                lock_ctx = chromium_lock(timeout=settings.chromium_lock.poll_timeout,
-                                         slots=settings.chromium_lock.slots)
-                lock_ctx.__enter__()
-            try:
-                with tr.span("poll_subprocess"):
-                    print("[poll_and_notify] poll.py ...")
-                    child_env = {**os.environ, **env_for_child()}
-                    rc = subprocess.call(
-                        [PY, str(ROOT / "scripts" / "poll.py"), *argv],
-                        cwd=str(ROOT), env=child_env,
-                    )
-            finally:
-                lock_ctx.__exit__(None, None, None)
-        except TimeoutError as e:
-            print(f"[poll_and_notify] chromium 락 대기 초과 — 이번 폴링 건너뜀: {e}", file=sys.stderr)
-            _ping(hc, "/fail")
-            return 1
+        # ADR 0019 Phase 1 — 옛 outer chromium_lock wrapper 제거. poll.py 가 사이트별로 잡음.
+        # outer wrapper 가 살아있으면 parent 가 slot 1개 통째 점유 → child poll.py 가 N=1 일 때
+        # 영원히 timeout, N≥2 일 때도 capacity 1 낭비.
+        with tr.span("poll_subprocess"):
+            print("[poll_and_notify] poll.py ...")
+            child_env = {**os.environ, **env_for_child()}
+            rc = subprocess.call(
+                [PY, str(ROOT / "scripts" / "poll.py"), *argv],
+                cwd=str(ROOT), env=child_env,
+            )
         if rc != 0:
             print(f"[poll_and_notify] poll.py 실패 rc={rc}", file=sys.stderr)
             _ping(hc, "/fail")

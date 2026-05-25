@@ -254,13 +254,15 @@ CREATE TABLE IF NOT EXISTS poll_site_runs (
     status      TEXT NOT NULL CHECK (status IN
                 ('ok','lurking','breakage','poll_timeout','task_exception',
                  'persist_mismatch','body_empty_drift','reprobe_enqueued',
-                 'reprobe_skipped_bug','reprobe_enqueue_failed','run_crashed','error')),
+                 'reprobe_skipped_bug','reprobe_enqueue_failed','run_crashed','error',
+                 'chromium_lock_timeout')),
     n_posts            INTEGER NOT NULL DEFAULT 0,
     n_new              INTEGER NOT NULL DEFAULT 0,
     n_attempted_unique INTEGER NOT NULL DEFAULT 0,
     n_inserted         INTEGER NOT NULL DEFAULT 0,
     n_present_after    INTEGER NOT NULL DEFAULT 0,
     duration_ms INTEGER,
+    lock_wait_ms INTEGER,
     error_msg   TEXT,
     note        TEXT,
     UNIQUE(run_id, slug)
@@ -404,9 +406,14 @@ def _migrate(conn: sqlite3.Connection) -> None:
     )
     # ADR 0017 — 옛 enum 으로 만들어진 runs 테이블의 CHECK constraint 마이그.
     # SQLite 의 `CREATE TABLE IF NOT EXISTS` 는 *기존* 테이블의 CHECK 갱신 안 함 → 새 status 값
-    # ('error', 'skipped_test_target') 가 IntegrityError. rebuild 패턴 (new → copy → drop → rename).
-    # codex 2차 review HIGH (2026-05-25).
+    # ('error', 'skipped_test_target', 'chromium_lock_timeout') 가 IntegrityError.
+    # rebuild 패턴 (new → copy → drop → rename). codex 2차 review HIGH (2026-05-25).
+    # ADR 0019 Phase 1 — chromium_lock_timeout 새 status + lock_wait_ms 새 컬럼 추가. probe 통과
+    # 시 둘 다 한 번에 rebuild 됨 (rebuild 템플릿이 새 enum + 새 컬럼 둘 다 포함). 옛 'error'
+    # probe 는 매우 옛 DB(아직 'error' enum 도 못 받은) 대비 보존.
     _migrate_runs_status_enum(conn, "poll_site_runs", "error",
+                              new_create=_POLL_SITE_RUNS_REBUILD)
+    _migrate_runs_status_enum(conn, "poll_site_runs", "chromium_lock_timeout",
                               new_create=_POLL_SITE_RUNS_REBUILD)
     _migrate_runs_status_enum(conn, "notify_target_runs", "skipped_test_target",
                               new_create=_NOTIFY_TARGET_RUNS_REBUILD)
@@ -424,13 +431,15 @@ CREATE TABLE poll_site_runs_new (
     status      TEXT NOT NULL CHECK (status IN
                 ('ok','lurking','breakage','poll_timeout','task_exception',
                  'persist_mismatch','body_empty_drift','reprobe_enqueued',
-                 'reprobe_skipped_bug','reprobe_enqueue_failed','run_crashed','error')),
+                 'reprobe_skipped_bug','reprobe_enqueue_failed','run_crashed','error',
+                 'chromium_lock_timeout')),
     n_posts            INTEGER NOT NULL DEFAULT 0,
     n_new              INTEGER NOT NULL DEFAULT 0,
     n_attempted_unique INTEGER NOT NULL DEFAULT 0,
     n_inserted         INTEGER NOT NULL DEFAULT 0,
     n_present_after    INTEGER NOT NULL DEFAULT 0,
     duration_ms INTEGER,
+    lock_wait_ms INTEGER,
     error_msg   TEXT,
     note        TEXT,
     UNIQUE(run_id, slug)
@@ -1514,21 +1523,26 @@ def poll_site_run_finish(conn: sqlite3.Connection, *, run_id: Optional[int], slu
                          n_attempted_unique: int = 0, n_inserted: int = 0,
                          n_present_after: int = 0,
                          duration_ms: Optional[int] = None,
+                         lock_wait_ms: Optional[int] = None,
                          error_msg: Optional[str] = None,
                          note: Optional[str] = None) -> None:
     """ADR 0017 — 사이트 1회 완료 시 INSERT. run_id=None 이면 skip. INSERT OR IGNORE
-    (UNIQUE(run_id, slug)) — reaper 의 _unknown_ row 와 race 시 정상 finish 가 우선."""
+    (UNIQUE(run_id, slug)) — reaper 의 _unknown_ row 와 race 시 정상 finish 가 우선.
+
+    ADR 0019 Phase 1 — lock_wait_ms = chromium flock 획득 대기 시간(ms). chromium 사이트만 박힘,
+    httpx 사이트는 NULL. duration_ms 와 분리 — duration_ms = fetch (wait_for 안) 만.
+    """
     if run_id is None:
         return
     try:
         conn.execute(
             "INSERT OR IGNORE INTO poll_site_runs(run_id,slug,started_at,ended_at,status,"
             "n_posts,n_new,n_attempted_unique,n_inserted,n_present_after,"
-            "duration_ms,error_msg,note) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "duration_ms,lock_wait_ms,error_msg,note) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (run_id, slug, started_at, ended_at, status,
              n_posts, n_new, n_attempted_unique, n_inserted, n_present_after,
-             duration_ms, error_msg, note),
+             duration_ms, lock_wait_ms, error_msg, note),
         )
         conn.commit()
     except Exception as e:  # noqa: BLE001

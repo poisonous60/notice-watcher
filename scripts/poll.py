@@ -568,6 +568,12 @@ async def _site_with_timeout(st: dict, *, timeout: float,
                              **kw) -> tuple[list[str], tuple, dict]:
     """ADR 0016 — 사이트별 wall timeout 래퍼. start/done/timeout/error stderr 1줄 + last_poll_duration_ms.
     ADR 0017 — happy / timeout / exception path 모두 `poll_site_run_finish` 1회 호출 (best-effort).
+    ADR 0019 Phase 1 — chromium 사이트는 sem 잡은 뒤 `chromium_lock_async(slots=N)` 도 잡는다 →
+    register subprocess 와 같은 N slot 공유 (RAM cap = N chromium). ordering = sem → flock →
+    wait_for(_process_site). flock 획득 대기는 `settings.poll.chromium_lock_wait_budget_s`(기본
+    300s) 안에 한다 — 초과 시 그 사이트만 `chromium_lock_timeout` 으로 죽고 나머지 진행. flock
+    대기 시간은 wall timeout 밖 (lock_wait_ms 컬럼 분리) — register hang 해도 다른 chromium
+    사이트 false timeout 안 남음.
 
     중요: sem(chromium/httpx) 은 wait_for **밖에서** 잡는다. 그래야 sem queue 대기 시간이 wall
     timeout 안에 포함 안 됨. 첫 구현(2026-05-25 1차) 은 sem 잡기를 _process_site 안에 두고
@@ -581,13 +587,17 @@ async def _site_with_timeout(st: dict, *, timeout: float,
     t0 = time.perf_counter()
     print(f"[poll] start {slug}", file=sys.stderr, flush=True)
     # sem 결정 — strategy 보고. _process_site 가 같은 결정을 하지만 거기선 안 잡음 (분리).
-    sem = sem_chromium if _uses_chromium(st) else sem_httpx
+    chromium = _uses_chromium(st)
+    sem = sem_chromium if chromium else sem_httpx
+    lock_wait_ms: int = 0  # chromium 만 박힘, httpx 는 0 → DB NULL
 
     def _finish(status: str, *, error_msg: str | None = None,
                 tracking: dict | None = None, dur_ms: int | None = None) -> None:
         if dur_ms is None:
             dur_ms = int((time.perf_counter() - t0) * 1000)
         ended_at = _now_iso()
+        # chromium 사이트만 lock_wait_ms 박음. httpx 는 NULL (의미 없음).
+        lock_wait_db: int | None = lock_wait_ms if chromium else None
         try:
             bot_db.poll_site_run_finish(
                 db_conn, run_id=run_id, slug=slug,
@@ -599,6 +609,7 @@ async def _site_with_timeout(st: dict, *, timeout: float,
                 n_inserted=int((tracking or {}).get("n_inserted", 0) or 0),
                 n_present_after=int((tracking or {}).get("n_present_after", 0) or 0),
                 duration_ms=dur_ms,
+                lock_wait_ms=lock_wait_db,
                 error_msg=error_msg or (tracking or {}).get("error_msg"),
                 note=(tracking or {}).get("note"),
             )
@@ -608,25 +619,91 @@ async def _site_with_timeout(st: dict, *, timeout: float,
     try:
         # sem 대기 — timeout 밖. sem queue 가 길어도 false timeout 안 남.
         async with sem:
-            t_fetch_start = time.perf_counter()
+            # ADR 0019 Phase 1 — chromium 사이트는 cross-process flock 도 잡는다. httpx 는 skip.
+            # slots = settings.chromium_lock.slots — worker (register/reprobe) 와 같은 N 슬롯 공유
+            # (capacity limit, 실 mutex 아님). RAM cap = N chromium 바이너리. ADR §2 Phase 1 원안의
+            # 'slots=1 명시' 는 운영상 register 처리량 반감 비용이 커서 N100 운영값(현 slots=5) 유지.
+            # flock 획득 자체는 budget(기본 300s) 안에 — N 슬롯 다 차서 못 잡으면 그 사이트만
+            # chromium_lock_timeout 으로 죽고 나머지 진행.
+            lock_cm = None
+            if chromium:
+                tr = current_trace()
+                budget = float(settings.poll.chromium_lock_wait_budget_s)
+                slots = int(settings.chromium_lock.slots)
+                t_lock_start = time.perf_counter()
+                try:
+                    with tr.span("poll.chromium_flock_acquire",
+                                 attrs={"slug": slug, "budget_s": budget, "slots": slots}):
+                        from scripts._chromium_lock import chromium_lock_async
+                        lock_cm = chromium_lock_async(timeout=budget, slots=slots)
+                        await lock_cm.__aenter__()
+                    lock_wait_ms = int((time.perf_counter() - t_lock_start) * 1000)
+                except TimeoutError as exc:
+                    lock_wait_ms = int((time.perf_counter() - t_lock_start) * 1000)
+                    dur_ms = int((time.perf_counter() - t0) * 1000)
+                    st["last_poll_duration_ms"] = dur_ms
+                    print(f"[poll] CHROMIUM_LOCK_TIMEOUT {slug} t={dur_ms}ms "
+                          f"lock_wait={lock_wait_ms}ms budget={budget}s",
+                          file=sys.stderr, flush=True)
+                    st["last_poll_at"] = _now_iso()
+                    st["last_status"] = "chromium_lock_timeout"
+                    st["consecutive_breakage"] = int(st.get("consecutive_breakage", 0)) + 1
+                    sp = st.get("_state_path")
+                    if sp:
+                        try:
+                            Path(sp).write_text(
+                                json.dumps({k: v for k, v in st.items() if k != "_state_path"},
+                                           ensure_ascii=False, indent=2),
+                                encoding="utf-8")
+                        except Exception:  # noqa: BLE001
+                            pass
+                    async with db_lock:
+                        _finish("chromium_lock_timeout",
+                                error_msg=f"flock wait > {budget}s ({exc})",
+                                dur_ms=dur_ms)
+                    return (
+                        [f"=== {slug} ===  ⚠ chromium_lock_timeout "
+                         f"(lock_wait={lock_wait_ms}ms, budget={budget}s)"],
+                        (slug, "chromium_lock_timeout", 0, 0,
+                         f"flock wait > {budget}s"),
+                        {"status": "chromium_lock_timeout",
+                         "n_posts": 0, "n_new": 0,
+                         "n_attempted_unique": 0, "n_inserted": 0, "n_present_after": 0,
+                         "note": None, "error_msg": str(exc)},
+                    )
             try:
-                result = await asyncio.wait_for(
-                    _process_site(st, db_conn=db_conn, db_lock=db_lock, **kw),
-                    timeout=timeout)
-            except asyncio.TimeoutError:
-                dur_ms = int((time.perf_counter() - t0) * 1000)
-                fetch_dur_ms = int((time.perf_counter() - t_fetch_start) * 1000)
-                st["last_poll_duration_ms"] = dur_ms
-                print(f"[poll] TIMEOUT {slug} t={dur_ms}ms (fetch={fetch_dur_ms}ms, cap={timeout}s)",
-                      file=sys.stderr, flush=True)
-                async with db_lock:
-                    _finish("poll_timeout",
-                            error_msg=f"wait_for cap={timeout}s, fetch={fetch_dur_ms}ms",
-                            dur_ms=dur_ms)
-                raise
+                t_fetch_start = time.perf_counter()
+                try:
+                    result = await asyncio.wait_for(
+                        _process_site(st, db_conn=db_conn, db_lock=db_lock, **kw),
+                        timeout=timeout)
+                except asyncio.TimeoutError:
+                    dur_ms = int((time.perf_counter() - t0) * 1000)
+                    fetch_dur_ms = int((time.perf_counter() - t_fetch_start) * 1000)
+                    st["last_poll_duration_ms"] = dur_ms
+                    print(f"[poll] TIMEOUT {slug} t={dur_ms}ms (fetch={fetch_dur_ms}ms, "
+                          f"lock_wait={lock_wait_ms}ms, cap={timeout}s)",
+                          file=sys.stderr, flush=True)
+                    async with db_lock:
+                        _finish("poll_timeout",
+                                error_msg=f"wait_for cap={timeout}s, fetch={fetch_dur_ms}ms",
+                                dur_ms=dur_ms)
+                    raise
+            finally:
+                # flock 해제는 모든 path 에서. exception 으로 빠져도 release.
+                if lock_cm is not None:
+                    try:
+                        await lock_cm.__aexit__(None, None, None)
+                    except Exception as e:  # noqa: BLE001
+                        print(f"[poll] ⚠ chromium_lock release failed for {slug}: {e!r}",
+                              file=sys.stderr, flush=True)
         dur_ms = int((time.perf_counter() - t0) * 1000)
         st["last_poll_duration_ms"] = dur_ms
-        print(f"[poll] done  {slug} t={dur_ms}ms", file=sys.stderr, flush=True)
+        if chromium:
+            print(f"[poll] done  {slug} t={dur_ms}ms lock_wait={lock_wait_ms}ms",
+                  file=sys.stderr, flush=True)
+        else:
+            print(f"[poll] done  {slug} t={dur_ms}ms", file=sys.stderr, flush=True)
         lines, row, tracking = result
         async with db_lock:
             _finish(tracking["status"], tracking=tracking, dur_ms=dur_ms)

@@ -40,6 +40,10 @@ class PollSection:
     seen_cap: int = 5000
     # posts 캐시 TTL GC 보존 일수 (ADR 0006). 발송 지연(~1d) ≫ 보다 충분히 커야 미수신 글 안 날림.
     posts_keep_days: int = 7
+    # ADR 0019 Phase 1 — chromium 사이트가 flock(_chromium_lock) 잡을 때 대기 budget(초).
+    # 초과 시 그 사이트만 status='chromium_lock_timeout' 으로 종료. register subprocess 가 영구
+    # hang 해도 poll cron 이 systemd 외각 timeout 까지 안 매달리게 차단.
+    chromium_lock_wait_budget_s: float = 300.0
 
 
 @dataclass
