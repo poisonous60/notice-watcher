@@ -12,9 +12,12 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from generate import GenerationError  # noqa: E402
+from generate import generator as genmod  # noqa: E402
 
 
 def _load_register():
@@ -116,6 +119,72 @@ def test_gen_agentic_rejects_too_small_remaining_wall_budget(monkeypatch):
     raise AssertionError("expected RegisterTimeoutError")
 
 
+def test_generate_raw_converts_self_veto_sentinel_to_generation_error():
+    class FakeClient:
+        provider = "fake"
+
+        def generate(self, **kwargs):
+            return SimpleNamespace(
+                text='{"ok": false, "stop_reason": "non_board", "reason": "single article"}',
+                provider="fake",
+            )
+
+    with pytest.raises(GenerationError) as excinfo:
+        genmod._generate_raw(
+            {"url": "https://example.com/post"},
+            client=FakeClient(),
+            prompt_text="digest",
+            temperature=0.0,
+            call_site="config_generate",
+            attempt=1,
+        )
+
+    assert excinfo.value.stop_reason == "non_board"
+    assert excinfo.value.last_config is None
+    assert excinfo.value.last_feedback == "single article"
+
+
+def test_generation_failure_stop_reason_self_veto_does_not_recall_classifier(monkeypatch):
+    reg = _load_register()
+    saved: list[tuple] = []
+    err = GenerationError("agent self-veto", stop_reason="non_board", last_feedback="single article")
+
+    def fail_classify(*args, **kwargs):
+        raise AssertionError("_classify_veto should not be called for agent self-veto")
+
+    monkeypatch.setattr(reg, "_classify_veto", fail_classify)
+    monkeypatch.setattr(reg, "_save_rejected", lambda *a, **k: saved.append((a, k)))
+
+    rc = reg._generation_failure_reject_rc({"url": "u"}, "u", "s", err, gate_only=False)
+
+    assert rc == 3
+    assert len(saved) == 1
+    assert saved[0][1]["note"] == "agent_self_veto:non_board"
+    assert saved[0][1]["learn"] is False
+
+
+@pytest.mark.parametrize(
+    ("stop_reason", "expected_rc", "expected_note"),
+    [
+        ("non_board", 3, "agent_self_veto:non_board"),
+        ("non_existent", 4, "agent_self_veto:non_existent"),
+        ("login_required", 2, "agent_self_veto:login_required"),
+    ],
+)
+def test_generation_failure_self_veto_stop_reason_rc_mapping(monkeypatch, stop_reason, expected_rc, expected_note):
+    reg = _load_register()
+    saved: list[tuple] = []
+    err = GenerationError("agent self-veto", stop_reason=stop_reason, last_feedback="veto reason")
+
+    monkeypatch.setattr(reg, "_classify_veto", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no recall")))
+    monkeypatch.setattr(reg, "_save_rejected", lambda *a, **k: saved.append((a, k)))
+
+    rc = reg._generation_failure_reject_rc({"url": "u"}, "u", "s", err, gate_only=False)
+
+    assert rc == expected_rc
+    assert saved[0][1]["note"] == expected_note
+
+
 def run() -> list[tuple[str, bool, str]]:
     reg = _load_register()
     cases: list[tuple[str, bool, str]] = []
@@ -181,16 +250,13 @@ def run() -> list[tuple[str, bool, str]]:
                   cfg == {"ok": True} and getattr(rep, "ok", False) is True and calls == [("gen", 1, None)],
                   f"calls={calls}"))
 
-    err = GenerationError("one-shot failed")
+    err = GenerationError("one-shot failed", stop_reason="non_board", last_feedback="single article")
     err.last_config = {"strategy": "httpx_html"}
-    err.last_feedback = "[FAIL] posts_nonempty: 0 rows"
     calls.clear()
     saved: list[tuple] = []
     orig_classify = reg._classify_veto
     orig_save = reg._save_rejected
-    reg._classify_veto = lambda digest, url, slug, gate_only: {
-        "class": "content", "confidence": 0.9, "reason": "single article"
-    }
+    reg._classify_veto = lambda *a, **k: (_ for _ in ()).throw(AssertionError("no classifier recall"))
     reg._save_rejected = lambda *a, **k: saved.append((a, k))
     try:
         rc = reg._generation_failure_reject_rc({"url": "u"}, "u", "s", err, gate_only=False)
@@ -198,12 +264,19 @@ def run() -> list[tuple[str, bool, str]]:
         reg._classify_veto = orig_classify
         reg._save_rejected = orig_save
     cases.append(("auto_content_fail_rejected",
-                  rc == 3 and len(saved) == 1 and saved[0][1].get("learn") is False,
+                  rc == 3
+                  and len(saved) == 1
+                  and saved[0][1].get("note") == "agent_self_veto:non_board"
+                  and saved[0][1].get("learn") is False,
                   f"rc={rc} saved={saved}"))
+
+    err_plain = GenerationError("one-shot failed")
+    err_plain.last_config = {"strategy": "httpx_html"}
+    err_plain.last_feedback = "[FAIL] posts_nonempty: 0 rows"
 
     def failing_gen(digest, *, max_attempts, model):
         calls.append(("gen", max_attempts, model))
-        raise err
+        raise err_plain
 
     def agentic_after_fail(digest, slug, url, failure_packet=None):
         calls.append(("agentic", failure_packet))

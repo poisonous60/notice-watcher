@@ -22,7 +22,15 @@
     },
     "stop_reason": {
       "type": "string",
-      "enum": ["validate_pass", "max_cycles", "agent_gave_up", "error"]
+      "enum": [
+        "validate_pass",
+        "max_cycles",
+        "agent_gave_up",
+        "error",
+        "non_board",
+        "non_existent",
+        "login_required"
+      ]
     }
   }
 }

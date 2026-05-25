@@ -81,6 +81,8 @@ CASES: list[tuple[str, tuple[Optional[str], Optional[int], Optional[str]], str, 
     # policy_reject (rc=2) ----
     ("policy_login", ("failed", 2, "[register] LOGIN_REQUIRED (네이버카페 비공개)"),
      "policy_reject", "login_required"),
+    ("agent_self_veto_login", ("failed", 2, "agent_self_veto:login_required ..."),
+     "policy_reject", "agent_self_veto_login"),
     ("policy_blocked_bot", ("failed", 2, "[register] BLOCKED_BOT"), "policy_reject", "blocked_bot"),
     ("policy_blocked_ip", ("failed", 2, "[register] BLOCKED_IP"), "policy_reject", "blocked_ip"),
     ("policy_blocked_geo", ("failed", 2, "[register] BLOCKED_GEO"), "policy_reject", "blocked_geo"),
@@ -96,6 +98,8 @@ CASES: list[tuple[str, tuple[Optional[str], Optional[int], Optional[str]], str, 
     ("url_dead_soft_404_rc4",
      ("failed", 4, "[register] 입력 URL 이 HTTP 200 으로 응답하지만 not-found shell 로 보임 (title: Not Found) (verdict='SOFT_404')."),
      "url_dead", "soft_404"),
+    ("agent_self_veto_non_existent", ("failed", 4, "agent_self_veto:non_existent ..."),
+     "url_dead", "agent_self_veto_non_existent"),
     ("url_dead_target_rc2_legacy",
      ("failed", 2, "[register] 입력 URL 의 글이 존재하지 않음 (verdict='TARGET_NOT_FOUND'). 게시판 목록 URL 또는 다른 글 URL 로 재시도."),
      "url_dead", "target_not_found"),
@@ -151,6 +155,8 @@ CASES: list[tuple[str, tuple[Optional[str], Optional[int], Optional[str]], str, 
     ("gate_classifier_content",
      ("failed", 3, "accept_path content 거부 (게이트 통과 + 분류기 content) [classifier=content conf=0.9: 단일 글]"),
      "gate_reject", "classifier_reject"),
+    ("agent_self_veto_non_board", ("failed", 3, "agent_self_veto:non_board ..."),
+     "gate_reject", "agent_self_veto_non_board"),
     ("gate_no_match", ("failed", 3, "something"), "gate_reject", None),
 
     # unknown rc ----
@@ -180,6 +186,11 @@ def run() -> list[tuple[str, bool, str]]:
                   f"len={len(reason) if reason else None}"))
 
     return cases
+
+
+def test_classify_fail_cases():
+    failed = [(name, detail) for name, ok, detail in run() if not ok]
+    assert not failed
 
 
 if __name__ == "__main__":
