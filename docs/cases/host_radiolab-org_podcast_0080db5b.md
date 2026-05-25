@@ -256,3 +256,57 @@ handcrafted config (이 case §해결) 가 *bot polling 환경에서 작동* 하
 - probe `wait_for_load_state("networkidle", timeout=8000)` 추가
 - user interaction simulate (scroll/click) — invasive
 - SPA marker 검출 시 *networkidle* + DOM mutation 양쪽 기다림
+
+---
+
+## 2026-05-25 추가 — wait 강화 + stylesheet 허용 + timeout 강제 적용
+
+직접 측정 (15s wait, resource block 없이) 에서 .radiolab-card DOM 12개 박힘 확인 후,
+probe 환경 차이 fix 박음:
+
+1. **`probe/fetch_headless.py:_BLOCKED_RESOURCE_TYPES` 에서 stylesheet 제거** (commit
+   6d054fd) — Nuxt/Vue 가 CSS 로드 후 hydration trigger 하는 사이트 대응. probe 모든
+   사이트 +0.5-2초 (CSS 작음).
+
+2. **SPA marker quick check 50KB→200KB** (commit 8d89229) — Radiolab `__nuxt` div
+   79KB, `window.__NUXT__` 86KB 위치라 50KB check 안 잡힘.
+
+3. **`probe/fetch_headless.py` SPA quiet_ms 8000 + hard_timeout 12000** (commit 19ca03a) —
+   strict SPA marker 검출 사이트만, polling 영향 X.
+
+4. **`scripts/register.py:_enforce_site_kind_config` SPA timeout 강제** (commit 8d279dc) —
+   strategy=playwright_html 박은 cfg 가 idle_timeout_ms/quiet_ms 안 박으면 engine default
+   (2000/500ms) 너무 짧음. setdefault 로 nav 20000, idle 12000, quiet 800 박음. LLM 명시
+   값 보존.
+
+### 결과 (commit 8d279dc 적용 후)
+
+- ✅ probe artifact (list.html) 에 진짜 cards 박힘 — `<div class="v-card flex-column max:flex-row radiolab-card">` 12개
+- ✅ html_repeating_patterns 의 row sample_url = `https://radiolab.org/podcast/6808128df...` (진짜 episode)
+- ✅ LLM 이 진짜 selector 박음 — `div.recent-episodes div.v-card.radiolab-card`
+- ✅ post_processor timeout 강제 적용됨 (idle=12000, quiet=800, nav=20000)
+- ❌ 그러나 N100 register 5 시도 다 posts_nonempty(0건) — engine playwright_html validate
+  flow 가 같은 cfg + 같은 selector 박았는데도 fetch 0건
+
+### probe vs engine playwright_html 환경 차이 (진짜 root)
+
+probe `fetch_headless.py`:
+- launch_args = `_LAUNCH_ARGS` (특수 flag)
+- fingerprint patch + resource block (font/image/media만, stylesheet 허용)
+- `_wait_xhr_quiet(quiet=8000, hard=12000)`
+
+engine `strategies/playwright_html.py`:
+- launch = `pw.chromium.launch(headless=True)` (bare)
+- playwright-stealth apply
+- resource block X (모든 resource fetch)
+- `wait_for_selector(wait_selector, timeout=idle_timeout)` 매칭 시 즉시 break
+
+= **engine 의 wait_for_selector 가 12초 안 어디선가 match 했는데도 page.content() 시점에
+   진짜 DOM 12개 cards 없음**. element exist (selector match) ≠ fully hydrated DOM.
+
+추가 plan 후보 (이번 plan 외):
+- engine playwright_html 에 SPA marker 검출 시 `wait_for_function("document.querySelectorAll(<row>).length >= 3", timeout=15000)` 추가
+- 또는 fetch_headless 의 capture-detect-recapture loop 패턴을 engine 에도 포팅
+
+handcrafted config (이 case §해결) 가 *polling 환경에서 작동* 한다는 사실이 가장 신뢰성 있는
+증거 — selector + timeout 조합이 정확하면 회복 가능. LLM 이 그 조합 자동 추측까지는 미흡.
