@@ -199,6 +199,67 @@ def run() -> list[tuple[str, bool, str]]:
     sel_pick_none = _pick_spa_wait_selector(digest_spa_no_cand, "x")
     cases.append(("pick_wait_selector_none_when_no_samehost", sel_pick_none is None, f"got {sel_pick_none!r}"))
 
+    # css_component_classes fallback (2026-05-25 Radiolab plan) — html_repeating_patterns
+    # 비어있을 때 css_component_classes 의 top 1 class 를 wait_selector 후보로.
+    digest_css_fallback = {
+        "url": "https://radiolab.org/podcast",
+        "site_kind": {"kind": "spa_rendered", "confidence": "high"},
+        "list_candidates": {
+            "html_repeating_patterns": [],  # empty
+            "css_component_classes": [
+                {"class": "radiolab-card", "rule_count": 12, "co_classes": ["v-card", "card-title-link"]},
+                {"class": "card-title-link", "rule_count": 8, "co_classes": ["h2"]},
+            ],
+        },
+    }
+    sel_css = _pick_spa_wait_selector(digest_css_fallback, "radiolab.org")
+    cases.append(("pick_css_fallback_uses_top",
+                  sel_css == ".radiolab-card",
+                  f"got {sel_css!r}"))
+
+    # css_component_classes 에 nav/skeleton 박힌 게 잘못 들어왔다면 reject + 다음 후보
+    digest_css_chrome_first = {
+        "url": "https://x.com/",
+        "site_kind": {"kind": "spa_rendered", "confidence": "high"},
+        "list_candidates": {
+            "html_repeating_patterns": [],
+            "css_component_classes": [
+                {"class": "nav", "rule_count": 10, "co_classes": []},
+                {"class": "post-card", "rule_count": 5, "co_classes": []},
+            ],
+        },
+    }
+    cases.append(("pick_css_skips_chrome_class",
+                  _pick_spa_wait_selector(digest_css_chrome_first, "x.com") == ".post-card",
+                  f"got {_pick_spa_wait_selector(digest_css_chrome_first, 'x.com')!r}"))
+
+    # html_repeating_patterns 후보 있으면 css fallback 안 사용 (우선순위)
+    digest_both = {
+        "url": "https://x.com/",
+        "site_kind": {"kind": "spa_rendered", "confidence": "high"},
+        "list_candidates": {
+            "html_repeating_patterns": [
+                {"selector": ".real-row", "child_count": 5,
+                 "sample_url": "https://x.com/a", "href_pattern_guess": "/a"},
+            ],
+            "css_component_classes": [
+                {"class": "css-class-name", "rule_count": 10, "co_classes": []},
+            ],
+        },
+    }
+    cases.append(("pick_html_repeating_priority_over_css",
+                  _pick_spa_wait_selector(digest_both, "x.com") == ".real-row",
+                  ""))
+
+    # 둘 다 없으면 None
+    digest_empty = {
+        "url": "https://x.com/",
+        "site_kind": {"kind": "spa_rendered", "confidence": "high"},
+        "list_candidates": {"html_repeating_patterns": [], "css_component_classes": []},
+    }
+    cases.append(("pick_none_when_both_empty",
+                  _pick_spa_wait_selector(digest_empty, "x.com") is None, ""))
+
     # R-H10 — nav/skeleton/loading chrome selector blocklist
     digest_nav_top = {
         "url": "https://x.com/",

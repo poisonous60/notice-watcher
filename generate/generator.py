@@ -271,7 +271,10 @@ def _pick_spa_wait_selector(digest: dict, host: Optional[str]) -> Optional[str]:
     nav/skeleton/footer 같은 chrome/loading 후보 회피용 보수 필터 (R-H10):
     1. sample_url same-host 또는 href_pattern_guess 가 relative path
     2. selector text 에 chrome/skeleton/loading token 없음
-    못 찾으면 None — patch 에서 wait_selector 안 박고 strategy switch 만 함.
+
+    못 찾으면 fallback — digest 의 `list_candidates.css_component_classes` 의 top 1 class
+    (Radiolab 류 — 정적 HTML DOM 에 없지만 inline `<style>` rule 엔 박힌 hydrated row container).
+    css class 도 없으면 None — patch 에서 wait_selector 안 박고 strategy switch 만 함.
     """
     lc = digest.get("list_candidates") or {}
     pats = lc.get("html_repeating_patterns") or []
@@ -300,10 +303,22 @@ def _pick_spa_wait_selector(digest: dict, host: Optional[str]) -> Optional[str]:
         if not same_host:
             continue
         cands.append((int(p.get("child_count") or 0), sel))
-    if not cands:
-        return None
-    cands.sort(key=lambda t: t[0], reverse=True)
-    return cands[0][1]
+    if cands:
+        cands.sort(key=lambda t: t[0], reverse=True)
+        return cands[0][1]
+    # fallback — css_component_classes (SPA hydration row 단서)
+    css_cands = lc.get("css_component_classes") or []
+    for cc in css_cands:
+        if not isinstance(cc, dict):
+            continue
+        cls = cc.get("class")
+        if not cls or not isinstance(cls, str):
+            continue
+        # _is_blocked_css_class 가 이미 reject 했지만 _SPA_WAIT_SELECTOR_BLOCKLIST_RE 추가 한 번 더
+        if _SPA_WAIT_SELECTOR_BLOCKLIST_RE.search(cls):
+            continue
+        return f".{cls}"
+    return None
 
 
 def _select_retry_recipes(cfg: dict, digest: dict, attempt_history: list[dict]) -> list[str]:

@@ -132,6 +132,13 @@ _ARTIFACTS: dict[str, ArtifactContract] = {
                            note="HTML 후보 중 '진짜 글 페이지' 같은 URL 1개 — pick_first_article_url 산출"),
             _ContractField("html_repeating_patterns", type_hint="list[dict]",
                            note="같은 시그니처 자식 ≥5 인 반복 패턴 — selector / sample_url / href_pattern_guess / row_data_attrs / href_is_js / child_count"),
+            _ContractField("css_component_classes", type_hint="list[dict]", required=False,
+                           note="raw HTML 의 inline `<style>` rule 에서 추출한 component class 후보 (SPA hydration row 단서). "
+                                "각 dict={class, rule_count, co_classes[:3]}. utility/chrome/generic blocklist 적용 후 top 8. "
+                                "engine/digest.py 의 _extract_css_component_classes 가 build_digest 시 backfill — artifact 자체엔 안 박힘. "
+                                "Radiolab 류 SPA (DOM 에 .radiolab-card 없는데 inline CSS rule 엔 박힌 사이트) 회복용. "
+                                "LLM 가 hydration 후 row container selector 후보로 검토. "
+                                "generate/generator.py:_pick_spa_wait_selector 가 html_repeating_patterns fallback 으로 참고."),
             _ContractField("traffic_json_api_candidates", type_hint="list[dict]",
                            note="HAR 의 JSON 응답 중 글 목록 같은 것 — relevance_score 내림차순 정렬, list_hits 포함"),
             _ContractField("hydration_list_candidates", type_hint="list[dict]",

@@ -65,4 +65,39 @@ def run() -> list[tuple[str, bool, str]]:
     # 5. 빈 HTML
     cases.append(("empty_html", html_repeating_patterns("", "https://x.com") == [], ""))
 
+    # 6. skeleton descendant reject (2026-05-25 Radiolab plan) —
+    #    row sig 자체엔 skeleton 없지만 descendant `<div class="p-skeleton">` 박힘.
+    #    SPA hydration 전 캡처된 가짜 row → 후보 list 에서 제외.
+    html_skeleton = '<div class="grid">' + ''.join(
+        f'''<div class="col-12 mb-6">
+              <div class="p-skeleton p-component card" aria-hidden="true"></div>
+            </div>'''
+        for _ in range(8)
+    ) + '</div>'
+    out = html_repeating_patterns(html_skeleton, "https://x.com/list")
+    cases.append(("skeleton_descendant_rejected",
+                  len(out) == 0,
+                  f"got {len(out)} candidates (skeleton 후보가 reject 안 됨): {out!r}"))
+
+    # 7. row 안에 loading/placeholder/shimmer 있는 경우도 reject
+    for token in ("loading", "placeholder", "shimmer", "p-skeleton"):
+        html_t = '<div class="grid">' + ''.join(
+            f'<div class="col-12 mb-6"><div class="{token}-row"></div></div>'
+            for _ in range(8)
+        ) + '</div>'
+        out_t = html_repeating_patterns(html_t, "https://x.com/list")
+        cases.append((f"reject_descendant_{token.replace('-', '_')}",
+                      len(out_t) == 0,
+                      f"got {len(out_t)} for token={token!r}"))
+
+    # 8. 진짜 row 는 reject 안 됨 (false-positive 가드) — class 에 loading 없는 정상 row
+    html_real = '<div class="recent">' + ''.join(
+        f'<article class="post-card"><h2><a href="/posts/{i}">post {i}</a></h2></article>'
+        for i in range(6)
+    ) + '</div>'
+    out_real = html_repeating_patterns(html_real, "https://x.com/")
+    cases.append(("real_row_not_rejected",
+                  len(out_real) >= 1 and out_real[0]["child_count"] == 6,
+                  f"got {out_real!r}"))
+
     return cases

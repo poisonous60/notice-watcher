@@ -51,6 +51,40 @@ def _registered_domain(host: str) -> str:
     return h
 
 
+_SKELETON_DESCENDANT_TOKEN_RE = re.compile(
+    r"(?<!\w)(skeleton|p-skeleton|loading|loading-spinner|placeholder|shimmer|spinner|ghost|empty-state)(?!\w)",
+    re.IGNORECASE,
+)
+
+
+def _row_has_skeleton_descendant(row: "Tag", *, max_desc: int = 10) -> bool:
+    """row 의 descendant element class 에 skeleton/loading/placeholder 등 박혀있는지.
+
+    Radiolab 류 — row sig (`div.col-12.mb-6`) 자체엔 skeleton 없지만 descendant 의
+    `<div class="p-skeleton p-component card">` 가 박힘. html_repeating_patterns 의 top
+    후보로 잡히면 LLM 함정. row 의 첫 N 자손 element class 검사 후 reject 신호.
+
+    2026-05-25 codex review (parent + child sig 만 봄 → descendant 안 봄) 정정.
+    """
+    try:
+        descendants = list(row.find_all(True))[:max_desc]
+    except Exception:
+        return False
+    for el in descendants:
+        try:
+            cls_list = el.get("class") or []
+        except Exception:
+            continue
+        if not isinstance(cls_list, list):
+            continue
+        for cls in cls_list:
+            if not isinstance(cls, str):
+                continue
+            if _SKELETON_DESCENDANT_TOKEN_RE.search(cls):
+                return True
+    return False
+
+
 @heuristic
 def html_repeating_patterns(html: str, base_url: str, *, min_children: int = 5) -> list[dict]:
     """같은 부모 안에서 같은 시그니처(태그+클래스)를 갖는 자식이 N개 이상인 노드 후보."""
@@ -73,6 +107,11 @@ def html_repeating_patterns(html: str, base_url: str, *, min_children: int = 5) 
             groups.setdefault(sig, []).append(c)
         for sig, group in groups.items():
             if len(group) < min_children:
+                continue
+            # skeleton descendant reject — group 의 sample (group[0]) 안 자손 class 에
+            # skeleton/loading/placeholder 있으면 SPA hydration 전 캡처된 가짜 row.
+            # LLM 함정 회피 — 후보 list 에서 제외.
+            if _row_has_skeleton_descendant(group[0]):
                 continue
             # 자식 안의 a 태그 href — javascript:/#/빈값은 따로 분류(글 링크가 href 가 아니라 data-* / 인라인 JS 에 있음)
             hrefs: list[str] = []

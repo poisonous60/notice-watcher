@@ -367,6 +367,113 @@ def _hydration_digest(raw_list_html: str) -> dict:
     return out
 
 
+# CSS class extract — SPA 사이트의 hydration 후 row selector 단서.
+# 정적 HTML 의 inline `<style>` 에 박힌 CSS rule 의 class 선언이 hydration 후 진짜 DOM 에 등장.
+# digest 의 clean_html 가 `<style>` 제거하기 *전* 의 raw HTML 에서 추출 — LLM prompt 한테 component
+# class 후보 전달용. 2026-05-25 Radiolab 회복 plan.
+_CSS_CLASS_TOKEN_RE = re.compile(r"\.([A-Za-z][\w-]*)")
+_CSS_RULE_SELECTOR_RE = re.compile(r"([^{}]+)\{[^{}]*\}", re.DOTALL)
+
+# utility/chrome/generic class reject. Tailwind/Bootstrap/PrimeVue/Bulma 노이즈 큼.
+_CSS_CLASS_BLOCKLIST_PATTERNS = [
+    # tailwind/bootstrap utility
+    re.compile(r"^(m|p|mt|mr|mb|ml|mx|my|pt|pr|pb|pl|px|py)-\w+$"),
+    re.compile(r"^col(?:-(?:xs|sm|md|lg|xl|2xl))?-\d+$"),
+    re.compile(r"^(text|bg|border|font|w|h|min|max|min-w|min-h|max-w|max-h|gap|space|leading|tracking|rounded|shadow|cursor|overflow|opacity|z|order|inset|top|right|bottom|left|whitespace|align|justify|items|content|self|grid|flex|hidden|block|inline|inline-block|sr|not-sr|visible|invisible)-[\w/.-]+$"),
+    re.compile(r"^(rounded|shadow|truncate|underline|capitalize|uppercase|lowercase|italic|antialiased)$"),
+    re.compile(r"^(flex|grid|block|inline|inline-block|table|hidden|relative|absolute|fixed|sticky|static)$"),
+    # primevue / primeicons
+    re.compile(r"^p-(component|button|dropdown|inputtext|menu|menubar|menuitem|submenu|dialog|sidebar|toast|tooltip|skeleton|inputwrapper|inputgroup|inputprefix|inputsuffix|datatable|datepicker|calendar|chip|tag|badge|avatar|card|panel|fieldset|message|messages|password|placeholder|highlight|disabled|focus|hover|active|selected|expanded|collapsed)[\w-]*$"),
+    re.compile(r"^pi(?:-[\w-]+)?$"),
+    # bootstrap / bulma utility
+    re.compile(r"^(btn(?:-\w+)?|nav(?:-\w+)?|navbar(?:-\w+)?|form(?:-\w+)?|input(?:-\w+)?|card-(?:body|header|footer|title|text)|list-group(?:-\w+)?|breadcrumb(?:-\w+)?|page-(?:link|item)|pagination(?:-\w+)?|alert(?:-\w+)?|badge(?:-\w+)?|spinner(?:-\w+)?|carousel(?:-\w+)?|collapse|dropdown(?:-\w+)?|modal(?:-\w+)?|tooltip(?:-\w+)?|popover(?:-\w+)?|table(?:-\w+)?)$"),
+    # tailwind breakpoint prefixes (sm: 류 — CSS 에선 escape 되지만 안전망)
+    re.compile(r"^(sm|md|lg|xl|2xl|hover|focus|active|visited|first|last|odd|even|group-hover):.+$"),
+    # chrome / loading / skeleton / nav
+    re.compile(r"^(nav|navbar|navigation|header|footer|sidebar|menu|menubar|breadcrumb|breadcrumbs|skeleton|loading|placeholder|spinner|shimmer|ghost|empty-state|toolbar|topbar|bottombar|overlay|backdrop|dimmer)(?:-[\w-]+)?$"),
+    # generic
+    re.compile(r"^(container|wrapper|inner|outer|body|main|content|fields|row|col|item|grid|section|article|aside|figure|head|title|subtitle|description|label|input|button|link|icon|image|img|video|audio|svg|text|copy|para|paragraph|block|element|widget|component|box|panel|popup|tooltip|modal|dialog|alert|notice|banner|hero|page|view|frame|layer|stack|cluster|cell|line|divider|separator|spacer)$"),
+]
+
+
+def _is_blocked_css_class(cls: str) -> bool:
+    cls = cls.strip()
+    if not cls or len(cls) < 3 or len(cls) > 60:
+        return True
+    for pat in _CSS_CLASS_BLOCKLIST_PATTERNS:
+        if pat.match(cls):
+            return True
+    return False
+
+
+def _extract_css_component_classes(raw_html: Optional[str], *, top_n: int = 8,
+                                    min_rule_count: int = 2) -> list[dict]:
+    """raw HTML 의 `<style>` 블록에서 component class 추출 — SPA hydration row 단서.
+
+    출력: [{"class": str, "rule_count": int, "co_classes": [str, ...]}, ...]
+      - rule_count: 해당 class 가 등장한 CSS rule 수 (frequency)
+      - co_classes: 같은 selector 안에 함께 등장한 다른 class top 3 (utility/chrome reject 후, 길이 cap)
+
+    reject: utility (mb-*, col-*, text-*, p-component, sm:* 등), chrome (nav/header/skeleton 등),
+    generic (container/wrapper/main 등). 너무 짧거나 (>60자) 너무 긴 class skip.
+
+    fail-safe: HTML 없거나 BeautifulSoup 실패 시 빈 list.
+    """
+    if not raw_html:
+        return []
+    try:
+        soup = BeautifulSoup(raw_html, "lxml")
+    except Exception:
+        return []
+    style_texts: list[str] = []
+    for st in soup.find_all("style"):
+        try:
+            txt = st.string or st.get_text() or ""
+        except Exception:
+            txt = ""
+        if txt and len(txt) > 10:
+            style_texts.append(txt)
+    if not style_texts:
+        return []
+
+    rule_count: dict[str, int] = {}
+    co_occurrence: dict[str, dict[str, int]] = {}
+    for css_text in style_texts:
+        # selector 부분만 매칭 (rule body 무시) — selector 안의 .class 토큰만 봄
+        for m in _CSS_RULE_SELECTOR_RE.finditer(css_text):
+            selector_part = m.group(1)
+            classes_in_rule = []
+            for cm in _CSS_CLASS_TOKEN_RE.finditer(selector_part):
+                cls = cm.group(1)
+                if _is_blocked_css_class(cls):
+                    continue
+                classes_in_rule.append(cls)
+            # 중복 제거 (한 selector 안 같은 class 여러 번 매칭되면 1로 카운트)
+            unique = list(dict.fromkeys(classes_in_rule))
+            for cls in unique:
+                rule_count[cls] = rule_count.get(cls, 0) + 1
+                # co-occurrence
+                co = co_occurrence.setdefault(cls, {})
+                for other in unique:
+                    if other != cls:
+                        co[other] = co.get(other, 0) + 1
+
+    # frequency >= min_rule_count + top_n by rule_count
+    sorted_classes = sorted(
+        ((c, n) for c, n in rule_count.items() if n >= min_rule_count),
+        key=lambda t: (-t[1], t[0]),
+    )[:top_n]
+
+    out: list[dict] = []
+    for cls, n in sorted_classes:
+        # top 3 co_classes (co-occurrence count 내림), 짧게 cap
+        co = co_occurrence.get(cls, {})
+        top_co = sorted(co.items(), key=lambda t: (-t[1], t[0]))[:3]
+        co_names = [c for c, _ in top_co if len(c) <= 40][:3]
+        out.append({"class": cls, "rule_count": n, "co_classes": co_names})
+    return out
+
+
 def _backfill_missing_heuristics(list_cands: dict, *, base_url: Optional[str]) -> None:
     """list_candidates.json 의 누락 휴리스틱 키 자동 보강 — 옛 artifact 호환.
 
@@ -617,6 +724,12 @@ def build_digest(
     list_path = _list_body_path(out_dir, results)
     raw_list_html = _read_text(list_path)
     list_html_clean, list_trunc = clean_html(raw_list_html, max_bytes=max_html_bytes)
+
+    # SPA hydration 후 row selector 단서 — 정적 HTML 의 `<style>` rule 에서 component class 추출.
+    # clean_html 가 `<style>` 다 제거하기 *전* 의 raw_list_html 에서 뽑아야 함. LLM prompt 에 별도
+    # 키로 전달 (artifact 안 건드림, digest 에만 박음 — backfill 패턴과 같음).
+    if isinstance(list_cands, dict):
+        list_cands["css_component_classes"] = _extract_css_component_classes(raw_list_html)
 
     article_path = _article_body_path(out_dir, results)
     raw_article_html = _read_text(article_path)

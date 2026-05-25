@@ -120,6 +120,24 @@ def _install_fingerprint_patch(context) -> None:
         pass
 
 
+# SPA marker detection — Nuxt/Next/Vuex 등 hydration 필요 신호.
+# strict: 강한 marker (next/nuxt/initial state) 1+ 또는 weak (#__nuxt/#__next id tag) 1+.
+# `<div id="app">` 단독은 false-positive 흔함 — skip (Vue 일반 mount point, 정적 사이트도 사용).
+# codex review (2026-05-25) 의 "3+ markers 또는 unique tag" 제안 정정: __nuxt/__next/__INITIAL_STATE__
+# 같은 unique-naming marker 는 1개 만으로 SPA 신호 충분 (다른 곳에서 우연 매칭 가능성 거의 0).
+_SPA_STRONG_MARKERS_RE = re.compile(
+    r"(__NEXT_DATA__|__NUXT__|window\.__INITIAL_STATE__|<div\s+id=[\"']?__nuxt[\"']?|<div\s+id=[\"']?__next[\"']?)",
+    re.IGNORECASE,
+)
+
+
+def _has_spa_hydration_marker(html: str) -> bool:
+    """SPA hydration 신호 — Nuxt/Next/Vuex 의 strict marker 1+ 매칭."""
+    if not html:
+        return False
+    return bool(_SPA_STRONG_MARKERS_RE.search(html))
+
+
 def _is_cloudflare_interstitial(page) -> tuple[bool, bool]:
     try:
         title = page.title() or ""
@@ -397,6 +415,19 @@ def fetch_with_capture(
                     # 데이터 XHR/fetch 응답 끝날 때까지 대기 — networkidle 보다 빠름 (광고 image 무시)
                     _wait_xhr_quiet(page, quiet_ms=300, hard_timeout_ms=idle_timeout_ms)
 
+                    # SPA hydration 강화 (2026-05-25 plan): strict marker (Nuxt/Next/Vuex) 감지 시
+                    # 추가 1500ms quiet 대기 후 capture. Radiolab 류 async data fetch
+                    # (api.wnyc.org/...recent_stories/...) 완료 전 capture 회피.
+                    # 짧은 quick-check 로 마커만 확인 (cost 적음, html head/body 초반에 위치).
+                    spa_extra_wait_note: Optional[str] = None
+                    try:
+                        quick = page.content()[:50_000]
+                        if _has_spa_hydration_marker(quick):
+                            _wait_xhr_quiet(page, quiet_ms=1500, hard_timeout_ms=3000)
+                            spa_extra_wait_note = "spa_hydration_extra_wait:1500ms"
+                    except Exception:
+                        pass
+
                     body, html_truncated = _capture_page_content(page)
                     try:
                         page.screenshot(path=str(screenshot_path), full_page=False)
@@ -437,6 +468,8 @@ def fetch_with_capture(
     notable.append(f"har: {har_path.name}")
     if "wait_note" in locals() and wait_note:
         notable.append(wait_note)
+    if "spa_extra_wait_note" in locals() and spa_extra_wait_note:
+        notable.append(spa_extra_wait_note)
     if html_truncated:
         notable.append(f"html_truncated: {len(body or '')}/{_MAX_CAPTURED_HTML_CHARS} chars")
     if captured_nav_headers:
