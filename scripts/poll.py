@@ -15,10 +15,11 @@ ADR 0016 (per-site isolation):
 
 흐름(사이트별, 동시):
   1. output/poll_state/<slug>.json 읽기 (slug, url, config_path, seen_post_ids, consecutive_breakage)
-  2. **구독자 체크** — bot.sqlite3 의 subscriptions 에 그 slug 가 1건도 없으면 *lurking* 모드:
-     - fetch_list 는 함(seen 갱신 + 깨짐 판정 + 자가복구 위해)
-     - 본문 fetch 안 함, collected/*.new.json 안 씀 → 발송 단계(deliver_due.py)가 자동 스킵 (LLM/Discord 호출 0)
-     - 등록 ≠ 구독: /preview 만 한 사이트·실험 등록 사이트는 비용 0
+  2. **구독자 체크** — bot.sqlite3 의 subscriptions 에 그 slug 가 1건도 없으면 *완전 skip*
+     (2026-05-25 사용자 결정. 이전 default = "lurking" = fetch_list 만 했음 — chromium
+     sem=1 직렬 줄에서 wall 412s 의 99% 잡아먹음. seen 갱신·자가복구 가치 ≈ 0).
+     - `--all` 또는 `--sites <slug>` 로 명시 시 lurking 도 포함 — 디버그·재계산용.
+     - lurking 모드 안에서도 본문 fetch 는 안 함, collected/*.new.json 안 씀 (옛 동작 유지).
   3. config 로 ConfigAdapter 만들어 fetch_list
      - 에러 / 0건(이전엔 글 있었는데) / 포맷 급변(post_id 모양 이상·title 대부분 빔) → 깨짐 신호
   4. 깨짐 아니면: new = 현재 post_id − seen.  (lurking 아니면) 새 글 본문 fetch(상한 --max-new-articles, polite_sleep).
@@ -577,6 +578,21 @@ async def _run_inner(args) -> int:
         raise
     db_lock = asyncio.Lock()
 
+    # 2026-05-25 사용자 결정 — 구독자 0 인 사이트(lurking) 는 fetch_list 도 안 함.
+    # 기존 default 동작 = lurking 도 fetch_list (seen 갱신 + 깨짐 감지). 그게 ~1024 사이트 wall
+    # 412s 의 99% 를 잡아먹음. seen 갱신·자가복구 가치 ≈ 0 (새 구독자 등록 시 register 가 게이트).
+    # `--all` 또는 `--sites` 명시 시는 lurking 도 포함 — 디버그·재계산용.
+    if not args.all and not args.sites:
+        states_before = len(states)
+        states = [st for st in states if st["slug"] in subscribed]
+        skipped = states_before - len(states)
+        if skipped:
+            print(f"[poll] lurking skip — 구독자 0 사이트 {skipped}개 제외 (전체 {states_before} → {len(states)})")
+        if not states:
+            print(f"[poll] 폴링 대상 0건 — 구독 등록부터 (bot.sqlite3 의 subscriptions 비어있음).")
+            db_conn.close()
+            return 0
+
     sem_chromium = asyncio.Semaphore(args.concurrency_chromium)
     sem_httpx = asyncio.Semaphore(args.concurrency_httpx)
     timeout_s = float(args.site_timeout) if args.site_timeout else POLL_SITE_TIMEOUT_S
@@ -667,7 +683,7 @@ def main(argv) -> int:
                    help="사이트당 폴링 1회에 본문 fetch 할 새 글 상한")
     p.add_argument("--no-reprobe", action="store_true", help="깨져도 reprobe 잡 enqueue 안 함(리포트만)")
     p.add_argument("--all", action="store_true",
-                   help="구독자 0 사이트도 본문 fetch + 알림(=lurking 모드 끔). 기본은 lurking — bot.sqlite3 의 subscriptions 에 1건도 없으면 fetch_list 만.")
+                   help="구독자 0 사이트도 fetch_list + 본문 fetch + 알림. 기본은 구독자 있는 사이트만 폴링 (구독자 0 = 완전 skip — 2026-05-25 사용자 결정).")
     p.add_argument("--concurrency-httpx", type=int, default=settings.poll.concurrency_httpx,
                    help="httpx_html / httpx_json 사이트 동시 fetch 상한. 가벼우니 늘려도 메모리 부담 X")
     p.add_argument("--concurrency-chromium", type=int, default=settings.poll.concurrency_chromium,
