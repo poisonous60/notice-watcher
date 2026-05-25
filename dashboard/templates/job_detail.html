@@ -25,7 +25,7 @@
     {% if fail_reason_short %}<div class="muted" style="font-size:0.85rem;margin-top:0.2rem;">{{ fail_reason_short }}</div>{% endif %}
   </dd>
   <dt>kind</dt><dd><code>{{ job.kind }}</code></dd>
-  <dt>priority</dt><dd><code>{{ job.priority }}</code> <span class="muted" style="font-size:0.8rem;">(ADR 0019 §2g: 0=user, 1=reprobe, 2=deliver_target, 3=poll_site, 4=batch-retry, 5=batch)</span></dd>
+  <dt>priority</dt><dd><code>{{ job.priority }}</code> <span class="muted" style="font-size:0.8rem;white-space:nowrap;">(ADR 0019 §2g: 0=user, 1=reprobe, 2=deliver_target, 3=poll_site, 4=batch-retry, 5=batch)</span></dd>
   <dt>via</dt><dd><code>{{ job.via }}</code></dd>
   <dt>요청자</dt>
   <dd>
