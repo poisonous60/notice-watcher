@@ -19,6 +19,8 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlsplit
 
+from engine.tracing import current_trace
+
 from .prompts import render_prompt
 from .routing import client_for
 from .llm_base import LLMClient, LLMError
@@ -153,19 +155,22 @@ def classify_index_content(*, url: str, digest: dict,
     )
     cli = client if client is not None else client_for("classify_index_content")
 
+    tr = current_trace()
     last: Optional[Exception] = None
-    for attempt in range(1, _RETRY + 1):
-        try:
-            resp = cli.generate(system_instruction=_SYSTEM, user_text=user,
-                                temperature=0.0, json_mode=True,
-                                call_site="classify_index_content", slug=slug,
-                                attempt=attempt)
-            return _parse(resp.text)
-        except LLMError as e:
-            last = e
-            if attempt < _RETRY:
-                time.sleep(2 * attempt)
-    return {"class": "?", "confidence": 0.0, "reason": f"llm_fail: {last}"}
+    with tr.span("classify_index_content", attrs={"slug": slug, "retries": _RETRY}):
+        for attempt in range(1, _RETRY + 1):
+            try:
+                with tr.span("classify_call", attrs={"attempt": attempt, "call_site": "classify_index_content"}):
+                    resp = cli.generate(system_instruction=_SYSTEM, user_text=user,
+                                        temperature=0.0, json_mode=True,
+                                        call_site="classify_index_content", slug=slug,
+                                        attempt=attempt)
+                return _parse(resp.text)
+            except LLMError as e:
+                last = e
+                if attempt < _RETRY:
+                    time.sleep(2 * attempt)
+        return {"class": "?", "confidence": 0.0, "reason": f"llm_fail: {last}"}
 
 
 __all__ = ["classify_index_content"]
