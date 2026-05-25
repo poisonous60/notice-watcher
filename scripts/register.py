@@ -55,7 +55,10 @@ from engine.digest import build_digest, classify_site_kind  # noqa: E402
 from engine.recognizers import recognize as recognize_platform, recognize_reject  # noqa: E402
 from engine.tracing import start_trace, current_trace, env_for_child  # noqa: E402
 from generate import generate_config_validated, GenerationError  # noqa: E402
+from generate.llm_base import LLMError  # noqa: E402
+from generate.prices import compute_cost as _compute_cost  # noqa: E402
 from generate.routing import resolve as _resolve_route  # noqa: E402
+from generate.usage_recorder import get_default_recorder as _get_default_recorder  # noqa: E402
 # rev 5 (register agentic): codex agentic mode is dispatched on
 # `resolve("config_generate").meta.get("mode") == "agentic"`.
 from generate.codex_agentic import (  # noqa: E402
@@ -1624,6 +1627,51 @@ async def _generate(digest: dict, *, max_attempts: int, model):
     )
 
 
+def _record_agentic_usage(slug: str, *, status: str, prompt_tokens: int,
+                          completion_tokens: int, wall_s: float,
+                          model: Optional[str] = None,
+                          raw_model: Optional[str] = None) -> None:
+    """Agentic uses Codex CLI directly, so LLMClient's recorder is bypassed."""
+    prompt_tokens = int(prompt_tokens or 0)
+    completion_tokens = int(completion_tokens or 0)
+    total_tokens = prompt_tokens + completion_tokens
+    model_name = model or _resolve_route("config_generate").model
+    cost_usd = None
+    try:
+        cost_usd = _compute_cost("codex", raw_model or model_name,
+                                 prompt_tokens, completion_tokens)
+    except Exception:  # noqa: BLE001
+        cost_usd = None
+    try:
+        _get_default_recorder().write(
+            call_site="config_generate_agentic",
+            slug=slug,
+            attempt=1,
+            provider="codex",
+            model=model_name,
+            raw_model=raw_model or model_name,
+            status=status,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            prompt_chars=0,
+            response_chars=0,
+            latency_ms=max(0, int(float(wall_s or 0.0) * 1000)),
+            cost_usd=cost_usd,
+            key_idx=None,
+        )
+    except Exception:  # noqa: BLE001 — telemetry must never break registration
+        pass
+
+
+def _set_span_attrs(span, attrs: dict) -> None:
+    for key, value in attrs.items():
+        try:
+            span.set_attr(key, value)
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def _gen_agentic(digest: dict, slug: str, url: str, failure_packet: Optional[dict] = None):
     """codex agentic mode 동기 래퍼. (config, ValidationReport) 반환 — `_gen` 과 같은 shape.
 
@@ -1641,12 +1689,41 @@ def _gen_agentic(digest: dict, slug: str, url: str, failure_packet: Optional[dic
     """
     from pathlib import Path as _Path
     repo = _Path(__file__).resolve().parent.parent
+    span_attrs = {
+        "slug": slug,
+        "url": url,
+        "auto_escalated": bool(failure_packet),
+    }
+    span_cm = current_trace().span("codex_agentic_generate", attrs=span_attrs)
+    sp = span_cm.__enter__()
     try:
         result = asyncio.run(_run_codex_agentic(
             digest=digest, slug=slug, url=url, repo=repo,
             failure_packet=failure_packet,
         ))
+        _set_span_attrs(sp, {
+            "prompt_tokens": result.prompt_tokens,
+            "completion_tokens": result.completion_tokens,
+            "total_tokens": result.prompt_tokens + result.completion_tokens,
+            "stop_reason": result.stop_reason,
+            "codex_version": result.codex_version,
+        })
     except _AgenticGenerationError as e:
+        _set_span_attrs(sp, {
+            "prompt_tokens": e.prompt_tokens,
+            "completion_tokens": e.completion_tokens,
+            "total_tokens": e.prompt_tokens + e.completion_tokens,
+            "stop_reason": e.stop_reason,
+            "codex_version": e.codex_version,
+        })
+        span_cm.__exit__(type(e), e, e.__traceback__)
+        _record_agentic_usage(
+            slug,
+            status=getattr(e, "status", "other"),
+            prompt_tokens=e.prompt_tokens,
+            completion_tokens=e.completion_tokens,
+            wall_s=e.wall_s,
+        )
         print(f"[register] agentic generate: {e.stop_reason or 'failed'} "
               f"(wall={e.wall_s:.1f}s tokens={e.prompt_tokens}+{e.completion_tokens} "
               f"codex={e.codex_version}) FAILED: {e}", flush=True)
@@ -1659,6 +1736,50 @@ def _gen_agentic(digest: dict, slug: str, url: str, failure_packet: Optional[dic
         translated.stop_reason = e.stop_reason
         translated.codex_version = e.codex_version
         raise translated from e
+    except _AgenticAuditFailError as e:
+        _set_span_attrs(sp, {"status": "audit_fail"})
+        span_cm.__exit__(type(e), e, e.__traceback__)
+        _record_agentic_usage(
+            slug,
+            status="audit_fail",
+            prompt_tokens=0,
+            completion_tokens=0,
+            wall_s=0.0,
+        )
+        raise
+    except LLMError as e:
+        _set_span_attrs(sp, {
+            "status": getattr(e, "status", "other"),
+            "prompt_tokens": getattr(e, "prompt_tokens", 0),
+            "completion_tokens": getattr(e, "completion_tokens", 0),
+            "total_tokens": (
+                int(getattr(e, "prompt_tokens", 0) or 0)
+                + int(getattr(e, "completion_tokens", 0) or 0)
+            ),
+            "stop_reason": getattr(e, "stop_reason", ""),
+            "codex_version": getattr(e, "codex_version", ""),
+        })
+        span_cm.__exit__(type(e), e, e.__traceback__)
+        _record_agentic_usage(
+            slug,
+            status=getattr(e, "status", "other"),
+            prompt_tokens=getattr(e, "prompt_tokens", 0),
+            completion_tokens=getattr(e, "completion_tokens", 0),
+            wall_s=getattr(e, "wall_s", 0.0),
+        )
+        raise
+    except Exception as e:  # noqa: BLE001
+        span_cm.__exit__(type(e), e, e.__traceback__)
+        raise
+    else:
+        span_cm.__exit__(None, None, None)
+    _record_agentic_usage(
+        slug,
+        status="ok",
+        prompt_tokens=result.prompt_tokens,
+        completion_tokens=result.completion_tokens,
+        wall_s=result.wall_s,
+    )
     print(f"[register] agentic generate: {result.stop_reason} "
           f"(wall={result.wall_s:.1f}s tokens={result.prompt_tokens}+{result.completion_tokens} "
           f"codex={result.codex_version})", flush=True)
@@ -2839,16 +2960,17 @@ def _main_inner(argv) -> int:
                           last_config=None, last_feedback=f"[FAIL] register_timeout: {e}")
         print(f"[register] ❌ 자동 처리 불가 — generate timeout. → {fp}")
         return 1
+    _config_generate_route = _resolve_route("config_generate")
+    _generation_mode = _select_generation_mode(_config_generate_route, args)
     gem_span_cm = current_trace().span("gemini_gen_validate",
                                         attrs={"slug": slug,
                                                "model_attempt1": _eff_model_init,
                                                "model_retry": _eff_model_retry,
-                                               "max_attempts": args.max_attempts})
+                                               "max_attempts": args.max_attempts,
+                                               "generation_mode": _generation_mode})
     gem_span_cm.__enter__()
     _gem_closed = False
     # rev 5+: routing.json 의 `config_generate__mode` 로 api_loop / agentic / auto 분기.
-    _config_generate_route = _resolve_route("config_generate")
-    _generation_mode = _select_generation_mode(_config_generate_route, args)
     try:
         cfg, rep = _generate_by_mode(
             _generation_mode,

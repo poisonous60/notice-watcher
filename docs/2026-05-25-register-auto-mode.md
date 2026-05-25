@@ -92,6 +92,26 @@ Dashboard validation rejects `auto` unless `config_generate` uses provider
 
 The `/control` routing UI now persists `auto` and exposes it in the mode list.
 
+## Observability Follow-Up
+
+Follow-up commit added explicit agentic observability because Codex agentic does
+not go through `LLMClient.generate()`.
+
+Dashboard `/usage`:
+
+- API-loop one-shot attempts continue to appear as `config_generate`.
+- Agentic runs now append one row as `config_generate_agentic`.
+- The row includes `provider=codex`, model, status, prompt/completion/total
+  tokens, latency, and cost when `model_prices.json` has a matching Codex price.
+
+Dashboard `/timings`:
+
+- The parent generation span keeps the historical name `gemini_gen_validate`,
+  but now includes `generation_mode` in attrs.
+- Agentic execution adds a nested `codex_agentic_generate` span.
+- That span records `auto_escalated`, prompt/completion/total tokens,
+  `stop_reason`, and `codex_version` on both success and known agentic failure.
+
 ## Files Changed In Rollout Commit
 
 - `scripts/register.py`
@@ -167,4 +187,3 @@ codex gpt-5.4-mini {'mode': 'auto'}
 - Existing dirty config changes at rollout time were intentionally not touched:
   four tracked config deletions and one untracked Django config existed before
   this work.
-

@@ -144,6 +144,148 @@ def run() -> list[tuple[str, bool, str]]:
                   cfg3 == {"agentic": True} and calls[1][0] == "agentic",
                   f"calls={calls}"))
 
+    # Agentic runs bypass LLMClient.generate(), so register.py must explicitly
+    # write usage.sqlite3 rows and timing attrs for dashboard observability.
+    class FakeRecorder:
+        def __init__(self):
+            self.rows = []
+
+        def write(self, **kw):
+            self.rows.append(kw)
+
+    class FakeSpan:
+        def __init__(self, name, attrs):
+            self.name = name
+            self.attrs = dict(attrs or {})
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            self.attrs["ok"] = exc_type is None
+            if exc_type is not None:
+                self.attrs["err_type"] = exc_type.__name__
+
+        def set_attr(self, key, value):
+            self.attrs[key] = value
+
+    class FakeTrace:
+        def __init__(self):
+            self.spans = []
+
+        def span(self, name, attrs=None):
+            sp = FakeSpan(name, attrs)
+            self.spans.append(sp)
+            return sp
+
+    async def fake_run_agentic(**kwargs):
+        return SimpleNamespace(
+            config={"agentic": True},
+            report=SimpleNamespace(ok=True),
+            stop_reason="validate_pass",
+            wall_s=12.5,
+            prompt_tokens=123,
+            completion_tokens=7,
+            codex_version="codex-cli test",
+        )
+
+    rec = FakeRecorder()
+    trace = FakeTrace()
+    orig_run_agentic = reg._run_codex_agentic
+    orig_recorder = reg._get_default_recorder
+    orig_cost = reg._compute_cost
+    orig_trace = reg.current_trace
+    reg._run_codex_agentic = fake_run_agentic
+    reg._get_default_recorder = lambda: rec
+    reg._compute_cost = lambda provider, model, prompt_tokens, completion_tokens: 0.001
+    reg.current_trace = lambda: trace
+    try:
+        cfg4, rep4 = reg._gen_agentic(
+            {"url": "https://example.com/hard"},
+            "slughard",
+            "https://example.com/hard",
+            failure_packet={"source": "api_loop_once"},
+        )
+    finally:
+        reg._run_codex_agentic = orig_run_agentic
+        reg._get_default_recorder = orig_recorder
+        reg._compute_cost = orig_cost
+        reg.current_trace = orig_trace
+    row = rec.rows[0] if rec.rows else {}
+    span = trace.spans[0] if trace.spans else None
+    cases.append(("agentic_usage_recorded",
+                  cfg4 == {"agentic": True}
+                  and getattr(rep4, "ok", False) is True
+                  and row.get("call_site") == "config_generate_agentic"
+                  and row.get("slug") == "slughard"
+                  and row.get("provider") == "codex"
+                  and row.get("raw_model") == "gpt-5.4-mini"
+                  and row.get("status") == "ok"
+                  and row.get("prompt_tokens") == 123
+                  and row.get("completion_tokens") == 7
+                  and row.get("total_tokens") == 130
+                  and row.get("latency_ms") == 12500,
+                  f"row={row}"))
+    cases.append(("agentic_timing_span_attrs",
+                  span is not None
+                  and span.name == "codex_agentic_generate"
+                  and span.attrs.get("auto_escalated") is True
+                  and span.attrs.get("prompt_tokens") == 123
+                  and span.attrs.get("completion_tokens") == 7
+                  and span.attrs.get("stop_reason") == "validate_pass"
+                  and span.attrs.get("codex_version") == "codex-cli test",
+                  f"span={None if span is None else (span.name, span.attrs)}"))
+
+    async def fake_run_agentic_fail(**kwargs):
+        raise reg._AgenticGenerationError(
+            "agent gave up",
+            last_config={"bad": True},
+            last_feedback="still failing",
+            prompt_tokens=456,
+            completion_tokens=8,
+            wall_s=20.0,
+            stop_reason="max_cycles",
+            codex_version="codex-cli fail",
+        )
+
+    rec_fail = FakeRecorder()
+    trace_fail = FakeTrace()
+    orig_run_agentic = reg._run_codex_agentic
+    orig_recorder = reg._get_default_recorder
+    orig_trace = reg.current_trace
+    reg._run_codex_agentic = fake_run_agentic_fail
+    reg._get_default_recorder = lambda: rec_fail
+    reg.current_trace = lambda: trace_fail
+    translated = None
+    try:
+        try:
+            reg._gen_agentic({"url": "https://example.com/fail"},
+                             "slugfail", "https://example.com/fail")
+        except GenerationError as e:
+            translated = e
+    finally:
+        reg._run_codex_agentic = orig_run_agentic
+        reg._get_default_recorder = orig_recorder
+        reg.current_trace = orig_trace
+    fail_row = rec_fail.rows[0] if rec_fail.rows else {}
+    fail_span = trace_fail.spans[0] if trace_fail.spans else None
+    cases.append(("agentic_failure_usage_recorded",
+                  translated is not None
+                  and getattr(translated, "prompt_tokens", None) == 456
+                  and fail_row.get("call_site") == "config_generate_agentic"
+                  and fail_row.get("status") == "other"
+                  and fail_row.get("total_tokens") == 464
+                  and fail_row.get("latency_ms") == 20000,
+                  f"translated={translated} row={fail_row}"))
+    cases.append(("agentic_failure_timing_attrs",
+                  fail_span is not None
+                  and fail_span.attrs.get("ok") is False
+                  and fail_span.attrs.get("prompt_tokens") == 456
+                  and fail_span.attrs.get("completion_tokens") == 8
+                  and fail_span.attrs.get("stop_reason") == "max_cycles"
+                  and fail_span.attrs.get("codex_version") == "codex-cli fail",
+                  f"span={None if fail_span is None else (fail_span.name, fail_span.attrs)}"))
+
     return cases
 
 
