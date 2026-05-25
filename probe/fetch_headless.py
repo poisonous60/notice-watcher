@@ -549,6 +549,43 @@ _ARTICLE_HINT_RE = re.compile(r"(view|detail|article|notice|read|thread|post|bbs
 _ID_DATA_KEY_RE = re.compile(r"(^|[-_])(id|no|seq|article|thread|data|post|board|nid|cid|aid)", re.IGNORECASE)
 
 _CONSENT_DISMISS_JS = r"""() => {
+    // Known CMP selector IDs — reject 우선(PIPA/CNIL 2025 권고: 자동 Accept = informed consent 부정).
+    // 출처: duckduckgo/autoconsent (MPL-2.0) lib/cmps/{onetrust,cookiebot,trustarc,quantcast,didomi}.ts
+    // — selector 문자열만 발췌 (factual data).
+    const KNOWN_CMP_REJECT = [
+        '#onetrust-reject-all-handler', '.ot-pc-refuse-all-handler',
+        '#CybotCookiebotDialogBodyLevelButtonLevelOptinDeclineAll',
+        '#didomi-notice-disagree-button',
+        '.qc-cmp2-summary-buttons button[mode="secondary"]',
+        '.iubenda-cs-reject-btn', '.cmplz-btn.cmplz-deny',
+    ];
+    const KNOWN_CMP_ACCEPT = [
+        '#onetrust-accept-btn-handler', '#accept-recommended-btn-handler', '.js-accept-cookies',
+        '#CybotCookiebotDialogBodyLevelButtonAccept', '#CybotCookiebotDialogBodyButtonAccept', '.h-dtcookie-accept',
+        '#truste-consent-button', '.trustarc-agree-btn',
+        '.qc-cmp2-summary-buttons button[mode="primary"]',
+        '#didomi-notice-agree-button',
+        '[data-testid="uc-accept-all-button"]',
+        '.message-component.message-button.no-children.focusable.primary-button',
+        '.cc-btn.cc-allow', '.cookie-notice-accept', '.cmplz-btn.cmplz-accept',
+        '.cli_action_button.wt-cli-accept-all-btn', '#cn-accept-cookie', '.iubenda-cs-accept-btn',
+    ];
+
+    // shadow-aware querySelector — open shadow root piercing. closed shadow root 은 표준상 접근 불가 → fail.
+    function queryDeep(sel, root) {
+        root = root || document;
+        const direct = root.querySelector(sel);
+        if (direct) return direct;
+        const all = root.querySelectorAll('*');
+        for (const el of all) {
+            if (el.shadowRoot && el.shadowRoot.mode === 'open') {
+                const found = queryDeep(sel, el.shadowRoot);
+                if (found) return found;
+            }
+        }
+        return null;
+    }
+
     const textPatterns = [
         /accept/i, /agree/i, /^ok$/i, /allow/i, /got it/i,
         /동의/, /확인/, /허용/, /수락/, /모두\s*동의/,
@@ -591,6 +628,28 @@ _CONSENT_DISMISS_JS = r"""() => {
     }
 
     let clicked = 0;
+
+    // 1) Known CMP ID — reject 먼저 (정책 안전), fail 시 accept (light-touch dismiss).
+    //    queryDeep 로 open shadow root 도 piercing. 1개 hit 면 충분 — banner 가 사라지므로.
+    for (const sel of KNOWN_CMP_REJECT) {
+        const el = queryDeep(sel);
+        if (el && visible(el)) {
+            try { el.click(); clicked += 1; } catch (_) {}
+            if (clicked >= 1) break;
+        }
+    }
+    if (clicked === 0) {
+        for (const sel of KNOWN_CMP_ACCEPT) {
+            const el = queryDeep(sel);
+            if (el && visible(el)) {
+                try { el.click(); clicked += 1; } catch (_) {}
+                if (clicked >= 1) break;
+            }
+        }
+    }
+    if (clicked > 0) return clicked;
+
+    // 2) Fallback — 기존 textPatterns + bannerLike 휴리스틱 (unknown CMP / 일반 cookie banner).
     const candidates = Array.from(document.querySelectorAll(
         '[id*="cookie" i] button, [class*="cookie" i] button,' +
         '[id*="consent" i] button, [class*="consent" i] button,' +
@@ -610,12 +669,70 @@ _CONSENT_DISMISS_JS = r"""() => {
 }"""
 
 
+_CMP_FRAME_URL_HINTS = (
+    "privacy-mgmt.com",         # Sourcepoint
+    "fundingchoicesmessages",   # Google Funding Choices
+    "cmp.quantcast.com",        # Quantcast Choice
+    "consent.cookiebot.com",    # Cookiebot iframe variant
+    "consent.trustarc.com",     # TrustArc
+    "consensu.org",             # IAB TCF iframe
+    "didomi.io",
+)
+
+
+def _dismiss_consent_in_frames(page) -> int:
+    """iframe CMP 처리 (Sourcepoint / Google Funding Choices / Quantcast 등 — main DOM 바깥).
+    main page 는 _dismiss_consent_modals 가 page.evaluate 로 직접 처리하므로 여기서 제외."""
+    dismissed = 0
+    try:
+        frames = list(page.frames)
+    except Exception:  # noqa: BLE001
+        return 0
+    main = None
+    try:
+        main = page.main_frame
+    except Exception:  # noqa: BLE001
+        main = None
+    for frame in frames:
+        if frame is main:
+            continue
+        try:
+            url = (frame.url or "").lower()
+        except Exception:  # noqa: BLE001
+            continue
+        if not any(h in url for h in _CMP_FRAME_URL_HINTS):
+            continue
+        # frame 안의 1차 reject 우선 (정책 안전), fail 시 accept 텍스트 매칭.
+        for sel in (
+            ".message-component.message-button.no-children.focusable.primary-button",  # Sourcepoint primary
+            'button[aria-label*="Consent" i]',
+            'button[aria-label*="Agree" i]',
+            'button:has-text("Consent")',
+            'button:has-text("Agree")',
+            'button:has-text("동의")',
+        ):
+            try:
+                loc = frame.locator(sel).first
+                if loc.count() and loc.is_visible(timeout=500):
+                    loc.click(timeout=2000, no_wait_after=True)
+                    dismissed += 1
+                    break
+            except Exception:  # noqa: BLE001
+                continue
+        if dismissed >= 2:
+            break
+    return dismissed
+
+
 def _dismiss_consent_modals(page) -> int:
-    """Dismiss visible cookie/consent overlays before click probing."""
+    """Dismiss visible cookie/consent overlays before click probing.
+    main page (KNOWN_CMP_REJECT/ACCEPT ID + queryDeep open-shadow piercing + 기존 휴리스틱)
+    + iframe CMP (Sourcepoint/Google Funding Choices 등 URL hint) 둘 다 처리."""
     try:
         dismissed = int(page.evaluate(_CONSENT_DISMISS_JS) or 0)
     except Exception:  # noqa: BLE001
-        return 0
+        dismissed = 0
+    dismissed += _dismiss_consent_in_frames(page)
     if dismissed > 0:
         try:
             page.wait_for_timeout(500)
