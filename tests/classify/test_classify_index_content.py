@@ -133,6 +133,15 @@ def run() -> list[tuple[str, bool, str]]:
     cases.append(("struct_rows", "반복 cluster" in h and "피드 2건" in h, f"h={h}"))
     h2 = _struct_hint({"list_candidates": {}}, "https://x.org/latest")
     cases.append(("struct_spa", "SPA" in h2, f"h2={h2}"))
+    d_view_links = {"list_candidates": {"html_repeating_patterns": [
+        {"child_count": 18, "href_pattern_guess": "https://www.plaync.com/ko-kr/board/notice/view?articleId={hex}"},
+        {"child_count": 4, "href_pattern_guess": "https://www.plaync.com/ko-kr/board/notice/view?bbsId=notice&articleId={hex}"},
+    ]}}
+    h3 = _struct_hint(d_view_links, "https://www.plaync.com/news/")
+    cases.append(("struct_view_link_cluster",
+                  "view-link cluster 2종" in h3 and "article cluster" in h3
+                  and "articleId" in h3 and "query id-like" in h3,
+                  f"h3={h3}"))
 
     # 10. register veto override 임계 (_veto_override / _classify_veto memoize / gate_only)
     import importlib.util
