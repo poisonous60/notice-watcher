@@ -1,4 +1,4 @@
-# 폴링 1회 (notice-poll.timer 가 매시 호출). chromium 락 안에서 poll.py 만 — 발송은 분리 (ADR 0006,
+# 폴링 1회 (notice-poll.timer 가 매일 08:20 호출). chromium 락 안에서 poll.py 만 — 발송은 분리 (ADR 0006,
 # 봇 1분 tick → deliver_due.py). poll_and_notify 는 legacy 이름이고 실제로 발송 안 함.
 # 설치: sudo cp deploy/notice-poll.service deploy/notice-poll.timer /etc/systemd/system/
 #       sudo systemctl daemon-reload && sudo systemctl enable --now notice-poll.timer
@@ -14,3 +14,9 @@ User=<user>
 WorkingDirectory=/home/<user>/notice-watcher
 EnvironmentFile=/home/<user>/notice-watcher/.env
 ExecStart=/home/<user>/notice-watcher/.venv/bin/python scripts/poll_and_notify.py
+# ADR 0016 — outer safety net. poll.py 의 per-site asyncio.wait_for(180s) 가 1차 가드,
+# 그게 미작동(예: signal handler 무한 hang)이면 systemd 가 SIGTERM→SIGKILL.
+# 정상 폴링 ≈ 7분(2026-05-24). 20분 = 3× 여유.
+RuntimeMaxSec=1200
+KillMode=mixed
+TimeoutStopSec=30

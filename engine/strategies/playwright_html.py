@@ -106,13 +106,18 @@ async def open_session(adapter) -> None:
 
 
 async def close_session(adapter) -> None:
+    # 각 close/stop 5s wall cap — 1단계 hang 이 다음 단계 cleanup 막지 않게 (ADR 0016 P+).
+    # cancel·playwright driver pipe 끊김 등에서도 best-effort 로 4 핸들 다 None 처리.
+    # open_session mid-hang 케이스: __aenter__ 가 partial state 만 채우고 raise/cancel 되면
+    # ConfigAdapter __aexit__ 가 호출 안 됨 → close_session 도 안 불림. 그 leak 은 systemd
+    # `KillMode=mixed` (deploy/notice-poll.service, ADR 0016 P4) 가 외곽에서 정리.
     for attr, closer in (("_page", "close"), ("_context", "close"), ("_browser", "close"), ("_pw", "stop")):
         obj = getattr(adapter, attr, None)
         if obj is None:
             continue
         try:
-            await getattr(obj, closer)()
-        except Exception:
+            await asyncio.wait_for(getattr(obj, closer)(), timeout=5.0)
+        except BaseException:  # noqa: BLE001 — Cancel 포함 다 흡수, 다음 핸들 close 진행
             pass
         setattr(adapter, attr, None)
 
