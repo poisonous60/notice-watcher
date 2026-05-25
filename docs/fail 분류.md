@@ -18,7 +18,7 @@
 | `policy_reject` | rc=2 | 사이트 정책 거부 | error |
 | `capability_blocked` | rc=5 | 차단(능력 부족) | warn |
 | `gate_reject` | rc=3 | 휴리스틱 게이트 거부 | warn |
-| `bug` | rc=-1/-2/-3/-5/-99 또는 status='failed' AND rc=0 | 시스템 결함 | error |
+| `bug` | rc=-1/-2/-3/-4/-5/-99 또는 status='failed' AND rc=0 | 시스템 결함 | error |
 
 **pseudo-kind** (catalog 외 표시값 — `pending`/`running` 은 base status, `unknown` 은 매처 모두 미스):
 
@@ -88,6 +88,7 @@
 | `chromium_lock_timeout` | Chromium 락 대기 초과 | 동시 register 가 락 대기로 timeout — concurrency 제한 확인. |
 | `subprocess_timeout` | register.py 600s timeout | subprocess 실행 시간 초과. |
 | `subprocess_exception` | subprocess 예외 | register.py 안 예외 (외부 runner 가 catch). |
+| `register_audit_violation` | agentic audit violation | codex agent 가 tmpdir 밖 repo 파일을 건드림 — system violation (NOT site fault). |
 | `attempts_limit` | 재시도 한도 초과 | BUG 마커로 재시작 한도 도달. |
 | `worker_exception` | worker 예외 | worker.py 본체 예외 (KeyError 등). |
 | `registered_but_no_state` | subprocess 성공 / state.json 미작성 | rc=0 인데 status='failed' — state 작성 race. |

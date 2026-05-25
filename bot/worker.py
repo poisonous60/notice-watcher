@@ -648,6 +648,21 @@ async def _process_job_inner(client, conn, job, dm_owner) -> None:
                     await edit_channel_message(
                         client, job["ack_channel_id"], job["ack_message_id"],
                         msg("blocked_bug", slug=slug))
+                elif rc == -4:
+                    # rev 5 신규 — codex agentic 의 audit violation. *system* violation (NOT site fault).
+                    # register.py 가 이미 `.BUG.json` 박았음. 여기서 OWNER DM alert (rc=-1/-2/-3 와 다른
+                    # 처리 — agent 가 룰 위반한 케이스라 operator 가 즉시 봐야 함, auto retry 안 됨).
+                    try:
+                        await dm_owner(
+                            f"register agentic AUDIT_FAIL — slug=`{slug}` url=`{url}`\n"
+                            f"agent 가 tmpdir 밖 파일 변경 시도. `.BUG.json` 박힘.\n"
+                            f"tail: {tail or '(no tail)'}"
+                        )
+                    except Exception as _e:  # noqa: BLE001
+                        log.warning("rc=-4 dm_owner 실패 — slug=%s err=%r", slug, _e)
+                    await edit_channel_message(
+                        client, job["ack_channel_id"], job["ack_message_id"],
+                        msg("worker_audit_violation", slug=slug))
                 elif rc == 4:
                     # url_dead (target_not_found / cert_or_dns_broken / soft_404) — register 가 이미
                     # `_save_rejected` → `.REJECTED.json` + `_prune_triage_queue` 마쳤음. rc=2/3 와 동일하게

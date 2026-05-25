@@ -19,9 +19,9 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace as dc_replace
 from pathlib import Path
-from typing import Optional
+from typing import Mapping, Optional
 
 from .codex import CodexClient
 from .gemini import GeminiClient, default_model as gemini_default_model
@@ -40,9 +40,30 @@ class _Route:
     provider: str
     model: str
     effort: Optional[str] = None  # codex reasoning effort override (low|medium|high)
+    meta: Mapping[str, str] = field(default_factory=dict)  # sidecar axes: {"mode": "agentic"}, ...
 
 
 _VALID_EFFORTS = ("low", "medium", "high")
+
+# sidecar key `<call_site>__<axis>` 의 axis 와 그 valid value whitelist.
+# free-form 금지 — 오타/미지원 축이 조용히 운영에 들어가는 것 차단 (codex review rev 3 권고).
+SIDECAR_AXIS_VALUES: dict[str, frozenset[str]] = {
+    "mode": frozenset({"api_loop", "agentic"}),
+}
+
+
+def _split_sidecar_key(key: str) -> Optional[tuple[str, str]]:
+    """`<base>__<axis>` 형태면 (base, axis) 반환. 아니면 None.
+    axis 가 whitelist 에 없으면 None (조용히 무시 → 잘못 적힌 sidecar 가 routing 깨뜨리지 않게).
+    """
+    if "__" not in key:
+        return None
+    base, _, axis = key.rpartition("__")
+    if not base or not axis:
+        return None
+    if axis not in SIDECAR_AXIS_VALUES:
+        return None
+    return base, axis
 
 
 def _parse_target(s: str) -> _Route:
@@ -94,12 +115,27 @@ def _reload_if_changed() -> None:
     except (OSError, json.JSONDecodeError):
         return  # 파싱 실패면 기존 캐시 유지 (잘못된 편집이 운영 중단시키지 않게)
     out: dict[str, _Route] = {}
+    # 두 패스: 1) 기본 call_site → _Route, 2) sidecar key `<base>__<axis>` 가 base 의 meta 채움.
+    sidecars: dict[str, dict[str, str]] = {}
     for k, v in data.items():
-        if isinstance(v, str) and v.strip():
-            try:
-                out[k] = _parse_target(v)
-            except ValueError:
-                continue
+        if not isinstance(v, str) or not v.strip():
+            continue
+        sk = _split_sidecar_key(k)
+        if sk is not None:
+            base, axis = sk
+            val = v.strip()
+            if val not in SIDECAR_AXIS_VALUES[axis]:
+                continue  # whitelist 밖 값 무시 — runtime 깨지지 않게
+            sidecars.setdefault(base, {})[axis] = val
+            continue
+        try:
+            out[k] = _parse_target(v)
+        except ValueError:
+            continue
+    # sidecar 박기 — base call_site 가 매핑돼 있을 때만 의미 있음. 없으면 무시.
+    for base, axes in sidecars.items():
+        if base in out:
+            out[base] = dc_replace(out[base], meta=axes)
     _cache_table = out
     _cache_mtime = mt
     _client_cache.clear()
@@ -192,4 +228,5 @@ class FallbackClient(LLMClient):
             )
 
 
-__all__ = ["client_for", "resolve", "set_process_override"]
+__all__ = ["client_for", "resolve", "set_process_override",
+           "SIDECAR_AXIS_VALUES", "_split_sidecar_key"]

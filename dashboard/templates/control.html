@@ -31,6 +31,7 @@
         <th>call_site</th>
         <th>모델</th>
         <th>reasoning effort<br><span class="muted" style="font-weight:normal;font-size:0.76rem;">codex 전용</span></th>
+        <th>register mode<br><span class="muted" style="font-weight:normal;font-size:0.76rem;">config_generate 만, codex 전용</span></th>
       </tr>
     </thead>
     <tbody>
@@ -66,6 +67,18 @@
             <option value="{{ e }}" {{ 'selected' if sel_effort==e else '' }}>{{ e }}</option>
             {% endfor %}
           </select>
+        </td>
+        <td>
+          {% set sel_mode = ctrl.routing.current_mode.get(key) if is_override else ctrl.routing.effective_mode.get(key) %}
+          {% if key == 'config_generate' %}
+          <select name="{{ key }}__mode" style="width:100%;margin:0;">
+            {% for m in ctrl.routing.modes %}
+            <option value="{{ m }}" {{ 'selected' if sel_mode==m else '' }}>{{ m }}</option>
+            {% endfor %}
+          </select>
+          {% else %}
+          <span class="muted" style="font-size:0.8rem;">—</span>
+          {% endif %}
         </td>
       </tr>
       {% endfor %}

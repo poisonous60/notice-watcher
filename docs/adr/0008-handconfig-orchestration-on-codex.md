@@ -82,7 +82,7 @@
 
 ## 미해결 (후속 검증)
 
-- N100 에 `codex login` 됐는지 — 안 되면 batch config-gen 이 routing=codex 라도 FallbackClient 로 gemini 행 (`generate/routing.py:128`). batch 도 OpenAI 로 굳히려면 확인.
+- ✅ N100 `codex login` 됐는지 (2026-05-25, 사용자 확인) — 풀림. routing=codex 가 fallback 안 거치고 직접 동작. `generate/routing.py:128` 경로는 인증 실패 시 fallback 이지만 현재 N100 이 인증돼 있음. ADR 0020 register-agentic 도 이 인증 기반으로 동작.
 - ✅ end-to-end 검증 완료 (2026-05-21): `community.cloudflare.com`(Discourse, gen_fail) 을 codex CLI 직접으로 end-to-end 처리 → commit 4479f22 배포. 190k 토큰 전부 OpenAI(Claude orch 0). 위임 하네스(↑)로 codify.
 - ✅ 병렬 위임 검증 완료 (2026-05-21-fedi): 6 청크 병렬/직렬, same-file race 0(disjoint 배정), diff-review 게이트로 enforcement. ↑ "병렬 위임" 절로 codify.
 - batch 청크 동시 실행 cap(`codex_batch.py --max`)은 현재 안내용 — 실제 cap(작업 큐) 미구현. 고볼륨 시 OpenAI throttle 관측 후 결정.

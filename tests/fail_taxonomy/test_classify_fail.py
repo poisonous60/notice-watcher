@@ -32,6 +32,7 @@ CASES: list[tuple[str, tuple[Optional[str], Optional[int], Optional[str]], str, 
     ("bug_-1", ("failed", -1, "chromium 락 대기 초과: ..."), "bug", "chromium_lock_timeout"),
     ("bug_-2", ("failed", -2, "register.py 실행 시간 초과 (600s)"), "bug", "subprocess_timeout"),
     ("bug_-3", ("failed", -3, "register.py 실행 중 예외: RuntimeError(...)"), "bug", "subprocess_exception"),
+    ("bug_-4", ("failed", -4, "register_audit_violation: agent wrote outside its workdir"), "bug", "register_audit_violation"),
     ("bug_-5", ("failed", -5, "(BUG: 재시작 2회로 한도 2 도달)"), "bug", "attempts_limit"),
     ("bug_-99", ("failed", -99, "worker exception: KeyError(...)"), "bug", "worker_exception"),
 

@@ -56,6 +56,13 @@ from engine.recognizers import recognize as recognize_platform, recognize_reject
 from engine.tracing import start_trace, current_trace, env_for_child  # noqa: E402
 from generate import generate_config_validated, GenerationError  # noqa: E402
 from generate.routing import resolve as _resolve_route  # noqa: E402
+# rev 5 (register agentic): codex agentic mode is dispatched on
+# `resolve("config_generate").meta.get("mode") == "agentic"`.
+from generate.codex_agentic import (  # noqa: E402
+    run_codex_agentic as _run_codex_agentic,
+    AuditFailError as _AgenticAuditFailError,
+    GenerationError as _AgenticGenerationError,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIGS_DIR = ROOT / "configs"
@@ -1617,6 +1624,25 @@ async def _generate(digest: dict, *, max_attempts: int, model):
     )
 
 
+def _gen_agentic(digest: dict, slug: str, url: str):
+    """codex agentic mode 동기 래퍼. (config, ValidationReport) 반환 — `_gen` 과 같은 shape.
+
+    실패 처리:
+    - AuditFailError → 호출자가 잡아서 rc=-4 + .BUG.json
+    - GenerationError → 호출자가 잡아서 rc=1 + .FAILED.json (기존 api_loop 와 같은 path)
+    - 기타 LLM 예외 → bubble up (위와 같음)
+    """
+    from pathlib import Path as _Path
+    repo = _Path(__file__).resolve().parent.parent
+    result = asyncio.run(_run_codex_agentic(
+        digest=digest, slug=slug, url=url, repo=repo,
+    ))
+    print(f"[register] agentic generate: {result.stop_reason} "
+          f"(wall={result.wall_s:.1f}s tokens={result.prompt_tokens}+{result.completion_tokens} "
+          f"codex={result.codex_version})", flush=True)
+    return result.config, result.report
+
+
 def _gen(digest: dict, *, max_attempts: int, model):
     """동기 래퍼 (asyncio.run)."""
     return asyncio.run(_generate(digest, max_attempts=max_attempts, model=model))
@@ -2702,8 +2728,28 @@ def _main_inner(argv) -> int:
                                                "max_attempts": args.max_attempts})
     gem_span_cm.__enter__()
     _gem_closed = False
+    # rev 5: routing.json 의 `config_generate__mode == "agentic"` 면 codex agentic 분기.
+    _config_generate_route = _resolve_route("config_generate")
+    _use_agentic = (not args.model
+                    and _config_generate_route.provider == "codex"
+                    and _config_generate_route.meta.get("mode") == "agentic")
     try:
-        cfg, rep = _gen(digest, max_attempts=args.max_attempts, model=args.model)
+        if _use_agentic:
+            cfg, rep = _gen_agentic(digest, slug, url)
+        else:
+            cfg, rep = _gen(digest, max_attempts=args.max_attempts, model=args.model)
+    except _AgenticAuditFailError as e:
+        _save_bug(slug, url, rc=-4,
+                  reason="register_audit_violation: agent wrote outside its workdir",
+                  tail=f"violations={getattr(e, 'violations', [])[:10]}")
+        print(f"\n[register] AUDIT_FAIL — agent wrote outside tmpdir. "
+              f"violations={getattr(e, 'violations', [])[:5]}", flush=True)
+        try:
+            gem_span_cm.__exit__(type(e), e, e.__traceback__)
+            _gem_closed = True
+        except Exception:  # noqa: BLE001
+            _gem_closed = True
+        return -4
     except GenerationError as e:
         blocked_reason = _generation_error_capability_blocked_reason(e)
         if blocked_reason:
@@ -2782,8 +2828,17 @@ def _main_inner(argv) -> int:
             except Exception:  # noqa: BLE001
                 pass
 
+    # rev 5: atomic publish via tempfile + Path.replace.
+    # 같은 slug 동시 register 시 last-writer-wins 지만 torn read (polling 워커가 반쯤 쓴 JSON 보는 것) 차단.
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _final_text = json.dumps(cfg, ensure_ascii=False, indent=2) + "\n"
+    with tempfile.NamedTemporaryFile(
+        "w", dir=out_path.parent, prefix=f".{out_path.stem}.", suffix=".json.tmp",
+        delete=False, encoding="utf-8",
+    ) as _tmp_f:
+        _tmp_f.write(_final_text)
+        _tmp_path = Path(_tmp_f.name)
+    _tmp_path.replace(out_path)
     # 일반 파이프라인은 validate 단계에서 이미 fetch_article 시도 — rep.article_bodies 가 결과.
     # 모두 0 자면 body_empty True (validate 가 "전부 접근제한" soft-OK 로 통과시킨 케이스).
     if rep.article_bodies:

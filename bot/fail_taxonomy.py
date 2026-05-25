@@ -111,7 +111,7 @@ def _race_subkind(_tail: str, rc: Optional[int]) -> Optional[str]:
 
 def _bug_rc_extra(_s: str, rc: Optional[int], _t: str) -> bool:
     """bug FailKind 의 status/rc 매칭 — 음수 rc 또는 race."""
-    return rc in (-1, -2, -3, -5, -99) or (_s == "failed" and rc == 0)
+    return rc in (-1, -2, -3, -4, -5, -99) or (_s == "failed" and rc == 0)
 
 
 # `_policy_check` 가 verdict TARGET_NOT_FOUND / CERT_OR_DNS_BROKEN 일 때 박는 tail 토큰들.
@@ -331,7 +331,7 @@ FAIL_CATALOG: tuple[FailKind, ...] = (
         severity="error",
         rc=None,
         rc_extra=_bug_rc_extra,
-        rc_doc="rc=-1/-2/-3/-5/-99 또는 status='failed' AND rc=0",
+        rc_doc="rc=-1/-2/-3/-4/-5/-99 또는 status='failed' AND rc=0",
         subkinds=(
             Subkind("chromium_lock_timeout", "Chromium 락 대기 초과",
                     "동시 register 가 락 대기로 timeout — concurrency 제한 확인.",
@@ -342,6 +342,9 @@ FAIL_CATALOG: tuple[FailKind, ...] = (
             Subkind("subprocess_exception", "subprocess 예외",
                     "register.py 안 예외 (외부 runner 가 catch).",
                     _rc_eq(-3, "subprocess_exception")),
+            Subkind("register_audit_violation", "agentic audit violation",
+                    "codex agent 가 tmpdir 밖 repo 파일을 건드림 — system violation (NOT site fault).",
+                    _rc_eq(-4, "register_audit_violation")),
             Subkind("attempts_limit", "재시도 한도 초과",
                     "BUG 마커로 재시작 한도 도달.",
                     _rc_eq(-5, "attempts_limit")),

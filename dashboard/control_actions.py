@@ -255,9 +255,38 @@ def known_models() -> list[str]:
 def validate_routing(data: dict) -> Optional[str]:
     if not isinstance(data, dict):
         return "JSON 객체 (dict) 가 아닙니다."
+    # rev 5 register-agentic: sidecar key `<call_site>__<axis>` 허용. whitelist 만.
+    try:
+        from generate.routing import SIDECAR_AXIS_VALUES
+    except ImportError:
+        SIDECAR_AXIS_VALUES = {"mode": frozenset({"api_loop", "agentic"})}
     for k, v in data.items():
         if k.startswith("_") and k != "_default":
             continue  # _comment 같은 키 허용
+        # sidecar key: <base>__<axis>
+        if "__" in k:
+            base, _, axis = k.rpartition("__")
+            if not base or not axis:
+                return f"잘못된 sidecar key: {k!r}"
+            if base not in _VALID_CALL_SITES:
+                return f"알 수 없는 call_site (sidecar base): {base!r}"
+            if axis not in SIDECAR_AXIS_VALUES:
+                return f"알 수 없는 sidecar axis {axis!r} (허용: {sorted(SIDECAR_AXIS_VALUES)})"
+            val = v.strip() if isinstance(v, str) else v
+            allowed = SIDECAR_AXIS_VALUES[axis]
+            if val not in allowed:
+                return f"{k}: 값 {val!r} 이 허용 값 {sorted(allowed)} 에 없음"
+            # mode=agentic 은 provider=codex 강제. base 의 provider 가 다르면 reject.
+            if axis == "mode" and val == "agentic":
+                base_val = data.get(base)
+                if not isinstance(base_val, str) or ":" not in base_val:
+                    return (f"{k}=agentic 인데 {base} 의 provider:model 매핑이 없음 — "
+                            f"먼저 {base} 에 codex:* 모델 박아라")
+                base_provider = base_val.split(":", 1)[0].strip()
+                if base_provider != "codex":
+                    return (f"{k}=agentic 은 provider=codex 일 때만 의미 — "
+                            f"{base} provider={base_provider!r} 와 충돌")
+            continue
         if k not in _VALID_CALL_SITES:
             return f"알 수 없는 call_site: {k!r}. 허용: {sorted(_VALID_CALL_SITES)}"
         if not isinstance(v, str):
@@ -277,22 +306,31 @@ def validate_routing(data: dict) -> Optional[str]:
 
 
 def build_routing_form(form: dict) -> dict:
-    """form_data → {call_site: 'provider:model' 또는 'provider:model#effort'}.
+    """form_data → {call_site: 'provider:model' 또는 'provider:model#effort'} + sidecar keys.
 
-    각 call_site 의 모델 select(name=call_site) + effort select(name=f'{call_site}__effort').
-    effort 는 codex 모델에만 붙임 (그 외 무시). 빈 모델은 '' → save_routing 이 매핑 제거.
+    각 call_site 의 모델 select(name=call_site) + effort select(name=f'{call_site}__effort') +
+    mode select(name=f'{call_site}__mode', 'api_loop'/'agentic' 또는 빈값='api_loop' default).
+    빈 모델은 '' → save_routing 이 매핑 제거. mode=api_loop (default) 면 sidecar 도 제거.
     """
     out: dict[str, str] = {}
     for cs in _VALID_CALL_SITES:
         model = (form.get(cs) or "").strip()
         if not model:
             out[cs] = ""
+            # 모델 매핑 제거 시 sidecar 도 같이 제거.
+            out[f"{cs}__mode"] = ""
             continue
         effort = (form.get(f"{cs}__effort") or "").strip().lower()
         if effort in REASONING_EFFORTS and model.split(":", 1)[0].strip() == "codex":
             out[cs] = f"{model}#{effort}"
         else:
             out[cs] = model
+        # mode sidecar. 빈값 또는 'api_loop' 는 default 라 제거 (routing.json 깔끔히 유지).
+        mode = (form.get(f"{cs}__mode") or "").strip().lower()
+        if mode == "agentic":
+            out[f"{cs}__mode"] = "agentic"
+        else:
+            out[f"{cs}__mode"] = ""
     return out
 
 
@@ -619,16 +657,28 @@ async def gather_state(*, load_remote: bool = False) -> dict:
         else:
             r = _routing.resolve(cs)
         effective[cs] = f"{r.provider}:{r.model}" + (f"#{r.effort}" if r.effort else "")
-    # 모델/effort 를 분리해 둠 — 템플릿이 model select 와 effort select 를 각각 채우게.
+    # 모델/effort/mode 를 분리해 둠 — 템플릿이 model/effort/mode select 를 각각 채우게.
     current_model: dict[str, str] = {}
     current_effort: dict[str, str] = {}
+    current_mode: dict[str, str] = {}
     effective_model: dict[str, str] = {}
     effective_effort: dict[str, str] = {}
+    effective_mode: dict[str, str] = {}
     for cs, _ in CALL_SITES:
         cm, ce = split_routing_value(routing_map.get(cs, ""))
         current_model[cs], current_effort[cs] = cm, ce
+        current_mode[cs] = (routing_map.get(f"{cs}__mode") or "").strip().lower()
         em, ee = split_routing_value(effective.get(cs, ""))
         effective_model[cs], effective_effort[cs] = em, ee
+        # effective mode — routing.resolve() 의 meta 에서 (default api_loop).
+        try:
+            if cs == "_default":
+                _r = _routing.resolve("__nonexistent_for_default__")
+            else:
+                _r = _routing.resolve(cs)
+            effective_mode[cs] = _r.meta.get("mode") or "api_loop"
+        except Exception:  # noqa: BLE001
+            effective_mode[cs] = "api_loop"
     state = {
         "routing": {
             "local_present": ROUTING_PATH.exists(),
@@ -636,10 +686,13 @@ async def gather_state(*, load_remote: bool = False) -> dict:
             "effective": effective,                # {call_site: 'provider:model[#effort]'} — 실제 적용 (override 없으면 fallback)
             "current_model": current_model,        # override 의 모델 부분만
             "current_effort": current_effort,      # override 의 effort 부분만 ('' = 미지정)
+            "current_mode": current_mode,          # override 의 mode sidecar ('' or 'agentic')
             "effective_model": effective_model,
             "effective_effort": effective_effort,
+            "effective_mode": effective_mode,      # 'api_loop' (default) or 'agentic'
             "models":  known_models(),             # model dropdown 옵션
             "efforts": REASONING_EFFORTS,          # effort dropdown 옵션 (codex 전용)
+            "modes":   ["api_loop", "agentic"],   # mode dropdown 옵션 (codex 전용)
             "call_sites": CALL_SITES,
         },
         "runtime": {

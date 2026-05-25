@@ -165,6 +165,91 @@ def run() -> list[tuple[str, bool, str]]:
         f"raised correctly: {raised}",
     ))
 
+    # ----- 6. sidecar `<call_site>__mode` 파싱 (rev 5 register-agentic) -----
+    p6 = _tmp_routing({
+        "config_generate": "codex:gpt-5.4-mini#low",
+        "config_generate__mode": "agentic",
+    })
+    _reset_routing_to(p6)
+    r6 = routing.resolve("config_generate")
+    cases.append((
+        "sidecar_mode_agentic",
+        r6.provider == "codex" and r6.meta.get("mode") == "agentic",
+        f"got provider={r6.provider} meta={dict(r6.meta)}",
+    ))
+
+    # ----- 7. sidecar value whitelist 밖 → 무시 -----
+    p7 = _tmp_routing({
+        "config_generate": "codex:gpt-5.4-mini",
+        "config_generate__mode": "weird_value",
+    })
+    _reset_routing_to(p7)
+    r7 = routing.resolve("config_generate")
+    cases.append((
+        "sidecar_invalid_value_ignored",
+        "mode" not in r7.meta,
+        f"got meta={dict(r7.meta)}",
+    ))
+
+    # ----- 8. sidecar axis 밖 → 무시 -----
+    p8 = _tmp_routing({
+        "config_generate": "codex:gpt-5.4-mini",
+        "config_generate__unknown_axis": "anything",
+    })
+    _reset_routing_to(p8)
+    r8 = routing.resolve("config_generate")
+    cases.append((
+        "sidecar_unknown_axis_ignored",
+        "unknown_axis" not in r8.meta,
+        f"got meta={dict(r8.meta)}",
+    ))
+
+    # ----- 9. _split_sidecar_key helper -----
+    cases.append((
+        "split_sidecar_key_valid",
+        routing._split_sidecar_key("config_generate__mode") == ("config_generate", "mode"),
+        f"got {routing._split_sidecar_key('config_generate__mode')}",
+    ))
+    cases.append((
+        "split_sidecar_key_unknown_axis",
+        routing._split_sidecar_key("config_generate__weird") is None,
+        f"got {routing._split_sidecar_key('config_generate__weird')}",
+    ))
+    cases.append((
+        "split_sidecar_key_no_double_underscore",
+        routing._split_sidecar_key("config_generate") is None,
+        f"got {routing._split_sidecar_key('config_generate')}",
+    ))
+
+    # ----- 10. dashboard validator: codex+agentic OK, gemini+agentic reject -----
+    from dashboard.control_actions import validate_routing as _validate
+    cases.append((
+        "validator_codex_agentic_ok",
+        _validate({"config_generate": "codex:gpt-5.4-mini",
+                   "config_generate__mode": "agentic"}) is None,
+        "should accept",
+    ))
+    err_msg = _validate({"config_generate": "gemini:flash",
+                         "config_generate__mode": "agentic"})
+    cases.append((
+        "validator_gemini_agentic_reject",
+        err_msg is not None and "provider=codex" in (err_msg or ""),
+        f"got err={err_msg!r}",
+    ))
+    err_msg2 = _validate({"config_generate__mode": "agentic"})
+    cases.append((
+        "validator_orphan_sidecar_reject",
+        err_msg2 is not None,
+        f"got err={err_msg2!r}",
+    ))
+    err_msg3 = _validate({"config_generate": "codex:m",
+                          "config_generate__mode": "weird"})
+    cases.append((
+        "validator_invalid_mode_value_reject",
+        err_msg3 is not None and "허용 값" in (err_msg3 or ""),
+        f"got err={err_msg3!r}",
+    ))
+
     # cleanup
     _reset_routing_to(Path("/no/such/file"))
 

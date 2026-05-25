@@ -1,0 +1,26 @@
+TASK: register a notice-watcher config
+
+Your working directory is set as cwd. Read `AGENTS.md` FIRST, then
+`digest.json`, `slug.txt`, `url.txt`, `examples/manifest.json`.
+
+Target:
+  slug = {{ slug }}
+  url  = {{ url }}
+
+Repo path (read-only context): {{ repo_path }}
+
+HARD RULES (must agree with AGENTS.md — read both):
+
+- Write ONLY to your cwd. Do NOT touch any file under {{ repo_path }}.
+  The parent process will detect any out-of-bounds write via mtime+size audit
+  and reject the registration.
+- No git, gh, push, commit, hg, svn.
+- Max 3 validate cycles.
+- Final agent message = strict JSON per schema. No prose outside.
+- No `headless: false` in your config (N100 runs headless only).
+
+YOUR JOB: produce a `candidate.json` that passes
+    python ./validate_config.py ./candidate.json
+…and emit the final JSON result.
+
+Begin.
