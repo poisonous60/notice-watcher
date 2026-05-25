@@ -1,0 +1,144 @@
+{
+  "version": 1,
+  "site": "www.laliga.com",
+  "board": "en-GB-news",
+  "strategy": "playwright_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-GB,en;q=0.9"
+  },
+  "timeout": 20,
+  "nav_timeout_ms": 30000,
+  "idle_timeout_ms": 3000,
+  "polite_sleep": {
+    "min": 5,
+    "max": 6
+  },
+  "list": {
+    "url_template": "https://www.laliga.com/en-GB/news",
+    "pagination": {
+      "kind": "none"
+    },
+    "wait_selector": "div[data-event-action='UltimasNoticias'] a[href*='/en-GB/news/']",
+    "row_selector": "div[data-event-action='UltimasNoticias']",
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a[href*='/en-GB/news/']",
+          "attr": "href",
+          "transform": [
+            [
+              "strip_query_fragment"
+            ],
+            [
+              "regex_extract",
+              "/en-GB/news/([^/?#]+)"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "div[class*='NoHeader'] p",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a[href*='/en-GB/news/']",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://www.laliga.com"
+            ],
+            [
+              "strip_query_fragment"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "time",
+          "text": true,
+          "transform": [
+            [
+              "regex_extract",
+              "\\d{2}\\.\\d{2}\\.\\d{4}",
+              0
+            ],
+            [
+              "iso8601",
+              [
+                "%d.%m.%Y"
+              ],
+              "+01:00"
+            ]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "css",
+          "selector": "div[class*='NewCompetitionTitle'] p",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "p:nth-of-type(4)",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "wait_selector": "article",
+    "content": [
+      {
+        "from": "css",
+        "selector": "article",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "h1",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "_source_url": "https://www.laliga.com/en-GB/news",
+  "_note": "LALIGA news is rendered enough for browser extraction but the batch probe timed out. Use headless playwright_html with wait_selector on rendered news rows; no headed mode or storage state is required."
+}
