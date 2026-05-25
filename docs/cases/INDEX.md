@@ -2,10 +2,12 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 313 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 315 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
+| [`host_pubg-com_en_12a87e3e`](host_pubg-com_en_12a87e3e.md) | ✅ 등록 — Vue cookie-banner + scoped-row 캡처/추출 보정 + 수동 config | 2026-05-26 | C | cookie_modal_click_intercept, vue_scoped_row_miss | https://www.pubg.com/en/news |
+| [`host_plaync-com_ko-kr_a0ec8736`](host_plaync-com_ko-kr_a0ec8736.md) | ✅ view-link cluster 분류 개선 + PlayNC 공지 config 등록 | 2026-05-26 | A+C | agent_self_veto_view_link_misclassified, kr_cms_view_url_pattern | https://www.plaync.com/ko-kr/board/notice/list |
 | [`host_usopen-org_en_US_ad97acdf`](host_usopen-org_en_US_ad97acdf.md) | ✅ 수동 config 등록 (relatedcontent JSON API) | 2026-05-25 | none | err_http2_protocol_error, render_navigation_failed | https://www.usopen.org/en_US/news/index.html |
 | [`host_the-afc-com_en_6207897b`](host_the-afc-com_en_6207897b.md) | ✅ 수동 config 등록 (RSS fallback, body optional) | 2026-05-25 | none | article_body_len, brittle_article_selector, rss_available | https://www.the-afc.com/en/about_afc/news.html |
 | [`host_oxide-computer_podcast_9f69bff0`](host_oxide-computer_podcast_9f69bff0.md) | ✅ 자동생성 성공 (옵션 A site_kind=hybrid med — N100 register 시도 2 PASS 30건). handcrafted config 도 보존 | 2026-05-25 | C+A+D+F | article_body_len, audio_share_host | https://oxide.computer/podcast/rss.xml |
@@ -327,8 +329,9 @@
 | layer | count |
 |---|---|
 | (미기재) | 36 |
+| A+C | 1 |
 | B | 1 |
-| C | 17 |
+| C | 18 |
 | C+A | 1 |
 | C+A+D | 2 |
 | C+A+D+F | 1 |
@@ -357,11 +360,11 @@
 | httpx_json (미적용 — 콘텐츠 0) | 1 |
 | mixed | 1 |
 | none | 41 |
-| playwright_html | 44 |
+| playwright_html | 46 |
 | rejected | 1 |
 | rss | 1 |
 
 ### 최근 90일 (≥ 2026-02-24)
 
-케이스 313 건.
+케이스 315 건.
 
