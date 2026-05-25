@@ -82,11 +82,13 @@ dev box:
    (pre-push hook 이 probe_smoke --stage 3 --stage 5 자동 실행)
 ```
 
-N100:
+N100 (ADR 0018 — cron×commit race 가드 wrapper):
 ```
-3. ssh $DEPLOY_HOST 'cd ~/notice-watcher && git pull --ff-only'
-4. (adapters/·engine/·scripts/notify.py·bot/ 변경 시) 'systemctl --user restart notice-bot.service'
-5. (requirements.txt 변경 시) '.venv/bin/pip install -r requirements.txt' (restart 전)
+3. ssh $DEPLOY_HOST 'bash ~/notice-watcher/scripts/n100_deploy.sh'
+   # wrapper 가 notice-poll.timer stop → 진행 중 service 끝나기 대기 (최대 1800s) → git pull
+   #   → requirements 변경 시 pip install → bot 코드 변경 시 notice-bot.service restart
+   #   → notice-poll.timer start. EXIT trap 이 timer 영구 stop 방지.
+   # raw `git pull --ff-only` 직접 호출 deprecated (2026-05-25 incident race).
 ```
 
 대시보드(dev 전용) N100 *배포 안 됨*.

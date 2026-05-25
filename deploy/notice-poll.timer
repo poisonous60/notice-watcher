@@ -3,6 +3,9 @@
 # **daily 인 이유**: 사이트 정중함(robots/rate-limit) + N100 부하. 시간당 폴링 X (2026-05-25 사용자
 #   결정. ADR 0016 §7 참조). 사용자 발송 시각이 08:30 기본이라 08:20 폴링이 그 직전 신선 데이터 공급.
 # notify_empty('새 공지 없음') 도 발송창에서 처리 — 폴링 시각과 분리됨.
+# **deploy 시 주의** (ADR 0018): git pull 은 항상 `scripts/n100_deploy.sh` 로. 그 wrapper 가
+#   이 timer 를 stop + 진행 중 service 끝나기 대기 + pull + restart. raw `git pull` 직접 호출은
+#   cron × commit race (2026-05-25 incident) 재발 위험.
 [Unit]
 Description=Run notice poll daily (08:20 KST) — ADR 0006/0016
 

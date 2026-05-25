@@ -71,11 +71,12 @@ dev box:
    (pre-push hook 이 probe_smoke --stage 3 --stage 5 자동 실행)
 ```
 
-N100:
+N100 (ADR 0018 — cron×commit race 가드 wrapper):
 ```
-3. ssh $DEPLOY_HOST 'cd ~/notice-watcher && git pull --ff-only'
-4. (adapters/·engine/·scripts/notify.py·bot/ 변경 시) 'systemctl --user restart notice-bot.service'
-5. (requirements.txt 변경 시) '.venv/bin/pip install -r requirements.txt' (restart 전)
+3. ssh $DEPLOY_HOST 'bash ~/notice-watcher/scripts/n100_deploy.sh'
+   # wrapper 가 notice-poll.timer stop → 진행 중 service 끝나기 대기 (최대 1800s) → git pull
+   #   → requirements 변경 시 pip install → bot 코드 변경 시 notice-bot.service restart
+   #   → notice-poll.timer start. raw `git pull` 직접 호출 금지 (race window).
 ```
 
 대시보드(dev 전용) N100 *배포 안 됨*.
@@ -233,3 +234,5 @@ codex 위임은 이미 `scripts/codex_handoff.py --worktree` 로 자동 격리 (
 - `docs/디스코드 메시지 톤 가이드.md` — 봇 사용자 향 메시지 톤·문체·포맷 룰 (해요체·이모지 어휘·체크리스트)
 - `docs/codex 위임 가이드.md` — 일반 작업을 Codex CLI 로 위임하는 기준·절차 (언제 YES/NO·entry/middle/exit·diff 게이트). batch/hand-config 외 작업용. ADR 0008 의 운영 가이드. ⚠ **codex 위임 = `scripts/codex_handoff.py {generic|bugfix} --launch` + `codex_watch.py --loop` 만**. `Agent(subagent_type=codex:codex-rescue)` **금지** — 가이드 §7 함정(Claude in-loop = quota 목표 위배 + Windows IPC deadlock #330). 2026-05-25 4회 같은 실수 후 박음.
 - `docs/adr/0015-worktree-isolation-for-parallel-sessions.md` — 동시 세션 = worktree 의무 (§9.0). 1인 모드 명시 시 main 직접 편집 예외. wrapper = `scripts/session_start.{sh,ps1}`.
+- `docs/adr/0017-poll-notify-runs-tracking.md` — poll/notify run + 사이트별 결과 영속 추적 + persist 검증. dashboard `/runs`. 2026-05-25 incident silent fail 재발 방지 게이트.
+- `docs/adr/0018-cron-commit-race-guard.md` — N100 deploy = `scripts/n100_deploy.sh` (timer atomic stop/start). `poll_runs.git_sha` 영속화. raw `git pull` 직접 호출 금지.
