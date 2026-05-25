@@ -108,20 +108,6 @@ Your final agent message MUST be a single JSON object (no prose):
 - ≤ 3 attempt entries total.
 - No JSON dump of cfg inside `attempts`.
 
-### headers field rule (when ok=true)
-
-In your candidate.json `headers` dict, write **MINIMAL** keys only:
-- `User-Agent` — one line
-- `Accept` — one line (e.g. `text/html,...` for HTML or `application/rss+xml,...` for RSS)
-
-Do NOT echo every header the digest captured. Specifically avoid:
-- `Accept-Language`, `Referer`, `Upgrade-Insecure-Requests`
-- `sec-ch-ua*`, `sec-fetch-*`, `sec-ch-platform`, ...
-- `cache-control`, `pragma`, `connection`, ...
-
-The engine fills the rest from defaults. Long header blobs are the main cause
-of final-message truncation (see "config field rule" reason above).
-
 Total final JSON target: ≤ 500 chars. If you're over, you're echoing a cfg
 where you shouldn't.
 
