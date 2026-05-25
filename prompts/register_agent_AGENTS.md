@@ -89,7 +89,27 @@ Your final agent message MUST be a single JSON object (no prose):
                      | "non_board" | "non_existent" | "login_required"
     }
 
-`config` MUST be present (empty `{}` if you give up or self-veto).
+### config field rule (STRICT — no exceptions)
+
+- `ok=true` → `config` = the passing cfg dict (full).
+- `ok=false` → `config` = empty `{}`. ALWAYS. No partial dump, no "informative"
+  last_config, no debug payload.
+  - Applies to ALL ok=false cases: `max_cycles`, `agent_gave_up`, `error`,
+    `non_board`, `non_existent`, `login_required`.
+  - Reason: parent reads `./candidate.json` directly for the last attempted
+    cfg. You do NOT need to echo it in the final JSON. Echoing it inflates
+    the final message past the model output budget and the response gets
+    truncated mid-string — parent then can't parse anything at all
+    (`LLMParseError: Expecting ',' delimiter`).
+
+### attempts field rule
+
+- `attempts[].error` ≤ 80 chars (validator's hard failure name + short detail).
+- ≤ 3 attempt entries total.
+- No JSON dump of cfg inside `attempts`.
+
+Total final JSON target: ≤ 500 chars. If you're over, you're echoing a cfg
+where you shouldn't.
 
 ## HARD RULES
 
