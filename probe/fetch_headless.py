@@ -425,9 +425,12 @@ def fetch_with_capture(
                     # 박힘 확인. quiet_ms=8000 + hard_timeout=12000 으로 늘림.
                     # 비용: strict SPA marker 검출 사이트만 (251 configs 중 일부 Nuxt/Next) 최대 +12초.
                     # polling 영향 X (engine/strategies/playwright_html 가 cfg timeout 따로 사용).
+                    # Radiolab list.html 의 `__nuxt` div 가 79KB 위치, `window.__NUXT__` 86KB —
+                    # 50KB quick check 안 잡힘. 200KB 까지 확장 (Nuxt/Next 가 보통 body 끝에 hydration
+                    # state script 박음). 비용: 1번 content() 호출 + 200KB substring 비교만.
                     spa_extra_wait_note: Optional[str] = None
                     try:
-                        quick = page.content()[:50_000]
+                        quick = page.content()[:200_000]
                         if _has_spa_hydration_marker(quick):
                             _wait_xhr_quiet(page, quiet_ms=8000, hard_timeout_ms=12000)
                             spa_extra_wait_note = "spa_hydration_extra_wait:8000ms"
