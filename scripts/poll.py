@@ -346,7 +346,6 @@ def _load_states(only: set[str] | None) -> list[dict]:
 
 async def _process_site(st: dict, *, page_size: int, max_new_articles: int,
                          lurking: bool, no_reprobe: bool, run_dir: Path,
-                         sem_chromium: asyncio.Semaphore, sem_httpx: asyncio.Semaphore,
                          db_conn, db_lock: asyncio.Lock) -> tuple[list[str], tuple]:
     """한 사이트의 fetch + 결과 처리 + collected/sqlite 박기 + state 파일 쓰기까지. (log_lines, row) 반환.
 
@@ -357,13 +356,14 @@ async def _process_site(st: dict, *, page_size: int, max_new_articles: int,
       ④ state.json 디스크 flush.
     crash safe: state.json 의 seen 은 sqlite 박힌 글만 인정. ②/③ 사이 crash 면 다음 폴링이 같은 글 다시 발견 → INSERT OR IGNORE 가 idempotent.
 
-    동시 실행 가드: strategy 가 playwright_html / handwritten 이면 chromium 세마포, 아니면 httpx 세마포.
+    동시 실행 가드(sem chromium/httpx) 는 호출 측 `_site_with_timeout` 에서 잡는다 — sem 대기
+    시간이 P1 wall timeout 안에 포함되면 sem queue 끝의 사이트가 false timeout 됨 (2026-05-25
+    1차 폴링에서 148건 발생). 분리해서 *fetch 자체* 만 wall cap.
     print 안 함 — 호출 측이 묶어서 출력해 사이트 로그 가독성 유지.
     """
     slug = st["slug"]
     strategy, adapter = _config_meta(st)
     chromium = _uses_chromium(st)
-    sem = sem_chromium if chromium else sem_httpx
     tag = strategy + (f":{adapter}" if strategy == "handwritten" else "")
     lines: list[str] = [
         f"=== {slug} ===  {st.get('url')} [{tag or '?'}{' (chromium)' if chromium else ''}]"
@@ -375,9 +375,8 @@ async def _process_site(st: dict, *, page_size: int, max_new_articles: int,
     with tr.span("poll.site", attrs={"slug": slug, "strategy": strategy,
                                        "adapter": adapter, "chromium": chromium,
                                        "lurking": lurking}) as ssp:
-        async with sem:
-            res = await _fetch_one(st, page_size=page_size,
-                                    max_new_articles=max_new_articles, lurking=lurking)
+        res = await _fetch_one(st, page_size=page_size,
+                                max_new_articles=max_new_articles, lurking=lurking)
         ssp.set_attr("n_posts", res.get("n_posts", 0))
         ssp.set_attr("n_new", res.get("n_new", 0))
         ssp.set_attr("broken", bool(res.get("broken")))
@@ -508,27 +507,41 @@ async def run(args) -> int:
         return await _run_inner(args)
 
 
-async def _site_with_timeout(st: dict, *, timeout: float, **kw) -> tuple[list[str], tuple]:
+async def _site_with_timeout(st: dict, *, timeout: float,
+                             sem_chromium: asyncio.Semaphore, sem_httpx: asyncio.Semaphore,
+                             **kw) -> tuple[list[str], tuple]:
     """ADR 0016 — 사이트별 wall timeout 래퍼. start/done/timeout/error stderr 1줄 + last_poll_duration_ms.
 
+    중요: sem(chromium/httpx) 은 wait_for **밖에서** 잡는다. 그래야 sem queue 대기 시간이 wall
+    timeout 안에 포함 안 됨. 첫 구현(2026-05-25 1차) 은 sem 잡기를 _process_site 안에 두고
+    wait_for 가 사이트 전체를 감싸서 sem_chromium=1 줄 끝의 148 사이트가 false timeout 됨.
+
     timeout 초과 시 asyncio.TimeoutError 던짐 — gather(return_exceptions=True) 가 잡아서 호출 측이
-    last_status="poll_timeout" 분기 처리. duration_ms 는 _process_site 가 성공 시 state.json 에 직접
-    박음. 실패 시엔 호출 측 fallback 이 박음.
+    last_status="poll_timeout" 분기 처리. duration_ms 는 모든 path 에서 박힘.
     """
     slug = st.get("slug", "?")
     t0 = time.perf_counter()
     print(f"[poll] start {slug}", file=sys.stderr, flush=True)
-    # success/timeout/error 모든 path 에 duration 박힘 — fallback handler 가 state.json 쓸 때 같이 박힘.
+    # sem 결정 — strategy 보고. _process_site 가 같은 결정을 하지만 거기선 안 잡음 (분리).
+    sem = sem_chromium if _uses_chromium(st) else sem_httpx
     try:
-        result = await asyncio.wait_for(_process_site(st, **kw), timeout=timeout)
+        # sem 대기 — timeout 밖. sem queue 가 길어도 false timeout 안 남.
+        async with sem:
+            t_fetch_start = time.perf_counter()
+            try:
+                result = await asyncio.wait_for(_process_site(st, **kw), timeout=timeout)
+            except asyncio.TimeoutError:
+                dur_ms = int((time.perf_counter() - t0) * 1000)
+                fetch_dur_ms = int((time.perf_counter() - t_fetch_start) * 1000)
+                st["last_poll_duration_ms"] = dur_ms
+                print(f"[poll] TIMEOUT {slug} t={dur_ms}ms (fetch={fetch_dur_ms}ms, cap={timeout}s)",
+                      file=sys.stderr, flush=True)
+                raise
         dur_ms = int((time.perf_counter() - t0) * 1000)
         st["last_poll_duration_ms"] = dur_ms
         print(f"[poll] done  {slug} t={dur_ms}ms", file=sys.stderr, flush=True)
         return result
     except asyncio.TimeoutError:
-        dur_ms = int((time.perf_counter() - t0) * 1000)
-        st["last_poll_duration_ms"] = dur_ms
-        print(f"[poll] TIMEOUT {slug} t={dur_ms}ms cap={timeout}s", file=sys.stderr, flush=True)
         raise
     except BaseException as e:  # noqa: BLE001 — Cancel 포함 다 surface
         dur_ms = int((time.perf_counter() - t0) * 1000)

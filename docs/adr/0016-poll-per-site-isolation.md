@@ -37,6 +37,8 @@
 
 CLI: `--site-timeout SECS` 로 override 가능.
 
+**sem-wait 분리** (2026-05-25 1차 폴링 후 fix): 첫 구현은 sem(chromium/httpx) 잡기를 `_process_site` 안에 두고 `wait_for` 가 *_process_site 전체*를 감쌌다. sem_chromium=1 직렬 큐 끝의 ~148 사이트가 wall clock 180s 도달 전에 sem 잡기도 못함 → false `poll_timeout` → 구독 사이트가 dashboard 에 `broken N` 으로 잘못 surface. fix: sem 잡기를 `_site_with_timeout` 의 wait_for **밖**으로 이동. `_process_site` 의 `async with sem:` 제거. sem 대기 = unbounded (의도적), *fetch 자체* 만 180s cap. 같은 사고 재발 방지 게이트.
+
 ### P2. progressive posts upsert (gather 안 기다림) + 순서 정의
 
 `_process_site` 안에서 sqlite `posts` 테이블에 INSERT OR IGNORE 직접 박음. 기존 line 530 의 batch upsert 제거.
