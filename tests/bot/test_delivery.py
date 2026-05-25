@@ -134,13 +134,13 @@ def run() -> list[tuple[str, bool, str]]:
                 (uid, "s1", "u", fp))
         conn6.commit()
         db.upsert_post(conn6, "s1", _post("p1"))
-        n = dd.flush_target(conn6, "tok", {"target_kind": "channel", "target_id": "c1"},
-                            today_kst="2026-05-20", dry_run=False)
+        n, status = dd.flush_target(conn6, "tok", {"target_kind": "channel", "target_id": "c1"},
+                                     today_kst="2026-05-20", dry_run=False)
         delivered = db.was_delivered(conn6, "s1", "p1", "c1")
         marked = db.due_targets(conn6, now_hhmm="23:59", today_kst="2026-05-20")  # 멱등 — 이제 안 잡힘? c1 설정 행 없음
         cases.append(("flush_or_filter_delivers_once",
-                      n == 1 and len(sent) == 1 and delivered,
-                      f"n={n} sent={len(sent)} delivered={delivered}"))
+                      n == 1 and status == "ok" and len(sent) == 1 and delivered,
+                      f"n={n} status={status} sent={len(sent)} delivered={delivered}"))
 
         # ----- 10. notify_empty — 빚진 글 0 인데 notify_empty 구독이면 빈 메시지 -----
         sent.clear()
@@ -150,11 +150,11 @@ def run() -> list[tuple[str, bool, str]]:
             "VALUES('u1','s1','u',NULL,'realtime','dm','u1',1,'2000-01-01T00:00:00+00:00')")
         db.ensure_setting(conn7, target_kind="dm", target_id="u1")
         conn7.commit()
-        n2 = dd.flush_target(conn7, "tok", {"target_kind": "dm", "target_id": "u1"},
-                             today_kst="2026-05-20", dry_run=False)
+        n2, status2 = dd.flush_target(conn7, "tok", {"target_kind": "dm", "target_id": "u1"},
+                                       today_kst="2026-05-20", dry_run=False)
         cases.append(("flush_notify_empty_sends_line",
-                      n2 == 0 and len(sent) == 1 and "없어요" in sent[0][2],
-                      f"n={n2} sent={sent!r}"))
+                      n2 == 0 and status2 == "empty" and len(sent) == 1 and "없어요" in sent[0][2],
+                      f"n={n2} status={status2} sent={sent!r}"))
     finally:
         dd.summarize_post, dd.filter_pass, dd.deliver, dd.client_for = orig
 

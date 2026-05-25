@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Poll Run #{{ run.id }} — notice-watcher{% endblock %}
+{% block body %}
+
+<h2>🛰 Poll Run #{{ run.id }} <small style="color:#888;">{{ run.run_label }}</small></h2>
+
+<p><a href="/runs">← Runs 목록</a></p>
+
+<dl class="compact" style="display:grid;grid-template-columns:auto 1fr;gap:0.2rem 1rem;max-width:50rem;">
+  <dt>status</dt><dd>
+    {% if run.status == 'running' %}<span style="color:#b58900;">⏳ running</span>
+    {% elif run.status == 'done' and run.persist_mismatch_sites %}<span style="color:#dc322f;">⚠ done (persist_mismatch)</span>
+    {% elif run.status == 'done' %}<span style="color:#0a8a0a;">✅ done</span>
+    {% else %}<span style="color:#dc322f;">💀 {{ run.status }} ({{ run.reap_reason or '' }})</span>
+    {% endif %}
+  </dd>
+  <dt>started_at</dt><dd>{{ run.started_at }}</dd>
+  <dt>ended_at</dt><dd>{{ run.ended_at or '—' }}</dd>
+  {% if run.reaped_at %}<dt>reaped_at</dt><dd>{{ run.reaped_at }} ({{ run.reap_reason }})</dd>{% endif %}
+  <dt>duration</dt><dd>{% if run.duration_ms %}{{ (run.duration_ms/1000) | round(1) }}s{% else %}—{% endif %}</dd>
+  <dt>pid · host</dt><dd>{{ run.pid }} · {{ run.host }}</dd>
+  <dt>git_sha</dt><dd>{% if run.git_sha %}<code>{{ run.git_sha }}</code>{% else %}—{% endif %}</dd>
+  <dt>args</dt><dd><code>{{ run.args_json or '[]' }}</code></dd>
+  <dt>n_sites · done / timeout / error</dt>
+    <dd>{{ run.n_sites or '—' }} · {{ run.n_done }} / {{ run.n_timeout }} / {{ run.n_error }} (lurking-skipped {{ run.n_lurking_skipped }})</dd>
+  <dt>posts attempted / inserted / present_after</dt>
+    <dd>{{ run.n_attempted_unique }} / {{ run.n_inserted }} / {{ run.n_present_after }}</dd>
+  <dt>persist_mismatch_sites</dt>
+    <dd>{% if run.persist_mismatch_sites %}<strong style="color:#dc322f;">{{ run.persist_mismatch_sites }}</strong> — sqlite 에 안 박힌 글 있음{% else %}0{% endif %}</dd>
+</dl>
+
+<h3 style="margin-top:1.2rem;">사이트별 결과 ({{ sites | length }}건)</h3>
+<form action="/runs/poll/{{ run.id }}" method="get" class="topbar" style="border:0;margin-bottom:0.5rem;gap:0.6rem;">
+  <input type="search" name="slug" value="{{ filter_slug or '' }}" placeholder="slug 필터" style="flex:1;min-width:14em;margin:0;">
+  <label style="margin:0;">status
+    <select name="status">
+      <option value="" {{ 'selected' if not filter_status else '' }}>전체</option>
+      <option value="ok" {{ 'selected' if filter_status=='ok' else '' }}>ok</option>
+      <option value="lurking" {{ 'selected' if filter_status=='lurking' else '' }}>lurking</option>
+      <option value="poll_timeout" {{ 'selected' if filter_status=='poll_timeout' else '' }}>poll_timeout</option>
+      <option value="task_exception" {{ 'selected' if filter_status=='task_exception' else '' }}>task_exception</option>
+      <option value="persist_mismatch" {{ 'selected' if filter_status=='persist_mismatch' else '' }}>persist_mismatch</option>
+      <option value="breakage" {{ 'selected' if filter_status=='breakage' else '' }}>breakage</option>
+      <option value="body_empty_drift" {{ 'selected' if filter_status=='body_empty_drift' else '' }}>body_empty_drift</option>
+      <option value="reprobe_enqueued" {{ 'selected' if filter_status=='reprobe_enqueued' else '' }}>reprobe_enqueued</option>
+      <option value="reprobe_skipped_bug" {{ 'selected' if filter_status=='reprobe_skipped_bug' else '' }}>reprobe_skipped_bug</option>
+      <option value="run_crashed" {{ 'selected' if filter_status=='run_crashed' else '' }}>run_crashed</option>
+      <option value="error" {{ 'selected' if filter_status=='error' else '' }}>error</option>
+    </select>
+  </label>
+  <button type="submit">필터</button>
+</form>
+
+<table class="compact striped">
+  <thead>
+    <tr>
+      <th>slug</th><th>status</th><th>dur</th>
+      <th>posts/new</th><th>attempted/inserted/present</th>
+      <th>error</th><th>note</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for s in sites %}
+    <tr>
+      <td><a href="/subs/{{ s.slug }}">{{ s.slug }}</a></td>
+      <td>
+        {% if s.status == 'ok' %}<span style="color:#0a8a0a;">✅ ok</span>
+        {% elif s.status == 'lurking' %}<span style="color:#888;">💤 lurking</span>
+        {% elif s.status == 'persist_mismatch' %}<span style="color:#dc322f;">⚠ persist_mismatch</span>
+        {% elif s.status in ('poll_timeout','task_exception','run_crashed','error') %}<span style="color:#dc322f;">💀 {{ s.status }}</span>
+        {% elif s.status == 'breakage' %}<span style="color:#cb4b16;">⚠ breakage</span>
+        {% elif s.status == 'body_empty_drift' %}<span style="color:#cb4b16;">⚠ drift</span>
+        {% else %}{{ s.status }}{% endif %}
+      </td>
+      <td>{% if s.duration_ms %}{{ (s.duration_ms/1000) | round(2) }}s{% else %}—{% endif %}</td>
+      <td><small>{{ s.n_posts }} / {{ s.n_new }}</small></td>
+      <td><small>{{ s.n_attempted_unique }} / {{ s.n_inserted }} / {{ s.n_present_after }}</small></td>
+      <td><small>{{ s.error_msg or '' }}</small></td>
+      <td><small>{{ s.note or '' }}</small></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="7" class="muted">사이트 결과 없음.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% endblock %}

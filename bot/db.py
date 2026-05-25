@@ -213,6 +213,100 @@ CREATE TABLE IF NOT EXISTS channel_settings (
     updated_at          TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_channel_deliver_at ON channel_settings(deliver_at);
+
+-- ADR 0017 — poll/notify runs 추적 + 영속화 검증.
+-- 폴링 1회 = 1 row (poll_runs). 사이트 1회 = 1 row (poll_site_runs, finish 시 INSERT).
+-- deliver_due 1회 = 1 row (notify_runs). target 1회 = 1 row (notify_target_runs).
+-- reaper 가 옛 status='running' row (process 죽음) 를 crashed 로 마킹.
+-- helper 는 모두 best-effort — fail 해도 poll/notify 본 흐름 영향 X (§2f).
+CREATE TABLE IF NOT EXISTS poll_runs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_label   TEXT NOT NULL,
+    started_at  TEXT NOT NULL,
+    ended_at    TEXT,
+    reaped_at   TEXT,
+    reap_reason TEXT,
+    pid         INTEGER NOT NULL,
+    host        TEXT,
+    git_sha     TEXT,
+    args_json   TEXT,
+    n_sites     INTEGER,
+    n_done      INTEGER NOT NULL DEFAULT 0,
+    n_timeout   INTEGER NOT NULL DEFAULT 0,
+    n_error     INTEGER NOT NULL DEFAULT 0,
+    n_lurking_skipped INTEGER NOT NULL DEFAULT 0,
+    n_attempted_unique INTEGER NOT NULL DEFAULT 0,
+    n_inserted        INTEGER NOT NULL DEFAULT 0,
+    n_present_after   INTEGER NOT NULL DEFAULT 0,
+    persist_mismatch_sites INTEGER NOT NULL DEFAULT 0,
+    duration_ms INTEGER,
+    status      TEXT NOT NULL DEFAULT 'running'
+                CHECK (status IN ('running','done','crashed','killed'))
+);
+CREATE INDEX IF NOT EXISTS idx_poll_runs_started ON poll_runs(started_at DESC);
+
+CREATE TABLE IF NOT EXISTS poll_site_runs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id      INTEGER NOT NULL REFERENCES poll_runs(id),
+    slug        TEXT NOT NULL,
+    started_at  TEXT NOT NULL,
+    ended_at    TEXT,
+    status      TEXT NOT NULL CHECK (status IN
+                ('ok','lurking','breakage','poll_timeout','task_exception',
+                 'persist_mismatch','body_empty_drift','reprobe_enqueued',
+                 'reprobe_skipped_bug','reprobe_enqueue_failed','run_crashed','error')),
+    n_posts            INTEGER NOT NULL DEFAULT 0,
+    n_new              INTEGER NOT NULL DEFAULT 0,
+    n_attempted_unique INTEGER NOT NULL DEFAULT 0,
+    n_inserted         INTEGER NOT NULL DEFAULT 0,
+    n_present_after    INTEGER NOT NULL DEFAULT 0,
+    duration_ms INTEGER,
+    error_msg   TEXT,
+    note        TEXT,
+    UNIQUE(run_id, slug)
+);
+CREATE INDEX IF NOT EXISTS idx_poll_site_runs_run ON poll_site_runs(run_id, slug);
+CREATE INDEX IF NOT EXISTS idx_poll_site_runs_slug ON poll_site_runs(slug, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS notify_runs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at  TEXT NOT NULL,
+    ended_at    TEXT,
+    reaped_at   TEXT,
+    reap_reason TEXT,
+    pid         INTEGER NOT NULL,
+    host        TEXT,
+    args_json   TEXT,
+    now_hhmm    TEXT,
+    today_kst   TEXT,
+    n_due_targets    INTEGER NOT NULL DEFAULT 0,
+    n_targets_ok     INTEGER NOT NULL DEFAULT 0,
+    n_targets_failed INTEGER NOT NULL DEFAULT 0,
+    n_posts_delivered INTEGER NOT NULL DEFAULT 0,
+    n_empty_notices  INTEGER NOT NULL DEFAULT 0,
+    duration_ms INTEGER,
+    status      TEXT NOT NULL DEFAULT 'running'
+                CHECK (status IN ('running','done','crashed','killed'))
+);
+CREATE INDEX IF NOT EXISTS idx_notify_runs_started ON notify_runs(started_at DESC);
+
+CREATE TABLE IF NOT EXISTS notify_target_runs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id      INTEGER NOT NULL REFERENCES notify_runs(id),
+    target_kind TEXT NOT NULL,
+    target_id   TEXT NOT NULL,
+    started_at  TEXT NOT NULL,
+    ended_at    TEXT,
+    status      TEXT NOT NULL CHECK (status IN
+                ('ok','empty','no_subs','failed','exception','run_crashed','skipped_test_target')),
+    n_posts     INTEGER NOT NULL DEFAULT 0,
+    n_chunks    INTEGER NOT NULL DEFAULT 0,
+    duration_ms INTEGER,
+    error_msg   TEXT,
+    UNIQUE(run_id, target_kind, target_id)
+);
+CREATE INDEX IF NOT EXISTS idx_notify_target_runs_run ON notify_target_runs(run_id);
+CREATE INDEX IF NOT EXISTS idx_notify_target_runs_target ON notify_target_runs(target_kind, target_id, started_at DESC);
 """
 
 # 발송 시각 미설정 수신처의 기본값 (KST HH:MM). ADR 0006.
@@ -308,7 +402,106 @@ def _migrate(conn: sqlite3.Connection) -> None:
         "SELECT DISTINCT target_id, ?, NULL, ? FROM subscriptions WHERE target_kind='channel'",
         (DEFAULT_DELIVER_AT, now),
     )
+    # ADR 0017 — 옛 enum 으로 만들어진 runs 테이블의 CHECK constraint 마이그.
+    # SQLite 의 `CREATE TABLE IF NOT EXISTS` 는 *기존* 테이블의 CHECK 갱신 안 함 → 새 status 값
+    # ('error', 'skipped_test_target') 가 IntegrityError. rebuild 패턴 (new → copy → drop → rename).
+    # codex 2차 review HIGH (2026-05-25).
+    _migrate_runs_status_enum(conn, "poll_site_runs", "error",
+                              new_create=_POLL_SITE_RUNS_REBUILD)
+    _migrate_runs_status_enum(conn, "notify_target_runs", "skipped_test_target",
+                              new_create=_NOTIFY_TARGET_RUNS_REBUILD)
     conn.commit()
+
+
+# ADR 0017 codex 2차 — rebuild 템플릿. _SCHEMA 의 정의와 동기 유지 필수.
+_POLL_SITE_RUNS_REBUILD = """
+CREATE TABLE poll_site_runs_new (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id      INTEGER NOT NULL REFERENCES poll_runs(id),
+    slug        TEXT NOT NULL,
+    started_at  TEXT NOT NULL,
+    ended_at    TEXT,
+    status      TEXT NOT NULL CHECK (status IN
+                ('ok','lurking','breakage','poll_timeout','task_exception',
+                 'persist_mismatch','body_empty_drift','reprobe_enqueued',
+                 'reprobe_skipped_bug','reprobe_enqueue_failed','run_crashed','error')),
+    n_posts            INTEGER NOT NULL DEFAULT 0,
+    n_new              INTEGER NOT NULL DEFAULT 0,
+    n_attempted_unique INTEGER NOT NULL DEFAULT 0,
+    n_inserted         INTEGER NOT NULL DEFAULT 0,
+    n_present_after    INTEGER NOT NULL DEFAULT 0,
+    duration_ms INTEGER,
+    error_msg   TEXT,
+    note        TEXT,
+    UNIQUE(run_id, slug)
+);
+"""
+
+_NOTIFY_TARGET_RUNS_REBUILD = """
+CREATE TABLE notify_target_runs_new (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id      INTEGER NOT NULL REFERENCES notify_runs(id),
+    target_kind TEXT NOT NULL,
+    target_id   TEXT NOT NULL,
+    started_at  TEXT NOT NULL,
+    ended_at    TEXT,
+    status      TEXT NOT NULL CHECK (status IN
+                ('ok','empty','no_subs','failed','exception','run_crashed','skipped_test_target')),
+    n_posts     INTEGER NOT NULL DEFAULT 0,
+    n_chunks    INTEGER NOT NULL DEFAULT 0,
+    duration_ms INTEGER,
+    error_msg   TEXT,
+    UNIQUE(run_id, target_kind, target_id)
+);
+"""
+
+
+def _migrate_runs_status_enum(conn: sqlite3.Connection, table: str, probe_status: str,
+                               *, new_create: str) -> None:
+    """ADR 0017 — runs 테이블의 status CHECK 가 새 enum 포함하는지 검사. 없으면 rebuild.
+
+    *probe_status* = 새로 추가된 status 값. sqlite_master 의 CREATE TABLE 텍스트 안에 그 값이
+    리터럴로 들어있는지 본다 (단순 substring 검사 — 충분히 보수적). 없으면 rebuild
+    (CREATE new → INSERT … SELECT → DROP → RENAME). 테이블 자체 없으면 skip.
+    codex 2차 review HIGH (2026-05-25) — `CREATE TABLE IF NOT EXISTS` 가 기존 CHECK 갱신 안 함 봉합.
+    """
+    if not conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
+    ).fetchone():
+        return
+    ddl = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (table,)
+    ).fetchone()
+    current_sql = ddl[0] if ddl else ""
+    if f"'{probe_status}'" in current_sql:
+        return  # already migrated
+    # foreign key 검사 잠시 끄고 rebuild — REFERENCES 가 새 테이블로 갈아끼우는 도중 reject 막음.
+    fk_row = conn.execute("PRAGMA foreign_keys").fetchone()
+    fk_state = int(fk_row[0]) if fk_row else 0
+    try:
+        if fk_state:
+            conn.execute("PRAGMA foreign_keys=OFF")
+        new_table = f"{table}_new"
+        conn.execute(f"DROP TABLE IF EXISTS {new_table}")
+        conn.executescript(new_create)
+        # 컬럼 명시 복사 — SELECT * 가 컬럼 순서 차이 시 위험.
+        cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+        col_list = ",".join(cols)
+        conn.execute(f"INSERT INTO {new_table}({col_list}) SELECT {col_list} FROM {table}")
+        conn.execute(f"DROP TABLE {table}")
+        conn.execute(f"ALTER TABLE {new_table} RENAME TO {table}")
+        # 인덱스 재생성 — rebuild 가 옛 인덱스를 같이 drop 함.
+        if table == "poll_site_runs":
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_poll_site_runs_run ON poll_site_runs(run_id, slug)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_poll_site_runs_slug ON poll_site_runs(slug, started_at DESC)")
+        elif table == "notify_target_runs":
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_notify_target_runs_run ON notify_target_runs(run_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_notify_target_runs_target ON notify_target_runs(target_kind, target_id, started_at DESC)")
+        import sys as _migr_sys
+        print(f"[db] migrated {table} status CHECK (added '{probe_status}' enum)", file=_migr_sys.stderr)
+    finally:
+        if fk_state:
+            conn.execute("PRAGMA foreign_keys=ON")
 
 
 def connect(db_path: Optional[Path] = None) -> sqlite3.Connection:
@@ -1210,3 +1403,418 @@ def get_user(conn: sqlite3.Connection, user_id: str) -> Optional[dict]:
     summary["recent_deliveries"] = [dict(r) for r in deliveries_for_target(
         conn, user_id, limit=50)]
     return summary
+
+
+# --------------------------------------------------------------------------- #
+# ADR 0017 — poll/notify runs 추적
+#
+# 설계 원칙 (§2f):
+#   - 모든 helper 는 best-effort. fail 시 transaction rollback + stderr 1줄 + 호출자에게 영향 X.
+#   - poll_run_start 가 None 반환 시 (DB 에러 등), 후속 helper 가 run_id=None 보면 곧장 skip.
+#   - 사이트 isolation = ADR 0016 그대로. tracking 은 그 위에 *얹는* 영구 기록.
+# --------------------------------------------------------------------------- #
+import os as _os
+import socket as _socket
+import sys as _sys
+
+# reaper 임계 — ADR 0017 §2e. anti-bot 사이트 wall-clock 안전 margin.
+_POLL_REAP_THRESHOLD_S = 2 * 60 * 60      # 2h
+_NOTIFY_REAP_THRESHOLD_S = 15 * 60         # 15min
+
+
+def _tracking_warn(fn_name: str, exc: BaseException) -> None:
+    """tracking helper 실패 stderr 1줄. 호출자에게 영향 X."""
+    print(f"[tracking] ⚠ {fn_name} failed: {type(exc).__name__}: {exc}", file=_sys.stderr, flush=True)
+
+
+def _pid_alive(pid: int) -> Optional[bool]:
+    """현 host 의 pid 살아있나? Linux/Mac = os.kill(pid,0). Windows / 모르면 None."""
+    if pid <= 0:
+        return False
+    try:
+        # Windows 에서는 os.kill 이 동작하지만 signal 0 의미 다름 — None 반환해 reaper 가 fallback.
+        if _sys.platform.startswith("win"):
+            return None
+        _os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _here_host() -> str:
+    try:
+        return _socket.gethostname()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def poll_run_start(conn: sqlite3.Connection, *, run_label: str, pid: int,
+                   git_sha: Optional[str] = None,
+                   args_json: Optional[str] = None,
+                   n_sites: Optional[int] = None) -> Optional[int]:
+    """ADR 0017 — poll 시작 시 row INSERT. 반환 = run_id (또는 fail 시 None).
+
+    같은 함수가 reaper 도 호출 — 옛 status='running' row 정리. best-effort."""
+    try:
+        reap_stale_poll_runs(conn)
+    except Exception as e:  # noqa: BLE001
+        _tracking_warn("reap_stale_poll_runs", e)
+    try:
+        cur = conn.execute(
+            "INSERT INTO poll_runs(run_label,started_at,pid,host,git_sha,args_json,n_sites,status) "
+            "VALUES(?,?,?,?,?,?,?,'running')",
+            (run_label, _now_iso(), pid, _here_host(), git_sha, args_json, n_sites),
+        )
+        conn.commit()
+        return int(cur.lastrowid)
+    except Exception as e:  # noqa: BLE001
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        _tracking_warn("poll_run_start", e)
+        return None
+
+
+def poll_run_finish(conn: sqlite3.Connection, run_id: Optional[int], *,
+                    n_done: int, n_timeout: int, n_error: int,
+                    n_lurking_skipped: int,
+                    n_attempted_unique: int, n_inserted: int,
+                    n_present_after: int, persist_mismatch_sites: int,
+                    duration_ms: int) -> None:
+    """poll 정상 종료 시 UPDATE. run_id=None 이면 skip."""
+    if run_id is None:
+        return
+    try:
+        conn.execute(
+            "UPDATE poll_runs SET ended_at=?, n_done=?, n_timeout=?, n_error=?, "
+            "n_lurking_skipped=?, n_attempted_unique=?, n_inserted=?, n_present_after=?, "
+            "persist_mismatch_sites=?, duration_ms=?, status='done' "
+            "WHERE id=? AND status='running'",
+            (_now_iso(), n_done, n_timeout, n_error, n_lurking_skipped,
+             n_attempted_unique, n_inserted, n_present_after, persist_mismatch_sites,
+             duration_ms, run_id),
+        )
+        conn.commit()
+    except Exception as e:  # noqa: BLE001
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        _tracking_warn("poll_run_finish", e)
+
+
+def poll_site_run_finish(conn: sqlite3.Connection, *, run_id: Optional[int], slug: str,
+                         started_at: str, ended_at: str, status: str,
+                         n_posts: int = 0, n_new: int = 0,
+                         n_attempted_unique: int = 0, n_inserted: int = 0,
+                         n_present_after: int = 0,
+                         duration_ms: Optional[int] = None,
+                         error_msg: Optional[str] = None,
+                         note: Optional[str] = None) -> None:
+    """ADR 0017 — 사이트 1회 완료 시 INSERT. run_id=None 이면 skip. INSERT OR IGNORE
+    (UNIQUE(run_id, slug)) — reaper 의 _unknown_ row 와 race 시 정상 finish 가 우선."""
+    if run_id is None:
+        return
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO poll_site_runs(run_id,slug,started_at,ended_at,status,"
+            "n_posts,n_new,n_attempted_unique,n_inserted,n_present_after,"
+            "duration_ms,error_msg,note) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (run_id, slug, started_at, ended_at, status,
+             n_posts, n_new, n_attempted_unique, n_inserted, n_present_after,
+             duration_ms, error_msg, note),
+        )
+        conn.commit()
+    except Exception as e:  # noqa: BLE001
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        _tracking_warn("poll_site_run_finish", e)
+
+
+def reap_stale_poll_runs(conn: sqlite3.Connection) -> int:
+    """ADR 0017 §2e — 옛 status='running' poll_runs 를 crashed 로 마킹.
+    같은 host 면 pid liveness 체크 (Linux/Mac). 다른 host 면 단순 timeout. 반환 = reaped row 수.
+
+    codex MED — 전체 함수 best-effort 가드. 최초 SELECT 도 실패할 수 있음 (closed conn 등).
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(seconds=_POLL_REAP_THRESHOLD_S)).isoformat()
+    here = _here_host()
+    try:
+        candidates = conn.execute(
+            "SELECT id, host, pid, started_at, n_sites FROM poll_runs "
+            "WHERE status='running' AND started_at < ?",
+            (cutoff,),
+        ).fetchall()
+    except Exception as e:  # noqa: BLE001
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        _tracking_warn("reap_stale_poll_runs:select", e)
+        return 0
+    n_reaped = 0
+    for r in candidates:
+        # liveness 체크 — 같은 host 면 pid alive 시 reap skip
+        if r["host"] == here:
+            alive = _pid_alive(int(r["pid"]))
+            if alive is True:
+                continue
+            reason = "liveness_dead" if alive is False else "stale_timeout"
+        else:
+            reason = "stale_timeout"
+        now = _now_iso()
+        try:
+            conn.execute(
+                "UPDATE poll_runs SET status='crashed', reaped_at=?, reap_reason=?, "
+                "ended_at=COALESCE(ended_at, ?) "
+                "WHERE id=? AND status='running'",
+                (now, reason, now, r["id"]),
+            )
+            # child reaper — 그 run 에 finish 못 박힌 사이트 수 만큼 _unknown_ row 1건.
+            n_recorded = int(conn.execute(
+                "SELECT COUNT(*) FROM poll_site_runs WHERE run_id=?", (r["id"],)
+            ).fetchone()[0])
+            delta = int((r["n_sites"] or 0) - n_recorded)
+            if delta > 0:
+                conn.execute(
+                    "INSERT OR IGNORE INTO poll_site_runs(run_id,slug,started_at,ended_at,status,"
+                    "error_msg,note) VALUES(?,?,?,?,?,?,?)",
+                    (r["id"], "_unknown_", r["started_at"], now, "run_crashed",
+                     f"reaper: parent crashed ({reason}), site finish not recorded",
+                     f"missing_count={delta}"),
+                )
+            conn.commit()
+            n_reaped += 1
+        except Exception as e:  # noqa: BLE001
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            _tracking_warn(f"reap_poll_runs(id={r['id']})", e)
+    return n_reaped
+
+
+def notify_run_start(conn: sqlite3.Connection, *, pid: int,
+                     args_json: Optional[str] = None,
+                     now_hhmm: Optional[str] = None,
+                     today_kst: Optional[str] = None,
+                     n_due_targets: int = 0) -> Optional[int]:
+    """ADR 0017 — deliver_due 시작 시 row INSERT. 반환 = run_id (또는 None)."""
+    try:
+        reap_stale_notify_runs(conn)
+    except Exception as e:  # noqa: BLE001
+        _tracking_warn("reap_stale_notify_runs", e)
+    try:
+        cur = conn.execute(
+            "INSERT INTO notify_runs(started_at,pid,host,args_json,now_hhmm,today_kst,"
+            "n_due_targets,status) VALUES(?,?,?,?,?,?,?,'running')",
+            (_now_iso(), pid, _here_host(), args_json, now_hhmm, today_kst, n_due_targets),
+        )
+        conn.commit()
+        return int(cur.lastrowid)
+    except Exception as e:  # noqa: BLE001
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        _tracking_warn("notify_run_start", e)
+        return None
+
+
+def notify_run_finish(conn: sqlite3.Connection, run_id: Optional[int], *,
+                      n_targets_ok: int, n_targets_failed: int,
+                      n_posts_delivered: int, n_empty_notices: int,
+                      duration_ms: int) -> None:
+    if run_id is None:
+        return
+    try:
+        conn.execute(
+            "UPDATE notify_runs SET ended_at=?, n_targets_ok=?, n_targets_failed=?, "
+            "n_posts_delivered=?, n_empty_notices=?, duration_ms=?, status='done' "
+            "WHERE id=? AND status='running'",
+            (_now_iso(), n_targets_ok, n_targets_failed, n_posts_delivered, n_empty_notices,
+             duration_ms, run_id),
+        )
+        conn.commit()
+    except Exception as e:  # noqa: BLE001
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        _tracking_warn("notify_run_finish", e)
+
+
+def notify_target_run_finish(conn: sqlite3.Connection, *, run_id: Optional[int],
+                             target_kind: str, target_id: str,
+                             started_at: str, ended_at: str, status: str,
+                             n_posts: int = 0, n_chunks: int = 0,
+                             duration_ms: Optional[int] = None,
+                             error_msg: Optional[str] = None) -> None:
+    if run_id is None:
+        return
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO notify_target_runs(run_id,target_kind,target_id,started_at,"
+            "ended_at,status,n_posts,n_chunks,duration_ms,error_msg) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (run_id, target_kind, target_id, started_at, ended_at, status,
+             n_posts, n_chunks, duration_ms, error_msg),
+        )
+        conn.commit()
+    except Exception as e:  # noqa: BLE001
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        _tracking_warn("notify_target_run_finish", e)
+
+
+def reap_stale_notify_runs(conn: sqlite3.Connection) -> int:
+    """ADR 0017 — 옛 status='running' notify_runs 정리. child reaping 포함 (codex MED)."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(seconds=_NOTIFY_REAP_THRESHOLD_S)).isoformat()
+    here = _here_host()
+    try:
+        candidates = conn.execute(
+            "SELECT id, host, pid, started_at, n_due_targets FROM notify_runs "
+            "WHERE status='running' AND started_at < ?",
+            (cutoff,),
+        ).fetchall()
+    except Exception as e:  # noqa: BLE001
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        _tracking_warn("reap_stale_notify_runs:select", e)
+        return 0
+    n_reaped = 0
+    for r in candidates:
+        if r["host"] == here:
+            alive = _pid_alive(int(r["pid"]))
+            if alive is True:
+                continue
+            reason = "liveness_dead" if alive is False else "stale_timeout"
+        else:
+            reason = "stale_timeout"
+        now = _now_iso()
+        try:
+            conn.execute(
+                "UPDATE notify_runs SET status='crashed', reaped_at=?, reap_reason=?, "
+                "ended_at=COALESCE(ended_at, ?) "
+                "WHERE id=? AND status='running'",
+                (now, reason, now, r["id"]),
+            )
+            # codex MED — child reaper: finish 안 박힌 target 수 만큼 _unknown_ sentinel 1건.
+            n_recorded = int(conn.execute(
+                "SELECT COUNT(*) FROM notify_target_runs WHERE run_id=?", (r["id"],)
+            ).fetchone()[0])
+            delta = int((r["n_due_targets"] or 0) - n_recorded)
+            if delta > 0:
+                conn.execute(
+                    "INSERT OR IGNORE INTO notify_target_runs(run_id,target_kind,target_id,"
+                    "started_at,ended_at,status,error_msg) VALUES(?,?,?,?,?,?,?)",
+                    (r["id"], "_unknown_", "_unknown_", r["started_at"], now, "run_crashed",
+                     f"reaper: parent crashed ({reason}), target finish not recorded; missing_count={delta}"),
+                )
+            conn.commit()
+            n_reaped += 1
+        except Exception as e:  # noqa: BLE001
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            _tracking_warn(f"reap_notify_runs(id={r['id']})", e)
+    return n_reaped
+
+
+# --------------------------------------------------------------------------- #
+# dashboard 조회 helper — /runs 페이지
+# --------------------------------------------------------------------------- #
+def recent_poll_runs(conn: sqlite3.Connection, *, limit: int = 100,
+                     status: Optional[str] = None) -> list[sqlite3.Row]:
+    if status:
+        return conn.execute(
+            "SELECT * FROM poll_runs WHERE status=? ORDER BY started_at DESC LIMIT ?",
+            (status, limit),
+        ).fetchall()
+    return conn.execute(
+        "SELECT * FROM poll_runs ORDER BY started_at DESC LIMIT ?", (limit,)
+    ).fetchall()
+
+
+def get_poll_run(conn: sqlite3.Connection, run_id: int) -> Optional[sqlite3.Row]:
+    return conn.execute("SELECT * FROM poll_runs WHERE id=?", (run_id,)).fetchone()
+
+
+def poll_site_runs_for(conn: sqlite3.Connection, run_id: int, *,
+                       slug: Optional[str] = None,
+                       status: Optional[str] = None) -> list[sqlite3.Row]:
+    sql = "SELECT * FROM poll_site_runs WHERE run_id=?"
+    params: list = [run_id]
+    if slug:
+        sql += " AND slug=?"
+        params.append(slug)
+    if status:
+        sql += " AND status=?"
+        params.append(status)
+    sql += " ORDER BY id ASC"
+    return conn.execute(sql, params).fetchall()
+
+
+def recent_notify_runs(conn: sqlite3.Connection, *, limit: int = 100,
+                       status: Optional[str] = None) -> list[sqlite3.Row]:
+    if status:
+        return conn.execute(
+            "SELECT * FROM notify_runs WHERE status=? ORDER BY started_at DESC LIMIT ?",
+            (status, limit),
+        ).fetchall()
+    return conn.execute(
+        "SELECT * FROM notify_runs ORDER BY started_at DESC LIMIT ?", (limit,)
+    ).fetchall()
+
+
+def get_notify_run(conn: sqlite3.Connection, run_id: int) -> Optional[sqlite3.Row]:
+    return conn.execute("SELECT * FROM notify_runs WHERE id=?", (run_id,)).fetchone()
+
+
+def notify_target_runs_for(conn: sqlite3.Connection, run_id: int) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM notify_target_runs WHERE run_id=? ORDER BY id ASC", (run_id,)
+    ).fetchall()
+
+
+def prune_runs(conn: sqlite3.Connection, *, poll_keep_days: int = 90,
+               site_keep_days: int = 30, notify_keep_days: int = 90) -> dict:
+    """ADR 0017 — TTL GC. poll_runs/notify_runs 90d, poll_site_runs 30d.
+
+    poll_runs 가 site 보다 길게 유지되는 이유: per-site detail 은 단기 진단 데이터지만,
+    run 단위 (언제 어떤 git_sha 로 폴링했나) 는 사후 분석에서 더 자주 본다."""
+    now = datetime.now(timezone.utc)
+    poll_cutoff = (now - timedelta(days=poll_keep_days)).isoformat()
+    site_cutoff = (now - timedelta(days=site_keep_days)).isoformat()
+    notify_cutoff = (now - timedelta(days=notify_keep_days)).isoformat()
+    out = {"poll_runs": 0, "poll_site_runs": 0, "notify_runs": 0, "notify_target_runs": 0}
+    try:
+        c = conn.execute("DELETE FROM poll_site_runs WHERE started_at < ?", (site_cutoff,))
+        out["poll_site_runs"] = c.rowcount
+        c = conn.execute("DELETE FROM notify_target_runs WHERE started_at < ?", (notify_cutoff,))
+        out["notify_target_runs"] = c.rowcount
+        c = conn.execute("DELETE FROM poll_runs WHERE started_at < ?", (poll_cutoff,))
+        out["poll_runs"] = c.rowcount
+        c = conn.execute("DELETE FROM notify_runs WHERE started_at < ?", (notify_cutoff,))
+        out["notify_runs"] = c.rowcount
+        conn.commit()
+    except Exception as e:  # noqa: BLE001
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        _tracking_warn("prune_runs", e)
+    return out
