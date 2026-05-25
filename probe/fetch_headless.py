@@ -416,15 +416,15 @@ def fetch_with_capture(
                     _wait_xhr_quiet(page, quiet_ms=300, hard_timeout_ms=idle_timeout_ms)
 
                     # SPA hydration 강화 (2026-05-25 plan): strict marker (Nuxt/Next/Vuex) 감지 시
-                    # 추가 1500ms quiet 대기 후 capture. Radiolab 류 async data fetch
-                    # (api.wnyc.org/...recent_stories/...) 완료 전 capture 회피.
-                    # 짧은 quick-check 로 마커만 확인 (cost 적음, html head/body 초반에 위치).
+                    # 추가 quiet 대기 후 capture. Radiolab 류 async data fetch (api.wnyc.org/
+                    # ...recent_stories/) 가 chunks 로드 후 실행되는 사이트는 1500ms 부족 — 3000ms
+                    # quiet (hard_timeout 5000ms) 까지 늘림. 비용: SPA 사이트만 +1.5초.
                     spa_extra_wait_note: Optional[str] = None
                     try:
                         quick = page.content()[:50_000]
                         if _has_spa_hydration_marker(quick):
-                            _wait_xhr_quiet(page, quiet_ms=1500, hard_timeout_ms=3000)
-                            spa_extra_wait_note = "spa_hydration_extra_wait:1500ms"
+                            _wait_xhr_quiet(page, quiet_ms=3000, hard_timeout_ms=5000)
+                            spa_extra_wait_note = "spa_hydration_extra_wait:3000ms"
                     except Exception:
                         pass
 

@@ -2201,9 +2201,34 @@ def pagination_hints(html: str, *, base_url: str, har_path: Optional[Path] = Non
                 # ad/tracker skip
                 if _AD_TRACKER_RE.search(xhr_url):
                     continue
+                # resourceType 으로 xhr/fetch 만 잡되, HAR 에 _resourceType 안 박힌 경우(일부
+                # playwright HAR config)는 fallback — 정적 asset 확장자 명확히 제외 후
+                # content-type=json 또는 URL 패턴(/api/, /graphql)으로 데이터 호출 추정.
                 rtype = _entry_resource_type(entry)
-                if rtype not in ("xhr", "fetch"):
+                if rtype and rtype not in ("xhr", "fetch"):
                     continue
+                if not rtype:
+                    path_lower = urlsplit(xhr_url).path.lower()
+                    if any(path_lower.endswith(ext) for ext in (
+                        ".js", ".css", ".html", ".htm", ".png", ".jpg", ".jpeg",
+                        ".gif", ".svg", ".webp", ".ico", ".woff", ".woff2", ".ttf",
+                        ".mp4", ".webm", ".mp3", ".wav", ".pdf",
+                    )):
+                        continue
+                    resp = entry.get("response", {}) or {}
+                    content = resp.get("content", {}) or {}
+                    ct = ""
+                    for h in resp.get("headers", []) or []:
+                        if str(h.get("name", "")).lower() == "content-type":
+                            ct = h.get("value", "") or ""
+                            break
+                    looks_data = (
+                        "json" in (ct.lower() + " " + str(content.get("mimeType", "")).lower())
+                        or "/api/" in path_lower
+                        or "/graphql" in path_lower
+                    )
+                    if not looks_data:
+                        continue
                 m = _PAGE_PARAM_RE.search(xhr_url)
                 if not m:
                     continue
