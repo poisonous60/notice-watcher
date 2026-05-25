@@ -1,76 +1,73 @@
 # notice-watcher register agent
 
-You are an automated configuration agent for notice-watcher.
+You are an automated configuration agent.
 
 ## GOAL
 
-Produce a working notice-watcher config JSON for the target site. The parent
-process will validate your output independently and atomically publish if it
-passes.
+Produce a working notice-watcher config JSON. Parent re-validates and publishes.
 
-## YOUR WORKDIR
+## STRICT SCOPE — TMPDIR ONLY
 
-Files in this directory (the codex `-C` working dir):
-- `AGENTS.md` — this file (read it first)
-- `digest.json` — probe result: HTML samples, list_candidates, recognizer hints
+You may read **only files in this directory** (your cwd, the tmpdir). Do NOT
+read, list, or browse any path outside this tmpdir. No `<REPO>` paths, no
+absolute paths, no `..`, no PowerShell `Get-ChildItem` of parent dirs.
+
+All inputs you need are already staged here:
+- `AGENTS.md` (this file)
+- `digest.json` — probe result (HTML samples, list_candidates, recognizer hints)
 - `slug.txt` — target slug (single line)
 - `url.txt` — target URL (single line)
-- `examples/` — curated prior configs (3-5) chosen by parent as closest matches
-- `examples/manifest.json` — `{slug, score, reason}` for each example
+- `examples/*.json` — 2 curated prior configs (closest matches)
+- `examples/manifest.json` — why each example was picked
+- `config_writer_rules.txt` — the full ruleset for config authoring
 - `validate_config.py` — validator wrapper (run via `python`)
-
-## REPO ACCESS
-
-The repository root is at the path in `repo_path.txt`. You MAY read any file
-there for prior-art context. Useful starting points:
-- `configs/*.json` — other successful configs
-- `engine/recognizers/*.py` — recognizer URL patterns
-- `prompts/config_writer*.txt` — the original generation prompt
-- `output/probe/<slug>/` — probe artifacts for this slug
-- `docs/config 기반 엔진 가이드.md` — config engine documentation
 
 ## WORKFLOW
 
-1. Read `digest.json`, `slug.txt`, `url.txt`.
-2. Inspect `examples/` for the closest-matching pattern.
-3. If blocked, read related code/configs in the repo for grounding.
-4. Write your candidate to `./candidate.json` (in this workdir).
-5. Run the validator:
+1. Read `digest.json`, `slug.txt`, `url.txt` first.
+2. Read `examples/manifest.json` to see which examples are relevant.
+3. Read 1-2 most relevant `examples/*.json`. Optionally skim
+   `config_writer_rules.txt` only if uncertain about a field.
+4. Write your candidate to `./candidate.json` (this tmpdir).
+5. Run validator:
        python ./validate_config.py ./candidate.json
-   Read the JSON result on stdout.
-6. If `ok=true` → STOP. Emit final JSON.
-7. If failed: edit `candidate.json` once, re-run validator.
-8. After **3 validate cycles total** (1 initial + 2 retries): STOP regardless.
+   Read JSON result.
+6. If `ok=true` → STOP, emit final.
+7. If failed: edit candidate.json once, re-run validator.
+8. After **2 validate attempts** (1 initial + 1 retry): STOP regardless.
    Emit final with the last attempt and `stop_reason: max_cycles`.
+
+## TOKEN DISCIPLINE
+
+- Don't `cat` the same file twice.
+- Don't read all examples — pick 1-2 from manifest scores.
+- Don't dump huge JSON to stdout for inspection — read into your reasoning
+  silently.
+- Aim for **≤ 4 tool calls total** (read inputs / write candidate / validate /
+  optional retry).
 
 ## FINAL OUTPUT — strict JSON
 
-Your final agent message MUST be JSON matching the schema, with no prose:
+Your final agent message MUST be a single JSON object (no prose):
 
     {
       "ok": <bool>,
-      "config": <object — the candidate>,
+      "config": <object>,
       "attempts": [
-        {"i": 1, "validate_ok": false, "error": "<short reason>"},
+        {"i": 1, "validate_ok": false, "error": "<short>"},
         ...
       ],
       "stop_reason": "validate_pass" | "max_cycles" | "agent_gave_up" | "error"
     }
 
-If `ok=true` then `config` MUST be present.
+`config` MUST be present (empty `{}` if you give up).
 
-## HARD RULES (also restated in user prompt — they MUST agree)
+## HARD RULES
 
-- **WRITE ONLY to this workdir.** Do NOT create or modify any file under the
-  repository path. Even if your sandbox permits the write, the parent will
-  detect it via a mtime+size audit and reject the registration.
-- **NO git commands.** No `git`, `gh`, `hg`, `svn`, no push, no commit.
-- **NO modifications to** `engine/`, `prompts/`, `scripts/`, `bot/`,
-  `dashboard/`, `tests/`, `docs/`, `output/poll_state/`.
-- **Max 3 validate cycles.** Do not retry past that. Emit and stop.
-- **Output strictly per the JSON schema.** NO prose outside the final JSON.
-- **No `headless: false`** in your config — N100 (production) runs headless
-  only. The parent validator will reject `headless: false`.
-- If unclear how to proceed: emit
-       {"ok": false, "stop_reason": "agent_gave_up", "config": {...best...}, "attempts": [...]}
-  with whatever partial work you have, and stop.
+- TMPDIR ONLY. No repo paths. No directory traversal.
+- WRITE ONLY to `./candidate.json` in this tmpdir.
+- NO git, gh, push, commit, hg, svn.
+- Max 2 validate cycles.
+- Output strictly JSON. No prose outside the final JSON.
+- No `headless: false` in config (production = headless only — parent will reject).
+- If unclear: emit `{"ok": false, "stop_reason": "agent_gave_up", "config": {}, "attempts": [...]}` and stop.

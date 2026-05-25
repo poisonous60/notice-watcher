@@ -57,6 +57,11 @@ try:
 except ImportError:  # codex.py not on path in some test setups
     from .codex import _classify_error as _codex_classify_error, _codex_bin  # type: ignore
 
+try:
+    from engine.digest import compress_html_for_prompt as _compress_html
+except ImportError:
+    _compress_html = None
+
 
 # --- public constants --------------------------------------------------------
 
@@ -334,15 +339,38 @@ def _pick_examples(digest: dict, repo: Path, slug: str, *, n: int = 4) -> list[P
 # --- tmpdir setup ------------------------------------------------------------
 
 
+def _compress_digest_html(digest: dict, *, max_html_chars: int = 60_000) -> dict:
+    """Trim raw HTML samples in `list_html` and `article_sample.html` to keep
+    agent input under control. Same compression api_loop's prompt builder applies.
+    Returns a shallow-copied dict with the HTML fields swapped (non-destructive).
+    Without this, list_html + article_sample = ~80KB raw each ~20K tokens per read.
+    """
+    if _compress_html is None:
+        return digest
+    out = dict(digest)
+    lh = out.get("list_html")
+    if isinstance(lh, dict) and isinstance(lh.get("html"), str):
+        lh2 = dict(lh)
+        lh2["html"] = _compress_html(lh["html"])[:max_html_chars]
+        out["list_html"] = lh2
+    asmp = out.get("article_sample")
+    if isinstance(asmp, dict) and isinstance(asmp.get("html"), str):
+        asmp2 = dict(asmp)
+        asmp2["html"] = _compress_html(asmp["html"])[:max_html_chars]
+        out["article_sample"] = asmp2
+    return out
+
+
 def _setup_workdir(digest: dict, slug: str, url: str, repo: Path) -> Path:
     """Create tmpdir (outside repo) with AGENTS.md, digest.json, examples, validate wrapper."""
     workdir = Path(tempfile.mkdtemp(prefix=f"reg_agent_{slug}_"))
     # AGENTS.md (focused, agent-specific)
     if PROMPT_AGENTS_PATH.is_file():
         shutil.copy2(PROMPT_AGENTS_PATH, workdir / "AGENTS.md")
-    # Inputs
+    # Inputs — digest compressed (raw HTML samples trimmed to 60K chars each).
+    digest_for_agent = _compress_digest_html(digest, max_html_chars=60_000)
     (workdir / "digest.json").write_text(
-        json.dumps(digest, ensure_ascii=False, indent=2), encoding="utf-8"
+        json.dumps(digest_for_agent, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     (workdir / "slug.txt").write_text(slug + "\n", encoding="utf-8")
     (workdir / "url.txt").write_text(url + "\n", encoding="utf-8")
@@ -350,7 +378,7 @@ def _setup_workdir(digest: dict, slug: str, url: str, repo: Path) -> Path:
     # Examples — copy + manifest
     examples_dir = workdir / "examples"
     examples_dir.mkdir(parents=True, exist_ok=True)
-    picked = _pick_examples(digest, repo, slug)
+    picked = _pick_examples(digest, repo, slug, n=2)
     manifest = []
     for p in picked:
         try:
@@ -368,6 +396,11 @@ def _setup_workdir(digest: dict, slug: str, url: str, repo: Path) -> Path:
     (examples_dir / "manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+    # config_writer rules — pre-staged so agent doesn't need to read prompts/ from repo.
+    # ~25KB / ~6K tokens. Agent reads this only if uncertain about a field.
+    config_writer_src = REPO_ROOT / "prompts" / "config_writer.system.txt"
+    if config_writer_src.is_file():
+        shutil.copy2(config_writer_src, workdir / "config_writer_rules.txt")
     # validate wrapper — agent runs it. Copy so agent doesn't need to touch repo.
     if VALIDATE_WRAPPER_PATH.is_file():
         shutil.copy2(VALIDATE_WRAPPER_PATH, workdir / "validate_config.py")
@@ -529,6 +562,8 @@ async def run_codex_agentic(
             creationflags = 0
             if sys.platform == "win32":
                 creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            child_env = os.environ.copy()
+            child_env["REPO_ROOT"] = str(repo)  # validate wrapper uses this
             proc = subprocess.Popen(
                 args,
                 stdin=subprocess.PIPE,
@@ -536,6 +571,7 @@ async def run_codex_agentic(
                 stderr=subprocess.PIPE,
                 text=True,
                 encoding="utf-8",
+                env=child_env,
                 preexec_fn=preexec,
                 creationflags=creationflags,
             )

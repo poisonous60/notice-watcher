@@ -20,17 +20,21 @@ import sys
 from pathlib import Path
 
 # Make the repo importable when the script is copied to an agent tmpdir.
-# Heuristic: if `engine` / `generate` not importable, look for a sibling
-# `repo_path.txt` (parent process writes this).
+# Resolution order: REPO_ROOT env (set by codex_agentic.run_codex_agentic) →
+# sibling `repo_path.txt` → direct import (when run from repo root).
 _HERE = Path(__file__).resolve().parent
 try:
     from generate.validate import validate_built_config  # type: ignore
 except ImportError:
-    repo_hint = _HERE / "repo_path.txt"
-    if repo_hint.exists():
-        repo_path = repo_hint.read_text(encoding="utf-8").strip()
-        if repo_path and Path(repo_path).is_dir():
-            sys.path.insert(0, repo_path)
+    repo_from_env = os.environ.get("REPO_ROOT", "").strip()
+    if repo_from_env and Path(repo_from_env).is_dir():
+        sys.path.insert(0, repo_from_env)
+    else:
+        repo_hint = _HERE / "repo_path.txt"
+        if repo_hint.exists():
+            repo_path = repo_hint.read_text(encoding="utf-8").strip()
+            if repo_path and Path(repo_path).is_dir():
+                sys.path.insert(0, repo_path)
     from generate.validate import validate_built_config  # type: ignore  # noqa: E402
 
 
