@@ -666,21 +666,56 @@ async def run_codex_agentic(
             )
         # Tolerant parse — agent may add prose around the JSON since --output-schema
         # is no longer enforcing strict structure. Extract first {...} block.
+        # On parse failure: fall back to ./candidate.json that the agent writes
+        # separately. The codex CLI truncates the final agent message (openai/codex
+        # issues #4138 / #15451 — no public knob to raise the cap; the truncation
+        # happens silently when tools are active). The candidate file is written by
+        # the agent before the final message, so it survives the truncation.
+        parsed = None
+        parse_error: Optional[str] = None
         try:
             parsed = json.loads(last_text)
         except json.JSONDecodeError:
             i = last_text.find("{")
             j = last_text.rfind("}")
-            if i < 0 or j <= i:
-                raise LLMParseError(
-                    f"codex_agentic: agent output not JSON: first 300 chars: {last_text[:300]!r}"
+            if i >= 0 and j > i:
+                try:
+                    parsed = json.loads(last_text[i : j + 1])
+                except json.JSONDecodeError as e:
+                    parse_error = str(e)
+            else:
+                parse_error = "no balanced { } block"
+
+        if parsed is None:
+            # Recover the candidate from disk — last.json is truncated.
+            candidate_path = workdir / "candidate.json"
+            recovered: Optional[dict] = None
+            if candidate_path.is_file():
+                try:
+                    recovered = json.loads(candidate_path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    recovered = None
+            if isinstance(recovered, dict) and recovered:
+                # Assume the agent intended ok=true with this candidate; parent
+                # re-validation below is the real arbiter. If validate fails the
+                # caller still sees a precise gen_fail, not LLMParseError.
+                print(
+                    f"[codex_agentic] last.json parse failed ({parse_error}) — "
+                    f"recovered candidate.json ({candidate_path.stat().st_size}B). "
+                    f"Parent will re-validate.",
+                    flush=True,
                 )
-            try:
-                parsed = json.loads(last_text[i : j + 1])
-            except json.JSONDecodeError as e:
+                parsed = {
+                    "ok": True,
+                    "config": recovered,
+                    "attempts": [],
+                    "stop_reason": "last_message_truncated_recovered_from_candidate",
+                }
+            else:
                 raise LLMParseError(
-                    f"codex_agentic: agent output not JSON after block extract: {e} "
-                    f"— first 300 chars: {last_text[:300]!r}"
+                    f"codex_agentic: agent output not JSON ({parse_error}) "
+                    f"and ./candidate.json missing/empty — first 300 chars: "
+                    f"{last_text[:300]!r}"
                 )
         if not isinstance(parsed, dict):
             raise LLMParseError(f"codex_agentic: agent output not a JSON object: {type(parsed).__name__}")
