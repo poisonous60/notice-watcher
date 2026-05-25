@@ -60,6 +60,24 @@ Important detail:
   only rejects before agentic when the LLM classifier is decisive. This avoids
   blocking hard-but-possibly-valid sites too early.
 
+Operational override:
+
+- `--generation-mode api_loop|auto|agentic` forces the mode for one
+  `register.py` invocation, ahead of `output/llm_routing.json`.
+- `--no-agentic` forces `api_loop` even when routing is `auto`; keep it for
+  cheap diagnostic probes only, not normal batch success-rate measurement.
+- Normal catalog batch and `--failed` retries should use the production path:
+  default `auto` = `api_loop_once` then agentic escalation.
+- If a cheap classifier/gate hypothesis check is explicitly desired:
+
+```bash
+python scripts/register.py --reuse-probe --no-agentic --max-attempts 1 "<URL>"
+```
+
+For agentic cost reduction, prefer shrinking the staged agent inputs
+(`failure_packet`, curated examples, compact rules) rather than disabling
+agentic during batch.
+
 ## Failure Packet
 
 When `api_loop_once` fails and auto escalates, the agentic workdir may contain:
@@ -126,6 +144,8 @@ Dashboard `/timings`:
 
 - `generate/codex_agentic.py`
   - Writes optional `failure_packet.json` into the agent tmpdir.
+  - No longer stages `repo_path.txt`; agent input remains tmpdir-only and does
+    not advertise repo paths.
 
 - `prompts/register_agent_AGENTS.md`
 - `prompts/register_agent_user.txt`

@@ -80,8 +80,8 @@ git status --short -- prompts/ engine/ probe/ generate/ engine/recognizers/
 ```
 
 둘 중 하나라도 있으면:
-- probe artifact (`output/probe/<slug>/`) 존재 → `python scripts/register.py --reuse-probe "<URL>"` (LLM 만 재호출, fetch 0 추가)
-- artifact 없음 (큐가 *FAILED.json 만* 가져온 경우 — snapshot copy 등) → `python scripts/register.py "<URL>"` (full probe + 생성)
+- probe artifact (`output/probe/<slug>/`) 존재 → 실전 회복 검사는 `python scripts/register.py --reuse-probe "<URL>"` (현재 기본 `auto`: api_loop_once → agentic). `--no-agentic` 은 classifier/gate 가설 같은 cheap 진단 전용이며, batch 성공률 판단에 쓰지 않는다.
+- artifact 없음 (큐가 *FAILED.json 만* 가져온 경우 — snapshot copy 등) → `python scripts/register.py "<URL>"` (full probe + 현재 기본 `auto` 생성). agentic 입력이 비싸면 호출을 끄기보다 `failure_packet`·curated examples·rules compact 를 줄이는 방향으로 개선한다.
 
 성공 → 큐 정리 + §1 skip. 실패 → §1 진입.
 
@@ -168,7 +168,7 @@ python scripts/remote.py jobs --since <분> --min-id <batch 시작 id> --wait --
 2. **일반화 신호 punt** — 청크 안에 2+ slug 가 같은 패턴(URL 누락 파라미터·JS detail 함수·TLS handshake 실패·platform CMS 동형) 보이는데 case body §일반화 후보 섹션이 비었거나 "사이트별 매핑이라 일반화 X" 1줄. (2026-05-24 krpublic: KR egov `menuid`/`menuCd` 누락 4건 동일 + `goView(seq)` JS detail 3건 동일 punt.)
 3. **ALLOW-LIST 밖 punt** — fix layer 가 engine/probe/prompts 인데 "allow-list 밖이라 안 함" 1줄로 끝남 (후속 chunk 에 정보 전달 X). 정상은: 단일 site config 는 ALLOW-LIST 안에서 진행 + escalate 섹션에 분석 완전 적기.
 4. **`no_change` 정당화 불충분** — 시도/차단신호(verbatim)/진짜 해결 경로 3개 중 빠진 게 있음.
-5. **`no_change` layer 오판** — LLM retry 3/3 fail 이고 generic layer 를 못 찾았는데 `no_change escalate` 로 끝냄. 이 경우 §2 의 최종 트랙은 §2e(수동/handwritten config) 검토다. generic improvement 부재는 site outcome 이 아니며, case outcome 은 그 사이트에 실제로 한 조치 기준으로 기록한다.
+5. **`no_change` layer 오판** — auto/api_loop 이 fail 이고 generic layer 를 못 찾았는데 `no_change escalate` 로 끝냄. 이 경우 §2 의 최종 트랙은 §2e(수동/handwritten config) 검토다. generic improvement 부재는 site outcome 이 아니며, case outcome 은 그 사이트에 실제로 한 조치 기준으로 기록한다.
 
 **Claude 의 audit 절차** (각 chunk merge 전):
 - 모든 case body 를 grep: `일반화 안 되는 이유` + `allow-list` + `보류` 라인 등장 빈도. 청크 멤버 수 대비 절반 이상이면 §0c-회피 2/3 의심.
@@ -244,7 +244,7 @@ artifact 없는 §0 신규 진입 (link 만 받은 첫 시도) 케이스는 예�
 
 ### 2c. probe 산출물에 *이미 신호 있는데* 휴리스틱화 안 됨 — 휴리스틱 추가 (수동 config 보다 우선)
 
-LLM 이 raw HTML/HAR 보고 4회 retry 후 fail — 신호가 `diagnosis.json`/`list_candidates.json`/HAR 에 있는데 안 뽑아서. 미래 같은 패턴 사이트도 자동 처리됨.
+자동 생성 경로(api_loop 또는 auto→agentic)가 raw HTML/HAR 를 보고도 fail — 신호가 `diagnosis.json`/`list_candidates.json`/HAR 에 있는데 안 뽑아서. 미래 같은 패턴 사이트도 자동 처리됨.
 
 기존 신호 단일 진실원: `probe/_contract.py:_ARTIFACTS` 의 `_ContractField.note`. 새 휴리스틱 박기 전 *거기 없는 카테고리* 인지 확인.
 
@@ -261,7 +261,7 @@ LLM 이 raw HTML/HAR 보고 4회 retry 후 fail — 신호가 `diagnosis.json`/`
 1. `probe/extract.py` 등에 새 `@heuristic` 함수 — 입력 = 기존 artifact, *추가 fetch 금지* (순수). 출력 = `diagnosis.json`/`list_candidates.json` 명시 키.
 2. **활용 자리 동시 박기**:
    - LLM 활용 → `prompts/config_writer.system.txt` 에 키 설명 한 줄 + `_PROMPT_REQUIRED_KEY_PATHS` 등록.
-   - preflight 거부 → register.py 가 키 보면 즉시 fail (LLM 호출 skip, 4회 retry 비용 0).
+   - preflight 거부 → register.py 가 키 보면 즉시 fail (LLM/agentic 생성 호출 skip, 생성 비용 0).
    - recognizer 후처리 → recognize 결과를 probe digest 와 merge 단계 신설 필요 (현재 X — F-layer).
 3. 영구 거부 마커 = `.REJECTED.json` + `bot/site_ops.py:is_registered` 가 봄 (별 PR).
 4. 휴리스틱 추가 규칙 (↓ §4) — fixture·contract·smoke 통과.
@@ -366,7 +366,7 @@ dynamic family (`recognizer:*`, `[FAIL]:<check>`) 는 추가 필요 X — 자동
      --reason "<1-3줄>" [--fix-layer <C+D>] [--failure-keys <k1,k2>] [--case-md-slug <slug>]
    ```
    이 시점 HEAD = 본 case 의 commit → `commit_sha` 와 `files_changed` 정확. commit 전 실행하면 stderr 에 `⚠ staged/working tree 변경 있음 — commit 후 호출 권장` 경고만 박고 진행 (derive 부정확 가능). outcome 분류는 §6 step 5 표 참조. 잊어도 push 차단 X (~10% gap). dashboard `/cases` 에서 표시.
-   **일반 개선 X (LLM retry 3/3 fail) 면 §2e 검토 필수**: 새 layer(§2a~§2d) 를 못 찾았다는 이유로 case outcome `no_change escalate` 로 끝내지 않는다. generic improvement 부재는 site outcome 이 아니라 “추가 공통 개선 없음”일 뿐이다. §2a~§2d 가 전부 아니면 §2e(수동 config/handwritten) 로 진행하고, `case_log log --case-md-slug` 의 `--outcome` 은 case .md frontmatter outcome 과 맞춘다.
+   **일반 개선 X (auto/api_loop 실패) 면 §2e 검토 필수**: 새 layer(§2a~§2d) 를 못 찾았다는 이유로 case outcome `no_change escalate` 로 끝내지 않는다. generic improvement 부재는 site outcome 이 아니라 “추가 공통 개선 없음”일 뿐이다. §2a~§2d 가 전부 아니면 §2e(수동 config/handwritten) 로 진행하고, `case_log log --case-md-slug` 의 `--outcome` 은 case .md frontmatter outcome 과 맞춘다.
 
 8. **N100 배포** (운영 메모 §8 SoT) — `ssh <user>@<host> 'cd ~/notice-watcher && git pull --ff-only && .venv/bin/python scripts/register.py --config "configs/<slug>.json"'`.
    - **`adapters/`·`engine/`·`scripts/notify.py`·`bot/` 변경 시 뒤에 `&& systemctl --user restart notice-bot.service`** — 봇 import 캐시. 안 하면 `make_adapter() ValueError`.
@@ -414,7 +414,7 @@ probe/prompt/schema/코드 손대기 전 다음 여섯 질문에 답해보면 �
 4. **검증 그린?** —
    - `python scripts/probe_smoke.py` 그린
    - 영향 사이트 있으면: `python scripts/register.py --config "configs/<영향-slug>.json"` 결과 비교
-   - LLM 거동 영향 (C/A/B) 이면: 가장 최근 실패 케이스의 probe artifact 로 `register.py --reuse-probe` 1회 — 산출 config 동등 또는 더 좋은지.
+   - LLM/agentic 거동 영향 (C/A/B) 이면: 가장 최근 실패 케이스의 probe artifact 로 `register.py --reuse-probe` 1회 — 현재 기본 `auto`(api_loop_once → agentic) 기준 산출 config 동등 또는 더 좋은지. agent 입력 비용이 문제면 호출 차단이 아니라 `failure_packet`·examples·rules compact 축소를 검토한다.
 
 5. **case 파일 + commit msg**:
    - `docs/cases/<slug>.md` frontmatter — 필수: `slug`/`url`/`status` (이모지 + 1줄)/`outcome`/`date`. 선택: `fix_layer`/`failure_keys`/`config_strategy`/`adapters_changed`/`engine_files_touched`/`tags`/`requested_by`.

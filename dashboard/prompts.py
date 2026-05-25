@@ -64,6 +64,9 @@ def hand_config_triage_queue(*, failed_slugs: list[str]) -> str:
         "전체 절차 = SKILL.md \"§0c codex 위임 모드\". 요약:",
         "",
         "1. `python scripts/triage.py pull --skip-later`  (FAILED + probe 받기)",
+        "1b. **실전 경로 유지**: batch/FAILED 재시도는 현재 기본 `auto` 그대로 둔다 "
+        "(api_loop_once → agentic). `--no-agentic` 은 cheap 가설 확인 전용이지 batch 성공률 판단에 쓰지 않는다. "
+        "개선 포인트는 agent 호출 억제가 아니라 agent 입력 축소/품질 개선: `failure_packet`·curated examples·rules compact 를 확인한다.",
         "2. **disjoint 파일소유 청크 분할** (`codex_batch.py plan` 은 단서). 공유 충돌파일=`scripts/register.py`(detect dispatch)+`probe/extract.py`(detect_*): "
         "path-match recognizer·수동 config=공유파일 0=병렬안전, probe-detect 플랫폼(root-URL)=한 청크만 소유·나머지 직렬. 소유 기록 output/codex_file_claims.json.",
         "3. **병렬 launch (ALLOW-LIST 박아서)** — 각 codex 프롬프트(`codex_handoff.py generic --task-file`)에 '이 파일만 편집, 나머지 금지' 제약. "
@@ -139,6 +142,9 @@ def catalog_run_and_fix(*, catalog_name: str,
     lines.append(f"1. `python scripts/remote.py batch-register --catalog={catalog_name}` 호출 → untried entry 큐 enqueue.")
     lines.append("2. worker drain 대기 — `python scripts/remote.py logs bot --tail 50` 와 dashboard `/candidates/" + catalog_name + "` KPI 로 진행 확인.")
     lines.append("3. drain 완료 후 fail_kind 분포 확인 (dashboard 또는 jobs 테이블).")
+    lines.append("3b. **실전 경로 유지**: batch/FAILED 재시도는 현재 기본 `auto` 그대로 둔다 "
+                 "(api_loop_once → agentic). `--no-agentic` 은 cheap 가설 확인 전용이지 batch 성공률 판단에 쓰지 않는다. "
+                 "개선 포인트는 agent 호출 억제가 아니라 agent 입력 축소/품질 개선: `failure_packet`·curated examples·rules compact 를 확인한다.")
     lines.append("4. **아래 우선순위대로** 처리 (2026-05-21 사용자 결정 — SKILL.md §0a):")
     lines.append("   1) **bug** (rc=-1/-2/-3/-5/-99, `.BUG.json`): *무조건 fix*, 최우선. traceback → bot/scripts/engine 코드 수정 (bug-fix workflow). `register.py 실행 시간 초과(300s)` 류 timeout 도 여기 — root-cause.")
     lines.append("   2) **gate_reject** (rc=3): board_shape/nav_only/single-article 게이트 거부 + LLM index/content 분류기(veto)도 content 판정(ADR 0007). 게시판/비게시판 false-reject 봉합은 *분류기 layer 의 일* — 임의로 '의도된 거부'라 신뢰 X. **사용자에게 분포·샘플 보고하고 확인 대기**, 받으면 fix 순서 = ① `prompts/classify.system.txt`/모델 보강 (게이트 휴리스틱 추가 X) → ② SPA(정적 HTML 에 목록 없음)면 render 트랙. SKILL.md §0a-2.")

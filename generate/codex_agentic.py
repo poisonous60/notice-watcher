@@ -408,7 +408,6 @@ def _setup_workdir(digest: dict, slug: str, url: str, repo: Path,
     )
     (workdir / "slug.txt").write_text(slug + "\n", encoding="utf-8")
     (workdir / "url.txt").write_text(url + "\n", encoding="utf-8")
-    (workdir / "repo_path.txt").write_text(str(repo) + "\n", encoding="utf-8")
     if failure_packet:
         (workdir / "failure_packet.json").write_text(
             json.dumps(failure_packet, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -462,10 +461,9 @@ def _build_user_prompt(slug: str, url: str, repo: Path) -> str:
     if PROMPT_USER_PATH.is_file():
         tpl = PROMPT_USER_PATH.read_text(encoding="utf-8")
     else:
-        tpl = "TASK: register slug={{slug}} url={{url}} repo={{repo_path}}\nBegin."
+        tpl = "TASK: register slug={{slug}} url={{url}}\nBegin."
     return (tpl.replace("{{ slug }}", slug)
-              .replace("{{ url }}", url)
-              .replace("{{ repo_path }}", str(repo)))
+              .replace("{{ url }}", url))
 
 
 # --- subprocess + process tree kill ------------------------------------------

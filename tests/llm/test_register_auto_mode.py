@@ -51,6 +51,27 @@ def run() -> list[tuple[str, bool, str]]:
     cases.append(("mode_model_override_forces_api_loop",
                   reg._select_generation_mode(route_auto, SimpleNamespace(model="gemini-x")) == "api_loop",
                   ""))
+    cases.append(("mode_no_agentic_forces_api_loop",
+                  reg._select_generation_mode(route_auto, SimpleNamespace(model=None, no_agentic=True)) == "api_loop",
+                  ""))
+    cases.append(("mode_cli_override_agentic_wins",
+                  reg._select_generation_mode(
+                      route_api,
+                      SimpleNamespace(model=None, no_agentic=False, generation_mode="agentic"),
+                  ) == "agentic",
+                  ""))
+    cases.append(("mode_cli_override_api_loop_blocks_auto",
+                  reg._select_generation_mode(
+                      route_auto,
+                      SimpleNamespace(model=None, no_agentic=False, generation_mode="api_loop"),
+                  ) == "api_loop",
+                  ""))
+    cases.append(("mode_cli_override_auto_non_codex_fails_closed",
+                  reg._select_generation_mode(
+                      route_gemini_auto,
+                      SimpleNamespace(model=None, no_agentic=False, generation_mode="auto"),
+                  ) == "api_loop",
+                  ""))
 
     calls: list[tuple] = []
 

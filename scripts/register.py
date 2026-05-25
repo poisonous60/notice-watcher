@@ -1805,7 +1805,9 @@ def _select_generation_mode(route, args) -> str:
     """
     if getattr(args, "model", None):
         return "api_loop"
-    mode = (getattr(route, "meta", {}) or {}).get("mode") or "api_loop"
+    if getattr(args, "no_agentic", False):
+        return "api_loop"
+    mode = getattr(args, "generation_mode", None) or (getattr(route, "meta", {}) or {}).get("mode") or "api_loop"
     if mode in ("agentic", "auto") and getattr(route, "provider", None) != "codex":
         return "api_loop"
     if mode not in ("api_loop", "agentic", "auto"):
@@ -2416,6 +2418,11 @@ def _main_inner(argv) -> int:
     p.add_argument("--max-attempts", type=int, default=_rt_settings.register.max_attempts,
                    help=f"gemini 생성+검증 시도 횟수 (한 라운드 안에서 검증 피드백 재시도). "
                         f"기본값은 config.toml [register].max_attempts (현재 {_rt_settings.register.max_attempts}).")
+    p.add_argument("--generation-mode", choices=("api_loop", "auto", "agentic"),
+                   help="이번 실행의 config 생성 모드를 강제 (routing.json 의 config_generate__mode 보다 우선). "
+                        "batch/triage cheap sweep 에서는 api_loop 로 agentic 진입을 막을 수 있음.")
+    p.add_argument("--no-agentic", action="store_true",
+                   help="agentic/auto escalation 을 끄고 api_loop 만 사용 (--generation-mode 보다 안전 우선).")
     p.add_argument("--reuse-probe", action="store_true", help="probe 산출물 있으면 재사용")
     p.add_argument("--full-probe", action="store_true", help="lite 대신 처음부터 full probe (외부 Jina/Crawl4AI·유료 서비스까지 — 보통 불필요, 느림)")
     p.add_argument("--no-escalate", action="store_true",
@@ -2962,6 +2969,7 @@ def _main_inner(argv) -> int:
         return 1
     _config_generate_route = _resolve_route("config_generate")
     _generation_mode = _select_generation_mode(_config_generate_route, args)
+    print(f"[register] generation mode={_generation_mode}", flush=True)
     gem_span_cm = current_trace().span("gemini_gen_validate",
                                         attrs={"slug": slug,
                                                "model_attempt1": _eff_model_init,

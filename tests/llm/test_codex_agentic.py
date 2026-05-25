@@ -219,7 +219,7 @@ def run() -> list[tuple[str, bool, str]]:
                 "digest.json": (wd / "digest.json").exists(),
                 "slug.txt": (wd / "slug.txt").exists(),
                 "url.txt": (wd / "url.txt").exists(),
-                "repo_path.txt": (wd / "repo_path.txt").exists(),
+                "repo_path_absent": not (wd / "repo_path.txt").exists(),
                 "examples_dir": (wd / "examples").exists(),
                 "manifest": (wd / "examples" / "manifest.json").exists(),
                 "failure_packet": (wd / "failure_packet.json").exists(),

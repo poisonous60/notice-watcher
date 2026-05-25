@@ -39,6 +39,12 @@ HARD_STOP = """\
 
 ALLOW-LIST 는 *편집 권한 제한*이지 *분석 권한 제한*이 아니다. 다음 4종 punt 패턴은 task 위반 — 위반 시 Claude 가 review 단계에서 reject (worktree merge X).
 
+## register auto-mode 원칙 (2026-05-25)
+
+- batch/FAILED 재시도는 실전 환경처럼 현재 기본 `auto` 를 그대로 탄다: api_loop_once → 필요 시 Codex agentic.
+- `--no-agentic` 은 classifier/gate 가설 확인 같은 cheap 진단 전용이다. batch 성공률 판단이나 final 재시도에 붙이지 마라.
+- agentic 개선 방향은 호출 억제가 아니라 agent 입력 축소/품질 개선이다. `failure_packet`·curated examples·rules compact 가 과하게 크거나 약한지 case body 의 일반화 후보에 적는다.
+
 **게이트 1 — "probe artifact 없음" defer 금지**
 - task 에 `ssh aaaa@n100-noticewatcher 'tar czf - ...'` 류 N100 probe pull 명령이 있는데 *시도하지 않고* `no_change` defer = 위반.
 - 다른 dev box 환경 (예: 사용자가 직접 본 슬러그 등) 에서 pull 이 명시 안 됐어도 `triage.py pull --slug <slug>` 또는 N100 tar pull 시도 1회 의무. 그 다음에도 artifact 못 받으면 그제서야 defer + 그 사실 case body 에 명시 ("ssh tar pull 시도 → 결과: <stderr 1줄>").
