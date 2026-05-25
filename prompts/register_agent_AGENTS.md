@@ -17,6 +17,8 @@ All inputs you need are already staged here:
 - `digest.json` — probe result (HTML samples, list_candidates, recognizer hints)
 - `slug.txt` — target slug (single line)
 - `url.txt` — target URL (single line)
+- `failure_packet.json` — optional previous api_loop_once failed candidate
+  and validation feedback. Treat it as diagnostic evidence, not as a template.
 - `examples/*.json` — 2 curated prior configs (closest matches)
 - `examples/manifest.json` — why each example was picked
 - `config_writer_rules.txt` — the full ruleset for config authoring
@@ -26,15 +28,17 @@ All inputs you need are already staged here:
 
 1. Read `digest.json`, `slug.txt`, `url.txt` first.
 2. Read `examples/manifest.json` to see which examples are relevant.
-3. Read 1-2 most relevant `examples/*.json`. Optionally skim
+3. If `failure_packet.json` exists, read it to learn what already failed.
+   You may reuse, patch, or discard that candidate completely.
+4. Read 1-2 most relevant `examples/*.json`. Optionally skim
    `config_writer_rules.txt` only if uncertain about a field.
-4. Write your candidate to `./candidate.json` (this tmpdir).
-5. Run validator:
+5. Write your candidate to `./candidate.json` (this tmpdir).
+6. Run validator:
        python ./validate_config.py ./candidate.json
    Read JSON result.
-6. If `ok=true` → STOP, emit final.
-7. If failed: edit candidate.json once, re-run validator.
-8. After **2 validate attempts** (1 initial + 1 retry): STOP regardless.
+7. If `ok=true` → STOP, emit final.
+8. If failed: edit candidate.json once, re-run validator.
+9. After **2 validate attempts** (1 initial + 1 retry): STOP regardless.
    Emit final with the last attempt and `stop_reason: max_cycles`.
 
 ## TOKEN DISCIPLINE

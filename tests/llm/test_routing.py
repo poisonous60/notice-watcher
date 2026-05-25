@@ -178,6 +178,19 @@ def run() -> list[tuple[str, bool, str]]:
         f"got provider={r6.provider} meta={dict(r6.meta)}",
     ))
 
+    # ----- 6b. sidecar mode=auto 파싱 (api_loop_once -> agentic fallback) -----
+    p6b = _tmp_routing({
+        "config_generate": "codex:gpt-5.4-mini#low",
+        "config_generate__mode": "auto",
+    })
+    _reset_routing_to(p6b)
+    r6b = routing.resolve("config_generate")
+    cases.append((
+        "sidecar_mode_auto",
+        r6b.provider == "codex" and r6b.meta.get("mode") == "auto",
+        f"got provider={r6b.provider} meta={dict(r6b.meta)}",
+    ))
+
     # ----- 7. sidecar value whitelist 밖 → 무시 -----
     p7 = _tmp_routing({
         "config_generate": "codex:gpt-5.4-mini",
@@ -221,12 +234,18 @@ def run() -> list[tuple[str, bool, str]]:
         f"got {routing._split_sidecar_key('config_generate')}",
     ))
 
-    # ----- 10. dashboard validator: codex+agentic OK, gemini+agentic reject -----
+    # ----- 10. dashboard validator: codex+agentic/auto OK, gemini+agentic/auto reject -----
     from dashboard.control_actions import validate_routing as _validate
     cases.append((
         "validator_codex_agentic_ok",
         _validate({"config_generate": "codex:gpt-5.4-mini",
                    "config_generate__mode": "agentic"}) is None,
+        "should accept",
+    ))
+    cases.append((
+        "validator_codex_auto_ok",
+        _validate({"config_generate": "codex:gpt-5.4-mini",
+                   "config_generate__mode": "auto"}) is None,
         "should accept",
     ))
     err_msg = _validate({"config_generate": "gemini:flash",
@@ -235,6 +254,13 @@ def run() -> list[tuple[str, bool, str]]:
         "validator_gemini_agentic_reject",
         err_msg is not None and "provider=codex" in (err_msg or ""),
         f"got err={err_msg!r}",
+    ))
+    err_msg_auto = _validate({"config_generate": "gemini:flash",
+                              "config_generate__mode": "auto"})
+    cases.append((
+        "validator_gemini_auto_reject",
+        err_msg_auto is not None and "provider=codex" in (err_msg_auto or ""),
+        f"got err={err_msg_auto!r}",
     ))
     err_msg2 = _validate({"config_generate__mode": "agentic"})
     cases.append((
@@ -248,6 +274,17 @@ def run() -> list[tuple[str, bool, str]]:
         "validator_invalid_mode_value_reject",
         err_msg3 is not None and "허용 값" in (err_msg3 or ""),
         f"got err={err_msg3!r}",
+    ))
+    from dashboard.control_actions import build_routing_form as _build_form
+    built = _build_form({
+        "config_generate": "codex:gpt-5.4-mini",
+        "config_generate__effort": "low",
+        "config_generate__mode": "auto",
+    })
+    cases.append((
+        "dashboard_form_persists_auto_mode",
+        built.get("config_generate__mode") == "auto",
+        f"built={built}",
     ))
 
     # cleanup

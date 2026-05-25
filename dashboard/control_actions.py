@@ -259,7 +259,7 @@ def validate_routing(data: dict) -> Optional[str]:
     try:
         from generate.routing import SIDECAR_AXIS_VALUES
     except ImportError:
-        SIDECAR_AXIS_VALUES = {"mode": frozenset({"api_loop", "agentic"})}
+        SIDECAR_AXIS_VALUES = {"mode": frozenset({"api_loop", "agentic", "auto"})}
     for k, v in data.items():
         if k.startswith("_") and k != "_default":
             continue  # _comment 같은 키 허용
@@ -276,15 +276,15 @@ def validate_routing(data: dict) -> Optional[str]:
             allowed = SIDECAR_AXIS_VALUES[axis]
             if val not in allowed:
                 return f"{k}: 값 {val!r} 이 허용 값 {sorted(allowed)} 에 없음"
-            # mode=agentic 은 provider=codex 강제. base 의 provider 가 다르면 reject.
-            if axis == "mode" and val == "agentic":
+            # mode=agentic/auto 는 provider=codex 강제. base 의 provider 가 다르면 reject.
+            if axis == "mode" and val in ("agentic", "auto"):
                 base_val = data.get(base)
                 if not isinstance(base_val, str) or ":" not in base_val:
-                    return (f"{k}=agentic 인데 {base} 의 provider:model 매핑이 없음 — "
+                    return (f"{k}={val} 인데 {base} 의 provider:model 매핑이 없음 — "
                             f"먼저 {base} 에 codex:* 모델 박아라")
                 base_provider = base_val.split(":", 1)[0].strip()
                 if base_provider != "codex":
-                    return (f"{k}=agentic 은 provider=codex 일 때만 의미 — "
+                    return (f"{k}={val} 은 provider=codex 일 때만 의미 — "
                             f"{base} provider={base_provider!r} 와 충돌")
             continue
         if k not in _VALID_CALL_SITES:
@@ -327,8 +327,8 @@ def build_routing_form(form: dict) -> dict:
             out[cs] = model
         # mode sidecar. 빈값 또는 'api_loop' 는 default 라 제거 (routing.json 깔끔히 유지).
         mode = (form.get(f"{cs}__mode") or "").strip().lower()
-        if mode == "agentic":
-            out[f"{cs}__mode"] = "agentic"
+        if mode in ("agentic", "auto"):
+            out[f"{cs}__mode"] = mode
         else:
             out[f"{cs}__mode"] = ""
     return out
@@ -686,13 +686,13 @@ async def gather_state(*, load_remote: bool = False) -> dict:
             "effective": effective,                # {call_site: 'provider:model[#effort]'} — 실제 적용 (override 없으면 fallback)
             "current_model": current_model,        # override 의 모델 부분만
             "current_effort": current_effort,      # override 의 effort 부분만 ('' = 미지정)
-            "current_mode": current_mode,          # override 의 mode sidecar ('' or 'agentic')
+            "current_mode": current_mode,          # override 의 mode sidecar ('' or 'agentic'/'auto')
             "effective_model": effective_model,
             "effective_effort": effective_effort,
-            "effective_mode": effective_mode,      # 'api_loop' (default) or 'agentic'
+            "effective_mode": effective_mode,      # 'api_loop' (default), 'agentic', or 'auto'
             "models":  known_models(),             # model dropdown 옵션
             "efforts": REASONING_EFFORTS,          # effort dropdown 옵션 (codex 전용)
-            "modes":   ["api_loop", "agentic"],   # mode dropdown 옵션 (codex 전용)
+            "modes":   ["api_loop", "auto", "agentic"],   # mode dropdown 옵션 (codex 전용)
             "call_sites": CALL_SITES,
         },
         "runtime": {

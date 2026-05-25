@@ -394,7 +394,8 @@ def _compress_digest_html(digest: dict, *, max_html_chars: int = 60_000) -> dict
     return out
 
 
-def _setup_workdir(digest: dict, slug: str, url: str, repo: Path) -> Path:
+def _setup_workdir(digest: dict, slug: str, url: str, repo: Path,
+                   failure_packet: Optional[dict] = None) -> Path:
     """Create tmpdir (outside repo) with AGENTS.md, digest.json, examples, validate wrapper."""
     workdir = Path(tempfile.mkdtemp(prefix=f"reg_agent_{slug}_"))
     # AGENTS.md (focused, agent-specific)
@@ -408,6 +409,10 @@ def _setup_workdir(digest: dict, slug: str, url: str, repo: Path) -> Path:
     (workdir / "slug.txt").write_text(slug + "\n", encoding="utf-8")
     (workdir / "url.txt").write_text(url + "\n", encoding="utf-8")
     (workdir / "repo_path.txt").write_text(str(repo) + "\n", encoding="utf-8")
+    if failure_packet:
+        (workdir / "failure_packet.json").write_text(
+            json.dumps(failure_packet, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
     # Examples — copy + manifest
     examples_dir = workdir / "examples"
     examples_dir.mkdir(parents=True, exist_ok=True)
@@ -549,6 +554,7 @@ async def run_codex_agentic(
     model: str = "gpt-5.4-mini",
     reasoning_effort: str = "low",
     keep_workdir: bool = False,
+    failure_packet: Optional[dict] = None,
 ) -> AgenticResult:
     """End-to-end agentic generate.
 
@@ -563,7 +569,7 @@ async def run_codex_agentic(
     9. return AgenticResult — caller publishes from candidate_path
     """
     version = _codex_preflight()
-    workdir = _setup_workdir(digest, slug, url, repo)
+    workdir = _setup_workdir(digest, slug, url, repo, failure_packet=failure_packet)
     pre = _audit_snapshot_paths(repo, slug)
     t0 = time.time()
     stdout_text = ""

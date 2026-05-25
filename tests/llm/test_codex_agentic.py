@@ -201,6 +201,11 @@ def run() -> list[tuple[str, bool, str]]:
         # PROMPT_AGENTS_PATH + VALIDATE_WRAPPER_PATH 가 실제 repo 의 파일이므로 임시 stub.
         wd = None
         try:
+            failure_packet = {
+                "source": "api_loop_once",
+                "candidate_config": {"strategy": "httpx_html"},
+                "validation_feedback": "[FAIL] posts_nonempty",
+            }
             wd = ca._setup_workdir(
                 {"recognizer_hint": {"name": "myrec"},
                  "strategy_hint": {"strategy": "httpx_html"},
@@ -208,6 +213,7 @@ def run() -> list[tuple[str, bool, str]]:
                 "testslug",
                 "https://example.com/board",
                 fake_repo2,
+                failure_packet=failure_packet,
             )
             files_present = {
                 "digest.json": (wd / "digest.json").exists(),
@@ -216,6 +222,7 @@ def run() -> list[tuple[str, bool, str]]:
                 "repo_path.txt": (wd / "repo_path.txt").exists(),
                 "examples_dir": (wd / "examples").exists(),
                 "manifest": (wd / "examples" / "manifest.json").exists(),
+                "failure_packet": (wd / "failure_packet.json").exists(),
             }
             cases.append(_check(
                 "workdir_files_present",
@@ -227,6 +234,12 @@ def run() -> list[tuple[str, bool, str]]:
                 "workdir_slug_content",
                 slug_content == "testslug",
                 f"got slug={slug_content!r}",
+            ))
+            got_packet = json.loads((wd / "failure_packet.json").read_text(encoding="utf-8"))
+            cases.append(_check(
+                "workdir_failure_packet_content",
+                got_packet == failure_packet,
+                f"got packet={got_packet!r}",
             ))
         finally:
             if wd is not None:

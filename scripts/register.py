@@ -1624,7 +1624,7 @@ async def _generate(digest: dict, *, max_attempts: int, model):
     )
 
 
-def _gen_agentic(digest: dict, slug: str, url: str):
+def _gen_agentic(digest: dict, slug: str, url: str, failure_packet: Optional[dict] = None):
     """codex agentic mode 동기 래퍼. (config, ValidationReport) 반환 — `_gen` 과 같은 shape.
 
     실패 처리:
@@ -1644,6 +1644,7 @@ def _gen_agentic(digest: dict, slug: str, url: str):
     try:
         result = asyncio.run(_run_codex_agentic(
             digest=digest, slug=slug, url=url, repo=repo,
+            failure_packet=failure_packet,
         ))
     except _AgenticGenerationError as e:
         print(f"[register] agentic generate: {e.stop_reason or 'failed'} "
@@ -1667,6 +1668,102 @@ def _gen_agentic(digest: dict, slug: str, url: str):
 def _gen(digest: dict, *, max_attempts: int, model):
     """동기 래퍼 (asyncio.run)."""
     return asyncio.run(_generate(digest, max_attempts=max_attempts, model=model))
+
+
+class _AutoRejected(RuntimeError):
+    def __init__(self, rc: int) -> None:
+        super().__init__(f"auto generation rejected with rc={rc}")
+        self.rc = rc
+
+
+def _select_generation_mode(route, args) -> str:
+    """Resolve register generation mode from routing sidecar.
+
+    Fail closed to api_loop when provider/model override is incompatible. `--model`
+    is an explicit API-loop override and never enters agentic/auto.
+    """
+    if getattr(args, "model", None):
+        return "api_loop"
+    mode = (getattr(route, "meta", {}) or {}).get("mode") or "api_loop"
+    if mode in ("agentic", "auto") and getattr(route, "provider", None) != "codex":
+        return "api_loop"
+    if mode not in ("api_loop", "agentic", "auto"):
+        return "api_loop"
+    return mode
+
+
+def _truncate_packet_text(text: object, *, limit: int = 2000) -> str:
+    s = str(text or "")
+    return s if len(s) <= limit else s[:limit] + "...(truncated)"
+
+
+def _build_failure_packet(exc: GenerationError) -> dict:
+    """Compact, non-authoritative evidence from api_loop_once for agentic."""
+    last_config = getattr(exc, "last_config", None)
+    return {
+        "source": "api_loop_once",
+        "attempt": 1,
+        "candidate_config": last_config if isinstance(last_config, dict) else {},
+        "validation_feedback": _truncate_packet_text(getattr(exc, "last_feedback", str(exc))),
+        "error": _truncate_packet_text(str(exc), limit=500),
+    }
+
+
+def _generation_failure_reject_rc(digest: dict, url: str, slug: str, exc: GenerationError,
+                                  *, gate_only: bool = False,
+                                  include_heterogeneous_hub: bool = True) -> Optional[int]:
+    """Reclassify a generation failure into REJECTED when page-type evidence is decisive."""
+    if gate_only:
+        return None
+    _cls_rc = _classify_decisive_rc(_classify_veto(digest, url, slug, gate_only=False))
+    if _cls_rc is not None:
+        _cls = _classify_veto(digest, url, slug, gate_only=False)
+        reason = (f"분류기 post-mortem({_cls.get('class')} conf={_cls.get('confidence')}) — "
+                  f"gen_fail 직전 재분류: {_cls.get('reason')[:120]}")
+        _save_rejected(slug, url, reason, learn=False)
+        print(f"\n[register] 🔴 generation fail 직후 LLM 분류기가 {_cls.get('class')}"
+              f"(비-게시판)로 판단 — gen_fail 아닌 거부 rc={_cls_rc} 로 재분류 "
+              f"(conf={_cls.get('confidence')}, {_cls.get('reason')[:60]})")
+        return _cls_rc
+    if include_heterogeneous_hub:
+        _het = _heterogeneous_hub_check(digest, url)
+        if _het is not None:
+            _save_rejected(slug, url,
+                           reason=f"이질 카드 hub (gen_fail post-mortem): {_het}",
+                           learn=False)
+            print(f"\n[register] 🔴 generation fail 직후 구조 신호 = 이질 카드 hub — rc=3 거부: {_het}")
+            return 3
+    return None
+
+
+def _generate_by_mode(mode: str, digest: dict, slug: str, url: str, *,
+                      max_attempts: int, model,
+                      gen_func=_gen, agentic_func=_gen_agentic):
+    """Dispatch api_loop / agentic / auto generation.
+
+    auto = api_loop_once first. On actionable non-index failure it raises
+    _AutoRejected(rc); otherwise it escalates to agentic with a failure packet.
+    """
+    if mode == "agentic":
+        return agentic_func(digest, slug, url)
+    if mode != "auto":
+        return gen_func(digest, max_attempts=max_attempts, model=model)
+    try:
+        return gen_func(digest, max_attempts=1, model=model)
+    except GenerationError as e:
+        rc = _generation_failure_reject_rc(
+            digest,
+            url,
+            slug,
+            e,
+            gate_only=False,
+            include_heterogeneous_hub=False,
+        )
+        if rc is not None:
+            raise _AutoRejected(rc) from e
+        failure_packet = _build_failure_packet(e)
+        print("[register] auto mode: api_loop_once failed; escalating to agentic with failure_packet", flush=True)
+        return agentic_func(digest, slug, url, failure_packet=failure_packet)
 
 
 def _has_structural_audio_share(digest: dict) -> bool:
@@ -2749,16 +2846,25 @@ def _main_inner(argv) -> int:
                                                "max_attempts": args.max_attempts})
     gem_span_cm.__enter__()
     _gem_closed = False
-    # rev 5: routing.json 의 `config_generate__mode == "agentic"` 면 codex agentic 분기.
+    # rev 5+: routing.json 의 `config_generate__mode` 로 api_loop / agentic / auto 분기.
     _config_generate_route = _resolve_route("config_generate")
-    _use_agentic = (not args.model
-                    and _config_generate_route.provider == "codex"
-                    and _config_generate_route.meta.get("mode") == "agentic")
+    _generation_mode = _select_generation_mode(_config_generate_route, args)
     try:
-        if _use_agentic:
-            cfg, rep = _gen_agentic(digest, slug, url)
-        else:
-            cfg, rep = _gen(digest, max_attempts=args.max_attempts, model=args.model)
+        cfg, rep = _generate_by_mode(
+            _generation_mode,
+            digest,
+            slug,
+            url,
+            max_attempts=args.max_attempts,
+            model=args.model,
+        )
+    except _AutoRejected as e:
+        try:
+            gem_span_cm.__exit__(type(e), e, e.__traceback__)
+            _gem_closed = True
+        except Exception:  # noqa: BLE001
+            _gem_closed = True
+        return e.rc
     except _AgenticAuditFailError as e:
         _save_bug(slug, url, rc=-4,
                   reason="register_audit_violation: agent wrote outside its workdir",
@@ -2790,38 +2896,16 @@ def _main_inner(argv) -> int:
                 _gem_closed = True
             return 5
         # gen_fail 직전 post-mortem (2026-05-25 sports batch 박음):
-        # 1) 분류기 conf≥0.7 으로 content/not_found/login 판단 → rc=2/3/4 재분류.
-        # 2) 분류기가 index 라도 *이질 카드 hub 구조 신호* (path prefix 다양도 ≥ 4 +
-        #    글-링크 cluster — 같은 prefix + 깊은 path + slug/ID — 0종) 이면 rc=3 재분류.
-        #    espn.com/soccer 류 (분류기가 body 우세로 index false-accept, LLM 도 못 푸는 카드 hub).
-        if not getattr(args, "gate_only", False):
-            _cls_rc = _classify_decisive_rc(_classify_veto(digest, url, slug, gate_only=False))
-            if _cls_rc is not None:
-                _cls = _classify_veto(digest, url, slug, gate_only=False)
-                reason = (f"분류기 post-mortem({_cls.get('class')} conf={_cls.get('confidence')}) — "
-                          f"gen_fail 직전 재분류: {_cls.get('reason')[:120]}")
-                _save_rejected(slug, url, reason, learn=False)
-                print(f"\n[register] 🔴 gemini 3회 fail 직후 LLM 분류기가 {_cls.get('class')}"
-                      f"(비-게시판)로 판단 — gen_fail 아닌 거부 rc={_cls_rc} 로 재분류 "
-                      f"(conf={_cls.get('confidence')}, {_cls.get('reason')[:60]})")
-                try:
-                    gem_span_cm.__exit__(type(e), e, e.__traceback__)
-                    _gem_closed = True
-                except Exception:  # noqa: BLE001
-                    _gem_closed = True
-                return _cls_rc
-            _het = _heterogeneous_hub_check(digest, url)
-            if _het is not None:
-                _save_rejected(slug, url,
-                               reason=f"이질 카드 hub (gen_fail post-mortem): {_het}",
-                               learn=False)
-                print(f"\n[register] 🔴 gemini 3회 fail 직후 구조 신호 = 이질 카드 hub — rc=3 거부: {_het}")
-                try:
-                    gem_span_cm.__exit__(type(e), e, e.__traceback__)
-                    _gem_closed = True
-                except Exception:  # noqa: BLE001
-                    _gem_closed = True
-                return 3
+        # 분류기 content/not_found/login/catalog 또는 이질 카드 hub 구조 신호면 REJECTED 로 재분류.
+        _reject_rc = _generation_failure_reject_rc(digest, url, slug, e,
+                                                   gate_only=getattr(args, "gate_only", False))
+        if _reject_rc is not None:
+            try:
+                gem_span_cm.__exit__(type(e), e, e.__traceback__)
+                _gem_closed = True
+            except Exception:  # noqa: BLE001
+                _gem_closed = True
+            return _reject_rc
         if args.no_escalate:
             _ctx = "--no-escalate: preflight(글페이지 re-probe + probe 신호 hint) 생략, raw lite digest 로 생성한 상태"
         elif digest.get("escalation_hint") or article_url_hint:

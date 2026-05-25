@@ -2,6 +2,7 @@ TASK: register a notice-watcher config
 
 Read AGENTS.md FIRST (in your cwd). Then:
 - digest.json, slug.txt, url.txt
+- failure_packet.json if present (previous api_loop_once failed; evidence only)
 - examples/manifest.json (pick 1-2 relevant)
 
 Target:

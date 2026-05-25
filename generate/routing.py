@@ -48,7 +48,7 @@ _VALID_EFFORTS = ("low", "medium", "high")
 # sidecar key `<call_site>__<axis>` 의 axis 와 그 valid value whitelist.
 # free-form 금지 — 오타/미지원 축이 조용히 운영에 들어가는 것 차단 (codex review rev 3 권고).
 SIDECAR_AXIS_VALUES: dict[str, frozenset[str]] = {
-    "mode": frozenset({"api_loop", "agentic"}),
+    "mode": frozenset({"api_loop", "agentic", "auto"}),
 }
 
 
