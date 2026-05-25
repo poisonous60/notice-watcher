@@ -51,7 +51,7 @@ from probe.diagnose import (  # noqa: E402
     STATIC_INSUFFICIENT_REPEAT_PREFIX as _JS_MOSAIC_NOTE_KW,
 )
 from probe.extract import audio_share_signal, rss_feed_urls  # noqa: E402
-from engine.digest import build_digest, classify_site_kind  # noqa: E402
+from engine.digest import build_digest, classify_site_kind, _validated_feed_candidates  # noqa: E402
 from engine.recognizers import recognize as recognize_platform, recognize_reject  # noqa: E402
 from engine.tracing import start_trace, current_trace, env_for_child  # noqa: E402
 from generate import generate_config_validated, GenerationError  # noqa: E402
@@ -731,9 +731,14 @@ def _heterogeneous_hub_check(digest: dict, url: str) -> Optional[str]:
 
     분류기가 body 우세로 index false-accept 하는 케이스 봉합. pre-LLM 적용은 SPA 게시판 false-reject 위험
     → gen_fail 직후 post-mortem 만.
+
+    2026-05-25: fetch-validated RSS/Atom feed with items means RSS is a valid board source.
+    In that case skip this HTML hub gate.
     """
     host = (urlsplit(url).netloc or "").lower()
     if not host:
+        return None
+    if _validated_feed_candidates(digest):
         return None
     lc = digest.get("list_candidates") or {}
     board_path = (urlsplit(url).path or "").rstrip("/").lower() or "/"
