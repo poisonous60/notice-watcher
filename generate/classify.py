@@ -61,26 +61,54 @@ def _extract_title_body(html: str, url: str) -> tuple[str, str]:
 
 
 def _struct_hint(digest: dict, url: str) -> str:
-    """list_candidates 의 같은-호스트 반복 글-행 / 피드 신호 압축. 게시판 판정 보조."""
+    """list_candidates 의 같은-호스트 반복 cluster (글-링크/nav 모두) + 피드 신호 압축.
+
+    옛 hint 는 *글-링크 행만* 박고 갯수+최다 child_count 만 출력했다 → espn.com/soccer 류
+    이질 카드 hub (nav/team-list cluster 多 + article cluster 0) 신호가 다 가려져 분류기가
+    'SPA index' 로 false-accept (2026-05-25 sports batch).
+
+    개선: 같은-호스트 반복 cluster *전부* 의 path prefix 다양도 + 대표 sample 을 그대로 박고
+    글-링크/nav 판별은 분류기 LLM 에 맡긴다 (휴리스틱 false-reject 회피).
+    """
     lc = digest.get("list_candidates") or {}
     host = (urlsplit(url).hostname or "").lower()
-    rows: list[tuple[int, str]] = []
+    clusters: list[tuple[int, str, str]] = []  # (cc, path_or_url, path_prefix)
     for p in (lc.get("html_repeating_patterns") or []):
         hp = p.get("href_pattern_guess") or p.get("sample_url") or ""
         if not hp:
             continue
-        # 상대경로(`/t/{n}`)는 같은-호스트로 간주. 절대 URL 은 hostname 정확 비교
-        # (substring 매칭은 example.com 이 notexample.com 에 오매칭 + 포트 오작동).
         h = (urlsplit(hp).hostname or "").lower()
-        if (not h and hp.startswith("/")) or (host and h == host):
-            rows.append((p.get("child_count", 0), hp))
-    rows.sort(reverse=True)
-    feed = len(digest.get("feed_candidates") or [])
+        same_host = (not h and hp.startswith("/")) or (host and h == host)
+        if not same_host:
+            continue
+        cc = int(p.get("child_count", 0) or 0)
+        if cc < 3:
+            continue
+        path = urlsplit(hp).path or hp
+        segs = [s for s in path.split("/") if s and not s.startswith("{")]
+        prefix = "/" + (segs[0] if segs else "")
+        clusters.append((cc, path or hp, prefix))
+    clusters.sort(reverse=True)
     parts: list[str] = []
-    if rows:
-        parts.append(f"같은-호스트 반복 글-링크 행 {len(rows)}종 (최다 {rows[0][0]}행, 예: {rows[0][1][:60]})")
+    if clusters:
+        prefixes = sorted({p for _, _, p in clusters})
+        samples = "; ".join(f"cc={cc} {p[:50]}" for cc, p, _ in clusters[:5])
+        parts.append(
+            f"같은-호스트 반복 cluster {len(clusters)}종 "
+            f"(path prefix {len(prefixes)}종: {', '.join(prefixes[:6])}; "
+            f"top: {samples})"
+        )
+        # 이질 카드 hub 강조 신호: path prefix ≥ 4 (서로 다른 섹션 루트 多 = 글-링크가 아닌 nav/카테고리)
+        # → 분류기에 명시 red-flag (struct hint 가 body 보다 약해 false-accept 나는 케이스 봉합).
+        if len(prefixes) >= 4:
+            parts.append(
+                f"⚠ 이질 카드 hub 신호: path prefix {len(prefixes)}종 ≥ 4 "
+                "(섹션별 카테고리 hub — 사람이 봤을 때 '카드 종류를 한 줄로 못 묶음'). "
+                "글-링크 cluster (같은 prefix + 다른 slug/ID) 가 흔적 없으면 class=content 가능성 큼."
+            )
     else:
-        parts.append("정적 HTML 에 같은-호스트 반복 글-행 패턴 없음 (SPA 렌더일 수 있음)")
+        parts.append("정적 HTML 에 같은-호스트 반복 cluster 없음 (SPA 렌더 또는 nav 만)")
+    feed = len(digest.get("feed_candidates") or [])
     if feed:
         parts.append(f"RSS/Atom 피드 {feed}건")
     return "; ".join(parts)

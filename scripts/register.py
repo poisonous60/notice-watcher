@@ -695,6 +695,69 @@ def _root_marketing_homepage_check(digest: dict, url: str) -> tuple[bool, str]:
                    + suggestion + f" [신호: {detail}]")
 
 
+def _heterogeneous_hub_check(digest: dict, url: str) -> Optional[str]:
+    """이질 카드 hub 구조 신호 (gen_fail post-mortem 용). 사람이 봤을 때 "카드 종류를
+    한 줄로 못 묶는" 페이지 — 섹션별 카테고리 hub (espn.com/soccer · si.com/nba 류).
+
+    분류기가 body 우세로 index false-accept 하는 케이스 봉합 (2026-05-25 sports batch).
+    pre-LLM 적용은 SPA 게시판 false-reject 위험 → gen_fail 직후 post-mortem 만.
+
+    트리거 (AND):
+      - 같은-호스트 반복 cluster (cc≥3) 의 path prefix ≥ 5종
+      - 그 cluster 중 *글-링크 모양* (path 깊이 ≥ 2 AND 마지막 segment 가 slug/ID — 길이 ≥ 8
+        + dash 多 또는 mixed alnum random ID 또는 placeholder `{n}` 가 마지막 segment) 0종
+
+    트리거 X (= 등록 진행 OK):
+      - 글-링크 cluster ≥ 1종 (SPA 게시판 가능 — LLM 이 실패해도 hub 단정 X)
+      - prefix < 4 (좁은 섹션)
+
+    return: 거부 사유 (1줄) 또는 None.
+    """
+    host = (urlsplit(url).netloc or "").lower()
+    if not host:
+        return None
+    lc = digest.get("list_candidates") or {}
+    prefixes: set[str] = set()
+    has_article_cluster = False
+    for p in (lc.get("html_repeating_patterns") or []):
+        hp = p.get("href_pattern_guess") or p.get("sample_url") or ""
+        if not hp:
+            continue
+        h = (urlsplit(hp).hostname or "").lower()
+        same_host = (not h and hp.startswith("/")) or (host and h == host.split(":")[0])
+        if not same_host:
+            continue
+        cc = int(p.get("child_count", 0) or 0)
+        if cc < 3:
+            continue
+        path = urlsplit(hp).path or hp
+        segs = [s for s in path.split("/") if s]
+        # placeholder `{n}` 가 path 어딘가 있고 마지막 segment 가 placeholder/길지 않은 token 일 수도
+        # → article cluster 인지 좁게 판정: depth ≥ 2 AND (마지막 segment 가 placeholder 또는 길고 dash 많음 또는 mixed alnum).
+        if len(segs) >= 2:
+            last = segs[-1]
+            last_no_placeholder = "{" not in last and "}" not in last
+            # 글-링크 모양: placeholder 마지막 OR (len ≥ 8 AND (dash ≥ 2 OR mixed alnum ID))
+            is_article = (
+                ("{" in last and "}" in last)
+                or (last_no_placeholder and len(last) >= 8 and (
+                    last.count("-") >= 2
+                    or (any(c.isdigit() for c in last) and any(c.isalpha() for c in last) and last.isalnum())
+                ))
+            )
+            if is_article:
+                has_article_cluster = True
+        first_seg = segs[0] if segs else ""
+        prefixes.add("/" + first_seg)
+    if has_article_cluster:
+        return None
+    if len(prefixes) < 5:
+        return None
+    return (f"path prefix {len(prefixes)}종 ({sorted(prefixes)[:6]}) 다양 + 글-링크 모양 cluster 0종 "
+            "→ 섹션별 카테고리 hub (heterogeneous). 사람이 카드 종류 한 줄로 못 묶는 페이지. "
+            "card hub root 대신 board-shape sub-URL 또는 RSS 권장.")
+
+
 def _board_shape_check(digest: dict, url: str) -> tuple[bool, str]:
     """probe digest 만으로 '게시판 형식 같은가' 판정 — gemini 부르기 전에.
     어떤 board 신호도 같은 호스트로 안 잡히면 '게시판 아님' 단정 (rc=3 로 거부).
@@ -2629,6 +2692,39 @@ def _main_inner(argv) -> int:
             except Exception:  # noqa: BLE001
                 _gem_closed = True
             return 5
+        # gen_fail 직전 post-mortem (2026-05-25 sports batch 박음):
+        # 1) 분류기 conf≥0.7 으로 content/not_found/login 판단 → rc=2/3/4 재분류.
+        # 2) 분류기가 index 라도 *이질 카드 hub 구조 신호* (path prefix 다양도 ≥ 4 +
+        #    글-링크 cluster — 같은 prefix + 깊은 path + slug/ID — 0종) 이면 rc=3 재분류.
+        #    espn.com/soccer 류 (분류기가 body 우세로 index false-accept, LLM 도 못 푸는 카드 hub).
+        if not getattr(args, "gate_only", False):
+            _cls_rc = _classify_decisive_rc(_classify_veto(digest, url, slug, gate_only=False))
+            if _cls_rc is not None:
+                _cls = _classify_veto(digest, url, slug, gate_only=False)
+                reason = (f"분류기 post-mortem({_cls.get('class')} conf={_cls.get('confidence')}) — "
+                          f"gen_fail 직전 재분류: {_cls.get('reason')[:120]}")
+                _save_rejected(slug, url, reason, learn=False)
+                print(f"\n[register] 🔴 gemini 3회 fail 직후 LLM 분류기가 {_cls.get('class')}"
+                      f"(비-게시판)로 판단 — gen_fail 아닌 거부 rc={_cls_rc} 로 재분류 "
+                      f"(conf={_cls.get('confidence')}, {_cls.get('reason')[:60]})")
+                try:
+                    gem_span_cm.__exit__(type(e), e, e.__traceback__)
+                    _gem_closed = True
+                except Exception:  # noqa: BLE001
+                    _gem_closed = True
+                return _cls_rc
+            _het = _heterogeneous_hub_check(digest, url)
+            if _het is not None:
+                _save_rejected(slug, url,
+                               reason=f"이질 카드 hub (gen_fail post-mortem): {_het}",
+                               learn=False)
+                print(f"\n[register] 🔴 gemini 3회 fail 직후 구조 신호 = 이질 카드 hub — rc=3 거부: {_het}")
+                try:
+                    gem_span_cm.__exit__(type(e), e, e.__traceback__)
+                    _gem_closed = True
+                except Exception:  # noqa: BLE001
+                    _gem_closed = True
+                return 3
         if args.no_escalate:
             _ctx = "--no-escalate: preflight(글페이지 re-probe + probe 신호 hint) 생략, raw lite digest 로 생성한 상태"
         elif digest.get("escalation_hint") or article_url_hint:

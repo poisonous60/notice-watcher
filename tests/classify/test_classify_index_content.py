@@ -130,7 +130,7 @@ def run() -> list[tuple[str, bool, str]]:
     d_rows = {"list_candidates": {"html_repeating_patterns": [
         {"child_count": 9, "href_pattern_guess": "https://x.org/t/{n}"}]}, "feed_candidates": [1, 2]}
     h = _struct_hint(d_rows, "https://x.org/latest")
-    cases.append(("struct_rows", "반복 글-링크 행" in h and "피드 2건" in h, f"h={h}"))
+    cases.append(("struct_rows", "반복 cluster" in h and "피드 2건" in h, f"h={h}"))
     h2 = _struct_hint({"list_candidates": {}}, "https://x.org/latest")
     cases.append(("struct_spa", "SPA" in h2, f"h2={h2}"))
 

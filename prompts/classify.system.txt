@@ -14,6 +14,10 @@
 - 목록이어도 *항목이 글이 아니라 패키지/제품/이미지 등 아티팩트*면 index 가 아니라 catalog 다. "릴리스 노트 글"(프로젝트가 쓴 변경 발표 본문)은 index, "패키지가 publish 됨"(레지스트리의 아티팩트 레코드 — 이름+버전, 읽을 발표 본문 없음)은 catalog — 둘 다 '릴리스'라 불려도 다르다.
 - 항목이 인기·큐레이션·관련도 순으로 배열돼 *새 항목이 맨 위에 안 뜨면*(최신순 아님) 폴링이 새 글을 감지 못 한다 → catalog 쪽.
 - 본문 추출 결과가 거의 비어있는데 링크가 많은 페이지는 목록(index)일 수 있다 (SPA 라 본문이 정적 HTML 에 안 잡힌 경우). 단, 그 링크들이 nav/메뉴뿐이고 "not found"/"로그인" 안내가 핵심이면 not_found/login 이다.
+- **반복 cluster 신호 해석 (글-링크 vs nav 판별)**: "구조 신호(probe)" 의 `같은-호스트 반복 cluster N종 (path prefix ..종: ...; top: cc=K /path/sample)` 를 본다.
+  - **글-링크 cluster** = path 가 *2 segment 이상 깊고* 마지막 segment 가 slug(긴 단어-단어-단어) / 숫자 ID / 랜덤 alphanumeric ID (예: `/news/<long-slug>`·`/article/12345`·`/news/<short>/<random-id>`). 같은 cluster 안의 link 들이 같은 prefix + 다른 slug/ID → 시간순 글 목록 → index 신호.
+  - **nav cluster** = path 가 *1 segment* 거나 (`/nba`·`/fantasy`·`/editions`) 마지막 segment 가 짧은 단일 단어 (`/soccer/team/{n}/arsenal`·`/en/match-centre`) → 메뉴/카테고리/팀 list → 글-링크 아님.
+- **이질 카드 hub 거부**: 같은-호스트 반복 cluster 의 *글-링크 cluster 가 0종* 인데 *nav cluster 가 path prefix ≥3종* (`/nba`·`/soccer`·`/fantasy`·`/editions` 등 서로 다른 섹션 루트) 으로 다수면 이건 *섹션 catalog hub* — 사람이 봤을 때 "카드 종류를 한 줄로 못 묶는 페이지" — class=content (또는 catalog). "SPA 게시판이라 본문이 안 잡혔다" 로 index 구출하지 X. SPA 게시판이면 *같은 path prefix* 의 글-링크 cluster 가 ≥1종은 정적 HTML 에 흔적 남는다 (link prefetch·sitemap·initial state JSON).
 - *글 목록이 실제로 보이면* 사이드바에 로그인 위젯이나 "로그인" 링크가 있어도 login 이 아니라 index 다. 페이지 전체가 로그인을 강요하고 목록이 안 보일 때만 login 이다.
 - 일부만 보이고 나머지는 가린 paywall: 미리보기(teaser) 본문이 보이면 content, 완전히 가려 로그인/구독을 강요하면 login.
 - 애매하면, 이 시스템은 false-reject(게시판을 index 아닌 것으로 잘못 거부)를 가장 싫어한다. *확실히* 단일 글/없음/로그인일 때만 content/not_found/login 으로 판단하고, 아니면 index 로 기운다.
