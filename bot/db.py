@@ -112,11 +112,18 @@ CREATE TABLE IF NOT EXISTS reports (
 CREATE INDEX IF NOT EXISTS idx_reports_status ON reports(status, id);
 CREATE INDEX IF NOT EXISTS idx_reports_slug ON reports(slug);
 
+-- ADR 0019 Phase 2 — generic jobs queue. 'register'/'reprobe' 외에 'poll_site' (chromium 사이트
+-- 폴링 1회), 'deliver_target' (수신처 1건 발송) 도 enqueue. url/slug 는 NULL 허용 (deliver_target
+-- 은 둘 다 없음). 추가 payload 는 sub_payload TEXT (JSON) 에. dedupe_key 는 generic 중복 제거 키
+-- — poll_site='poll:{run_id}:{slug}', deliver_target='deliver:{kind}:{id}:{today_kst}'. 옛
+-- (kind, slug) dedupe 는 dedupe_key 가 NULL 일 때 fallback. requeue_at = 발송 barrier 가 'pending'
+-- 유지하면서 그 시각 이후 재시도 신호 (ADR 0019 §2c). priority enum = ADR 0019 §2g canonical.
 CREATE TABLE IF NOT EXISTS jobs (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    kind            TEXT NOT NULL CHECK (kind IN ('register','reprobe')),
-    url             TEXT NOT NULL,
-    slug            TEXT NOT NULL,
+    kind            TEXT NOT NULL CHECK (kind IN
+                    ('register','reprobe','poll_site','deliver_target')),
+    url             TEXT,
+    slug            TEXT,
     article_url     TEXT,
     via             TEXT,
     requested_by    TEXT,
@@ -131,10 +138,15 @@ CREATE TABLE IF NOT EXISTS jobs (
     result_rc       INTEGER,
     result_tail     TEXT,
     attempts        INTEGER NOT NULL DEFAULT 0,
-    priority        INTEGER NOT NULL DEFAULT 0   -- 우선순위 큐 (ADR 0009): 작을수록 먼저 dequeue. enqueue_job 이 via/kind 에서 도출.
+    priority        INTEGER NOT NULL DEFAULT 0,  -- ADR 0019 §2g: 0=user, 1=reprobe, 2=deliver_target, 3=poll_site, 4=batch-retry, 5=batch
+    dedupe_key      TEXT,                         -- ADR 0019 §2d generic dedupe (NULL = fallback (kind,slug))
+    requeue_at      TEXT                          -- ADR 0019 §2c delivery barrier deferral
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status, id);
 CREATE INDEX IF NOT EXISTS idx_jobs_slug ON jobs(slug);
+-- 추가 인덱스 (idx_jobs_kind_status, idx_jobs_dedupe partial UNIQUE) 는 _migrate() 에서 박음 —
+-- 옛 DB 의 jobs 가 새 컬럼(dedupe_key) 없을 때 _SCHEMA 단계에서 IF NOT EXISTS 가 컬럼 미존재로
+-- 죽는 걸 회피. 마이그 (rebuild) 후 dedupe_key 컬럼 보장 시점에 idempotent CREATE.
 
 -- 공지 옵트아웃: 기본 opt-in. 행이 있고 opted_out=1 일 때만 발송에서 제외.
 -- scope_kind='dm' → scope_id 는 discord user_id, 'channel' → channel_id.
@@ -411,12 +423,42 @@ def _migrate(conn: sqlite3.Connection) -> None:
     # ADR 0019 Phase 1 — chromium_lock_timeout 새 status + lock_wait_ms 새 컬럼 추가. probe 통과
     # 시 둘 다 한 번에 rebuild 됨 (rebuild 템플릿이 새 enum + 새 컬럼 둘 다 포함). 옛 'error'
     # probe 는 매우 옛 DB(아직 'error' enum 도 못 받은) 대비 보존.
-    _migrate_runs_status_enum(conn, "poll_site_runs", "error",
-                              new_create=_POLL_SITE_RUNS_REBUILD)
-    _migrate_runs_status_enum(conn, "poll_site_runs", "chromium_lock_timeout",
-                              new_create=_POLL_SITE_RUNS_REBUILD)
-    _migrate_runs_status_enum(conn, "notify_target_runs", "skipped_test_target",
-                              new_create=_NOTIFY_TARGET_RUNS_REBUILD)
+    _migrate_check_enum(conn, "poll_site_runs", "error",
+                         new_create=_POLL_SITE_RUNS_REBUILD)
+    _migrate_check_enum(conn, "poll_site_runs", "chromium_lock_timeout",
+                         new_create=_POLL_SITE_RUNS_REBUILD)
+    _migrate_check_enum(conn, "notify_target_runs", "skipped_test_target",
+                         new_create=_NOTIFY_TARGET_RUNS_REBUILD)
+    # ADR 0019 Phase 2a — jobs 테이블 generic 화. CHECK enum 확장 + url/slug NULL + 새 컬럼
+    # (dedupe_key, requeue_at). 'poll_site' probe 가 새 enum + 새 컬럼 + url/slug NULL 모두
+    # rebuild 로 한 번에 처리. priority 백필 후 (ADR 0019 §2g canonical) 다시 실행.
+    _migrate_check_enum(conn, "jobs", "poll_site",
+                         new_create=_JOBS_REBUILD,
+                         after_rebuild_sql=_JOBS_INDEXES_SQL)
+    # rebuild 가 skip 됐어도 (fresh DB — _SCHEMA 가 이미 새 jobs 만듦) 인덱스는 박혀야 함.
+    # _SCHEMA 단계는 dedupe_key 미존재 옛 DB 차단 위해 인덱스 생성 안 함 — 여기서 idempotent CREATE.
+    for sql in _JOBS_INDEXES_SQL:
+        conn.execute(sql)
+    # ADR 0019 §2g priority canonical 표 — 옛 mapping (batch=3, batch-retry=2, reprobe=1, user=0)
+    # → 새 mapping (batch=5, batch-retry=4, deliver_target=2, poll_site=3, reprobe=1, user=0).
+    # 기존 pending/running row 만 백필 — done/failed 는 historical, 안 건드림.
+    # idempotent — 이미 새 mapping 이면 no-op. backfill marker = priority>=4 인 batch* 가 있는지
+    # 체크해 한 번만 실행.
+    _backfilled = conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE status IN ('pending','running') "
+        "AND ((via='batch' AND priority<>5) OR (via='batch-retry' AND priority<>4))"
+    ).fetchone()[0]
+    if int(_backfilled) > 0:
+        conn.execute(
+            "UPDATE jobs SET priority = CASE "
+            "WHEN via='batch' THEN 5 "
+            "WHEN via='batch-retry' THEN 4 "
+            "WHEN kind='deliver_target' THEN 2 "
+            "WHEN kind='poll_site' THEN 3 "
+            "WHEN kind='reprobe' THEN 1 "
+            "ELSE 0 END "
+            "WHERE status IN ('pending','running')"
+        )
     conn.commit()
 
 
@@ -464,15 +506,59 @@ CREATE TABLE notify_target_runs_new (
 );
 """
 
+# ADR 0019 Phase 2a — generic jobs schema rebuild template. _SCHEMA 의 jobs 정의와 동기 유지 필수.
+# 옛 schema = (kind CHECK in ('register','reprobe'), url/slug NOT NULL). 새 schema =
+# kind enum 확장 + url/slug NULL + dedupe_key + requeue_at + 컬럼 추가.
+_JOBS_REBUILD = """
+CREATE TABLE jobs_new (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind            TEXT NOT NULL CHECK (kind IN
+                    ('register','reprobe','poll_site','deliver_target')),
+    url             TEXT,
+    slug            TEXT,
+    article_url     TEXT,
+    via             TEXT,
+    requested_by    TEXT,
+    ack_channel_id  TEXT,
+    ack_message_id  TEXT,
+    sub_payload     TEXT,
+    status          TEXT NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending','running','done','failed')),
+    created_at      TEXT NOT NULL,
+    started_at      TEXT,
+    finished_at     TEXT,
+    result_rc       INTEGER,
+    result_tail     TEXT,
+    attempts        INTEGER NOT NULL DEFAULT 0,
+    priority        INTEGER NOT NULL DEFAULT 0,
+    dedupe_key      TEXT,
+    requeue_at      TEXT
+);
+"""
 
-def _migrate_runs_status_enum(conn: sqlite3.Connection, table: str, probe_status: str,
-                               *, new_create: str) -> None:
-    """ADR 0017 — runs 테이블의 status CHECK 가 새 enum 포함하는지 검사. 없으면 rebuild.
+# 마이그 후 재생성 인덱스 — _JOBS_REBUILD 후 다시 박아야 idx_jobs_dedupe partial UNIQUE 도 살아남음.
+_JOBS_INDEXES_SQL = [
+    "CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status, id)",
+    "CREATE INDEX IF NOT EXISTS idx_jobs_slug ON jobs(slug)",
+    "CREATE INDEX IF NOT EXISTS idx_jobs_kind_status ON jobs(kind, status, id)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_dedupe ON jobs(dedupe_key) WHERE dedupe_key IS NOT NULL",
+]
 
-    *probe_status* = 새로 추가된 status 값. sqlite_master 의 CREATE TABLE 텍스트 안에 그 값이
-    리터럴로 들어있는지 본다 (단순 substring 검사 — 충분히 보수적). 없으면 rebuild
-    (CREATE new → INSERT … SELECT → DROP → RENAME). 테이블 자체 없으면 skip.
-    codex 2차 review HIGH (2026-05-25) — `CREATE TABLE IF NOT EXISTS` 가 기존 CHECK 갱신 안 함 봉합.
+
+def _migrate_check_enum(conn: sqlite3.Connection, table: str, probe_token: str,
+                         *, new_create: str, after_rebuild_sql: Optional[list[str]] = None) -> None:
+    """ADR 0017 / 0019 — 테이블의 CHECK enum 이 새 token 포함하는지 검사. 없으면 rebuild.
+
+    *probe_token* = 새 enum 값 (e.g. 'chromium_lock_timeout', 'poll_site'). sqlite_master 의
+    CREATE TABLE 텍스트 안에 그 값이 quoted literal (`'value'`) 로 들어있는지 본다. 없으면
+    rebuild (CREATE new → INSERT … SELECT → DROP → RENAME). 테이블 자체 없으면 skip.
+
+    *new_create* = `CREATE TABLE <table>_new (...)` SQL 문 (`<table>_new` 이름 강제).
+    *after_rebuild_sql* = rebuild 후 다시 박을 인덱스 SQL list. None 이면 표준 인덱스만
+    (table 별 하드코딩 case).
+
+    ADR 0017 codex 2차 review HIGH (2026-05-25) — `CREATE TABLE IF NOT EXISTS` 가 기존 CHECK
+    갱신 안 함 봉합. ADR 0019 §2a — runs/jobs 공용 generic helper 로 일반화.
     """
     if not conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
@@ -482,7 +568,7 @@ def _migrate_runs_status_enum(conn: sqlite3.Connection, table: str, probe_status
         "SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (table,)
     ).fetchone()
     current_sql = ddl[0] if ddl else ""
-    if f"'{probe_status}'" in current_sql:
+    if f"'{probe_token}'" in current_sql:
         return  # already migrated
     # foreign key 검사 잠시 끄고 rebuild — REFERENCES 가 새 테이블로 갈아끼우는 도중 reject 막음.
     fk_row = conn.execute("PRAGMA foreign_keys").fetchone()
@@ -493,24 +579,31 @@ def _migrate_runs_status_enum(conn: sqlite3.Connection, table: str, probe_status
         new_table = f"{table}_new"
         conn.execute(f"DROP TABLE IF EXISTS {new_table}")
         conn.executescript(new_create)
-        # 컬럼 명시 복사 — SELECT * 가 컬럼 순서 차이 시 위험.
+        # 컬럼 명시 복사 — SELECT * 가 컬럼 순서 차이 시 위험. 옛 컬럼만 복사, 새 컬럼은 DEFAULT/NULL.
         cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
         col_list = ",".join(cols)
         conn.execute(f"INSERT INTO {new_table}({col_list}) SELECT {col_list} FROM {table}")
         conn.execute(f"DROP TABLE {table}")
         conn.execute(f"ALTER TABLE {new_table} RENAME TO {table}")
         # 인덱스 재생성 — rebuild 가 옛 인덱스를 같이 drop 함.
-        if table == "poll_site_runs":
+        if after_rebuild_sql is not None:
+            for sql in after_rebuild_sql:
+                conn.execute(sql)
+        elif table == "poll_site_runs":
             conn.execute("CREATE INDEX IF NOT EXISTS idx_poll_site_runs_run ON poll_site_runs(run_id, slug)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_poll_site_runs_slug ON poll_site_runs(slug, started_at DESC)")
         elif table == "notify_target_runs":
             conn.execute("CREATE INDEX IF NOT EXISTS idx_notify_target_runs_run ON notify_target_runs(run_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_notify_target_runs_target ON notify_target_runs(target_kind, target_id, started_at DESC)")
         import sys as _migr_sys
-        print(f"[db] migrated {table} status CHECK (added '{probe_status}' enum)", file=_migr_sys.stderr)
+        print(f"[db] migrated {table} CHECK (added '{probe_token}')", file=_migr_sys.stderr)
     finally:
         if fk_state:
             conn.execute("PRAGMA foreign_keys=ON")
+
+
+# backward-compat alias — 기존 caller 명칭 보존. 새 코드 = _migrate_check_enum.
+_migrate_runs_status_enum = _migrate_check_enum
 
 
 def connect(db_path: Optional[Path] = None) -> sqlite3.Connection:
@@ -909,38 +1002,75 @@ def mark_digest_sent(conn: sqlite3.Connection, target_id: str, schedule: str, ks
 # jobs (register / re-probe 큐) — bot/worker.py 가 소비
 # --------------------------------------------------------------------------- #
 def _derive_priority(kind: str, via: Optional[str]) -> int:
-    """잡 우선순위 (작을수록 먼저 dequeue). 우선순위 큐의 값 SoT — via/kind 에서만 도출 (ADR 0009).
-    user(via=watch/preview)=0 > reprobe(kind=reprobe)=1 > batch-retry(via=batch-retry)=2 > batch(via=batch)=3.
-    batch 계열만 deprioritize — 그 외 register 는 전부 interactive 라 최우선(0).
-    batch 안에서 2단: 신규 catalog bulk(via=batch)=3 < 재시도/테스트(via=batch-retry)=2.
-    한 batch 끝내고 그 실패분을 retry/테스트(register_batch.py --failed/--rc/--force/--url) 돌리는 중에
-    다른 catalog bulk 를 동시 enqueue 하면, retry 가 새 bulk backlog 보다 먼저 dequeue 된다."""
+    """잡 우선순위 (작을수록 먼저 dequeue). 우선순위 큐의 값 SoT — via/kind 에서만 도출.
+
+    ADR 0019 §2g canonical 표 (Phase 2):
+      0 = user (via=watch|preview)          — interactive
+      1 = reprobe (kind=reprobe)
+      2 = deliver_target (kind=deliver_target) — 시간 민감 발송
+      3 = poll_site (kind=poll_site)           — cron 폴링
+      4 = batch-retry (via=batch-retry)        — 옛 ADR 0009
+      5 = batch (via=batch)                    — 옛 ADR 0009
+
+    batch 계열만 deprioritize — 그 외 register 는 interactive 라 최우선(0).
+    batch 안에서 2단: 신규 catalog bulk(via=batch)=5 < 재시도/테스트(via=batch-retry)=4.
+    """
     if via == "batch":
-        return 3
+        return 5
     if via == "batch-retry":
+        return 4
+    if kind == "deliver_target":
         return 2
+    if kind == "poll_site":
+        return 3
     if kind == "reprobe":
         return 1
     return 0
 
 
+_JOB_KINDS = ("register", "reprobe", "poll_site", "deliver_target")
+
+
 def enqueue_job(conn: sqlite3.Connection, *,
-                kind: str, url: str, slug: str,
+                kind: str,
+                url: Optional[str] = None,
+                slug: Optional[str] = None,
                 article_url: Optional[str] = None,
                 via: Optional[str] = None,
                 requested_by: Optional[str] = None,
                 ack_channel_id: Optional[str] = None,
                 ack_message_id: Optional[str] = None,
                 sub_payload: Optional[str] = None,
+                dedupe_key: Optional[str] = None,
                 dedupe: bool = True) -> tuple[int, bool]:
     """잡 enqueue. (job_id, newly_inserted) 반환.
 
-    dedupe=True 면 같은 (kind, slug) 가 이미 pending/running 이면 그 잡 id 를 반환하고 새로 안 넣음.
-    request_by/sub_payload 는 JSON 문자열. ack_* 는 호출자가 보낸 채널 메시지 id (worker 가 그걸 edit).
+    ADR 0019 Phase 2a — generic. kind enum = register|reprobe|poll_site|deliver_target.
+    register/reprobe = url/slug 필수. poll_site = url/slug 권장. deliver_target = sub_payload 에
+    target_kind/target_id/today_kst 박음, url/slug 둘 다 NULL OK.
+
+    dedupe:
+    - dedupe_key 가 명시되면 partial UNIQUE 인덱스 (idx_jobs_dedupe) 가 race 가드. 같은
+      dedupe_key 가 이미 박혀있으면 INSERT 가 IntegrityError → 그 row 의 id 반환 (newly=False).
+    - dedupe_key 미지정 + dedupe=True = 옛 fallback. (kind, slug) 가 pending/running 이면 그 잡 반환.
+    - dedupe=False = 무조건 INSERT.
     """
-    if kind not in ("register", "reprobe"):
+    if kind not in _JOB_KINDS:
         raise ValueError(f"invalid kind: {kind}")
-    if dedupe:
+    # register/reprobe 는 url/slug 필수 (옛 caller 의 invariant 유지).
+    if kind in ("register", "reprobe") and (not url or not slug):
+        raise ValueError(f"{kind} requires url and slug")
+    if dedupe_key:
+        # partial UNIQUE 가드 — race 안전. 이미 존재하면 그 잡 반환.
+        row = conn.execute(
+            "SELECT id FROM jobs WHERE dedupe_key=? ORDER BY id ASC LIMIT 1",
+            (dedupe_key,),
+        ).fetchone()
+        if row is not None:
+            return int(row["id"]), False
+    elif dedupe and slug:
+        # 옛 fallback — (kind, slug) 의 pending/running 1개. slug 없으면 fallback skip
+        # (deliver_target 처럼 slug 없는 kind 는 dedupe_key 로만).
         row = conn.execute(
             "SELECT id FROM jobs WHERE kind=? AND slug=? AND status IN ('pending','running') ORDER BY id ASC LIMIT 1",
             (kind, slug),
@@ -948,15 +1078,36 @@ def enqueue_job(conn: sqlite3.Connection, *,
         if row is not None:
             return int(row["id"]), False
     priority = _derive_priority(kind, via)
-    def _do():
-        cur = conn.execute(
-            "INSERT INTO jobs(kind,url,slug,article_url,via,requested_by,ack_channel_id,ack_message_id,sub_payload,"
-            "status,created_at,priority) VALUES(?,?,?,?,?,?,?,?,?, 'pending', ?,?)",
-            (kind, url, slug, article_url, via, requested_by, ack_channel_id, ack_message_id, sub_payload, _now_iso(), priority),
-        )
-        conn.commit()
-        return int(cur.lastrowid)
-    return _retry(_do), True
+
+    class _RaceLost(Exception):
+        def __init__(self, existing_id: int):
+            self.existing_id = existing_id
+
+    def _do() -> int:
+        try:
+            cur = conn.execute(
+                "INSERT INTO jobs(kind,url,slug,article_url,via,requested_by,ack_channel_id,ack_message_id,sub_payload,"
+                "status,created_at,priority,dedupe_key) "
+                "VALUES(?,?,?,?,?,?,?,?,?, 'pending', ?,?,?)",
+                (kind, url, slug, article_url, via, requested_by, ack_channel_id, ack_message_id,
+                 sub_payload, _now_iso(), priority, dedupe_key),
+            )
+            conn.commit()
+            return int(cur.lastrowid)
+        except sqlite3.IntegrityError as e:
+            # partial UNIQUE 충돌 — 다른 caller 가 같은 dedupe_key 박음. 그 row 반환.
+            if dedupe_key and "idx_jobs_dedupe" in str(e):
+                existing = conn.execute(
+                    "SELECT id FROM jobs WHERE dedupe_key=? ORDER BY id ASC LIMIT 1",
+                    (dedupe_key,),
+                ).fetchone()
+                if existing is not None:
+                    raise _RaceLost(int(existing["id"]))
+            raise
+    try:
+        return _retry(_do), True
+    except _RaceLost as r:
+        return r.existing_id, False
 
 
 def claim_next_pending(conn: sqlite3.Connection) -> Optional[sqlite3.Row]:
