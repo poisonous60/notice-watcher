@@ -70,7 +70,11 @@ _LAUNCH_ARGS = [
 
 # HAR 의 XHR/fetch 후보 발견만 필요 — image/font/media/stylesheet 는 차단해서 페이지 로드 + networkidle 가속.
 # stylesheet 차단은 visual 렌더만 영향, JS engine 실행과 XHR 발사는 무관 (대부분 SPA 에서 안전).
-_BLOCKED_RESOURCE_TYPES = {"image", "media", "font", "stylesheet"}
+# stylesheet 는 block 안 함 — Nuxt/Next 등 SPA 가 CSS 로드 후 hydration trigger 하는
+# 경우 (Radiolab 류) cards 가 DOM 에 안 박힘. 2026-05-25 직접 측정 (resource block 없이
+# 15s wait → .radiolab-card 12개 박힘) 대비 probe (block + 12s wait → 0개) 차이로 확인.
+# image/media/font 는 그대로 block — bandwidth/시간 절약, probe heuristic 정확도 영향 X.
+_BLOCKED_RESOURCE_TYPES = {"image", "media", "font"}
 
 _DEFAULT_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
