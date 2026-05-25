@@ -1,6 +1,19 @@
 """등록된 사이트들 폴링: config 실행 → 새 글 감지 → 리포트 → 깨짐 감지 시 재-probe.
 
-흐름(사이트별, 순차):
+ADR 0016 (per-site isolation):
+  - 사이트 1개당 `asyncio.wait_for(_process_site, timeout=POLL_SITE_TIMEOUT_S=180s)` wall cap.
+    초과 시 그 사이트만 `last_status="poll_timeout"` 죽이고 나머지 사이트는 그대로 진행
+    (기존엔 `asyncio.gather` 가 끝나기를 기다린 뒤 일괄 posts 캐시 박는 구조라 1개 hang =
+     1000개 글 lost. 2026-05-25 incident 후 fix).
+  - posts 캐시 sqlite upsert 는 `_process_site` 안에서 *progressive*. ordering:
+    ① .new.json → ② sqlite INSERT OR IGNORE (사이트당 1 batch commit) → ③ seen_post_ids
+    in-memory 갱신 → ④ state.json 디스크 flush. crash safe (state.json 의 seen 은 sqlite
+    박힌 글만 인정).
+  - single `sqlite3.Connection` + `asyncio.Lock` 으로 writer 직렬화 (WAL).
+  - stderr 에 `[poll] start <slug>` / `[poll] done <slug> t=Xms` / `[poll] TIMEOUT <slug>`
+    1줄씩. 다음 hang 진단용. `state.last_poll_duration_ms` 박음.
+
+흐름(사이트별, 동시):
   1. output/poll_state/<slug>.json 읽기 (slug, url, config_path, seen_post_ids, consecutive_breakage)
   2. **구독자 체크** — bot.sqlite3 의 subscriptions 에 그 slug 가 1건도 없으면 *lurking* 모드:
      - fetch_list 는 함(seen 갱신 + 깨짐 판정 + 자가복구 위해)
@@ -8,9 +21,9 @@
      - 등록 ≠ 구독: /preview 만 한 사이트·실험 등록 사이트는 비용 0
   3. config 로 ConfigAdapter 만들어 fetch_list
      - 에러 / 0건(이전엔 글 있었는데) / 포맷 급변(post_id 모양 이상·title 대부분 빔) → 깨짐 신호
-  4. 깨짐 아니면: new = 현재 post_id − seen.  (lurking 아니면) 새 글 본문 fetch(상한 --max-new-articles, polite_sleep).  seen 갱신.
+  4. 깨짐 아니면: new = 현재 post_id − seen.  (lurking 아니면) 새 글 본문 fetch(상한 --max-new-articles, polite_sleep).
+     ADR 0016 ordering 따라 .new.json → sqlite upsert → seen → state.json.
   5. 깨짐이고 consecutive_breakage ≥ 2 (= 연속 2회째) → bot.sqlite3 의 jobs 큐에 reprobe 잡 enqueue. 봇 worker(bot/worker.py)가 폴링 끝난 뒤 차례로 처리. --no-reprobe 면 리포트만.
-  6. 상태 파일 갱신.  결과를 output/collected/<ts>/ 에 기록.
 
 사용:
     python scripts/poll.py
@@ -18,6 +31,7 @@
     python scripts/poll.py --no-reprobe          # 깨져도 재-probe 안 함(리포트만)
     python scripts/poll.py --all                 # 구독자 0 사이트도 본문 fetch (lurking 모드 끔, 기존 동작)
     python scripts/poll.py --concurrency-httpx 8 --concurrency-chromium 1   # 동시 fetch 상한
+    python scripts/poll.py --site-timeout 300    # 사이트별 wall timeout override (기본 180s)
 병렬: 사이트별로 동시에 fetch 한다. chromium 띄우는 strategy(playwright_html/handwritten)는 메모리 폭주 방지를 위해 별도 작은 세마포(기본 1), pure httpx 사이트는 큰 세마포(기본 8). 사이트별 print 는 fetch 완료 후 한 묶음으로 출력해 가독성 유지.
 재-probe 는 폴링 중 inline 실행 X — bot.sqlite3 의 jobs 큐에 enqueue 만 함. 실제 register.py 실행은 봇 worker(bot/worker.py) 가 폴링 종료 후 chromium 락 안에서 직렬 처리.
 """
@@ -28,6 +42,7 @@ import asyncio
 import json
 import re
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -48,6 +63,11 @@ PROBE_DIR = ROOT / "output" / "probe"
 _STABLE_ID_RE = re.compile(r"^[\w\-./:%]{1,200}$")  # generate/validate.py:_STABLE_ID_RE 와 동기 — URL-slug-as-id 수용.
 # strategy == "handwritten" 이면 adapter 이름을 보고 결정. 여기 들어있는 어댑터만 chromium sem.
 _CHROMIUM_HANDWRITTEN = {"ArcaLiveAdapter", "IdxPressReleaseAdapter"}
+
+# ADR 0016 — 사이트 1개당 wall timeout. 정상 폴링 ≪ 30s, anti-bot 사이트 ≈ 17s.
+# 180s = 정상의 6×, anti-bot 의 10×. 이 cap 넘으면 그 사이트만 poll_timeout 로 죽이고
+# 나머지 사이트는 그대로 진행 — 1개 hang 으로 1000개 폴링 결과 lost 막음.
+POLL_SITE_TIMEOUT_S = 180
 
 
 def _config_meta(state: dict) -> tuple[str, str]:
@@ -326,8 +346,16 @@ def _load_states(only: set[str] | None) -> list[dict]:
 
 async def _process_site(st: dict, *, page_size: int, max_new_articles: int,
                          lurking: bool, no_reprobe: bool, run_dir: Path,
-                         sem_chromium: asyncio.Semaphore, sem_httpx: asyncio.Semaphore) -> tuple[list[str], tuple]:
-    """한 사이트의 fetch + 결과 처리 + state 파일 쓰기 + collected 쓰기까지. (log_lines, row) 반환.
+                         sem_chromium: asyncio.Semaphore, sem_httpx: asyncio.Semaphore,
+                         db_conn, db_lock: asyncio.Lock) -> tuple[list[str], tuple]:
+    """한 사이트의 fetch + 결과 처리 + collected/sqlite 박기 + state 파일 쓰기까지. (log_lines, row) 반환.
+
+    ADR 0016 ordering — 발견한 새 글의 disk·sqlite·seen·state 박는 순서:
+      ① run_dir/<slug>.new.json 쓰기 (collected 아티팩트)
+      ② db_conn 으로 posts 캐시 upsert — db_lock 안에서 사이트당 1 commit (batch).
+      ③ seen_post_ids = _new_seen (state.json 에 박힐 in-memory 값 갱신)
+      ④ state.json 디스크 flush.
+    crash safe: state.json 의 seen 은 sqlite 박힌 글만 인정. ②/③ 사이 crash 면 다음 폴링이 같은 글 다시 발견 → INSERT OR IGNORE 가 idempotent.
 
     동시 실행 가드: strategy 가 playwright_html / handwritten 이면 chromium 세마포, 아니면 httpx 세마포.
     print 안 함 — 호출 측이 묶어서 출력해 사이트 로그 가독성 유지.
@@ -405,18 +433,36 @@ async def _process_site(st: dict, *, page_size: int, max_new_articles: int,
     else:
         st["consecutive_breakage"] = 0
         st["last_status"] = res["status"]  # "ok" 또는 "lurking"
-        if "_new_seen" in res:
-            st["seen_post_ids"] = res["_new_seen"]
+        # ADR 0016 ordering — seen 갱신은 sqlite upsert 끝난 *뒤* 에 한다. 여기선 후보값만 보관.
+        new_seen_candidate = res.get("_new_seen")
         if res.get("lurking"):
             lines.append(f"  {res['n_posts']}건 / 새 글 {res['n_new']}건 (lurking — 본문 fetch·알림 생략, seen 갱신만)")
+            if new_seen_candidate is not None:
+                st["seen_post_ids"] = new_seen_candidate  # lurking 은 sqlite 안 박음 → 곧장 seen
         else:
             n_fetched_bodies = sum(1 for p in res["new_posts"] if (p.get("content_html") or "").strip())
             lines.append(f"  {res['n_posts']}건 / 새 글 {res['n_new']}건 (본문 fetch {n_fetched_bodies}건)")
             for p in res["new_posts"][:5]:
                 lines.append(f"    NEW {p.get('post_id')}  {p.get('published_at')}  {(p.get('title') or '')[:60]}")
             if res["new_posts"]:
+                # ① collected 디스크 (디버그 아티팩트 — 새 글 raw 스냅샷)
                 (run_dir / f"{slug}.new.json").write_text(
                     json.dumps(res["new_posts"], ensure_ascii=False, indent=2), encoding="utf-8")
+                # ② posts 캐시 sqlite upsert — db_lock 안에서 batch (사이트당 1 commit). ADR 0016.
+                # 기존엔 gather 끝난 *뒤* 일괄 했음. 1개 사이트 hang 으로 999개 글 lost 막음.
+                async with db_lock:
+                    for post in res["new_posts"]:
+                        db_conn.execute(
+                            "INSERT OR IGNORE INTO posts(slug,post_id,title,url,published_at,category,content_html,summary,collected_at) "
+                            "VALUES(?,?,?,?,?,?,?,NULL,?)",
+                            (slug, str(post.get("post_id")), post.get("title"), post.get("url"),
+                             post.get("published_at"), post.get("category"),
+                             post.get("content_html"), _now_iso()),
+                        )
+                    db_conn.commit()
+            # ③ sqlite 다 박힘 (또는 new_posts 0건) → seen 갱신 OK
+            if new_seen_candidate is not None:
+                st["seen_post_ids"] = new_seen_candidate
 
             # body drift 감지 — 새 글 본문 fetch 결과 전부 빈 것이 K회 연속이면
             # 사이트가 등록 후 등급제한/로그인월 추가됐을 가능성. 직접 DM 못 부르니까
@@ -462,6 +508,35 @@ async def run(args) -> int:
         return await _run_inner(args)
 
 
+async def _site_with_timeout(st: dict, *, timeout: float, **kw) -> tuple[list[str], tuple]:
+    """ADR 0016 — 사이트별 wall timeout 래퍼. start/done/timeout/error stderr 1줄 + last_poll_duration_ms.
+
+    timeout 초과 시 asyncio.TimeoutError 던짐 — gather(return_exceptions=True) 가 잡아서 호출 측이
+    last_status="poll_timeout" 분기 처리. duration_ms 는 _process_site 가 성공 시 state.json 에 직접
+    박음. 실패 시엔 호출 측 fallback 이 박음.
+    """
+    slug = st.get("slug", "?")
+    t0 = time.perf_counter()
+    print(f"[poll] start {slug}", file=sys.stderr, flush=True)
+    # success/timeout/error 모든 path 에 duration 박힘 — fallback handler 가 state.json 쓸 때 같이 박힘.
+    try:
+        result = await asyncio.wait_for(_process_site(st, **kw), timeout=timeout)
+        dur_ms = int((time.perf_counter() - t0) * 1000)
+        st["last_poll_duration_ms"] = dur_ms
+        print(f"[poll] done  {slug} t={dur_ms}ms", file=sys.stderr, flush=True)
+        return result
+    except asyncio.TimeoutError:
+        dur_ms = int((time.perf_counter() - t0) * 1000)
+        st["last_poll_duration_ms"] = dur_ms
+        print(f"[poll] TIMEOUT {slug} t={dur_ms}ms cap={timeout}s", file=sys.stderr, flush=True)
+        raise
+    except BaseException as e:  # noqa: BLE001 — Cancel 포함 다 surface
+        dur_ms = int((time.perf_counter() - t0) * 1000)
+        st["last_poll_duration_ms"] = dur_ms
+        print(f"[poll] ERROR {slug} t={dur_ms}ms {type(e).__name__}: {e!r}", file=sys.stderr, flush=True)
+        raise
+
+
 async def _run_inner(args) -> int:
     states = _load_states(set(args.sites) if args.sites else None)
     if not states:
@@ -472,39 +547,67 @@ async def _run_inner(args) -> int:
     run_dir = COLLECTED_DIR / ts
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    bot_conn = bot_db.connect()
+    # ADR 0006 — posts 캐시 sqlite 는 _process_site 안에서 progressive upsert.
+    # ADR 0016 — single connection 을 asyncio.Lock 으로 직렬화. WAL 모드라 read 는 동시 OK,
+    # writer 1 직렬은 sqlite 자체 제약. 1660 사이트 × 평균 5글 ≈ 8k write 부하는 네트워크 ≪.
+    # bot.sqlite3 단일 connection — fetch fail 시 무음 폴백 X (그러면 모든 사이트가 lurking
+    # 으로 분류돼 본문 fetch·sqlite 캐시 통째로 skip → 알림 유실. codex 검토 권고).
+    # 못 읽으면 그냥 죽는다 — 폴링 자체가 의미 없음. 단 죽을 때 connection 누수 막음 (codex 2차).
+    db_conn = bot_db.connect()
     try:
-        subscribed = set(bot_db.all_slugs(bot_conn))
-    finally:
-        bot_conn.close()
+        subscribed = set(bot_db.all_slugs(db_conn))
+    except BaseException:
+        try:
+            db_conn.close()
+        except Exception:
+            pass
+        raise
+    db_lock = asyncio.Lock()
 
     sem_chromium = asyncio.Semaphore(args.concurrency_chromium)
     sem_httpx = asyncio.Semaphore(args.concurrency_httpx)
-    print(f"[poll] 병렬 fetch — chromium sem={args.concurrency_chromium}, httpx sem={args.concurrency_httpx}, 사이트 {len(states)}개")
+    timeout_s = float(args.site_timeout) if args.site_timeout else POLL_SITE_TIMEOUT_S
+    # fallback handler 가 wall-timeout note 만들 때도 같은 값 — CLI override 와 일관성.
+    effective_timeout = timeout_s
+    print(f"[poll] 병렬 fetch — chromium sem={args.concurrency_chromium}, httpx sem={args.concurrency_httpx}, "
+          f"사이트 {len(states)}개, site_timeout={timeout_s}s")
 
     tasks = [
-        asyncio.create_task(_process_site(
-            st, page_size=args.page_size, max_new_articles=args.max_new_articles,
+        asyncio.create_task(_site_with_timeout(
+            st, timeout=timeout_s,
+            page_size=args.page_size, max_new_articles=args.max_new_articles,
             lurking=(not args.all) and (st["slug"] not in subscribed),
             no_reprobe=args.no_reprobe, run_dir=run_dir,
             sem_chromium=sem_chromium, sem_httpx=sem_httpx,
+            db_conn=db_conn, db_lock=db_lock,
         ))
         for st in states
     ]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+    try:
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+    finally:
+        # _run_inner 가 어떤 이유로 일찍 빠져도 connection 누수 막음.
+        try:
+            db_conn.close()
+        except Exception:
+            pass
 
     rows = []
+    n_timeout = 0
     for st, res in zip(states, results):
         if isinstance(res, BaseException):
-            # _process_site 본문 안에서 처리 못한 예외 — state 파일에 fallback 업데이트:
+            # _process_site 본문 안에서 처리 못한 예외 또는 wall timeout. state 파일에 fallback 업데이트:
             # consecutive_breakage 증가시켜 reprobe 파이프라인이 인지하게.
             slug = st.get("slug", "?")
-            note = f"{type(res).__name__}: {res}"
+            is_to = isinstance(res, asyncio.TimeoutError)
+            note = f"{type(res).__name__}: {res}" if not is_to else f"poll_timeout > {int(effective_timeout)}s"
             print(f"\n=== {slug} ===")
-            print(f"  ⚠ task 예외: {note}")
+            print(f"  ⚠ {'wall timeout' if is_to else 'task 예외'}: {note}")
             st["last_poll_at"] = _now_iso()
             st["consecutive_breakage"] = int(st.get("consecutive_breakage", 0)) + 1
-            st["last_status"] = "task_exception"
+            st["last_status"] = "poll_timeout" if is_to else "task_exception"
+            if is_to:
+                n_timeout += 1
             sp = st.get("_state_path")
             if sp:
                 try:
@@ -515,35 +618,15 @@ async def _run_inner(args) -> int:
                     )
                 except Exception as we:  # noqa: BLE001
                     print(f"  ⚠ state 파일 쓰기 실패: {we!r}")
-            rows.append((slug, "task_exception", 0, 0, note))
+            rows.append((slug, st["last_status"], 0, 0, note))
             continue
         lines, row = res
         print()
         for line in lines:
             print(line)
         rows.append(row)
-
-    # ADR 0006 — 이번 폴링이 발견한 새 글을 posts 캐시에 raw 박음 (summary=NULL, LLM 0).
-    # 발송창(봇 1분 tick)이 나중에 lazy 요약·필터·발송. collected/ 파일을 그대로 읽어 upsert
-    # (gather 후 단일 connection 순차 — async task 내 DB write 회피). INSERT OR IGNORE 라
-    # 재폴링이 같은 글을 덮어쓰지 않음.
-    posts_conn = bot_db.connect()
-    try:
-        n_cached = 0
-        for f in run_dir.glob("*.new.json"):
-            slug = f.name[: -len(".new.json")]
-            try:
-                items = json.loads(f.read_text(encoding="utf-8"))
-            except Exception as e:  # noqa: BLE001
-                print(f"  ⚠ posts 캐시 skip {f.name}: {e!r}", file=sys.stderr)
-                continue
-            for post in items:
-                bot_db.upsert_post(posts_conn, slug, post)
-                n_cached += 1
-        if n_cached:
-            print(f"[poll] posts 캐시 {n_cached}건 박음")
-    finally:
-        posts_conn.close()
+    if n_timeout:
+        print(f"\n[poll] ⚠ wall-timeout {n_timeout}건 (>{effective_timeout}s) — 그 사이트만 죽이고 나머지 진행. journal 의 `[poll] TIMEOUT <slug>` 로 식별.")
 
     # 요약 (사람용 summary.txt + 기계용 poll_result.json — 디버그 아티팩트, 현재 reader 없음)
     lines = [f"[poll {ts}]", ""]
@@ -576,6 +659,8 @@ def main(argv) -> int:
                    help="httpx_html / httpx_json 사이트 동시 fetch 상한. 가벼우니 늘려도 메모리 부담 X")
     p.add_argument("--concurrency-chromium", type=int, default=settings.poll.concurrency_chromium,
                    help="playwright_html / ArcaLiveAdapter(handwritten) 동시 fetch 상한. chromium 1개당 RAM ~200MB+ 라 작은 박스 보호용")
+    p.add_argument("--site-timeout", type=float, default=None,
+                   help=f"ADR 0016 — 사이트 1개당 wall timeout(초). 미지정 시 {POLL_SITE_TIMEOUT_S}s. 이 cap 넘으면 그 사이트만 poll_timeout 죽이고 나머지 진행.")
     args = p.parse_args(argv)
     if args.sites:
         args.sites = [s.strip() for s in args.sites.split(",") if s.strip()]
