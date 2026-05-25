@@ -32,11 +32,12 @@ ADR 0017 이 *추적 (visibility)* 박았지만 사용자 원 요청 = *jobs 큐
 
 ### Phase 1 (1 commit, ~50 줄) — flock 공유 + lock_wait 분리
 
-목표: chromium 작업 cross-process 직렬화. semantic 변경 X.
+목표: chromium 작업 cross-process **capacity limit** (RAM 충돌만 봉합, 실 직렬화 아님). semantic 변경 X.
 
 #### 변경:
 - `scripts/poll.py` 의 chromium 사이트 fetch 가 `_chromium_lock.acquire()` 잡음. register.py 와 같은 file lock 공유.
-- **slots = 1** 명시 (Phase 1 운영 동안). slots≥2 는 capacity limiter 의미라 진짜 직렬화 아님 — 사용자 요청 명확히 직렬화 = 1.
+- **slots = `settings.chromium_lock.slots`** (poll·worker 같은 N 공유 — capacity limiter, mutex 아님. 동시 chromium 인스턴스 ≤ N). RAM/cookie/IP 충돌 봉합 = capacity limit 으로 충분 (실 mutex 는 Phase 2 검토). 초안의 "slots=1 명시 (real mutex)" 는 worker register 처리량 N→1 반감 비용이 커서 폐기 (2026-05-25 구현 시 사용자 결정 — N100 운영값 현 slots=5). 실 mutex 필요하면 운영자가 `chromium_lock.slots=1` 로 override.
+- `scripts/poll_and_notify.py` 의 outer `chromium_lock_acquire` wrapper **제거** (codex Phase 1 review CRITICAL). 옛 coarse Phase 0 가드 — 새 per-site lock 과 self-deadlock (parent 가 slot 1개 통째 점유 → N=1 이면 child 가 영원히 timeout, N=2+ 도 capacity 1 낭비). poll.py 자체가 chromium 사이트별 acquire/release → 외각 wrapper 불필요.
 - `_site_with_timeout` 의 ordering (codex CRITICAL §1 — 4 stage 분리):
   ```
   1. sem 대기 (asyncio.Semaphore — in-process, fast)            : not measured, not in wall budget
@@ -235,10 +236,10 @@ WHERE status IN ('pending','running');
 ## 5. 검증
 
 ### Phase 1
-- `tests/scripts/test_chromium_lock_share.py` — Linux 만, 두 process 가 같은 lock file 잡는 race 확인 + lock_wait_ms 측정.
+- `tests/scripts/test_chromium_lock_share.py` — Linux 만, 두 process 가 같은 lock file 잡는 race 확인 (직렬화 + acquire TimeoutError). `lock_wait_ms` DB 박힘 확인은 1주 운영 데이터로 (test 안 들어감 — flock 단위만 검증).
 - pre-push hook `probe_smoke --stage 3 --stage 5`.
 - 손-poll + 동시 user `/preview` 트리거 → journal 의 `chromium_flock_acquire` 직렬화 + `lock_wait_ms` 박힘.
-- 1주 운영 후 p95 측정.
+- 1주 운영 후 `poll_runs.duration_ms` p95 + `poll_site_runs.lock_wait_ms` 분포 측정.
 
 ### Phase 2
 - **migration test** (codex HIGH §5 의무): 옛 jobs 테이블 fixture → connect → `_migrate_jobs_kind_enum` 동작 → `enqueue_job(kind='poll_site')` 동작 → 옛 register row 유지.
