@@ -520,8 +520,9 @@ async def run_codex_agentic(
                 "--output-last-message", str(out_file),
                 "--dangerously-bypass-approvals-and-sandbox",
             ]
-            if SCHEMA_PATH.is_file():
-                args.extend(["--output-schema", str(SCHEMA_PATH)])
+            # NOTE: --output-schema dropped — OpenAI structured output requires
+            # additionalProperties:false on all nested objects, but `config` has
+            # arbitrary user-defined keys. Schema kept as prompt context only.
             # Linux: new session so the whole process group can be killed on timeout.
             preexec = os.setsid if sys.platform != "win32" else None
             # Windows: CREATE_NEW_PROCESS_GROUP so taskkill /T can find tree.
@@ -572,12 +573,24 @@ async def run_codex_agentic(
             raise LLMParseError(
                 f"codex_agentic: empty agent output (stderr tail: {stderr_text[-300:]!r})"
             )
+        # Tolerant parse — agent may add prose around the JSON since --output-schema
+        # is no longer enforcing strict structure. Extract first {...} block.
         try:
             parsed = json.loads(last_text)
-        except json.JSONDecodeError as e:
-            raise LLMParseError(
-                f"codex_agentic: agent output not JSON: {e} — first 300 chars: {last_text[:300]!r}"
-            )
+        except json.JSONDecodeError:
+            i = last_text.find("{")
+            j = last_text.rfind("}")
+            if i < 0 or j <= i:
+                raise LLMParseError(
+                    f"codex_agentic: agent output not JSON: first 300 chars: {last_text[:300]!r}"
+                )
+            try:
+                parsed = json.loads(last_text[i : j + 1])
+            except json.JSONDecodeError as e:
+                raise LLMParseError(
+                    f"codex_agentic: agent output not JSON after block extract: {e} "
+                    f"— first 300 chars: {last_text[:300]!r}"
+                )
         if not isinstance(parsed, dict):
             raise LLMParseError(f"codex_agentic: agent output not a JSON object: {type(parsed).__name__}")
         ok_flag = bool(parsed.get("ok"))

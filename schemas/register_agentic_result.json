@@ -3,40 +3,26 @@
   "title": "register_agentic_result",
   "description": "Final agent_message JSON for register agentic mode. Parent re-validates `config` independently before atomic publish.",
   "type": "object",
-  "additionalProperties": false,
-  "required": ["ok", "attempts", "stop_reason"],
+  "additionalProperties": true,
+  "required": ["ok", "config", "attempts", "stop_reason"],
   "properties": {
     "ok": {
-      "type": "boolean",
-      "description": "Agent's own validate result. Parent re-validates regardless."
+      "type": "boolean"
     },
     "config": {
       "type": "object",
-      "description": "Candidate config dict. Required when ok=true."
+      "additionalProperties": true
     },
     "attempts": {
       "type": "array",
-      "maxItems": 5,
       "items": {
         "type": "object",
-        "additionalProperties": false,
-        "required": ["i", "validate_ok"],
-        "properties": {
-          "i": { "type": "integer", "minimum": 1, "maximum": 5 },
-          "validate_ok": { "type": "boolean" },
-          "error": { "type": ["string", "null"], "maxLength": 1000 }
-        }
+        "additionalProperties": true
       }
     },
     "stop_reason": {
       "type": "string",
       "enum": ["validate_pass", "max_cycles", "agent_gave_up", "error"]
     }
-  },
-  "allOf": [
-    {
-      "if": { "properties": { "ok": { "const": true } } },
-      "then": { "required": ["config"] }
-    }
-  ]
+  }
 }
