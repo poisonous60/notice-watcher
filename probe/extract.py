@@ -2098,6 +2098,154 @@ def audio_share_signal(
     )
 
 
+# URL pagination heuristic — 사이트의 페이지네이션 query param 자동 감지.
+# Radiolab 류 SPA 가 `?page={page}` query 없으면 cards 안 그리는 케이스 봉합용. probe 두 신호:
+#   1. 정적 HTML anchor — `<a href="...?page=N">` 류 직접 박힌 pagination 링크
+#   2. HAR XHR fetch URL — SPA 의 클라이언트 fetch URL 에 `page=N` 또는 path `/N` 박힌 것
+# config writer 가 list.url_template + list.pagination 박을 때 hint 로 사용.
+
+_PAGE_PARAM_NAMES = ("page", "p", "pg", "offset", "start", "skip", "cursor", "_page", "page_num")
+_PAGE_PARAM_RE = re.compile(
+    r"[?&](" + "|".join(re.escape(n) for n in _PAGE_PARAM_NAMES) + r")=(\d+)",
+    re.IGNORECASE,
+)
+
+
+def _pagination_url_template(url: str, param: str) -> Optional[str]:
+    """url 의 `?{param}=N` 자리에 `{page}` 박은 url_template 반환. 실패 시 None."""
+    try:
+        sp = urlsplit(url)
+    except ValueError:
+        return None
+    if not sp.query:
+        return None
+    pairs = parse_qsl(sp.query, keep_blank_values=True)
+    out_pairs = []
+    found = False
+    for k, v in pairs:
+        if k.lower() == param.lower():
+            out_pairs.append((k, "{page}"))
+            found = True
+        else:
+            out_pairs.append((k, v))
+    if not found:
+        return None
+    new_q = "&".join(f"{k}={v}" for k, v in out_pairs)
+    return urlunsplit((sp.scheme, sp.netloc, sp.path, new_q, ""))
+
+
+@heuristic
+def pagination_hints(html: str, *, base_url: str, har_path: Optional[Path] = None) -> list[dict]:
+    """페이지네이션 query param 후보. 두 source 종합 (html anchor + HAR XHR).
+
+    출력: [{kind, param, url_template, source, evidence_url}, ...] — confidence 순.
+      - kind: "query_param" (현재 유일). path_segment 는 후속 plan.
+      - param: 검출된 param 이름 (page/p/offset/cursor/start/skip/cursor/_page/page_num).
+      - url_template: base_url 기반 `?{param}={{page}}` 박은 URL. *page_url 의 path* 에 박음
+        (XHR 의 API host 가 다른 경우 — 예: Radiolab radiolab.org 인데 XHR api.wnyc.org —
+        config 의 list.url_template 은 page URL 의 path 에 query 박은 게 맞음).
+      - source: "html_anchor" | "har_xhr" — 진단/디버그용.
+      - evidence_url: 검출 원본 URL (LLM 한테 신뢰도 가늠 시 참고).
+
+    fail-safe: html/har 둘 다 신호 없으면 빈 list. base_url 의 page 자리 박을 query 가 없는
+    `/podcast` 같은 path 도 `?{param}={page}` 추가해서 후보 박음 (Radiolab 케이스).
+    """
+    hints: list[dict] = []
+    seen: set[tuple[str, str]] = set()  # (param, url_template) 중복 제거
+
+    # (1) HTML anchor pagination
+    if html:
+        try:
+            soup = BeautifulSoup(html, "lxml")
+        except Exception:
+            soup = None
+        if soup:
+            for a in soup.find_all("a", href=True)[:500]:  # 첫 500 만 검사
+                href = a.get("href") or ""
+                if not isinstance(href, str):
+                    continue
+                m = _PAGE_PARAM_RE.search(href)
+                if not m:
+                    continue
+                param = m.group(1).lower()
+                abs_url = urljoin(base_url, href)
+                tmpl = _pagination_url_template(abs_url, param)
+                if not tmpl:
+                    continue
+                key = (param, tmpl)
+                if key in seen:
+                    continue
+                seen.add(key)
+                hints.append({
+                    "kind": "query_param",
+                    "param": param,
+                    "url_template": tmpl,
+                    "source": "html_anchor",
+                    "evidence_url": abs_url,
+                })
+
+    # (2) HAR XHR pagination — SPA 의 fetch URL 에 page param 박힌 것
+    if har_path and Path(har_path).exists():
+        try:
+            har = json.loads(Path(har_path).read_text(encoding="utf-8", errors="replace"))
+        except Exception:
+            har = None
+        if har and isinstance(har, dict):
+            base_host = urlsplit(base_url).netloc if base_url else ""
+            xhr_params_found: dict[str, str] = {}  # param → first evidence URL
+            for entry in (har.get("log", {}).get("entries", []) or [])[:200]:
+                req = entry.get("request", {}) or {}
+                xhr_url = req.get("url") or ""
+                if not xhr_url:
+                    continue
+                # ad/tracker skip
+                if _AD_TRACKER_RE.search(xhr_url):
+                    continue
+                rtype = _entry_resource_type(entry)
+                if rtype not in ("xhr", "fetch"):
+                    continue
+                m = _PAGE_PARAM_RE.search(xhr_url)
+                if not m:
+                    continue
+                param = m.group(1).lower()
+                if param not in xhr_params_found:
+                    xhr_params_found[param] = xhr_url
+
+            # XHR 에 검출된 param 을 base_url 의 path 에 `?{param}={page}` 박아 후보 생성
+            # (Radiolab: XHR=api.wnyc.org, page URL=radiolab.org/podcast → config url_template
+            #  = `radiolab.org/podcast?{param}={page}`).
+            for param, ev_url in xhr_params_found.items():
+                try:
+                    sp = urlsplit(base_url)
+                    new_q_pairs = list(parse_qsl(sp.query, keep_blank_values=True))
+                    # base_url 에 이미 같은 param 있으면 그 자리에 박음, 없으면 추가
+                    found_in_base = False
+                    for i, (k, v) in enumerate(new_q_pairs):
+                        if k.lower() == param:
+                            new_q_pairs[i] = (k, "{page}")
+                            found_in_base = True
+                            break
+                    if not found_in_base:
+                        new_q_pairs.append((param, "{page}"))
+                    new_q = "&".join(f"{k}={v}" for k, v in new_q_pairs)
+                    tmpl = urlunsplit((sp.scheme, sp.netloc, sp.path, new_q, ""))
+                except Exception:
+                    continue
+                key = (param, tmpl)
+                if key in seen:
+                    continue
+                seen.add(key)
+                hints.append({
+                    "kind": "query_param",
+                    "param": param,
+                    "url_template": tmpl,
+                    "source": "har_xhr",
+                    "evidence_url": ev_url,
+                })
+
+    return hints[:8]  # top 8 cap (token cost)
+
+
 def write_list_candidates(
     out_dir: Path,
     *,
@@ -2127,6 +2275,7 @@ def write_list_candidates(
     mbin_platform: Optional[dict] = None,
 ) -> None:
     feeds = rss_feed_urls(html=page_html or "", base_url=base_url, har_path=har_path)
+    page_hints = pagination_hints(html=page_html or "", base_url=base_url, har_path=har_path)
     audio_share = audio_share_signal(
         base_url=base_url,
         first_article_url=first_article_url,
@@ -2161,6 +2310,10 @@ def write_list_candidates(
         # RSS/Atom URL 후보 — <link rel=alternate type=application/rss+xml|atom+xml>, HTML 본문 feed/rss 링크, HAR 의 XML feed 응답.
         # config writer 는 feed 후보가 있으면 list.url_template 에 이 URL 을 그대로 써야 한다.
         "rss_feed_urls": feeds,
+        # URL pagination 후보 — 정적 HTML anchor 의 ?page=N + HAR XHR fetch URL 의 ?page=N.
+        # Radiolab 류 SPA 가 ?page query 없으면 cards 안 그리는 사이트 봉합. config writer 는 hint
+        # 발견 시 list.url_template 에 그대로 박고 list.pagination={kind:"query_param", page_param:<param>}.
+        "pagination_hints": page_hints,
         # 페이지 HTML 안에 박힌 ID/슬러그 후보 — URL 에 없지만 사이트가 명시한 cafe_id/board_id 등.
         "runtime_id_candidates": runtime_ids or [],
         "first_article_url": first_article_url,
