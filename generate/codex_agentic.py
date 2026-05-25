@@ -480,6 +480,30 @@ def _build_user_prompt(slug: str, url: str, repo: Path) -> str:
               .replace("{{ url }}", url))
 
 
+def _read_candidate_config(workdir: Path, candidate_path: object = None) -> dict:
+    """Read the agent-written candidate from the tmpdir.
+
+    The final Codex message is intentionally small and may only reference this
+    file. Keep the accepted path shape narrow because the agent is untrusted.
+    """
+    raw = "./candidate.json" if candidate_path is None else str(candidate_path).strip()
+    normalized = raw.replace("\\", "/")
+    if normalized not in ("candidate.json", "./candidate.json"):
+        raise LLMParseError(f"codex_agentic: unsupported candidate_path {raw!r}")
+    p = workdir / "candidate.json"
+    try:
+        cfg = json.loads(p.read_text(encoding="utf-8"))
+    except OSError as e:
+        raise LLMParseError(f"codex_agentic: cannot read ./candidate.json: {e}") from e
+    except json.JSONDecodeError as e:
+        raise LLMParseError(f"codex_agentic: ./candidate.json is not JSON: {e}") from e
+    if not isinstance(cfg, dict):
+        raise LLMParseError(
+            f"codex_agentic: ./candidate.json is not a JSON object: {type(cfg).__name__}"
+        )
+    return cfg
+
+
 # --- subprocess + process tree kill ------------------------------------------
 
 
@@ -687,21 +711,18 @@ async def run_codex_agentic(
                 parse_error = "no balanced { } block"
 
         if parsed is None:
-            # Recover the candidate from disk — last.json is truncated.
-            candidate_path = workdir / "candidate.json"
             recovered: Optional[dict] = None
-            if candidate_path.is_file():
-                try:
-                    recovered = json.loads(candidate_path.read_text(encoding="utf-8"))
-                except (OSError, json.JSONDecodeError):
-                    recovered = None
+            try:
+                recovered = _read_candidate_config(workdir)
+            except LLMParseError:
+                recovered = None
             if isinstance(recovered, dict) and recovered:
                 # Assume the agent intended ok=true with this candidate; parent
                 # re-validation below is the real arbiter. If validate fails the
                 # caller still sees a precise gen_fail, not LLMParseError.
                 print(
                     f"[codex_agentic] last.json parse failed ({parse_error}) — "
-                    f"recovered candidate.json ({candidate_path.stat().st_size}B). "
+                    f"recovered candidate.json ({(workdir / 'candidate.json').stat().st_size}B). "
                     f"Parent will re-validate.",
                     flush=True,
                 )
@@ -723,6 +744,8 @@ async def run_codex_agentic(
         config = parsed.get("config")
         attempts = parsed.get("attempts") or []
         stop_reason = str(parsed.get("stop_reason") or "")
+        if ok_flag and (not isinstance(config, dict) or not config):
+            config = _read_candidate_config(workdir, parsed.get("candidate_path"))
 
         # Compute usage once — reused for both success result and any failure-path
         # GenerationError so measurement scripts see the cost of failed runs too.

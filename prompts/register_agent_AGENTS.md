@@ -80,7 +80,8 @@ Your final agent message MUST be a single JSON object (no prose):
 
     {
       "ok": <bool>,
-      "config": <object>,
+      "candidate_path": "./candidate.json",
+      "config": {},
       "attempts": [
         {"i": 1, "validate_ok": false, "error": "<short>"},
         ...
@@ -91,16 +92,16 @@ Your final agent message MUST be a single JSON object (no prose):
 
 ### config field rule (STRICT — no exceptions)
 
-- `ok=true` → `config` = the passing cfg dict (full).
+- `ok=true` → include `"candidate_path": "./candidate.json"` and `config: {}`.
+  NEVER echo the full cfg in the final message.
 - `ok=false` → `config` = empty `{}`. ALWAYS. No partial dump, no "informative"
   last_config, no debug payload.
-  - Applies to ALL ok=false cases: `max_cycles`, `agent_gave_up`, `error`,
-    `non_board`, `non_existent`, `login_required`.
-  - Reason: parent reads `./candidate.json` directly for the last attempted
-    cfg. You do NOT need to echo it in the final JSON. Echoing it inflates
-    the final message past the model output budget and the response gets
-    truncated mid-string — parent then can't parse anything at all
-    (`LLMParseError: Expecting ',' delimiter`).
+  - Applies to ALL cases: `validate_pass`, `max_cycles`, `agent_gave_up`,
+    `error`, `non_board`, `non_existent`, `login_required`.
+  - Reason: parent reads `./candidate.json` directly for the attempted cfg.
+    Echoing it inflates the final message past the model output budget and
+    the response gets truncated mid-string — parent then can't parse attempts
+    or `stop_reason` (`LLMParseError: Expecting ',' delimiter`).
 
 ### attempts field rule
 
