@@ -342,6 +342,8 @@ _ARTIFACTS: dict[str, ArtifactContract] = {
                            note="클릭한 <a> 의 href 원본 ('' 면 JS 핸들러)"),
             _ContractField("note", type_hint="str|null",
                            note="클릭 실패 등 상태 메모"),
+            _ContractField("consent_dismissed", required=False, type_hint="int|null",
+                           note="Phase 9b 클릭 전 cookie/consent modal 자동 dismiss 횟수"),
         ),
         optional_on_disk=True,
     ),

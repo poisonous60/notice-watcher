@@ -19,7 +19,11 @@ class _FakePage:
 
 
 def run() -> list[tuple[str, bool, str]]:
-    from probe.fetch_headless import _context_kwargs, _is_cloudflare_interstitial
+    from probe.fetch_headless import (
+        _body_preserving_truncated_html,
+        _context_kwargs,
+        _is_cloudflare_interstitial,
+    )
 
     cases: list[tuple[str, bool, str]] = []
 
@@ -57,5 +61,18 @@ def run() -> list[tuple[str, bool, str]]:
     ))
     cases.append(("normal_page_not_challenge", not challenge and not turnstile,
                   f"challenge={challenge}, turnstile={turnstile}"))
+
+    large_head = (
+        "<html><head>"
+        + "<style>" + ("x" * 1200) + "</style>"
+        + "</head><body><main><a class='post' href='/en/news/10000'>title</a></main></body></html>"
+    )
+    compact = _body_preserving_truncated_html(large_head, 500)
+    cases.append(("truncated_capture_preserves_body",
+                  "/en/news/10000" in compact and "probe.truncated_html" in compact,
+                  compact[:200]))
+    cases.append(("truncated_capture_drops_large_head_style",
+                  "x" * 200 not in compact,
+                  compact[:200]))
 
     return cases

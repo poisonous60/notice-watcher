@@ -232,6 +232,24 @@ def _wait_xhr_quiet(page, *, quiet_ms: int = 500, hard_timeout_ms: int = 2000) -
             pass
 
 
+def _body_preserving_truncated_html(html: str, limit: int) -> str:
+    """When head CSS exceeds the cap, keep body DOM instead of only the head prefix."""
+    if len(html) <= limit:
+        return html
+    marker = "\n<!-- probe.truncated_html: capture limit reached -->"
+    m = re.search(r"<body\b[^>]*>.*?</body>", html, re.IGNORECASE | re.DOTALL)
+    if not m:
+        return html[:limit] + marker
+    title = ""
+    tm = re.search(r"<title\b[^>]*>.*?</title>", html, re.IGNORECASE | re.DOTALL)
+    if tm:
+        title = tm.group(0)
+    compact = f"<html><head>{title}</head>{m.group(0)}</html>"
+    if len(compact) > limit:
+        compact = compact[:limit]
+    return compact + marker
+
+
 def _capture_page_content(page) -> tuple[str, bool]:
     """DOM 전체 직렬화가 큰 SPA 에서 Python/Chromium 메모리를 같이 밀어올리지 않게 cap."""
     js = """(limit) => {
@@ -239,6 +257,16 @@ def _capture_page_content(page) -> tuple[str, bool]:
         if (!root) return {html: "", truncated: false};
         const html = root.outerHTML || "";
         if (html.length <= limit) return {html, truncated: false};
+        const title = document.querySelector("title")?.outerHTML || "";
+        const body = document.body?.outerHTML || "";
+        if (body) {
+            let compact = `<html><head>${title}</head>${body}</html>`;
+            if (compact.length > limit) compact = compact.slice(0, limit);
+            return {
+                html: compact + "\\n<!-- probe.truncated_html: capture limit reached -->",
+                truncated: true
+            };
+        }
         return {
             html: html.slice(0, limit) + "\\n<!-- probe.truncated_html: capture limit reached -->",
             truncated: true
@@ -251,11 +279,7 @@ def _capture_page_content(page) -> tuple[str, bool]:
     except Exception:  # noqa: BLE001
         html = page.content()
         if len(html) > _MAX_CAPTURED_HTML_CHARS:
-            return (
-                html[:_MAX_CAPTURED_HTML_CHARS]
-                + "\n<!-- probe.truncated_html: capture limit reached -->",
-                True,
-            )
+            return (_body_preserving_truncated_html(html, _MAX_CAPTURED_HTML_CHARS), True)
         return html, False
 
 
@@ -524,6 +548,81 @@ _NAV_JUNK_RE = re.compile(
 _ARTICLE_HINT_RE = re.compile(r"(view|detail|article|notice|read|thread|post|bbs|board|news|content|story|/\d{2,})", re.IGNORECASE)
 _ID_DATA_KEY_RE = re.compile(r"(^|[-_])(id|no|seq|article|thread|data|post|board|nid|cid|aid)", re.IGNORECASE)
 
+_CONSENT_DISMISS_JS = r"""() => {
+    const textPatterns = [
+        /accept/i, /agree/i, /^ok$/i, /allow/i, /got it/i,
+        /동의/, /확인/, /허용/, /수락/, /모두\s*동의/,
+        /Aceptar/i, /Akzeptieren/i
+    ];
+    const bannerHint = /(cookie|consent|privacy|gdpr|쿠키|동의|개인정보)/i;
+
+    function visible(el) {
+        const r = el.getBoundingClientRect();
+        const s = window.getComputedStyle(el);
+        return r.width > 0 && r.height > 0 && s.visibility !== "hidden" && s.display !== "none";
+    }
+    function label(el) {
+        return [
+            el.innerText || el.value || "",
+            el.getAttribute("aria-label") || "",
+            el.id || "",
+            el.className || ""
+        ].join(" ");
+    }
+    function looksLikeDismiss(el) {
+        const t = label(el);
+        return textPatterns.some((re) => re.test(t));
+    }
+    function bannerLike(el) {
+        let cur = el;
+        for (let depth = 0; cur && depth < 7; depth += 1, cur = cur.parentElement) {
+            const idClass = `${cur.id || ""} ${cur.className || ""}`;
+            const txt = (cur.innerText || "").slice(0, 1000);
+            if (bannerHint.test(idClass)) return true;
+            const role = (cur.getAttribute("role") || "").toLowerCase();
+            const style = window.getComputedStyle(cur);
+            const rect = cur.getBoundingClientRect();
+            const z = parseInt(style.zIndex || "0", 10) || 0;
+            const floating = ["fixed", "sticky"].includes(style.position) || z >= 1000 || role === "dialog";
+            const largeEnough = rect.width >= Math.min(320, window.innerWidth * 0.25) && rect.height >= 40;
+            if (floating && largeEnough && bannerHint.test(`${idClass} ${txt}`)) return true;
+        }
+        return false;
+    }
+
+    let clicked = 0;
+    const candidates = Array.from(document.querySelectorAll(
+        '[id*="cookie" i] button, [class*="cookie" i] button,' +
+        '[id*="consent" i] button, [class*="consent" i] button,' +
+        'button[id*="accept" i], button[id*="agree" i], button[class*="accept" i],' +
+        '[aria-label*="accept" i], [aria-label*="agree" i],' +
+        'button, [role="button"], input[type="button"], input[type="submit"]'
+    ));
+    for (const el of candidates) {
+        if (clicked >= 3) break;
+        if (!visible(el) || !looksLikeDismiss(el) || !bannerLike(el)) continue;
+        try {
+            el.click();
+            clicked += 1;
+        } catch (_) {}
+    }
+    return clicked;
+}"""
+
+
+def _dismiss_consent_modals(page) -> int:
+    """Dismiss visible cookie/consent overlays before click probing."""
+    try:
+        dismissed = int(page.evaluate(_CONSENT_DISMISS_JS) or 0)
+    except Exception:  # noqa: BLE001
+        return 0
+    if dismissed > 0:
+        try:
+            page.wait_for_timeout(500)
+        except Exception:  # noqa: BLE001
+            pass
+    return dismissed
+
 
 @heuristic
 def _score_click_link(link: dict, *, page_host: str) -> int:
@@ -583,7 +682,8 @@ def fetch_article_by_click(
     반환: (Result(strategy="S4.click", target="article"), meta_dict).
     """
     meta: dict = {"requested_url": list_url, "resolved_url": None, "status": None,
-                  "clicked_text": None, "clicked_href": None, "note": None}
+                  "clicked_text": None, "clicked_href": None, "note": None,
+                  "consent_dismissed": 0}
 
     def _result(cls: Classification, body_path: Optional[str], status: Optional[int], dur: int,
                 notable: list[str], error: Optional[str], url: str) -> "Result":
@@ -659,6 +759,7 @@ def fetch_article_by_click(
                     page.goto(list_url, wait_until="domcontentloaded", timeout=timeout_ms)
                     wait_note = _wait_through_cloudflare_interstitial(page)
                     _wait_xhr_quiet(page, quiet_ms=300, hard_timeout_ms=idle_timeout_ms)
+                    meta["consent_dismissed"] = _dismiss_consent_modals(page)
                     links = page.evaluate(_LINK_JS) or []
                     ranked = sorted(((_score_click_link(l, page_host=page_host), l) for l in links),
                                     key=lambda t: t[0], reverse=True)
@@ -726,6 +827,8 @@ def fetch_article_by_click(
                     break
         except Exception:  # noqa: BLE001
             pass
+    if final_url and status is None and body is not None:
+        status = 200
     meta["status"] = status
     # NOTE: '클릭 후 URL 이 first_article_url(=probe 가 추측한 글 URL)과 다른가' 비교는 digest.py 에서 한다
     #       (여기선 list_url 밖에 모르는데, 목록→글 클릭이 list_url 과 다른 URL 로 가는 건 당연하므로 의미 없음).

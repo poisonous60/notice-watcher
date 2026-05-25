@@ -100,6 +100,8 @@ def html_repeating_patterns(html: str, base_url: str, *, min_children: int = 5) 
         children = [c for c in parent.find_all(recursive=False) if isinstance(c, Tag)]
         if len(children) < min_children:
             continue
+        if str(parent.name).lower() == "head":
+            continue
         # 시그니처 그룹핑
         groups: dict[str, list[Tag]] = {}
         for c in children:
@@ -107,6 +109,8 @@ def html_repeating_patterns(html: str, base_url: str, *, min_children: int = 5) 
             groups.setdefault(sig, []).append(c)
         for sig, group in groups.items():
             if len(group) < min_children:
+                continue
+            if str(group[0].name).lower() in {"script", "style", "meta", "link"}:
                 continue
             # skeleton descendant reject — group 의 sample (group[0]) 안 자손 class 에
             # skeleton/loading/placeholder 있으면 SPA hydration 전 캡처된 가짜 row.
