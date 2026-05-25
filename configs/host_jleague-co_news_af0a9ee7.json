@@ -1,0 +1,172 @@
+{
+  "version": 1,
+  "site": "jleague.co",
+  "board": "news",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.jleague.co/news/"
+  },
+  "timeout": 20,
+  "polite_sleep": {
+    "min": 30,
+    "max": 35
+  },
+  "list": {
+    "url_template": "https://www.jleague.co/{board}/",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "ul.news-articles-list > li.news-articles-list__item",
+    "row_required_selector": "a.news-article[href^='/news/'] h3.news-article__details__title",
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a.news-article[href^='/news/']",
+          "attr": "href",
+          "transform": [
+            [
+              "strip_query_fragment"
+            ],
+            [
+              "regex_extract",
+              "/news/([^/?#]+)/?$"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "h3.news-article__details__title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a.news-article[href^='/news/']",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://www.jleague.co"
+            ],
+            [
+              "strip_query_fragment"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "div.news-article__details__post-date",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "regex_extract",
+              "^([A-Za-z]{3}, \\d{1,2} [A-Za-z]{3} \\d{4} · \\d{2}:\\d{2})"
+            ],
+            [
+              "iso8601",
+              [
+                "%a, %d %b %Y · %H:%M"
+              ],
+              "+09:00"
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "div.news-article__details__content",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "cover_image": [
+        {
+          "from": "attr",
+          "selector": "img.news-article__image__image",
+          "attr": "src",
+          "transform": [
+            [
+              "strip_query_fragment"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "article.news-article",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "div.news-article__content",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "h1.article-headline",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "div.article-post-date",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "regex_extract",
+              "^([A-Za-z]{3}, \\d{1,2} [A-Za-z]{3} \\d{4} · \\d{2}:\\d{2})"
+            ],
+            [
+              "iso8601",
+              [
+                "%a, %d %b %Y · %H:%M"
+              ],
+              "+09:00"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "_source_url": "https://www.jleague.co/news/",
+  "_note": "J.LEAGUE News is a server-rendered static list. Use article card rows and derive post_id from the canonical /news/<slug>/ href; long URL slugs are stable IDs even when they exceed generator stable-shape cap."
+}
