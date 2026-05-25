@@ -238,6 +238,10 @@ FAIL_CATALOG: tuple[FailKind, ...] = (
             Subkind("soft_404", "soft-404 (200 not-found)",
                     "HTTP 200 이지만 not-found shell — URL 이 잘못됐거나 삭제됨.",
                     _url_dead_soft_404),
+            Subkind("agent_self_veto_non_existent", "agent self-veto 404/not-found",
+                    "api_loop/agentic 이 스스로 404/not-found shell 로 판정해 self-veto.",
+                    _has_any("agent_self_veto:non_existent", "agent self-veto(non_existent)",
+                             name="agent_self_veto_non_existent")),
         ),
     ),
     FailKind(
@@ -249,6 +253,10 @@ FAIL_CATALOG: tuple[FailKind, ...] = (
             Subkind("login_required", "로그인 필요",
                     "사이트가 로그인 요구 (네이버카페 비공개 등).",
                     _has_any("LOGIN_REQUIRED", name="login_required")),
+            Subkind("agent_self_veto_login", "agent self-veto 로그인 필요",
+                    "api_loop/agentic 이 스스로 로그인 필요로 판정해 self-veto.",
+                    _has_any("agent_self_veto:login_required", "agent self-veto(login_required)",
+                             name="agent_self_veto_login")),
             Subkind("blocked_bot", "봇 차단",
                     "User-Agent 또는 행동 기반 봇 감지.",
                     _has_any("BLOCKED_BOT", name="blocked_bot")),
@@ -319,6 +327,11 @@ FAIL_CATALOG: tuple[FailKind, ...] = (
             Subkind("board_shape", "게시판 형식 아님",
                     "post 리스트 구조 인식 실패.",
                     _has_any("게시판 형식 아님", name="board_shape")),
+            Subkind("agent_self_veto_non_board", "agent self-veto 비-게시판",
+                    "api_loop/agentic 이 스스로 content/single-article/catalog 로 판정해 self-veto. "
+                    "LLM 재호출 없음.",
+                    _has_any("agent_self_veto:non_board", "agent self-veto(non_board)",
+                             name="agent_self_veto_non_board")),
             Subkind("classifier_reject", "분류기 비-게시판 판정",
                     "LLM page-type 분류기가 content/catalog 등 비-게시판으로 판정해 거부 "
                     "(ADR 0007 accept-path / ADR 0011 catalog=아티팩트·비최신순 listing). 수동 config 는 허용.",

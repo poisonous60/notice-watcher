@@ -1845,22 +1845,32 @@ def _build_failure_packet(exc: GenerationError) -> dict:
     }
 
 
+_STOP_REASON_RC = {
+    "non_board": 3,
+    "non_existent": 4,
+    "login_required": 2,
+}
+
+
 def _generation_failure_reject_rc(digest: dict, url: str, slug: str, exc: GenerationError,
                                   *, gate_only: bool = False,
                                   include_heterogeneous_hub: bool = True) -> Optional[int]:
-    """Reclassify a generation failure into REJECTED when page-type evidence is decisive."""
+    """Reclassify agent self-veto generation failures into REJECTED.
+
+    api_loop_once / codex agentic can self-determine that a page is content,
+    not-found, or login-required and report it via GenerationError.stop_reason.
+    Do not re-call the page classifier here.
+    """
     if gate_only:
         return None
-    _cls_rc = _classify_decisive_rc(_classify_veto(digest, url, slug, gate_only=False))
-    if _cls_rc is not None:
-        _cls = _classify_veto(digest, url, slug, gate_only=False)
-        reason = (f"분류기 post-mortem({_cls.get('class')} conf={_cls.get('confidence')}) — "
-                  f"gen_fail 직전 재분류: {_cls.get('reason')[:120]}")
-        _save_rejected(slug, url, reason, learn=False)
-        print(f"\n[register] 🔴 generation fail 직후 LLM 분류기가 {_cls.get('class')}"
-              f"(비-게시판)로 판단 — gen_fail 아닌 거부 rc={_cls_rc} 로 재분류 "
-              f"(conf={_cls.get('confidence')}, {_cls.get('reason')[:60]})")
-        return _cls_rc
+    sr = getattr(exc, "stop_reason", "") or ""
+    rc = _STOP_REASON_RC.get(sr)
+    if rc is not None:
+        feedback = getattr(exc, "last_feedback", "") or str(exc)
+        reason = f"agent self-veto({sr}): {feedback[:200]}"
+        _save_rejected(slug, url, reason, note=f"agent_self_veto:{sr}", learn=False)
+        print(f"\n[register] 🔴 agent self-veto({sr}) — gen_fail 대신 거부 rc={rc} (LLM 재호출 0)")
+        return rc
     if include_heterogeneous_hub:
         _het = _heterogeneous_hub_check(digest, url)
         if _het is not None:

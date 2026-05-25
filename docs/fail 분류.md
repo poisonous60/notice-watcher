@@ -49,12 +49,14 @@
 | `target_not_found` | 404 (URL 없음) | 도메인 정상이지만 입력 URL 의 글/페이지가 없음 — 카탈로그 URL 편집 필요. |
 | `cert_or_dns_broken` | SSL/DNS 깨짐 | 도메인 자체 접근 단계 이전에 cert/DNS fail — 사이트가 사라졌거나 운영 오설정. |
 | `soft_404` | soft-404 (200 not-found) | HTTP 200 이지만 not-found shell — URL 이 잘못됐거나 삭제됨. |
+| `agent_self_veto_non_existent` | agent self-veto 404/not-found | api_loop/agentic 이 스스로 404/not-found shell 로 판정해 self-veto. |
 
 ### policy_reject
 
 | subkind | label | hint |
 |---|---|---|
 | `login_required` | 로그인 필요 | 사이트가 로그인 요구 (네이버카페 비공개 등). |
+| `agent_self_veto_login` | agent self-veto 로그인 필요 | api_loop/agentic 이 스스로 로그인 필요로 판정해 self-veto. |
 | `blocked_bot` | 봇 차단 | User-Agent 또는 행동 기반 봇 감지. |
 | `blocked_ip` | IP 차단 | IP/네트워크 단위 차단. |
 | `blocked_geo` | 지역 차단 | 지역(GEO) 단위 차단. |
@@ -79,6 +81,7 @@
 | `multi_host_hub` | multi-host hub root | 외부 host 여러 곳으로 발산하는 hub root. |
 | `root_marketing_homepage` | root 마케팅 랜딩 | 메이저 미디어/플랫폼 root 도메인 — board 아님. 카테고리 URL 권장. |
 | `board_shape` | 게시판 형식 아님 | post 리스트 구조 인식 실패. |
+| `agent_self_veto_non_board` | agent self-veto 비-게시판 | api_loop/agentic 이 스스로 content/single-article/catalog 로 판정해 self-veto. LLM 재호출 없음. |
 | `classifier_reject` | 분류기 비-게시판 판정 | LLM page-type 분류기가 content/catalog 등 비-게시판으로 판정해 거부 (ADR 0007 accept-path / ADR 0011 catalog=아티팩트·비최신순 listing). 수동 config 는 허용. |
 
 ### bug

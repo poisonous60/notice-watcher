@@ -25,7 +25,12 @@ from .validate import validate_built_config, ValidationReport
 
 
 class GenerationError(RuntimeError):
-    pass
+    def __init__(self, msg: str, *, stop_reason: str = "",
+                 last_config=None, last_feedback: str = ""):
+        super().__init__(msg)
+        self.stop_reason = stop_reason
+        self.last_config = last_config
+        self.last_feedback = last_feedback
 
 
 def _build_recipe_feedback_section(recipes: list[str], patched_candidate: Optional[dict]) -> str:
@@ -388,6 +393,9 @@ _RECIPE_TEXT_HINTS = {
 }
 
 
+_SELF_VETO_STOP_REASONS = {"non_board", "non_existent", "login_required"}
+
+
 def _patch_minimal(cfg: dict, digest: dict) -> dict:
     if not isinstance(cfg, dict):
         raise GenerationError(f"모델이 JSON 객체가 아닌 걸 반환: {type(cfg).__name__}")
@@ -427,6 +435,16 @@ def _generate_raw(digest: dict, *, client: LLMClient, prompt_text: str, temperat
         cfg = _parse_json_loose(resp.text)
     except LLMError as e:
         raise GenerationError(f"LLM 응답 JSON 파싱 실패 ({resp.provider or client.provider}): {e}") from e
+    if isinstance(cfg, dict) and cfg.get("ok") is False:
+        sr = str(cfg.get("stop_reason") or "")
+        if sr in _SELF_VETO_STOP_REASONS:
+            reason = str(cfg.get("reason") or "")
+            raise GenerationError(
+                f"agent self-veto: {sr} — {reason[:200]}",
+                stop_reason=sr,
+                last_config=None,
+                last_feedback=reason,
+            )
     return _patch_minimal(cfg, digest)
 
 
@@ -492,6 +510,8 @@ async def generate_config_validated(
                     cfg = _generate_raw(digest, client=cli, prompt_text=prompt_text, temperature=temperature,
                                         call_site=call_site, attempt=i)
             except GenerationError as e:
+                if getattr(e, "stop_reason", "") in _SELF_VETO_STOP_REASONS:
+                    raise
                 msg = f"생성 실패: {e}"
                 if on_attempt:
                     on_attempt(i, None, None, False, msg)
