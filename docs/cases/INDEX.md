@@ -2,11 +2,12 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 307 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 308 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
 | [`host_oxide-computer_podcast_9f69bff0`](host_oxide-computer_podcast_9f69bff0.md) | ✅ 자동생성 성공 (옵션 A site_kind=hybrid med — N100 register 시도 2 PASS 30건). handcrafted config 도 보존 | 2026-05-25 | C+A+D+F | article_body_len, audio_share_host | https://oxide.computer/podcast/rss.xml |
+| [`host_jleague-co_news_af0a9ee7`](host_jleague-co_news_af0a9ee7.md) | ✅ 수동 config 등록 (httpx_html, J.LEAGUE news card rows) | 2026-05-25 | F | post_id_stable_shape | https://www.jleague.co/news/ |
 | [`host_feeds-thisameri_talpodcast_c725ed7a`](host_feeds-thisameri_talpodcast_c725ed7a.md) | ✅ D-layer recipe 회복 — 자동 등록 완료 (15건) | 2026-05-25 | D | post_id_stable_shape, post_id_unique, rss_post_id | https://feeds.thisamericanlife.org/talpodcast |
 | [`host_yongin-go-kr_user_f1eef610`](host_yongin-go-kr_user_f1eef610.md) | ✅ 수동 config — Playwright로 용인 시정소식 10건 추출 | 2026-05-24 | none | posts_nonempty, tls_handshake, playwright_required | https://www.yongin.go.kr/user/bbs/BD_selectBbsList.do?q_bbsCode=1001 |
 | [`host_worldbank-org_en_61b26912`](host_worldbank-org_en_61b26912.md) | 수동 config - World Bank news landing 의 정적 latest news cards 로 등록 | 2026-05-24 | none | posts_nonempty, matches_probe_first_article, count_ballpark | https://www.worldbank.org/en/news |
@@ -333,7 +334,7 @@
 | D | 2 |
 | E | 6 |
 | E+A+C+D | 1 |
-| F | 87 |
+| F | 88 |
 | F+A | 1 |
 | F+C | 3 |
 | adapter | 1 |
@@ -346,7 +347,7 @@
 |---|---|
 | (미기재) | 55 |
 | handwritten | 31 |
-| httpx_html | 111 |
+| httpx_html | 112 |
 | httpx_json | 24 |
 | httpx_json (미적용 — 콘텐츠 0) | 1 |
 | mixed | 1 |
@@ -356,5 +357,5 @@
 
 ### 최근 90일 (≥ 2026-02-24)
 
-케이스 307 건.
+케이스 308 건.
 
