@@ -386,6 +386,11 @@ def _policy_check(digest: dict, url: str) -> tuple[bool, list[str]]:
             return False, [f"입력 URL 의 글이 존재하지 않음 — 모든 진입 시도가 HTTP 404 "
                            f"(verdict={digest.get('verdict')!r}). 도메인 자체는 정상이므로 사이트 차단이 아니라 "
                            "URL 이 잘못됐거나 글이 삭제된 것 — 게시판 목록 URL 또는 다른 글 URL 로 재시도."]
+        if "waf_406_block" in verdict:
+            return False, [f"자체 WAF (HTTP 406 Not Acceptable) 차단 (verdict={digest.get('verdict')!r}) — "
+                           "Cloudflare/Akamai 가 아닌 origin 자체 WAF (KR IDC NHN/Naver/WAPPLES 등) 가 "
+                           "UA/Accept-Language/TLS 콤보를 거름. curl_cffi 'chrome' 임퍼소네이트 트랙 권장 "
+                           "(S1.curl strategy). stealth playwright 만으론 통과 못 함."]
         return False, [f"목록 페이지에 정적으로도 headless 로도 접근 실패 (verdict={digest.get('verdict')!r}). "
                        "anti-bot/captcha 차단 — 능력 부족(정책 아님). stealth/storage_state 어댑터 재도전 대상."]
     # robots Disallow — 경고만 (와일드카드 * / 끝앵커 $ 도 처리)
