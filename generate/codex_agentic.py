@@ -441,6 +441,20 @@ def _setup_workdir(digest: dict, slug: str, url: str, repo: Path,
     # validate wrapper — agent runs it. Copy so agent doesn't need to touch repo.
     if VALIDATE_WRAPPER_PATH.is_file():
         shutil.copy2(VALIDATE_WRAPPER_PATH, workdir / "validate_config.py")
+    py = sys.executable
+    (workdir / "python_path.txt").write_text(py + "\n", encoding="utf-8")
+    if sys.platform == "win32":
+        (workdir / "run_validator.bat").write_text(
+            f'@echo off\r\n"{py}" "%~dp0validate_config.py" %*\r\n',
+            encoding="utf-8",
+        )
+    else:
+        sh_path = workdir / "run_validator.sh"
+        sh_path.write_text(
+            f'#!/bin/sh\nexec "{py}" "$(dirname "$0")/validate_config.py" "$@"\n',
+            encoding="utf-8",
+        )
+        sh_path.chmod(0o755)
     return workdir
 
 
@@ -601,6 +615,8 @@ async def run_codex_agentic(
                 creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
             child_env = os.environ.copy()
             child_env["REPO_ROOT"] = str(repo)  # validate wrapper uses this
+            venv_bin = Path(sys.executable).parent
+            child_env["PATH"] = str(venv_bin) + os.pathsep + child_env.get("PATH", "")
             proc = subprocess.Popen(
                 args,
                 stdin=subprocess.PIPE,

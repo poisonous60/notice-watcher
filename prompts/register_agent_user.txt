@@ -19,7 +19,8 @@ HARD RULES (match AGENTS.md):
 - No `headless: false` in config.
 
 YOUR JOB: produce ./candidate.json that passes
-    python ./validate_config.py ./candidate.json
+    ./run_validator.sh ./candidate.json     # Linux
+    .\run_validator.bat ./candidate.json    # Windows
 …and emit the final JSON.
 
 Begin.
