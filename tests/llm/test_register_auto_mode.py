@@ -26,6 +26,96 @@ def _load_register():
     return reg
 
 
+class _NoopSpan:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def set_attr(self, key, value):
+        pass
+
+
+class _NoopTrace:
+    def span(self, name, attrs=None):
+        return _NoopSpan()
+
+
+def _patch_agentic_success(reg, monkeypatch):
+    calls: list[dict] = []
+
+    async def fake_run_agentic(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(
+            config={"agentic": True},
+            report=SimpleNamespace(ok=True),
+            stop_reason="validate_pass",
+            wall_s=1.0,
+            prompt_tokens=1,
+            completion_tokens=2,
+            codex_version="codex-cli test",
+        )
+
+    class FakeRecorder:
+        def write(self, **kw):
+            pass
+
+    monkeypatch.setattr(reg, "_run_codex_agentic", fake_run_agentic)
+    monkeypatch.setattr(reg, "_get_default_recorder", lambda: FakeRecorder())
+    monkeypatch.setattr(reg, "_compute_cost", lambda *a, **k: 0.0)
+    monkeypatch.setattr(reg, "current_trace", lambda: _NoopTrace())
+    return calls
+
+
+def test_gen_agentic_uses_default_timeout_without_wall_deadline(monkeypatch):
+    reg = _load_register()
+    calls = _patch_agentic_success(reg, monkeypatch)
+
+    cfg, rep = reg._gen_agentic(
+        {"url": "https://example.com/default"},
+        "slugdefault",
+        "https://example.com/default",
+        wall_deadline=None,
+    )
+
+    assert cfg == {"agentic": True}
+    assert getattr(rep, "ok", False) is True
+    assert calls[0]["timeout_s"] == reg.DEFAULT_AGENTIC_TIMEOUT_S
+
+
+def test_gen_agentic_caps_timeout_to_remaining_wall_budget(monkeypatch):
+    reg = _load_register()
+    calls = _patch_agentic_success(reg, monkeypatch)
+    monkeypatch.setattr(reg.time, "monotonic", lambda: 100.0)
+
+    reg._gen_agentic(
+        {"url": "https://example.com/tight"},
+        "slugtight",
+        "https://example.com/tight",
+        wall_deadline=170.0,
+    )
+
+    assert calls[0]["timeout_s"] == 60.0
+
+
+def test_gen_agentic_rejects_too_small_remaining_wall_budget(monkeypatch):
+    reg = _load_register()
+    _patch_agentic_success(reg, monkeypatch)
+    monkeypatch.setattr(reg.time, "monotonic", lambda: 100.0)
+
+    try:
+        reg._gen_agentic(
+            {"url": "https://example.com/expired"},
+            "slugexpired",
+            "https://example.com/expired",
+            wall_deadline=135.0,
+        )
+    except reg.RegisterTimeoutError:
+        return
+    raise AssertionError("expected RegisterTimeoutError")
+
+
 def run() -> list[tuple[str, bool, str]]:
     reg = _load_register()
     cases: list[tuple[str, bool, str]] = []
@@ -216,10 +306,12 @@ def run() -> list[tuple[str, bool, str]]:
     orig_recorder = reg._get_default_recorder
     orig_cost = reg._compute_cost
     orig_trace = reg.current_trace
+    orig_route = reg._resolve_route
     reg._run_codex_agentic = fake_run_agentic
     reg._get_default_recorder = lambda: rec
     reg._compute_cost = lambda provider, model, prompt_tokens, completion_tokens: 0.001
     reg.current_trace = lambda: trace
+    reg._resolve_route = lambda call_site: SimpleNamespace(model="gpt-5.4-mini")
     try:
         cfg4, rep4 = reg._gen_agentic(
             {"url": "https://example.com/hard"},
@@ -232,6 +324,7 @@ def run() -> list[tuple[str, bool, str]]:
         reg._get_default_recorder = orig_recorder
         reg._compute_cost = orig_cost
         reg.current_trace = orig_trace
+        reg._resolve_route = orig_route
     row = rec.rows[0] if rec.rows else {}
     span = trace.spans[0] if trace.spans else None
     cases.append(("agentic_usage_recorded",

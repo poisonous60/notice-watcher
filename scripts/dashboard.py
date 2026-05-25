@@ -39,7 +39,23 @@ def main(argv: list[str]) -> int:
                    help="바인딩 호스트 (기본 127.0.0.1 — 외부에 절대 0.0.0.0 쓰지 말 것)")
     p.add_argument("--port", type=int, default=8765)
     p.add_argument("--reload", action="store_true", help="개발용 자동 reload (uvicorn --reload)")
+    p.add_argument("--self-check", action="store_true", help="라우트 import smoke test 후 종료")
     a = p.parse_args(argv)
+
+    if a.self_check:
+        try:
+            from dashboard.app import app
+        except Exception as e:  # noqa: BLE001
+            sys.stderr.write(f"[dashboard] self-check FAIL: import dashboard.app: {type(e).__name__}: {e}\n")
+            return 1
+        paths = {getattr(r, "path", "") for r in app.routes}
+        needed = {"/jobs", "/usage"}
+        missing = sorted(needed - paths)
+        if missing:
+            sys.stderr.write(f"[dashboard] self-check FAIL: missing routes {missing}\n")
+            return 1
+        print("[dashboard] self-check OK: dashboard.app import + /jobs,/usage routes")
+        return 0
 
     _require_deploy_host_env()
 

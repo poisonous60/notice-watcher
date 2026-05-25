@@ -65,6 +65,7 @@ from generate.codex_agentic import (  # noqa: E402
     run_codex_agentic as _run_codex_agentic,
     AuditFailError as _AgenticAuditFailError,
     GenerationError as _AgenticGenerationError,
+    DEFAULT_TIMEOUT_S as DEFAULT_AGENTIC_TIMEOUT_S,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -73,6 +74,7 @@ STATE_DIR = ROOT / "output" / "poll_state"
 DEFAULT_WALL_TIMEOUT_S = float(os.environ.get("REGISTER_WALL_TIMEOUT_S", "240"))
 PROBE_TIMEOUT_S = float(os.environ.get("REGISTER_PROBE_TIMEOUT_S", "120"))
 ARTICLE_REPROBE_TIMEOUT_S = float(os.environ.get("REGISTER_ARTICLE_REPROBE_TIMEOUT_S", "45"))
+MIN_AGENTIC_TIMEOUT_S = 30.0
 _GENERATION_HTTP_4XX_BLOCKED_RE = re.compile(
     r"HTTPStatusError:.*\b(403|429|451)\b", re.IGNORECASE | re.DOTALL
 )
@@ -1672,7 +1674,8 @@ def _set_span_attrs(span, attrs: dict) -> None:
             pass
 
 
-def _gen_agentic(digest: dict, slug: str, url: str, failure_packet: Optional[dict] = None):
+def _gen_agentic(digest: dict, slug: str, url: str, failure_packet: Optional[dict] = None,
+                 wall_deadline: Optional[float] = None):
     """codex agentic mode 동기 래퍼. (config, ValidationReport) 반환 — `_gen` 과 같은 shape.
 
     실패 처리:
@@ -1697,9 +1700,19 @@ def _gen_agentic(digest: dict, slug: str, url: str, failure_packet: Optional[dic
     span_cm = current_trace().span("codex_agentic_generate", attrs=span_attrs)
     sp = span_cm.__enter__()
     try:
+        timeout_s = DEFAULT_AGENTIC_TIMEOUT_S
+        if wall_deadline is not None:
+            timeout_s = min(DEFAULT_AGENTIC_TIMEOUT_S, _remaining_budget(wall_deadline, reserve_s=10.0))
+            if timeout_s < MIN_AGENTIC_TIMEOUT_S:
+                raise RegisterTimeoutError(
+                    f"agentic generation skipped: remaining wall-clock budget "
+                    f"{timeout_s:.1f}s < minimum {MIN_AGENTIC_TIMEOUT_S:.0f}s "
+                    f"(slug={slug}, url={url})"
+                )
         result = asyncio.run(_run_codex_agentic(
             digest=digest, slug=slug, url=url, repo=repo,
             failure_packet=failure_packet,
+            timeout_s=timeout_s,
         ))
         _set_span_attrs(sp, {
             "prompt_tokens": result.prompt_tokens,
@@ -1861,13 +1874,16 @@ def _generation_failure_reject_rc(digest: dict, url: str, slug: str, exc: Genera
 
 def _generate_by_mode(mode: str, digest: dict, slug: str, url: str, *,
                       max_attempts: int, model,
-                      gen_func=_gen, agentic_func=_gen_agentic):
+                      gen_func=_gen, agentic_func=_gen_agentic,
+                      wall_deadline: Optional[float] = None):
     """Dispatch api_loop / agentic / auto generation.
 
     auto = api_loop_once first. On actionable non-index failure it raises
     _AutoRejected(rc); otherwise it escalates to agentic with a failure packet.
     """
     if mode == "agentic":
+        if wall_deadline is not None:
+            return agentic_func(digest, slug, url, wall_deadline=wall_deadline)
         return agentic_func(digest, slug, url)
     if mode != "auto":
         return gen_func(digest, max_attempts=max_attempts, model=model)
@@ -1886,6 +1902,8 @@ def _generate_by_mode(mode: str, digest: dict, slug: str, url: str, *,
             raise _AutoRejected(rc) from e
         failure_packet = _build_failure_packet(e)
         print("[register] auto mode: api_loop_once failed; escalating to agentic with failure_packet", flush=True)
+        if wall_deadline is not None:
+            return agentic_func(digest, slug, url, failure_packet=failure_packet, wall_deadline=wall_deadline)
         return agentic_func(digest, slug, url, failure_packet=failure_packet)
 
 
@@ -2987,6 +3005,7 @@ def _main_inner(argv) -> int:
             url,
             max_attempts=args.max_attempts,
             model=args.model,
+            wall_deadline=wall_deadline,
         )
     except _AutoRejected as e:
         try:
