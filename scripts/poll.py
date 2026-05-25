@@ -1,5 +1,14 @@
 """등록된 사이트들 폴링: config 실행 → 새 글 감지 → 리포트 → 깨짐 감지 시 재-probe.
 
+ADR 0017 (runs 추적 + 영속화 검증):
+  - `poll_runs` 1 row / 폴링 1회. 시작 시 INSERT(status='running'), 끝 시 UPDATE(status='done').
+    process 죽으면 다음 run 의 reaper 가 'crashed' 박음.
+  - `poll_site_runs` 1 row / 사이트 1회 (finish 시점 INSERT). status·n_attempted_unique·
+    n_inserted·n_present_after 같이 박음.
+  - persist 검증: 새 글 INSERT 후 SELECT 로 *실제 박힌* 글 카운트. mismatch (n_present_after !=
+    n_attempted_unique) 시 status='persist_mismatch' + missing id note + **seen 에서 missing 제외**.
+  - 모든 tracking helper 는 best-effort — fail 해도 폴링 본 흐름 영향 X. ADR 0017 §2f.
+
 ADR 0016 (per-site isolation):
   - 사이트 1개당 `asyncio.wait_for(_process_site, timeout=POLL_SITE_TIMEOUT_S=180s)` wall cap.
     초과 시 그 사이트만 `last_status="poll_timeout"` 죽이고 나머지 사이트는 그대로 진행
@@ -41,7 +50,9 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import re
+import subprocess
 import sys
 import time
 from datetime import datetime, timezone
@@ -347,14 +358,18 @@ def _load_states(only: set[str] | None) -> list[dict]:
 
 async def _process_site(st: dict, *, page_size: int, max_new_articles: int,
                          lurking: bool, no_reprobe: bool, run_dir: Path,
-                         db_conn, db_lock: asyncio.Lock) -> tuple[list[str], tuple]:
-    """한 사이트의 fetch + 결과 처리 + collected/sqlite 박기 + state 파일 쓰기까지. (log_lines, row) 반환.
+                         db_conn, db_lock: asyncio.Lock) -> tuple[list[str], tuple, dict]:
+    """한 사이트의 fetch + 결과 처리 + collected/sqlite 박기 + state 파일 쓰기까지.
+    (log_lines, row, tracking) 반환 — tracking 은 호출 측 (_site_with_timeout) 이 poll_site_run_finish
+    호출에 사용.
 
     ADR 0016 ordering — 발견한 새 글의 disk·sqlite·seen·state 박는 순서:
       ① run_dir/<slug>.new.json 쓰기 (collected 아티팩트)
       ② db_conn 으로 posts 캐시 upsert — db_lock 안에서 사이트당 1 commit (batch).
-      ③ seen_post_ids = _new_seen (state.json 에 박힐 in-memory 값 갱신)
-      ④ state.json 디스크 flush.
+      ③ ADR 0017 persist 검증 — INSERT 후 SELECT 로 *실제 박힌* 글 카운트.
+      ④ mismatch 시 missing id 를 seen 에서 제외 (CRITICAL invariant).
+      ⑤ seen_post_ids = _new_seen (state.json 에 박힐 in-memory 값 갱신)
+      ⑥ state.json 디스크 flush.
     crash safe: state.json 의 seen 은 sqlite 박힌 글만 인정. ②/③ 사이 crash 면 다음 폴링이 같은 글 다시 발견 → INSERT OR IGNORE 가 idempotent.
 
     동시 실행 가드(sem chromium/httpx) 는 호출 측 `_site_with_timeout` 에서 잡는다 — sem 대기
@@ -444,23 +459,48 @@ async def _process_site(st: dict, *, page_size: int, max_new_articles: int,
             lines.append(f"  {res['n_posts']}건 / 새 글 {res['n_new']}건 (본문 fetch {n_fetched_bodies}건)")
             for p in res["new_posts"][:5]:
                 lines.append(f"    NEW {p.get('post_id')}  {p.get('published_at')}  {(p.get('title') or '')[:60]}")
+            # ADR 0017 persist 검증 — 새 글 INSERT 후 *실제 박힌* 글 카운트. mismatch 시 missing id 를
+            # seen 에서 제외 (CRITICAL invariant — 안 박힌 글이 seen 박혀 영원히 누락되는 silent fail 차단).
+            persist_data = {"n_attempted_unique": 0, "n_inserted": 0, "n_present_after": 0,
+                            "missing_ids": []}
             if res["new_posts"]:
                 # ① collected 디스크 (디버그 아티팩트 — 새 글 raw 스냅샷)
                 (run_dir / f"{slug}.new.json").write_text(
                     json.dumps(res["new_posts"], ensure_ascii=False, indent=2), encoding="utf-8")
-                # ② posts 캐시 sqlite upsert — db_lock 안에서 batch (사이트당 1 commit). ADR 0016.
-                # 기존엔 gather 끝난 *뒤* 일괄 했음. 1개 사이트 hang 으로 999개 글 lost 막음.
+                # ② posts 캐시 sqlite upsert + persist 검증. db_lock 안에서 진행.
+                attempted_ids = {str(post.get("post_id")) for post in res["new_posts"]}
+                persist_data["n_attempted_unique"] = len(attempted_ids)
+                n_inserted = 0
                 async with db_lock:
                     for post in res["new_posts"]:
-                        db_conn.execute(
+                        cur = db_conn.execute(
                             "INSERT OR IGNORE INTO posts(slug,post_id,title,url,published_at,category,content_html,summary,collected_at) "
                             "VALUES(?,?,?,?,?,?,?,NULL,?)",
                             (slug, str(post.get("post_id")), post.get("title"), post.get("url"),
                              post.get("published_at"), post.get("category"),
                              post.get("content_html"), _now_iso()),
                         )
+                        n_inserted += cur.rowcount
                     db_conn.commit()
-            # ③ sqlite 다 박힘 (또는 new_posts 0건) → seen 갱신 OK
+                    # ③ 검증 — IN clause SELECT 로 실제 박힌 id 집합.
+                    placeholders = ",".join("?" for _ in attempted_ids)
+                    present = {row[0] for row in db_conn.execute(
+                        f"SELECT post_id FROM posts WHERE slug=? AND post_id IN ({placeholders})",
+                        (slug, *attempted_ids),
+                    ).fetchall()}
+                persist_data["n_inserted"] = n_inserted
+                persist_data["n_present_after"] = len(present)
+                missing = attempted_ids - present
+                if missing:
+                    persist_data["missing_ids"] = sorted(missing)
+                    # ④ CRITICAL invariant — missing 은 seen 에서 제외.
+                    if new_seen_candidate is not None:
+                        new_seen_candidate = [pid for pid in new_seen_candidate if pid not in missing]
+                    st["last_status"] = "persist_mismatch"
+                    lines.append(f"  ⚠ persist_mismatch — 새 글 {persist_data['n_attempted_unique']}건 중 "
+                                 f"sqlite 에 {persist_data['n_present_after']}건만 박힘. "
+                                 f"missing={sorted(missing)[:5]}")
+            # ⑤ sqlite 다 박힘 (또는 new_posts 0건) → seen 갱신 OK
             if new_seen_candidate is not None:
                 st["seen_post_ids"] = new_seen_candidate
 
@@ -494,7 +534,21 @@ async def _process_site(st: dict, *, page_size: int, max_new_articles: int,
         encoding="utf-8",
     )
     row = (slug, st["last_status"], res["n_posts"], res["n_new"], res["note"])
-    return lines, row
+    # ADR 0017 — 호출 측 (_site_with_timeout) 이 poll_site_run_finish 부르는 데 쓸 tracking dict.
+    persist_data = locals().get("persist_data") or {"n_attempted_unique": 0, "n_inserted": 0,
+                                                     "n_present_after": 0, "missing_ids": []}
+    tracking = {
+        "status": st["last_status"],
+        "n_posts": int(res.get("n_posts", 0) or 0),
+        "n_new": int(res.get("n_new", 0) or 0),
+        "n_attempted_unique": int(persist_data.get("n_attempted_unique", 0) or 0),
+        "n_inserted": int(persist_data.get("n_inserted", 0) or 0),
+        "n_present_after": int(persist_data.get("n_present_after", 0) or 0),
+        "note": (json.dumps({"missing_ids": persist_data["missing_ids"][:20]}, ensure_ascii=False)
+                 if persist_data.get("missing_ids") else (res.get("note") or None)),
+        "error_msg": None,
+    }
+    return lines, row, tracking
 
 
 async def run(args) -> int:
@@ -510,8 +564,10 @@ async def run(args) -> int:
 
 async def _site_with_timeout(st: dict, *, timeout: float,
                              sem_chromium: asyncio.Semaphore, sem_httpx: asyncio.Semaphore,
-                             **kw) -> tuple[list[str], tuple]:
+                             run_id: int | None, db_conn, db_lock: asyncio.Lock,
+                             **kw) -> tuple[list[str], tuple, dict]:
     """ADR 0016 — 사이트별 wall timeout 래퍼. start/done/timeout/error stderr 1줄 + last_poll_duration_ms.
+    ADR 0017 — happy / timeout / exception path 모두 `poll_site_run_finish` 1회 호출 (best-effort).
 
     중요: sem(chromium/httpx) 은 wait_for **밖에서** 잡는다. 그래야 sem queue 대기 시간이 wall
     timeout 안에 포함 안 됨. 첫 구현(2026-05-25 1차) 은 sem 잡기를 _process_site 안에 두고
@@ -521,33 +577,71 @@ async def _site_with_timeout(st: dict, *, timeout: float,
     last_status="poll_timeout" 분기 처리. duration_ms 는 모든 path 에서 박힘.
     """
     slug = st.get("slug", "?")
+    started_at = _now_iso()
     t0 = time.perf_counter()
     print(f"[poll] start {slug}", file=sys.stderr, flush=True)
     # sem 결정 — strategy 보고. _process_site 가 같은 결정을 하지만 거기선 안 잡음 (분리).
     sem = sem_chromium if _uses_chromium(st) else sem_httpx
+
+    def _finish(status: str, *, error_msg: str | None = None,
+                tracking: dict | None = None, dur_ms: int | None = None) -> None:
+        if dur_ms is None:
+            dur_ms = int((time.perf_counter() - t0) * 1000)
+        ended_at = _now_iso()
+        try:
+            bot_db.poll_site_run_finish(
+                db_conn, run_id=run_id, slug=slug,
+                started_at=started_at, ended_at=ended_at,
+                status=status,
+                n_posts=int((tracking or {}).get("n_posts", 0) or 0),
+                n_new=int((tracking or {}).get("n_new", 0) or 0),
+                n_attempted_unique=int((tracking or {}).get("n_attempted_unique", 0) or 0),
+                n_inserted=int((tracking or {}).get("n_inserted", 0) or 0),
+                n_present_after=int((tracking or {}).get("n_present_after", 0) or 0),
+                duration_ms=dur_ms,
+                error_msg=error_msg or (tracking or {}).get("error_msg"),
+                note=(tracking or {}).get("note"),
+            )
+        except Exception as e:  # noqa: BLE001
+            print(f"[tracking] ⚠ _finish({slug}) failed: {e!r}", file=sys.stderr, flush=True)
+
     try:
         # sem 대기 — timeout 밖. sem queue 가 길어도 false timeout 안 남.
         async with sem:
             t_fetch_start = time.perf_counter()
             try:
-                result = await asyncio.wait_for(_process_site(st, **kw), timeout=timeout)
+                result = await asyncio.wait_for(
+                    _process_site(st, db_conn=db_conn, db_lock=db_lock, **kw),
+                    timeout=timeout)
             except asyncio.TimeoutError:
                 dur_ms = int((time.perf_counter() - t0) * 1000)
                 fetch_dur_ms = int((time.perf_counter() - t_fetch_start) * 1000)
                 st["last_poll_duration_ms"] = dur_ms
                 print(f"[poll] TIMEOUT {slug} t={dur_ms}ms (fetch={fetch_dur_ms}ms, cap={timeout}s)",
                       file=sys.stderr, flush=True)
+                async with db_lock:
+                    _finish("poll_timeout",
+                            error_msg=f"wait_for cap={timeout}s, fetch={fetch_dur_ms}ms",
+                            dur_ms=dur_ms)
                 raise
         dur_ms = int((time.perf_counter() - t0) * 1000)
         st["last_poll_duration_ms"] = dur_ms
         print(f"[poll] done  {slug} t={dur_ms}ms", file=sys.stderr, flush=True)
-        return result
+        lines, row, tracking = result
+        async with db_lock:
+            _finish(tracking["status"], tracking=tracking, dur_ms=dur_ms)
+        return lines, row, tracking
     except asyncio.TimeoutError:
         raise
     except BaseException as e:  # noqa: BLE001 — Cancel 포함 다 surface
         dur_ms = int((time.perf_counter() - t0) * 1000)
         st["last_poll_duration_ms"] = dur_ms
         print(f"[poll] ERROR {slug} t={dur_ms}ms {type(e).__name__}: {e!r}", file=sys.stderr, flush=True)
+        try:
+            async with db_lock:
+                _finish("task_exception", error_msg=f"{type(e).__name__}: {e!r}", dur_ms=dur_ms)
+        except Exception:  # noqa: BLE001
+            pass
         raise
 
 
@@ -601,6 +695,22 @@ async def _run_inner(args) -> int:
     print(f"[poll] 병렬 fetch — chromium sem={args.concurrency_chromium}, httpx sem={args.concurrency_httpx}, "
           f"사이트 {len(states)}개, site_timeout={timeout_s}s")
 
+    # ADR 0017 — runs 추적. run_label = collected dir basename + pid (collision-safe).
+    # git_sha = ADR 0018 의 cron×commit race 가시화 (직전 run 과 sha 비교).
+    pid = os.getpid()
+    run_label = f"{ts}_pid{pid}"
+    git_sha = _git_head_sha()
+    args_json = None
+    try:
+        args_json = json.dumps(sys.argv[1:], ensure_ascii=False)
+    except Exception:
+        pass
+    run_id = bot_db.poll_run_start(
+        db_conn, run_label=run_label, pid=pid, git_sha=git_sha,
+        args_json=args_json, n_sites=len(states),
+    )
+    t_run = time.perf_counter()
+
     tasks = [
         asyncio.create_task(_site_with_timeout(
             st, timeout=timeout_s,
@@ -609,24 +719,30 @@ async def _run_inner(args) -> int:
             no_reprobe=args.no_reprobe, run_dir=run_dir,
             sem_chromium=sem_chromium, sem_httpx=sem_httpx,
             db_conn=db_conn, db_lock=db_lock,
+            run_id=run_id,
         ))
         for st in states
     ]
     try:
         results = await asyncio.gather(*tasks, return_exceptions=True)
     finally:
-        # _run_inner 가 어떤 이유로 일찍 빠져도 connection 누수 막음.
-        try:
-            db_conn.close()
-        except Exception:
-            pass
+        # ADR 0017 — run 종료 마킹은 connection 닫기 *전*에. tracking helper 의 best-effort 가 finally
+        # 안에서도 conn 살아있을 때 동작하게.
+        pass
 
     rows = []
     n_timeout = 0
+    # ADR 0017 — 집계 aggregator. _site_with_timeout 의 happy path 가 tracking dict 반환 →
+    # 그 값으로 sum. exception path 는 dict 없음 — 사이트별 finish 는 _site_with_timeout 가 박았음.
+    agg = {"n_done": 0, "n_timeout": 0, "n_error": 0,
+           "n_attempted_unique": 0, "n_inserted": 0, "n_present_after": 0,
+           "persist_mismatch_sites": 0}
+    n_lurking_skipped = 0
+    if not args.all and not args.sites:
+        n_lurking_skipped = max(0, locals().get("skipped", 0) or 0)
     for st, res in zip(states, results):
         if isinstance(res, BaseException):
-            # _process_site 본문 안에서 처리 못한 예외 또는 wall timeout. state 파일에 fallback 업데이트:
-            # consecutive_breakage 증가시켜 reprobe 파이프라인이 인지하게.
+            # _process_site 본문 안에서 처리 못한 예외 또는 wall timeout. state 파일에 fallback 업데이트.
             slug = st.get("slug", "?")
             is_to = isinstance(res, asyncio.TimeoutError)
             note = f"{type(res).__name__}: {res}" if not is_to else f"poll_timeout > {int(effective_timeout)}s"
@@ -637,6 +753,9 @@ async def _run_inner(args) -> int:
             st["last_status"] = "poll_timeout" if is_to else "task_exception"
             if is_to:
                 n_timeout += 1
+                agg["n_timeout"] += 1
+            else:
+                agg["n_error"] += 1
             sp = st.get("_state_path")
             if sp:
                 try:
@@ -649,13 +768,37 @@ async def _run_inner(args) -> int:
                     print(f"  ⚠ state 파일 쓰기 실패: {we!r}")
             rows.append((slug, st["last_status"], 0, 0, note))
             continue
-        lines, row = res
+        lines, row, tracking = res
         print()
         for line in lines:
             print(line)
         rows.append(row)
+        agg["n_done"] += 1
+        agg["n_attempted_unique"] += int(tracking.get("n_attempted_unique", 0) or 0)
+        agg["n_inserted"] += int(tracking.get("n_inserted", 0) or 0)
+        agg["n_present_after"] += int(tracking.get("n_present_after", 0) or 0)
+        if tracking.get("status") == "persist_mismatch":
+            agg["persist_mismatch_sites"] += 1
     if n_timeout:
         print(f"\n[poll] ⚠ wall-timeout {n_timeout}건 (>{effective_timeout}s) — 그 사이트만 죽이고 나머지 진행. journal 의 `[poll] TIMEOUT <slug>` 로 식별.")
+    if agg["persist_mismatch_sites"] > 0:
+        print(f"\n[poll] ⚠ persist_mismatch {agg['persist_mismatch_sites']}개 사이트 — sqlite 에 안 박힌 새 글 있음 (run_id={run_id}). dashboard /runs/poll/{run_id} 확인.",
+              file=sys.stderr, flush=True)
+
+    # ADR 0017 — run finish + connection 닫기.
+    dur_ms = int((time.perf_counter() - t_run) * 1000)
+    bot_db.poll_run_finish(db_conn, run_id,
+                            n_done=agg["n_done"], n_timeout=agg["n_timeout"], n_error=agg["n_error"],
+                            n_lurking_skipped=n_lurking_skipped,
+                            n_attempted_unique=agg["n_attempted_unique"],
+                            n_inserted=agg["n_inserted"],
+                            n_present_after=agg["n_present_after"],
+                            persist_mismatch_sites=agg["persist_mismatch_sites"],
+                            duration_ms=dur_ms)
+    try:
+        db_conn.close()
+    except Exception:
+        pass
 
     # 요약 (사람용 summary.txt + 기계용 poll_result.json — 디버그 아티팩트, 현재 reader 없음)
     lines = [f"[poll {ts}]", ""]
@@ -664,7 +807,7 @@ async def _run_inner(args) -> int:
     text = "\n".join(lines) + "\n"
     (run_dir / "summary.txt").write_text(text, encoding="utf-8")
     (run_dir / "poll_result.json").write_text(
-        json.dumps({"ts": ts, "polled_at": _now_iso(),
+        json.dumps({"ts": ts, "polled_at": _now_iso(), "run_id": run_id,
                     "sites": [{"slug": s, "status": st, "n_posts": np, "n_new": nn}
                               for s, st, np, nn, _ in rows]},
                    ensure_ascii=False, indent=2),
@@ -672,6 +815,20 @@ async def _run_inner(args) -> int:
     print("\n" + text)
     print(f"→ {run_dir}")
     return 0
+
+
+def _git_head_sha() -> str | None:
+    """현재 HEAD 의 short sha (ADR 0018 cron×commit race 가시화). 실패 시 None."""
+    try:
+        r = subprocess.run(
+            ["git", "rev-parse", "--short=12", "HEAD"],
+            cwd=str(ROOT), check=False, capture_output=True, timeout=2.0, text=True,
+        )
+        if r.returncode == 0:
+            return r.stdout.strip() or None
+    except Exception:
+        pass
+    return None
 
 
 def main(argv) -> int:

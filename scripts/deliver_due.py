@@ -1,5 +1,11 @@
 """발송창 flush (ADR 0006) — 봇 1분 tick 이 due 수신처가 있을 때 이 스크립트를 subprocess 로 띄운다.
 
+ADR 0017 — runs 추적:
+  notify_runs 1 row / 호출 1회. notify_target_runs 1 row / target 1회. dashboard `/runs` 에서
+  현재 in-flight + 최근 발송 결과 surface. process 죽으면 reaper 가 'crashed' 박음.
+
+
+
 흐름:
   1. 지금 KST HH:MM 도래 + 오늘 미발송 수신처(user_settings/channel_settings) 를 db.due_targets 로 뽑음.
   2. 수신처별로 빚진 글 계산 — posts ⨝ (그 수신처 구독 slug) − deliveries(수신처).
@@ -12,25 +18,34 @@
 
 봇 event loop 비블록 위해 *subprocess* 로 분리 (LLM·blocking Discord·sleep 포함). [codex HIGH]
 
+테스트 모드 (B — 2026-05-25 incident 후속):
+  env `NOTIFY_TEST_TARGETS` 가 설정되면 = 발송 allow-list. 형식 = 쉼표 구분 `kind:id` (예
+  `dm:123,channel:456`). 특수 값 `owner` = `dm:<OWNER_USER_ID>` 로 확장. allow-list 에 *없는*
+  수신처는 *dry-print* 만 (실제 발송 X · last_delivered_date 도 안 박음 → 다음 tick 에 다시 due
+  → env 풀면 자연 회복). bot.sqlite3 변경 0 — 위험한 코드 push 직후 owner 만 수신 검증할 때 사용.
+
 사용:
     python scripts/deliver_due.py
     python scripts/deliver_due.py --dry-run
     python scripts/deliver_due.py --force-target dm:123456   # 시각·멱등 무시하고 그 수신처 즉시 flush (디버그)
+    NOTIFY_TEST_TARGETS=owner python scripts/deliver_due.py  # owner DM 만 실제 발송, 나머지는 dry-print
 """
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import sys
 import time
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from bot import db  # noqa: E402
-from bot.config import bot_token  # noqa: E402
+from bot.config import bot_token, owner_user_id  # noqa: E402
 from bot.runtime_config import settings  # noqa: E402
 from bot.discord_rest import deliver, CannotDeliver, DiscordRestError  # noqa: E402
 from engine.tracing import start_trace, current_trace  # noqa: E402
@@ -53,8 +68,50 @@ def _ensure_summary(conn, slug: str, post: dict, sum_client) -> str:
     return s
 
 
-def flush_target(conn, tok: Optional[str], target: dict, *, today_kst: str, dry_run: bool) -> int:
-    """한 수신처 발송창 flush. 반환 = 발송한 글 수 (notify_empty 한 줄은 0 으로 침)."""
+def flush_target(conn, tok: Optional[str], target: dict, *, today_kst: str, dry_run: bool,
+                  run_id: Optional[int] = None, test_skip: bool = False) -> tuple[int, str]:
+    """한 수신처 발송창 flush. 반환 = (n_posts, status).
+
+    ADR 0017 — run_id 가 주어지면 finish 시 `notify_target_run_finish` 호출 (best-effort).
+    status enum: 'ok'/'empty'/'no_subs'/'failed'/'exception'/'skipped_test_target'.
+    test_skip=True (codex MED 1) — NOTIFY_TEST_TARGETS allow-list 밖 → status='skipped_test_target'.
+    main 의 aggregator 가 status 보고 정확히 분류 (codex MED 2 — n_targets_failed 과 n_empty_notices
+    구분, 옛 코드는 n=0 만으로 empty 처리해 failed/no_subs 도 empty 카운터에 더했음).
+    """
+    target_kind = target["target_kind"]
+    target_id = target["target_id"]
+    started_at = datetime.now(timezone.utc).isoformat()
+    t0 = time.perf_counter()
+    final_status = "exception"
+    n_owed = 0
+    n_chunks = 0
+    err_msg: Optional[str] = None
+    try:
+        n_owed, inner_status, n_chunks = _flush_target_inner(
+            conn, tok, target, today_kst=today_kst, dry_run=dry_run)
+        # test_skip 이면 inner 결과 무관 = 'skipped_test_target' (dashboard 가 dry-run 분리)
+        final_status = "skipped_test_target" if test_skip else inner_status
+        return n_owed, final_status
+    except Exception as e:
+        err_msg = f"{type(e).__name__}: {e!r}"
+        raise
+    finally:
+        if run_id is not None:
+            try:
+                db.notify_target_run_finish(
+                    conn, run_id=run_id, target_kind=target_kind, target_id=target_id,
+                    started_at=started_at, ended_at=datetime.now(timezone.utc).isoformat(),
+                    status=final_status, n_posts=n_owed, n_chunks=n_chunks,
+                    duration_ms=int((time.perf_counter() - t0) * 1000),
+                    error_msg=err_msg,
+                )
+            except Exception:
+                pass
+
+
+def _flush_target_inner(conn, tok: Optional[str], target: dict, *, today_kst: str,
+                         dry_run: bool) -> tuple[int, str, int]:
+    """flush_target 본체 — (n_owed, status, n_chunks) 반환. status enum 정의 ADR 0017 §2a."""
     target_kind = target["target_kind"]
     target_id = target["target_id"]
     subs = db.subscriptions_for_target(conn, target_id)
@@ -62,7 +119,7 @@ def flush_target(conn, tok: Optional[str], target: dict, *, today_kst: str, dry_
         # 설정 행은 있으나 구독 0 — 발송창만 닫고 종료 (오늘 다시 안 깨어나게).
         if not dry_run:
             db.mark_setting_delivered(conn, target_kind=target_kind, target_id=target_id, today_kst=today_kst)
-        return 0
+        return 0, "no_subs", 0
 
     subs_by_slug: dict[str, list] = defaultdict(list)
     for s in subs:
@@ -112,17 +169,17 @@ def flush_target(conn, tok: Optional[str], target: dict, *, today_kst: str, dry_
                     print(f"  ✗ {target_kind}:{target_id} empty 발송 실패: {e}", file=sys.stderr)
         if not dry_run:
             db.mark_setting_delivered(conn, target_kind=target_kind, target_id=target_id, today_kst=today_kst)
-        return 0
+        return 0, "empty", 0
 
     chunks = digest_chunks(owed)
     if dry_run:
         for ch in chunks:
             print(f"\n--- [{target_kind}:{target_id} DIGEST] ---\n{ch}\n")
-        return len(owed)
+        return len(owed), "ok", len(chunks)
 
     if not tok:
         print(f"  ✗ {target_kind}:{target_id}: BOT_TOKEN 없음 — 발송 불가", file=sys.stderr)
-        return 0
+        return 0, "failed", len(chunks)
 
     # 모든 chunk 발송 성공해야 deliveries + 발송창 닫음. 실패 시 last_delivered_date 안 박음 →
     # 다음 tick catch-up (이미 보낸 chunk 재전송 가능성 = at-least-once. 드문 실패라 수용).
@@ -143,7 +200,48 @@ def flush_target(conn, tok: Optional[str], target: dict, *, today_kst: str, dry_
             db.mark_delivered(conn, post["slug"], str(post["post_id"]), target_id)
         db.mark_setting_delivered(conn, target_kind=target_kind, target_id=target_id, today_kst=today_kst)
         print(f"  ✅ {target_kind}:{target_id} digest {len(owed)}건 ({when})")
-    return len(owed) if ok_all else 0
+        return len(owed), "ok", len(chunks)
+    return 0, "failed", len(chunks)
+
+
+class TestTargetsConfigError(SystemExit):
+    """NOTIFY_TEST_TARGETS env 가 설정됐는데 유효 target 0개 — fail closed (codex HIGH)."""
+
+
+def _parse_test_targets() -> tuple[bool, set[str]]:
+    """env NOTIFY_TEST_TARGETS 파싱. (test_mode_requested, allow_list) 반환.
+
+    형식: 쉼표 구분 `kind:id`. 특수 `owner` → `dm:<OWNER_USER_ID>`.
+    test_mode_requested=False = env 미설정 (정상 발송).
+    test_mode_requested=True + allow_list 비어있음 = 잘못된 설정 → fail closed (raise SystemExit).
+    test_mode_requested=True + allow_list 채워있음 = allow-list 밖 target 은 dry-print only.
+    """
+    raw = os.environ.get("NOTIFY_TEST_TARGETS", "").strip()
+    if not raw:
+        return False, set()
+    out: set[str] = set()
+    bad: list[str] = []
+    for tok in (t.strip() for t in raw.split(",")):
+        if not tok:
+            continue
+        if tok.lower() == "owner":
+            owner = owner_user_id()
+            if owner:
+                out.add(f"dm:{owner}")
+            else:
+                bad.append("owner (OWNER_USER_ID 미설정)")
+            continue
+        if ":" not in tok:
+            bad.append(f"'{tok}' (형식 이상)")
+            continue
+        out.add(tok)
+    if not out:
+        # codex HIGH — env 명시했는데 유효 target 0 → fail closed (절대 실발송 X).
+        raise TestTargetsConfigError(
+            f"[deliver_due] ✗ NOTIFY_TEST_TARGETS='{raw}' 파싱 결과 유효 target 0개"
+            f" (bad={bad}). fail closed — 실발송 방지 위해 exit 2."
+        )
+    return True, out
 
 
 def main(argv: list[str]) -> int:
@@ -161,7 +259,17 @@ def main(argv: list[str]) -> int:
     now_hhmm = now_kst.strftime("%H:%M")
     today = now_kst.strftime("%Y-%m-%d")
 
-    with start_trace("deliver_due", attrs={"now_hhmm": now_hhmm, "today": today}):
+    try:
+        test_mode_requested, test_allowed = _parse_test_targets()
+    except TestTargetsConfigError as e:
+        print(str(e), file=sys.stderr)
+        return 2
+    if test_mode_requested:
+        print(f"[deliver_due] 🧪 NOTIFY_TEST_TARGETS — 실발송 allow-list={sorted(test_allowed)}, "
+              f"나머지는 dry-print only", file=sys.stderr)
+
+    with start_trace("deliver_due", attrs={"now_hhmm": now_hhmm, "today": today,
+                                           "test_mode": bool(test_allowed)}):
         if args.force_target:
             kind, _, tid = args.force_target.partition(":")
             targets = [{"target_kind": kind, "target_id": tid, "deliver_at": now_hhmm}]
@@ -170,11 +278,47 @@ def main(argv: list[str]) -> int:
         if not targets:
             return 0
         print(f"[deliver_due] {now_hhmm} KST — due 수신처 {len(targets)}건")
+        # ADR 0017 — notify_runs row 박음 (best-effort).
+        try:
+            args_json = json.dumps(argv, ensure_ascii=False)
+        except Exception:
+            args_json = None
+        run_id = db.notify_run_start(
+            conn, pid=os.getpid(), args_json=args_json,
+            now_hhmm=now_hhmm, today_kst=today, n_due_targets=len(targets),
+        )
+        t_run = time.perf_counter()
+        agg = {"n_targets_ok": 0, "n_targets_failed": 0,
+               "n_posts_delivered": 0, "n_empty_notices": 0}
         total = 0
         for target in targets:
+            key = f"{target['target_kind']}:{target['target_id']}"
+            # test 모드: allow-list 밖이면 dry_run 강제 (last_delivered_date 안 박힘 → 다음 tick 재진입).
+            # codex MED — dry-run path 의 결과를 *실발송* 카운터에 안 더한다 (대시보드 오해 방지).
+            effective_dry = args.dry_run
+            is_test_skip = bool(test_mode_requested and key not in test_allowed)
+            if is_test_skip:
+                effective_dry = True
+                print(f"  🧪 {key} — NOTIFY_TEST_TARGETS 밖, dry-print only (실발송·멱등 박음 X)")
             try:
-                total += flush_target(conn, tok, target, today_kst=today, dry_run=args.dry_run)
+                n, status = flush_target(conn, tok, target, today_kst=today, dry_run=effective_dry,
+                                          run_id=run_id, test_skip=is_test_skip)
+                if is_test_skip:
+                    # 카운터 분리 — 실발송 0 으로 침. notify_target_runs.status 는 'skipped_test_target'.
+                    continue
+                total += n
+                # codex MED 2 — status 보고 정확히 분류. 옛 코드는 n=0 만으로 empty 처리해서 failed/no_subs
+                # 까지 empty 카운터에 더했음 → n_targets_failed undercount.
+                if status == "ok":
+                    agg["n_targets_ok"] += 1
+                    agg["n_posts_delivered"] += n
+                elif status in ("failed", "exception"):
+                    agg["n_targets_failed"] += 1
+                else:
+                    # 'empty' / 'no_subs' → 의도된 0 발송. dashboard 가 status 로 정확히 분류.
+                    agg["n_empty_notices"] += 1
             except Exception as e:  # noqa: BLE001
+                agg["n_targets_failed"] += 1
                 print(f"  ⚠ flush 예외 {target}: {e!r}", file=sys.stderr)
         # TTL GC — due 가 있던 run 에서만 (매분 GC 회피).
         if not args.dry_run:
@@ -182,6 +326,19 @@ def main(argv: list[str]) -> int:
             if n_pruned:
                 print(f"[deliver_due] posts GC {n_pruned}건 삭제")
         print(f"[deliver_due] 총 {total}건 발송")
+        # ADR 0017 — run finish + runs TTL GC (큰 부하 X — 매 cron 1회 idempotent).
+        dur_ms = int((time.perf_counter() - t_run) * 1000)
+        db.notify_run_finish(conn, run_id,
+                              n_targets_ok=agg["n_targets_ok"],
+                              n_targets_failed=agg["n_targets_failed"],
+                              n_posts_delivered=agg["n_posts_delivered"],
+                              n_empty_notices=agg["n_empty_notices"],
+                              duration_ms=dur_ms)
+        if not args.dry_run:
+            try:
+                db.prune_runs(conn)
+            except Exception:
+                pass
         return 0
 
 

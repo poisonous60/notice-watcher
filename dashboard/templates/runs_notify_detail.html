@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Notify Run #{{ run.id }} — notice-watcher{% endblock %}
+{% block body %}
+
+<h2>🛰 Notify Run #{{ run.id }}</h2>
+
+<p><a href="/runs">← Runs 목록</a></p>
+
+<dl class="compact" style="display:grid;grid-template-columns:auto 1fr;gap:0.2rem 1rem;max-width:50rem;">
+  <dt>status</dt><dd>
+    {% if run.status == 'running' %}<span style="color:#b58900;">⏳ running</span>
+    {% elif run.status == 'done' %}<span style="color:#0a8a0a;">✅ done</span>
+    {% else %}<span style="color:#dc322f;">💀 {{ run.status }} ({{ run.reap_reason or '' }})</span>
+    {% endif %}
+  </dd>
+  <dt>started_at</dt><dd>{{ run.started_at }}</dd>
+  <dt>ended_at</dt><dd>{{ run.ended_at or '—' }}</dd>
+  {% if run.reaped_at %}<dt>reaped_at</dt><dd>{{ run.reaped_at }} ({{ run.reap_reason }})</dd>{% endif %}
+  <dt>duration</dt><dd>{% if run.duration_ms %}{{ (run.duration_ms/1000) | round(1) }}s{% else %}—{% endif %}</dd>
+  <dt>pid · host</dt><dd>{{ run.pid }} · {{ run.host }}</dd>
+  <dt>HH:MM · day</dt><dd>{{ run.now_hhmm or '—' }} · {{ run.today_kst or '—' }}</dd>
+  <dt>args</dt><dd><code>{{ run.args_json or '[]' }}</code></dd>
+  <dt>due / ok / failed</dt><dd>{{ run.n_due_targets }} / {{ run.n_targets_ok }} / {{ run.n_targets_failed }}</dd>
+  <dt>posts / empty notices</dt><dd>{{ run.n_posts_delivered }} / {{ run.n_empty_notices }}</dd>
+</dl>
+
+<h3 style="margin-top:1.2rem;">target 별 결과 ({{ targets | length }}건)</h3>
+<table class="compact striped">
+  <thead>
+    <tr>
+      <th>kind:id</th><th>status</th><th>dur</th>
+      <th>posts</th><th>chunks</th><th>error</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for t in targets %}
+    <tr>
+      <td><small>{{ t.target_kind }}:{{ t.target_id }}</small></td>
+      <td>
+        {% if t.status == 'ok' %}<span style="color:#0a8a0a;">✅ ok</span>
+        {% elif t.status == 'empty' %}<span style="color:#888;">📭 empty</span>
+        {% elif t.status == 'no_subs' %}<span style="color:#888;">— no_subs</span>
+        {% elif t.status == 'skipped_test_target' %}<span style="color:#268bd2;">🧪 skipped_test_target</span>
+        {% elif t.status in ('failed','exception','run_crashed') %}<span style="color:#dc322f;">💀 {{ t.status }}</span>
+        {% else %}{{ t.status }}{% endif %}
+      </td>
+      <td>{% if t.duration_ms %}{{ (t.duration_ms/1000) | round(2) }}s{% else %}—{% endif %}</td>
+      <td>{{ t.n_posts }}</td>
+      <td>{{ t.n_chunks }}</td>
+      <td><small>{{ t.error_msg or '' }}</small></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6" class="muted">target 결과 없음.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% endblock %}

@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block title %}Runs — notice-watcher{% endblock %}
+{% block body %}
+
+<h2>🛰 Runs (ADR 0017 — poll / notify 추적)</h2>
+
+<form action="/runs" method="get" class="topbar" style="border:0;margin-bottom:0.5rem;gap:0.6rem;">
+  <label style="margin:0;">kind
+    <select name="kind">
+      <option value="" {{ 'selected' if not kind else '' }}>poll + notify</option>
+      <option value="poll" {{ 'selected' if kind=='poll' else '' }}>poll</option>
+      <option value="notify" {{ 'selected' if kind=='notify' else '' }}>notify</option>
+    </select>
+  </label>
+  <label style="margin:0;">status
+    <select name="status">
+      <option value="" {{ 'selected' if not filter_status else '' }}>전체</option>
+      <option value="running" {{ 'selected' if filter_status=='running' else '' }}>running</option>
+      <option value="done" {{ 'selected' if filter_status=='done' else '' }}>done</option>
+      <option value="crashed" {{ 'selected' if filter_status=='crashed' else '' }}>crashed</option>
+      <option value="killed" {{ 'selected' if filter_status=='killed' else '' }}>killed</option>
+    </select>
+  </label>
+  <label style="margin:0;">limit
+    <input type="number" name="limit" value="{{ limit }}" min="1" max="500" style="width:6em;">
+  </label>
+  <button type="submit">필터</button>
+</form>
+
+{% set running_polls = poll_rows | selectattr('status','equalto','running') | list %}
+{% set running_notifies = notify_rows | selectattr('status','equalto','running') | list %}
+{% if running_polls or running_notifies %}
+<div style="background:#fff8e1;border:1px solid #f5c000;padding:0.6rem 0.8rem;margin:0.5rem 0;border-radius:4px;">
+  <strong>⏳ 현재 in-flight:</strong>
+  poll {{ running_polls | length }}건, notify {{ running_notifies | length }}건.
+  process 죽으면 reaper(2h/15min 임계)가 'crashed' 박음.
+</div>
+{% endif %}
+
+{% if kind != 'notify' %}
+<h3 style="margin-top:1rem;">poll_runs ({{ poll_rows | length }}건)</h3>
+<table class="compact striped">
+  <thead>
+    <tr>
+      <th>id</th><th>label</th><th>started</th><th>status</th><th>dur</th>
+      <th>sites</th><th>done/timeout/error</th>
+      <th>new(attempted/inserted/present)</th><th>mismatch</th>
+      <th>git_sha</th><th>host</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in poll_rows %}
+    <tr>
+      <td><a href="/runs/poll/{{ r.id }}">{{ r.id }}</a></td>
+      <td><small>{{ r.run_label }}</small></td>
+      <td><small>{{ r.started_at[:19] }}</small></td>
+      <td>
+        {% if r.status == 'running' %}<span style="color:#b58900;">⏳ running</span>
+        {% elif r.status == 'done' and r.persist_mismatch_sites %}<span style="color:#dc322f;">⚠ done(mismatch)</span>
+        {% elif r.status == 'done' %}<span style="color:#0a8a0a;">✅ done</span>
+        {% elif r.status in ('crashed','killed') %}<span style="color:#dc322f;">💀 {{ r.status }}{% if r.reap_reason %}<br><small>({{ r.reap_reason }})</small>{% endif %}</span>
+        {% else %}{{ r.status }}{% endif %}
+      </td>
+      <td>{% if r.duration_ms %}{{ (r.duration_ms/1000) | round(1) }}s{% else %}—{% endif %}</td>
+      <td>{{ r.n_sites or '—' }}</td>
+      <td><small>{{ r.n_done }}/{{ r.n_timeout }}/{{ r.n_error }}</small></td>
+      <td><small>{{ r.n_attempted_unique }}/{{ r.n_inserted }}/{{ r.n_present_after }}</small></td>
+      <td>
+        {% if r.persist_mismatch_sites %}<strong style="color:#dc322f;">{{ r.persist_mismatch_sites }}</strong>
+        {% else %}0{% endif %}
+      </td>
+      <td>
+        <small>{% if r.git_sha %}<code>{{ r.git_sha[:12] }}</code>{% if r.sha_changed %} <span style="color:#268bd2;">⤴</span>{% endif %}{% else %}—{% endif %}</small>
+      </td>
+      <td><small>{{ r.host or '—' }}</small></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="11" class="muted">poll_runs 없음.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% if kind != 'poll' %}
+<h3 style="margin-top:1rem;">notify_runs ({{ notify_rows | length }}건)</h3>
+<table class="compact striped">
+  <thead>
+    <tr>
+      <th>id</th><th>started</th><th>status</th><th>dur</th>
+      <th>HH:MM</th><th>day</th>
+      <th>due</th><th>ok/failed</th><th>posts</th><th>empty</th><th>host</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in notify_rows %}
+    <tr>
+      <td><a href="/runs/notify/{{ r.id }}">{{ r.id }}</a></td>
+      <td><small>{{ r.started_at[:19] }}</small></td>
+      <td>
+        {% if r.status == 'running' %}<span style="color:#b58900;">⏳ running</span>
+        {% elif r.status == 'done' %}<span style="color:#0a8a0a;">✅ done</span>
+        {% elif r.status in ('crashed','killed') %}<span style="color:#dc322f;">💀 {{ r.status }}{% if r.reap_reason %}<br><small>({{ r.reap_reason }})</small>{% endif %}</span>
+        {% else %}{{ r.status }}{% endif %}
+      </td>
+      <td>{% if r.duration_ms %}{{ (r.duration_ms/1000) | round(1) }}s{% else %}—{% endif %}</td>
+      <td>{{ r.now_hhmm or '—' }}</td>
+      <td>{{ r.today_kst or '—' }}</td>
+      <td>{{ r.n_due_targets }}</td>
+      <td><small>{{ r.n_targets_ok }}/{{ r.n_targets_failed }}</small></td>
+      <td>{{ r.n_posts_delivered }}</td>
+      <td>{{ r.n_empty_notices }}</td>
+      <td><small>{{ r.host or '—' }}</small></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="11" class="muted">notify_runs 없음.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% endblock %}

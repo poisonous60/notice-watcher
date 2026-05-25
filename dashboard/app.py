@@ -97,6 +97,7 @@ PAGE_SOURCES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("/triage/failed", ("poll_state",)),  # *.FAILED.json 만 봄
     ("/clusters",    ("configs", "poll_state")),  # recognizer 승급 후보 — config 묶음 × url(poll_state)
     # bot_db 위주 + 일부 부수
+    ("/runs",        ("bot_db",)),   # ADR 0017 poll/notify 추적
     ("/jobs",        ("bot_db",)),
     ("/reports",     ("bot_db",)),
     ("/feedback",    ("bot_db",)),
@@ -401,6 +402,60 @@ async def clusters_dismiss(request: Request):
 # --------------------------------------------------------------------------- #
 # Jobs
 # --------------------------------------------------------------------------- #
+# --------------------------------------------------------------------------- #
+# Runs (ADR 0017) — poll/notify 추적. dashboard /runs.
+# --------------------------------------------------------------------------- #
+@app.get("/runs", response_class=HTMLResponse)
+async def runs_list(request: Request,
+                    kind: Optional[str] = Query(None, regex="^(poll|notify)$"),
+                    status: Optional[str] = None,
+                    limit: int = Query(100, ge=1, le=500),
+                    conn=Depends(get_conn)):
+    if conn is None:
+        return _no_snapshot(request)
+    poll_rows: list = []
+    notify_rows: list = []
+    if kind in (None, "poll"):
+        poll_rows = [dict(r) for r in db.recent_poll_runs(conn, limit=limit, status=status)]
+    if kind in (None, "notify"):
+        notify_rows = [dict(r) for r in db.recent_notify_runs(conn, limit=limit, status=status)]
+    # 직전 sha 와 다른 poll_run 표시 (ADR 0018 cron×commit race 가시화)
+    last_sha: Optional[str] = None
+    for r in sorted(poll_rows, key=lambda x: x["started_at"]):
+        r["sha_changed"] = bool(last_sha and r.get("git_sha") and r["git_sha"] != last_sha)
+        if r.get("git_sha"):
+            last_sha = r["git_sha"]
+    return _render("runs.html", request, poll_rows=poll_rows, notify_rows=notify_rows,
+                   kind=kind, filter_status=status, limit=limit, active="runs")
+
+
+@app.get("/runs/poll/{run_id}", response_class=HTMLResponse)
+async def runs_poll_detail(request: Request, run_id: int,
+                            slug: Optional[str] = None,
+                            status: Optional[str] = None,
+                            conn=Depends(get_conn)):
+    if conn is None:
+        return _no_snapshot(request)
+    run = db.get_poll_run(conn, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="poll_run not found")
+    sites = [dict(r) for r in db.poll_site_runs_for(conn, run_id, slug=slug, status=status)]
+    return _render("runs_poll_detail.html", request, run=dict(run), sites=sites,
+                   filter_slug=slug, filter_status=status, active="runs")
+
+
+@app.get("/runs/notify/{run_id}", response_class=HTMLResponse)
+async def runs_notify_detail(request: Request, run_id: int, conn=Depends(get_conn)):
+    if conn is None:
+        return _no_snapshot(request)
+    run = db.get_notify_run(conn, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="notify_run not found")
+    targets = [dict(r) for r in db.notify_target_runs_for(conn, run_id)]
+    return _render("runs_notify_detail.html", request, run=dict(run), targets=targets,
+                   active="runs")
+
+
 @app.get("/jobs", response_class=HTMLResponse)
 async def jobs_list(request: Request, count: int = Query(50, ge=1, le=200),
                     page: int = Query(1, ge=1),
