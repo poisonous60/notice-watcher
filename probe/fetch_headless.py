@@ -416,15 +416,17 @@ def fetch_with_capture(
                     _wait_xhr_quiet(page, quiet_ms=300, hard_timeout_ms=idle_timeout_ms)
 
                     # SPA hydration 강화 (2026-05-25 plan): strict marker (Nuxt/Next/Vuex) 감지 시
-                    # 추가 quiet 대기 후 capture. Radiolab 류 async data fetch (api.wnyc.org/
-                    # ...recent_stories/) 가 chunks 로드 후 실행되는 사이트는 1500ms 부족 — 3000ms
-                    # quiet (hard_timeout 5000ms) 까지 늘림. 비용: SPA 사이트만 +1.5초.
+                    # 추가 quiet 대기 후 capture. Radiolab 류 (Nuxt + ad fetch flurry) 는 5초 안에
+                    # quiet 안 잡히고 hydration 까지 8-12초 걸림 — 15초 wait 직접 측정에서 12 cards
+                    # 박힘 확인. quiet_ms=8000 + hard_timeout=12000 으로 늘림.
+                    # 비용: strict SPA marker 검출 사이트만 (251 configs 중 일부 Nuxt/Next) 최대 +12초.
+                    # polling 영향 X (engine/strategies/playwright_html 가 cfg timeout 따로 사용).
                     spa_extra_wait_note: Optional[str] = None
                     try:
                         quick = page.content()[:50_000]
                         if _has_spa_hydration_marker(quick):
-                            _wait_xhr_quiet(page, quiet_ms=3000, hard_timeout_ms=5000)
-                            spa_extra_wait_note = "spa_hydration_extra_wait:3000ms"
+                            _wait_xhr_quiet(page, quiet_ms=8000, hard_timeout_ms=12000)
+                            spa_extra_wait_note = "spa_hydration_extra_wait:8000ms"
                     except Exception:
                         pass
 
