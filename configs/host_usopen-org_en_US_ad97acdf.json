@@ -1,0 +1,193 @@
+{
+  "version": 1,
+  "site": "www.usopen.org",
+  "board": "en_US-news",
+  "strategy": "httpx_json",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/json,text/plain,*/*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.usopen.org/en_US/news/index.html"
+  },
+  "timeout": 20,
+  "polite_sleep": {
+    "min": 5,
+    "max": 6
+  },
+  "list": {
+    "url_template": "https://www.usopen.org/relatedcontent/rest/v2/uso_v1/en/content/byType/news?zone=2&count={page_size}",
+    "pagination": {
+      "kind": "none"
+    },
+    "page_size_max": 25,
+    "list_path": [
+      "content"
+    ],
+    "fields": {
+      "post_id": [
+        {
+          "from": "json",
+          "path": [
+            "contentId"
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "json",
+          "path": [
+            "title"
+          ],
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "json",
+          "path": [
+            "shareUrl"
+          ],
+          "transform": [
+            [
+              "urljoin",
+              "https://www.usopen.org"
+            ],
+            [
+              "strip_query_fragment"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "json",
+          "path": [
+            "displayDate"
+          ],
+          "transform": [
+            [
+              "unixtime_to_iso",
+              "Z",
+              "ms"
+            ]
+          ]
+        }
+      ],
+      "author": [
+        {
+          "from": "json",
+          "path": [
+            "metadata",
+            "credit"
+          ],
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "json",
+          "path": [
+            "metadata",
+            "displayCategory"
+          ],
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        },
+        {
+          "from": "json",
+          "path": [
+            "subType"
+          ],
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "json",
+          "path": [
+            "description"
+          ],
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "cover_image": [
+        {
+          "from": "json",
+          "path": [
+            "images",
+            0,
+            "large"
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "url_template": "https://www.usopen.org/relatedcontent/rest/v2/uso_v1/en/content/{post_id}?zone=2&",
+    "fetch_kind": "json",
+    "content": [
+      {
+        "from": "json",
+        "path": [
+          "description"
+        ],
+        "transform": [
+          [
+            "collapse_ws"
+          ]
+        ]
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "json",
+          "path": [
+            "title"
+          ],
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "json",
+          "path": [
+            "displayDate"
+          ],
+          "transform": [
+            [
+              "unixtime_to_iso",
+              "Z",
+              "ms"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "_source_url": "https://www.usopen.org/en_US/news/index.html",
+  "_note": "Chromium Page.goto fails with ERR_HTTP2_PROTOCOL_ERROR on the app URL. The site config exposes the relatedcontent news API, which returns the same public news cards without browser navigation."
+}

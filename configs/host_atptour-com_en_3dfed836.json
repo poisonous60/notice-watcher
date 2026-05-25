@@ -1,0 +1,143 @@
+{
+  "version": 1,
+  "site": "www.atptour.com",
+  "board": "en-news",
+  "strategy": "playwright_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9"
+  },
+  "timeout": 20,
+  "nav_timeout_ms": 30000,
+  "idle_timeout_ms": 20000,
+  "polite_sleep": {
+    "min": 5,
+    "max": 6
+  },
+  "list": {
+    "url_template": "https://www.atptour.com/en/news",
+    "pagination": {
+      "kind": "none"
+    },
+    "wait_selector": "div.atp_card a.card-link[href*='/en/news/']",
+    "row_selector": "div.atp_card",
+    "row_required_selector": "a.card-link[href*='/en/news/']",
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a.card-link[href*='/en/news/']",
+          "attr": "href",
+          "transform": [
+            [
+              "strip_query_fragment"
+            ],
+            [
+              "regex_extract",
+              "/en/news/([^/?#]+)"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "h3.title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a.card-link[href*='/en/news/']",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://www.atptour.com"
+            ],
+            [
+              "strip_query_fragment"
+            ]
+          ]
+        }
+      ],
+      "author": [
+        {
+          "from": "css",
+          "selector": "div.credit",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "css",
+          "selector": "div.tag",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "cover_image": [
+        {
+          "from": "attr",
+          "selector": "img",
+          "attr": "src",
+          "transform": [
+            [
+              "urljoin",
+              "https://www.atptour.com"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "wait_selector": "div.atp_article p",
+    "content": [
+      {
+        "from": "css",
+        "selector": "div.atp_article div.main-video-content",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "div.atp_article",
+        "html": true
+      }
+    ],
+    "body_empty_acceptable": true,
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "h1",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "_source_url": "https://www.atptour.com/en/news",
+  "_note": "Plain httpx receives a Cloudflare challenge, while headless Chromium with the existing playwright_html stealth path renders the news cards and article body. Keep headless default true for N100."
+}
