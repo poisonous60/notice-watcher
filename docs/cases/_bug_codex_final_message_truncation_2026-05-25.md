@@ -1,13 +1,22 @@
 ---
-slug: _chunk-codex-truncation-rootcause
+slug: _bug_codex_final_message_truncation_2026-05-25
 url: internal://codex-agentic-final-message-truncation
-status: "✅ root cause documented; agent final output now references candidate.json"
+status: "✅ fixed (merged fecb54c, deployed to N100)"
 outcome: improved
 date: 2026-05-25
 fix_layer: none
 failure_keys: [llm_parse, codex_final_message_truncated, candidate_json_recovery]
-tags: [codex, agentic, chunk5]
+tags: [bug, codex, agentic, register]
 ---
+
+## 실측 회복 (fix 후 retry)
+
+| slug | 1차 batch | retry 후 | n_baseline |
+|---|---|---|---|
+| densediscovery.com | rc=1 LLMParseError (char 1083 mid-string 잘림) | ✅ done | 30 |
+| webtoolsweekly.com | rc=1 LLMParseError | ✅ done | 20 |
+| nodeweekly.com | rc=1 LLMParseError (char 1045 잘림) | ✅ done | 4 |
+| postgresweekly.com | rc=1 LLMParseError | ✅ done | 4 |
 
 ## 요약
 
