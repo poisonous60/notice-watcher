@@ -1577,6 +1577,15 @@ def _enforce_site_kind_config(cfg: dict, digest: dict) -> dict:
             lst = {}
             cfg["list"] = lst
         lst["url_template"] = primary
+
+    # SPA hydration timeout 강제 — Nuxt/Next 류 (site_kind=spa_rendered/high + strategy=playwright_html)
+    # 가 LLM cfg 에 timeout 안 박을 때 engine default (idle 2000/quiet 500) 너무 짧아 row 0건.
+    # prompt 안내 (2026-05-25) 무시되는 케이스 fallback. polling 시점 LLM 영향 0 — register 시
+    # 결과 cfg 에 박힘.
+    if kind == "spa_rendered" and conf == "high" and (cfg.get("strategy") == "playwright_html"):
+        cfg.setdefault("nav_timeout_ms", 20000)
+        cfg.setdefault("idle_timeout_ms", 12000)
+        cfg.setdefault("quiet_ms", 800)
     return cfg
 
 
