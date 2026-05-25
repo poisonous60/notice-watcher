@@ -18,9 +18,10 @@ from ._contract import validate_payload
 from .headers import preset_h2_chrome_min
 
 
-_FEED_PATHS = ("/rss", "/feed", "/atom.xml", "/rss.xml", "/feed.xml", "/feeds")
+_FEED_PATHS = ("/feed", "/rss", "/atom.xml", "/rss.xml", "/feed.xml", "/feeds")
 _PAGE_FEED_SUFFIXES = ("/rss.xml", "/feed", "/index.xml", ".rss")
 _MAX_FEED_VALIDATE_CHARS = 1_000_000
+_WELL_KNOWN_FEED_TIMEOUT = 3.0
 
 # 입력 URL 자체가 RSS/Atom 피드인 경우 path 매칭. catalog 의
 # `bbs.ruliweb.com/news/board/<id>/rss` / `steamcommunity.com/.../rss/` /
@@ -246,9 +247,11 @@ def discover_feeds(*, page_url: str, page_html: str, out_dir: Path, timeout: flo
     base = f"{parts.scheme}://{parts.netloc}"
 
     # 6 well-known feed path 동시 fetch — probe 는 일회성 정찰이라 host 폴라이트 0.5s 의미 약함.
+    well_known_timeout = min(timeout, _WELL_KNOWN_FEED_TIMEOUT)
+
     def _try(path: str) -> dict | None:
         url = urljoin(base, path)
-        return validate_feed_candidate(url, source="well-known-path", timeout=timeout)
+        return validate_feed_candidate(url, source="well-known-path", timeout=well_known_timeout)
 
     from concurrent.futures import ThreadPoolExecutor as _TPE
     with _TPE(max_workers=len(_FEED_PATHS)) as _ex:
