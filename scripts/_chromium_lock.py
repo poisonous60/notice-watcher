@@ -4,7 +4,7 @@ register.py(probe) 와 poll.py(재-probe / playwright_html·handwritten 사이�
 띄우면 메모리 폭주 위험이 있어서 — 둘 다 띄우기 직전에 이 락을 잡는다.
 
 `slots>=2` 면 multi-slot 모드 — `.chromium.{0..slots-1}.lock` 파일 N개 중 *첫 번째로 잡히는 것* 을 선택.
-worker_pool=2 + poll_and_notify 동시 시각에 깨는 spike 같은 경우 슬롯 N개 한도 안에서 동시 진입 허용.
+worker_pool + poll_cron 의 chromium 사이트 polling 동시 진입 시 슬롯 N개 한도 안에서 capacity limit.
 caller 가 매 호출마다 같은 N 값을 줘야 일관 — 봇/폴링 둘 다 `settings.chromium_lock.slots` 에서 읽음.
 
 ADR 0019 Phase 1 — `chromium_lock_async` 비동기 context manager 도 노출. `scripts/poll.py` cron 폴링이

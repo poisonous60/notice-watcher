@@ -119,7 +119,7 @@ async def users_m1_solo(slug: str, target_kind: str, target_id: str) -> dict:
     이후 notice-poll.timer / notice-notify.timer tick 에서 같은 dir 재처리 안 됨 → 다른
     구독자 자동 fan-out 차단. poll 실패 시 notify 단계 skip.
 
-    quiet 변종을 쓰는 이유: 기본 `poll-now-slug` 은 정상 pipeline (poll_and_notify) 이라 새 글이
+    quiet 변종을 쓰는 이유: 기본 `poll-now-slug` 은 정상 pipeline (poll_cron) 이라 새 글이
     있으면 *모든* 구독자에 fan-out 됨 → 격리 발송 의도가 깨짐.
     """
     r1 = await run_remote("poll-now-slug-quiet", slug)

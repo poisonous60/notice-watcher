@@ -79,7 +79,7 @@ python -m bot.main
 
 # 4) 폴링·발송 (별 프로세스/별 터미널) — bot worker 가 등록만 처리하고,
 #    실제 새 글 감지는 이 스크립트가 주기 실행되어야 함
-python scripts/poll_and_notify.py   # 한 번 도는 1회성. cron 또는 systemd timer 로 N분 간격
+python scripts/poll_cron.py   # 한 번 도는 1회성. cron 또는 systemd timer 로 N분 간격
 ```
 
 상시 운영은 `deploy/` 의 systemd unit 사용 — `notice-bot.service` (봇) + `notice-poll.timer` (폴링 주기 트리거). [docs/배포 가이드.md](docs/%EB%B0%B0%ED%8F%AC%20%EA%B0%80%EC%9D%B4%EB%93%9C.md).

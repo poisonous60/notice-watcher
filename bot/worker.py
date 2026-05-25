@@ -16,6 +16,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import time
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
 from bot import db
@@ -83,8 +87,9 @@ async def start(client, conn, *, dm_owner: Callable[..., Awaitable[None]]) -> No
     if _tasks:
         # 부분 생존 — 일부 task 가 BaseException 등으로 죽어 pool 이 줄어든 상태.
         # 잡 reset 은 안 함(살아있는 worker 가 running 잡 처리 중일 수 있음) — 부족한 만큼만 top-up.
+        # top-up 은 모두 mixed lane (priority_max=None) — reserve 는 첫 부팅 시에만 박힘.
         missing = n - len(_tasks)
-        log.warning("worker 부분 생존 (%d/%d alive) — %d 개 top-up", len(_tasks), n, missing)
+        log.warning("worker 부분 생존 (%d/%d alive) — %d 개 top-up (mixed lane)", len(_tasks), n, missing)
         for i in range(missing):
             _tasks.append(asyncio.create_task(
                 _loop(client, conn, dm_owner), name=f"bot.worker.topup.{i}"))
@@ -92,9 +97,15 @@ async def start(client, conn, *, dm_owner: Callable[..., Awaitable[None]]) -> No
     n_reset = db.reset_running_to_pending(conn)
     if n_reset:
         log.info("worker start: %d개 running 잡을 pending 으로 reset (이전 인스턴스 잔재)", n_reset)
+    # ADR 0019 Phase 2f — slot reserve. pool_size>=2 면 worker[0] 가 interactive lane (priority<2
+    # = user/reprobe 만 claim). chromium poll_site/deliver_target/batch 가 다른 worker 다 점유해도
+    # user register 즉시 처리 보장. pool_size==1 이면 reserve 없음 (single lane mixed).
     for i in range(n):
-        _tasks.append(asyncio.create_task(_loop(client, conn, dm_owner), name=f"bot.worker.{i}"))
-    log.info("worker task 시작 — pool_size=%d (chromium_lock.slots=%d)",
+        priority_max = 2 if (n >= 2 and i == 0) else None
+        _tasks.append(asyncio.create_task(
+            _loop(client, conn, dm_owner, priority_max=priority_max),
+            name=f"bot.worker.{i}{'.reserve' if priority_max is not None else ''}"))
+    log.info("worker task 시작 — pool_size=%d (chromium_lock.slots=%d, slot[0]=reserve(priority<2))",
              n, settings.chromium_lock.slots)
 
 
@@ -121,10 +132,11 @@ async def stop() -> None:
             pass
 
 
-async def _loop(client, conn, dm_owner: Callable[..., Awaitable[None]]) -> None:
+async def _loop(client, conn, dm_owner: Callable[..., Awaitable[None]],
+                *, priority_max: Optional[int] = None) -> None:
     while True:
         try:
-            job = db.claim_next_pending(conn)
+            job = db.claim_next_pending(conn, priority_max=priority_max)
             if job is None:
                 await asyncio.sleep(settings.worker.idle_poll_seconds)
                 continue
@@ -157,6 +169,273 @@ async def _drain_phase_edits(futures: list) -> None:
     futures.clear()
 
 
+# ADR 0019 Phase 2 — chromium 사이트 polling 의 site wall timeout. scripts/poll.POLL_SITE_TIMEOUT_S
+# 와 같은 의미: 정상 < 30s, anti-bot 17s, 180s = 6× margin. 초과 시 poll_timeout 으로 죽고
+# worker lane 해제 → 다음 chromium 사이트 진행 가능. (codex 2차 review HIGH 1.)
+_POLL_SITE_TIMEOUT_S = 180
+
+
+async def _process_poll_site(conn, job) -> None:
+    """ADR 0019 Phase 2 — execute one chromium poll_site job from poll.py enqueue.
+
+    ordering: chromium_lock_async (cross-process) → wait_for(_process_site, POLL_SITE_TIMEOUT_S).
+    timeout 시 status='poll_timeout', worker lane 해제. trace = poll_site span (chromium_flock_acquire
+    + poll.site inner spans).
+    """
+    from engine.tracing import start_trace, current_trace
+    job_id = int(job["id"])
+    payload = json.loads(job["sub_payload"] or "{}")
+    slug = str(payload.get("slug") or job["slug"] or "")
+    state_path = Path(payload["state_path"])
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["_state_path"] = str(state_path)
+    slug = str(state.get("slug") or slug)
+    run_id = payload.get("run_id")
+    started_at = datetime.now(timezone.utc).isoformat()
+    t0 = time.perf_counter()
+    run_dir = Path(payload.get("run_dir") or ("output/collected/" + datetime.now().strftime("%Y%m%d_%H%M%S")))
+    run_dir.mkdir(parents=True, exist_ok=True)
+    # worker pool 동시 처리 시 같은 conn write 직렬화 — module-level lock 공유.
+    db_lock = _worker_db_lock()
+    timeout_s = float(payload.get("site_timeout") or _POLL_SITE_TIMEOUT_S)
+    lock_wait_ms: int = 0
+    status = "ok"
+    tracking: dict = {}
+    trace_cm = start_trace("poll_site", attrs={
+        "job_id": job_id, "slug": slug, "run_id": run_id,
+        "timeout_s": timeout_s,
+    })
+    try:
+        trace_cm.__enter__()
+        tr = current_trace()
+        from scripts.poll import _process_site
+        from scripts._chromium_lock import chromium_lock_async
+        budget = float(settings.poll.chromium_lock_wait_budget_s)
+        slots = int(settings.chromium_lock.slots)
+        try:
+            t_lock_start = time.perf_counter()
+            with tr.span("poll.chromium_flock_acquire",
+                         attrs={"slug": slug, "budget_s": budget, "slots": slots}):
+                async with chromium_lock_async(timeout=budget, slots=slots):
+                    lock_wait_ms = int((time.perf_counter() - t_lock_start) * 1000)
+                    # site wall timeout (ADR 0016 — flock 밖). hang chromium 차단.
+                    try:
+                        lines, row, tracking = await asyncio.wait_for(
+                            _process_site(
+                                state,
+                                db_conn=conn,
+                                db_lock=db_lock,
+                                page_size=payload.get("page_size", settings.poll.page_size),
+                                max_new_articles=payload.get("max_new_articles", settings.poll.max_new_articles),
+                                lurking=bool(payload.get("lurking", False)),
+                                no_reprobe=bool(payload.get("no_reprobe", False)),
+                                run_dir=run_dir,
+                            ),
+                            timeout=timeout_s,
+                        )
+                    except asyncio.TimeoutError:
+                        status = "poll_timeout"
+                        tracking = {"status": status, "n_posts": 0, "n_new": 0,
+                                    "n_attempted_unique": 0, "n_inserted": 0, "n_present_after": 0,
+                                    "error_msg": f"wait_for cap={timeout_s}s"}
+                        log.warning("poll_site job #%d TIMEOUT slug=%s cap=%ss", job_id, slug, timeout_s)
+        except TimeoutError as exc:
+            # flock budget 초과
+            lock_wait_ms = int((time.perf_counter() - t_lock_start) * 1000)
+            status = "chromium_lock_timeout"
+            tracking = {"status": status, "n_posts": 0, "n_new": 0,
+                        "n_attempted_unique": 0, "n_inserted": 0, "n_present_after": 0,
+                        "error_msg": f"flock wait > {budget}s ({exc})"}
+        ended_at = datetime.now(timezone.utc).isoformat()
+        status = str(tracking.get("status") or status)
+        db.poll_site_run_finish(
+            conn,
+            run_id=run_id,
+            job_id=job_id,
+            slug=slug,
+            started_at=started_at,
+            ended_at=ended_at,
+            status=status,
+            n_posts=int(tracking.get("n_posts", 0) or 0),
+            n_new=int(tracking.get("n_new", 0) or 0),
+            n_attempted_unique=int(tracking.get("n_attempted_unique", 0) or 0),
+            n_inserted=int(tracking.get("n_inserted", 0) or 0),
+            n_present_after=int(tracking.get("n_present_after", 0) or 0),
+            duration_ms=int((time.perf_counter() - t0) * 1000),
+            lock_wait_ms=lock_wait_ms,
+            error_msg=tracking.get("error_msg"),
+            note=tracking.get("note"),
+        )
+        ok = status in ("ok", "lurking", "enqueued", "reprobe_enqueued", "reprobe_skipped_bug",
+                        "reprobe_enqueue_failed", "body_empty_drift")
+        db.mark_job_finished(conn, job_id, ok=ok, rc=0 if ok else -10, tail=status)
+        db.poll_run_maybe_finalize(conn, run_id)
+        log.info("poll_site job #%d 종료 — slug=%s status=%s lock_wait_ms=%d",
+                 job_id, slug, status, lock_wait_ms)
+    except Exception as e:  # noqa: BLE001
+        ended_at = datetime.now(timezone.utc).isoformat()
+        db.poll_site_run_finish(
+            conn,
+            run_id=run_id,
+            job_id=job_id,
+            slug=slug or str(job["slug"] or "?"),
+            started_at=started_at,
+            ended_at=ended_at,
+            status="task_exception",
+            duration_ms=int((time.perf_counter() - t0) * 1000),
+            lock_wait_ms=lock_wait_ms,
+            error_msg=f"{type(e).__name__}: {e!r}",
+        )
+        db.mark_job_finished(conn, job_id, ok=False, rc=-99, tail=f"poll_site exception: {e!r}")
+        db.poll_run_maybe_finalize(conn, run_id)
+        try:
+            trace_cm.__exit__(type(e), e, e.__traceback__)
+        except Exception:
+            pass
+        raise
+    else:
+        try:
+            trace_cm.__exit__(None, None, None)
+        except Exception:
+            pass
+
+
+def _flush_target_in_thread(*, target_kind: str, target_id: str, today_kst: str,
+                             db_path: str, bot_tok: Optional[str],
+                             run_id: Optional[int]) -> tuple[int, str, int]:
+    """worker thread 안에서 fresh sqlite conn 으로 flush_target 호출 (codex 2차 review HIGH 2).
+
+    flush_target = LLM + Discord REST + sqlite write. asyncio event loop 에서 직접 호출하면
+    bot heartbeat / worker polling 다 멈춤. asyncio.to_thread + 새 conn 으로 격리.
+    반환 = (n_posts, status, duration_ms).
+    """
+    import sqlite3 as _sq
+    import time as _t
+    fresh = _sq.connect(db_path, timeout=15.0)
+    fresh.row_factory = _sq.Row
+    fresh.execute("PRAGMA journal_mode=WAL")
+    fresh.execute("PRAGMA foreign_keys=ON")
+    try:
+        from scripts.deliver_due import flush_target
+        t0 = _t.perf_counter()
+        n_posts, status = flush_target(
+            fresh, bot_tok,
+            {"target_kind": target_kind, "target_id": target_id},
+            today_kst=today_kst, dry_run=False, run_id=run_id,
+        )
+        dur_ms = int((_t.perf_counter() - t0) * 1000)
+        return n_posts, status, dur_ms
+    finally:
+        try:
+            fresh.close()
+        except Exception:
+            pass
+
+
+async def _process_deliver_target(client, conn, job) -> None:
+    """ADR 0019 Phase 2 — execute one due delivery target with poll freshness barrier.
+
+    barrier: poll_run_blocking_for_today 가 True 면 requeue_at=now+60s 박고 status='pending' 유지.
+    flush_target 는 asyncio.to_thread 안에서 fresh sqlite conn 으로 — event loop 격리 (codex 2차
+    review HIGH 2). trace = deliver_target span.
+    """
+    from engine.tracing import start_trace
+    job_id = int(job["id"])
+    payload = json.loads(job["sub_payload"] or "{}")
+    target_kind = str(payload["target_kind"])
+    target_id = str(payload["target_id"])
+    today = str(payload["today_kst"])
+    blocking, blocking_run_id, reason = db.poll_run_blocking_for_today(conn, today)
+    if blocking:
+        requeue_at = (datetime.now(timezone.utc) + timedelta(seconds=60)).isoformat()
+        conn.execute(
+            "UPDATE jobs SET status='pending', requeue_at=? WHERE id=? AND status='running'",
+            (requeue_at, job_id),
+        )
+        conn.commit()
+        log.info("deliver_target job #%d barrier wait — poll_run=%s reason=%s requeue_at=%s",
+                 job_id, blocking_run_id, reason, requeue_at)
+        return
+
+    run_id = None
+    trace_cm = start_trace("deliver_target", attrs={
+        "job_id": job_id, "target_kind": target_kind, "target_id": target_id, "today_kst": today,
+    })
+    t_run = time.perf_counter()
+    try:
+        trace_cm.__enter__()
+        from bot.config import bot_token
+        run_id = db.notify_run_start(
+            conn,
+            pid=os.getpid(),
+            args_json=json.dumps({"job_id": job_id, "target_kind": target_kind,
+                                   "target_id": target_id}, ensure_ascii=False),
+            today_kst=today,
+            n_due_targets=1,
+        )
+        # asyncio.to_thread + fresh conn — event loop 격리 (codex HIGH 2)
+        from bot.db import DB_PATH as _DB_PATH
+        n_posts, status, inner_dur_ms = await asyncio.to_thread(
+            _flush_target_in_thread,
+            target_kind=target_kind, target_id=target_id, today_kst=today,
+            db_path=str(_DB_PATH), bot_tok=bot_token(), run_id=run_id,
+        )
+        outer_dur_ms = int((time.perf_counter() - t_run) * 1000)
+        # 카운터 — scripts/deliver_due.py 의 main aggregator semantics 미러 (codex MED 2).
+        # status='ok' → ok+발송. 'empty'/'no_subs' → empty_notices (의도된 0 발송). 'failed'/'exception' → failed.
+        is_terminal_ok = status == "ok"
+        is_empty_like = status in ("empty", "no_subs")
+        is_failed = status in ("failed", "exception")
+        db.notify_run_finish(
+            conn, run_id,
+            n_targets_ok=1 if is_terminal_ok else 0,
+            n_targets_failed=1 if is_failed else 0,
+            n_posts_delivered=n_posts if is_terminal_ok else 0,
+            n_empty_notices=1 if is_empty_like else 0,
+            duration_ms=outer_dur_ms,
+        )
+        db.mark_job_finished(
+            conn, job_id, ok=not is_failed,
+            rc=0 if not is_failed else -20,
+            tail=f"{target_kind}:{target_id} {status} n={n_posts} inner={inner_dur_ms}ms",
+        )
+        log.info("deliver_target job #%d 종료 — %s:%s status=%s n=%d inner=%dms",
+                 job_id, target_kind, target_id, status, n_posts, inner_dur_ms)
+    except Exception as e:  # noqa: BLE001
+        outer_dur_ms = int((time.perf_counter() - t_run) * 1000)
+        if run_id is not None:
+            db.notify_run_finish(
+                conn, run_id,
+                n_targets_ok=0, n_targets_failed=1,
+                n_posts_delivered=0, n_empty_notices=0,
+                duration_ms=outer_dur_ms,
+            )
+        db.mark_job_finished(conn, job_id, ok=False, rc=-99, tail=f"deliver_target exception: {e!r}")
+        try:
+            trace_cm.__exit__(type(e), e, e.__traceback__)
+        except Exception:
+            pass
+        raise
+    else:
+        try:
+            trace_cm.__exit__(None, None, None)
+        except Exception:
+            pass
+
+
+# module-level db_lock — worker pool 의 여러 task 가 같은 sqlite conn 공유 시 write race
+# 방지. _process_site (scripts/poll) 가 db_lock 안에서 conn.execute + commit 시 atomic.
+_WORKER_DB_LOCK: Optional[asyncio.Lock] = None
+
+
+def _worker_db_lock() -> asyncio.Lock:
+    """module-level singleton asyncio.Lock — worker pool 공유."""
+    global _WORKER_DB_LOCK
+    if _WORKER_DB_LOCK is None:
+        _WORKER_DB_LOCK = asyncio.Lock()
+    return _WORKER_DB_LOCK
+
+
 async def _process_job(client, conn, job, dm_owner) -> None:
     """slug 단위 직렬화 wrapper. 본문은 `_process_job_inner` — 락 잡고 호출.
 
@@ -165,6 +444,9 @@ async def _process_job(client, conn, job, dm_owner) -> None:
     """
     job_id = int(job["id"])
     slug = job["slug"]
+    if slug is None:
+        await _process_job_inner(client, conn, job, dm_owner)
+        return
     lock = _slug_locks.setdefault(slug, asyncio.Lock())
     if lock.locked():
         log.info("잡 #%d slug=%s — 같은 slug 다른 worker 처리 중, 끝날 때까지 대기", job_id, slug)
@@ -180,6 +462,13 @@ async def _process_job_inner(client, conn, job, dm_owner) -> None:
     url = job["url"]
     slug = job["slug"]
     article_url = job["article_url"]
+    if kind == "poll_site":
+        return await _process_poll_site(conn, job)
+    if kind == "deliver_target":
+        return await _process_deliver_target(client, conn, job)
+    if kind not in ("register", "reprobe"):
+        db.mark_job_finished(conn, job_id, ok=False, rc=-98, tail=f"unknown job kind: {kind}")
+        return
     # attempts>0 = 이전 인스턴스가 running 상태로 죽었고 reset_running_to_pending 이 +1 한 뒤 재claim 된 잡.
     # 옛 DB 행은 attempts 컬럼이 없을 수 있어 keys() 체크로 안전 fetch.
     attempts = int(job["attempts"]) if "attempts" in job.keys() else 0

@@ -59,7 +59,7 @@ class ChromiumLockSection:
     bot_timeout: float = 900.0
     poll_timeout: float = 1800.0
     register_subprocess_timeout: float = 600.0
-    # 동시 chromium 컨텍스트 슬롯. bot worker pool + poll_and_notify 가 공유 (multi-file flock).
+    # 동시 chromium 컨텍스트 슬롯. bot worker pool + poll.py 의 chromium 사이트 fetch 가 공유 (multi-file flock).
     # daemon (notice-pw-daemon.service) 가 떠 있으면 chromium 1개에 컨텍스트 N개로 share —
     # 컨텍스트당 ~100MB 추가. daemon 없으면 chromium binary 가 N개 = OOM 위험.
     slots: int = 2

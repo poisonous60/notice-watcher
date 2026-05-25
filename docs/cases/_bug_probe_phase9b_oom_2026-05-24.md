@@ -119,6 +119,6 @@ miss. **외부 process 가 IO-block 으로 자유 CPU 라 fix 안전.**
 
 같은 패턴 미래 사이트:
 - *모든* heavy SPA probe 가 N100 service 를 죽이지 못함 (self-guard + cgroup 2중 방어).
-- dashboard `/jobs` 에 `probe_memory_guard` Subkind 로 분류 — hand-config 워크플로가 capability
+- dashboard `/jobs` 에 `probe_memory_guard` Subkind 로 분류 — hand-config pipeline 이 capability
   한계로 즉시 인식.
 - root-cause fix 가 박히면 (별도 case) 임계 낮추거나 Phase 9b 자체 개선 검토.

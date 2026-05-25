@@ -590,6 +590,42 @@ async def _site_with_timeout(st: dict, *, timeout: float,
     chromium = _uses_chromium(st)
     sem = sem_chromium if chromium else sem_httpx
     lock_wait_ms: int = 0  # chromium 만 박힘, httpx 는 0 → DB NULL
+    if chromium:
+        payload = {
+            "state_path": str(st.get("_state_path") or ""),
+            "slug": slug,
+            "run_id": run_id,
+            "page_size": kw.get("page_size"),
+            "max_new_articles": kw.get("max_new_articles"),
+            "lurking": bool(kw.get("lurking", False)),
+            "no_reprobe": bool(kw.get("no_reprobe", False)),
+            "run_dir": str(kw.get("run_dir") or ""),
+        }
+        # codex 2차 review LOW 5 — run_id None 시 'poll:None:slug' 가 미래 작업과 충돌
+        # 안 하게 dedupe 끄고 unique INSERT.
+        if run_id is not None:
+            dedupe_key = f"poll:{run_id}:{slug}"
+        else:
+            dedupe_key = None
+        async with db_lock:
+            job_id, _inserted = bot_db.enqueue_job(
+                db_conn,
+                kind="poll_site",
+                slug=slug,
+                url=st.get("url"),
+                dedupe_key=dedupe_key,
+                sub_payload=json.dumps(payload, ensure_ascii=False),
+                via="poll-cron",
+                dedupe=(dedupe_key is not None),
+            )
+        return (
+            [f"=== {slug} ===  poll_site job #{job_id} enqueued"],
+            (slug, "enqueued", 0, 0, f"poll_site job #{job_id}"),
+            {"status": "enqueued",
+             "n_posts": 0, "n_new": 0,
+             "n_attempted_unique": 0, "n_inserted": 0, "n_present_after": 0,
+             "note": None, "error_msg": None},
+        )
 
     def _finish(status: str, *, error_msg: str | None = None,
                 tracking: dict | None = None, dur_ms: int | None = None) -> None:
@@ -814,6 +850,7 @@ async def _run_inner(args) -> int:
     agg = {"n_done": 0, "n_timeout": 0, "n_error": 0,
            "n_attempted_unique": 0, "n_inserted": 0, "n_present_after": 0,
            "persist_mismatch_sites": 0}
+    any_chromium_enqueued = False
     n_lurking_skipped = 0
     if not args.all and not args.sites:
         n_lurking_skipped = max(0, locals().get("skipped", 0) or 0)
@@ -854,6 +891,8 @@ async def _run_inner(args) -> int:
         agg["n_attempted_unique"] += int(tracking.get("n_attempted_unique", 0) or 0)
         agg["n_inserted"] += int(tracking.get("n_inserted", 0) or 0)
         agg["n_present_after"] += int(tracking.get("n_present_after", 0) or 0)
+        if tracking.get("status") == "enqueued":
+            any_chromium_enqueued = True
         if tracking.get("status") == "persist_mismatch":
             agg["persist_mismatch_sites"] += 1
     if n_timeout:
@@ -864,14 +903,17 @@ async def _run_inner(args) -> int:
 
     # ADR 0017 — run finish + connection 닫기.
     dur_ms = int((time.perf_counter() - t_run) * 1000)
-    bot_db.poll_run_finish(db_conn, run_id,
-                            n_done=agg["n_done"], n_timeout=agg["n_timeout"], n_error=agg["n_error"],
-                            n_lurking_skipped=n_lurking_skipped,
-                            n_attempted_unique=agg["n_attempted_unique"],
-                            n_inserted=agg["n_inserted"],
-                            n_present_after=agg["n_present_after"],
-                            persist_mismatch_sites=agg["persist_mismatch_sites"],
-                            duration_ms=dur_ms)
+    if any_chromium_enqueued:
+        bot_db.poll_run_mark_enqueue_done(db_conn, run_id)
+    else:
+        bot_db.poll_run_finish(db_conn, run_id,
+                                n_done=agg["n_done"], n_timeout=agg["n_timeout"], n_error=agg["n_error"],
+                                n_lurking_skipped=n_lurking_skipped,
+                                n_attempted_unique=agg["n_attempted_unique"],
+                                n_inserted=agg["n_inserted"],
+                                n_present_after=agg["n_present_after"],
+                                persist_mismatch_sites=agg["persist_mismatch_sites"],
+                                duration_ms=dur_ms)
     try:
         db_conn.close()
     except Exception:
