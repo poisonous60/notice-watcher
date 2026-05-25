@@ -101,11 +101,12 @@ def run() -> list[tuple[str, bool, str]]:
         # seed: 공유 코드 파일 1개
         (fake_repo / "engine" / "a.py").write_text("ORIGINAL", encoding="utf-8")
         slug = "testsite"
+        cfg_root = fake_repo / "configs"
         pre = ca._audit_snapshot_paths(fake_repo, slug)
         # mutate
         (fake_repo / "engine" / "a.py").write_text("MUTATED", encoding="utf-8")
         post = ca._audit_snapshot_paths(fake_repo, slug)
-        diff = ca._audit_diff(pre, post)
+        diff = ca._audit_diff(pre, post, self_slug=slug, configs_root=cfg_root)
         cases.append(_check(
             "audit_detects_content_change",
             any("a.py" in d for d in diff),
@@ -122,36 +123,56 @@ def run() -> list[tuple[str, bool, str]]:
         os.utime(fake_repo / "engine" / "a.py",
                  ns=(orig_mtime_ns, orig_mtime_ns))
         post2 = ca._audit_snapshot_paths(fake_repo, slug)
-        diff2 = ca._audit_diff(pre2, post2)
+        diff2 = ca._audit_diff(pre2, post2, self_slug=slug, configs_root=cfg_root)
         cases.append(_check(
             "audit_catches_mtime_spoof_via_sha",
             any("a.py" in d for d in diff2),
             f"diff={diff2} — SHA should catch same-len different-content",
         ))
 
-        # ----- 5. NEW file detection -----
+        # ----- 5. NEW file detection (shared dir) -----
         (fake_repo / "engine" / "b.py").write_text("INTRUDER", encoding="utf-8")
         post3 = ca._audit_snapshot_paths(fake_repo, slug)
-        diff3 = ca._audit_diff(pre, post3)
+        diff3 = ca._audit_diff(pre, post3, self_slug=slug, configs_root=cfg_root)
         cases.append(_check(
             "audit_detects_new_file",
             any("b.py" in d and "NEW" in d for d in diff3),
             f"diff={diff3}",
         ))
 
-        # ----- 6. per-slug scope: 다른 slug 의 config 변경은 audit 무관 -----
+        # ----- 6a. other-slug config NEW = allowed (parallel publish, rev 5) -----
+        pre4 = ca._audit_snapshot_paths(fake_repo, slug)
         (fake_repo / "configs" / "OTHER.json").write_text(json.dumps({"k": 1}),
                                                          encoding="utf-8")
-        pre4 = ca._audit_snapshot_paths(fake_repo, slug)
-        # 다른 slug 의 config 변경
+        post4 = ca._audit_snapshot_paths(fake_repo, slug)
+        diff4 = ca._audit_diff(pre4, post4, self_slug=slug, configs_root=cfg_root)
+        cases.append(_check(
+            "audit_allows_other_slug_new_publish",
+            not any("OTHER.json" in d for d in diff4),
+            f"diff={diff4} (NEW other-slug config should be allowed)",
+        ))
+
+        # ----- 6b. other-slug config CONTENT CHANGED = VIOLATION (audit hole fix) -----
+        pre4b = ca._audit_snapshot_paths(fake_repo, slug)
         (fake_repo / "configs" / "OTHER.json").write_text(json.dumps({"k": 2}),
                                                          encoding="utf-8")
-        post4 = ca._audit_snapshot_paths(fake_repo, slug)
-        diff4 = ca._audit_diff(pre4, post4)
+        post4b = ca._audit_snapshot_paths(fake_repo, slug)
+        diff4b = ca._audit_diff(pre4b, post4b, self_slug=slug, configs_root=cfg_root)
         cases.append(_check(
-            "audit_ignores_other_slug_config",
-            not any("OTHER.json" in d for d in diff4),
-            f"diff={diff4} (should be empty — other slug)",
+            "audit_catches_other_slug_content_change",
+            any("OTHER.json" in d and "CONTENT" in d for d in diff4b),
+            f"diff={diff4b} (other slug's config shouldn't move)",
+        ))
+
+        # ----- 6c. other-slug config DELETED = VIOLATION (the actual bug — agent ate few-shot example) -----
+        pre4c = ca._audit_snapshot_paths(fake_repo, slug)
+        (fake_repo / "configs" / "OTHER.json").unlink()
+        post4c = ca._audit_snapshot_paths(fake_repo, slug)
+        diff4c = ca._audit_diff(pre4c, post4c, self_slug=slug, configs_root=cfg_root)
+        cases.append(_check(
+            "audit_catches_other_slug_delete",
+            any("OTHER.json" in d and "DELETED" in d for d in diff4c),
+            f"diff={diff4c} (DELETE of other-slug config = the few-shot-eat bug)",
         ))
 
         # ----- 7. self slug config 변경은 audit 잡음 -----
@@ -161,7 +182,7 @@ def run() -> list[tuple[str, bool, str]]:
         (fake_repo / "configs" / f"{slug}.json").write_text(json.dumps({"k": 2}),
                                                             encoding="utf-8")
         post5 = ca._audit_snapshot_paths(fake_repo, slug)
-        diff5 = ca._audit_diff(pre5, post5)
+        diff5 = ca._audit_diff(pre5, post5, self_slug=slug, configs_root=cfg_root)
         cases.append(_check(
             "audit_catches_self_slug_config_change",
             any(f"{slug}.json" in d for d in diff5),
@@ -212,6 +233,38 @@ def run() -> list[tuple[str, bool, str]]:
                 shutil.rmtree(wd, ignore_errors=True)
     finally:
         shutil.rmtree(fake_repo2, ignore_errors=True)
+
+    # ----- 8b. GenerationError carries token/wall meta on failure path -----
+    err = ca.GenerationError(
+        "fake fail",
+        last_config={"x": 1},
+        last_feedback="why",
+        prompt_tokens=1234,
+        completion_tokens=56,
+        wall_s=12.5,
+        stop_reason="max_cycles",
+        codex_version="codex-cli 0.130.0",
+    )
+    cases.append(_check(
+        "generation_error_carries_meta",
+        (err.prompt_tokens == 1234 and err.completion_tokens == 56
+         and err.wall_s == 12.5 and err.stop_reason == "max_cycles"
+         and err.codex_version == "codex-cli 0.130.0"
+         and err.last_config == {"x": 1} and err.last_feedback == "why"),
+        f"got tokens={err.prompt_tokens}+{err.completion_tokens} wall={err.wall_s} "
+        f"stop={err.stop_reason} ver={err.codex_version}",
+    ))
+
+    # Default values preserved when meta omitted (backwards compat).
+    err_bare = ca.GenerationError("bare")
+    cases.append(_check(
+        "generation_error_default_meta_zero",
+        (err_bare.prompt_tokens == 0 and err_bare.completion_tokens == 0
+         and err_bare.wall_s == 0.0 and err_bare.stop_reason == ""
+         and err_bare.codex_version == ""),
+        f"got tokens={err_bare.prompt_tokens}+{err_bare.completion_tokens} "
+        f"wall={err_bare.wall_s} stop={err_bare.stop_reason!r}",
+    ))
 
     # ----- 9. _sum_usage: multi-turn 누적 -----
     stdout_jsonl = "\n".join([

@@ -1631,12 +1631,33 @@ def _gen_agentic(digest: dict, slug: str, url: str):
     - AuditFailError → 호출자가 잡아서 rc=-4 + .BUG.json
     - GenerationError → 호출자가 잡아서 rc=1 + .FAILED.json (기존 api_loop 와 같은 path)
     - 기타 LLM 예외 → bubble up (위와 같음)
+
+    PHASE log 는 success 와 GenerationError 모두에서 출력 — 실패 run 의
+    token/wall 비용도 측정 스크립트가 캡쳐할 수 있도록.
+
+    `_AgenticGenerationError` 는 api_loop 의 `GenerationError` 와 다른 class
+    (전자 LLMError 후자 RuntimeError) — outer except 가 못 잡으므로 여기서
+    api_loop GenerationError 로 번역해서 raise. 메타 필드는 attr 로 보존.
     """
     from pathlib import Path as _Path
     repo = _Path(__file__).resolve().parent.parent
-    result = asyncio.run(_run_codex_agentic(
-        digest=digest, slug=slug, url=url, repo=repo,
-    ))
+    try:
+        result = asyncio.run(_run_codex_agentic(
+            digest=digest, slug=slug, url=url, repo=repo,
+        ))
+    except _AgenticGenerationError as e:
+        print(f"[register] agentic generate: {e.stop_reason or 'failed'} "
+              f"(wall={e.wall_s:.1f}s tokens={e.prompt_tokens}+{e.completion_tokens} "
+              f"codex={e.codex_version}) FAILED: {e}", flush=True)
+        translated = GenerationError(str(e))
+        translated.last_config = e.last_config
+        translated.last_feedback = e.last_feedback
+        translated.prompt_tokens = e.prompt_tokens
+        translated.completion_tokens = e.completion_tokens
+        translated.wall_s = e.wall_s
+        translated.stop_reason = e.stop_reason
+        translated.codex_version = e.codex_version
+        raise translated from e
     print(f"[register] agentic generate: {result.stop_reason} "
           f"(wall={result.wall_s:.1f}s tokens={result.prompt_tokens}+{result.completion_tokens} "
           f"codex={result.codex_version})", flush=True)

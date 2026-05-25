@@ -79,13 +79,25 @@ VALIDATE_WRAPPER_PATH = REPO_ROOT / "scripts" / "validate_config.py"
 
 
 class GenerationError(LLMError):
-    """Agent failed to produce a passing config (max_cycles / agent_gave_up / parent re-validate fail)."""
+    """Agent failed to produce a passing config (max_cycles / agent_gave_up / parent re-validate fail).
+
+    Carries token/wall meta even on failure so callers can log cost of failed
+    runs (measurement parity with success path).
+    """
 
     def __init__(self, msg: str, *, last_config: Optional[dict] = None,
-                 last_feedback: str = "") -> None:
+                 last_feedback: str = "",
+                 prompt_tokens: int = 0, completion_tokens: int = 0,
+                 wall_s: float = 0.0, stop_reason: str = "",
+                 codex_version: str = "") -> None:
         super().__init__(msg)
         self.last_config = last_config
         self.last_feedback = last_feedback
+        self.prompt_tokens = prompt_tokens
+        self.completion_tokens = completion_tokens
+        self.wall_s = wall_s
+        self.stop_reason = stop_reason
+        self.codex_version = codex_version
 
 
 class AuditFailError(LLMError):
@@ -156,10 +168,11 @@ def _audit_snapshot_paths(repo: Path, slug: str) -> dict[str, _AuditEntry]:
             key = str(p)
             if key in out:
                 continue
-            # Filter configs/ to only the current slug for per-slug scope (others may
-            # legitimately change in pool_size>1 deployments — see rev 5 plan).
-            if p.parent == repo / "configs" and p.name != f"{slug}.json":
-                continue
+            # Snapshot ALL configs/ files. _audit_diff applies the per-slug policy:
+            # other-slug NEW is allowed (parallel agent publish — rev 5), but DELETE
+            # or CONTENT CHANGED of other-slug configs is a violation (closes the hole
+            # where an agent could delete few-shot example configs or corrupt other
+            # slugs' settled configs and slip past audit).
             if p.parent == repo / "output" / "poll_state" and not p.name.startswith(f"{slug}."):
                 continue
             try:
@@ -210,13 +223,33 @@ def _iter_audit_paths(repo: Path, slug: str) -> Iterable[Path]:
             yield rp
 
 
-def _audit_diff(before: dict[str, _AuditEntry], after: dict[str, _AuditEntry]) -> list[str]:
-    """Returns paths that changed. SHA mismatch / size mismatch / new / deleted."""
+def _audit_diff(before: dict[str, _AuditEntry], after: dict[str, _AuditEntry],
+                *, self_slug: str, configs_root: Path) -> list[str]:
+    """Returns paths that changed = violations.
+
+    Per-slug policy for `configs/`:
+    - self-slug config: any change = violation (publish is parent's job, post-audit)
+    - other-slug config:
+        - DELETED → violation (kill few-shot examples / settled configs)
+        - CONTENT CHANGED → violation (someone else's config shouldn't move)
+        - NEW → allowed (parallel agent publishing its slug — rev 5)
+
+    All other paths (shared dirs, poll_state, probe, root files): any change = violation.
+    """
     out: list[str] = []
     keys = set(before) | set(after)
+    self_cfg_name = f"{self_slug}.json"
+    cfg_root_str = str(configs_root)
     for k in keys:
         b, a = before.get(k), after.get(k)
+        kp = Path(k)
+        is_other_slug_cfg = (
+            str(kp.parent) == cfg_root_str and kp.name != self_cfg_name
+        )
         if b is None:
+            # NEW
+            if is_other_slug_cfg:
+                continue  # parallel publish allowed
             out.append(f"{k} (NEW)")
             continue
         if a is None:
@@ -591,7 +624,9 @@ async def run_codex_agentic(
                 )
             # post-audit — any change outside tmpdir = violation
             post = _audit_snapshot_paths(repo, slug)
-            violations = _audit_diff(pre, post)
+            violations = _audit_diff(pre, post,
+                                     self_slug=slug,
+                                     configs_root=repo / "configs")
             if violations:
                 raise AuditFailError(
                     f"agent wrote outside its workdir ({len(violations)} files): "
@@ -633,16 +668,34 @@ async def run_codex_agentic(
         config = parsed.get("config")
         attempts = parsed.get("attempts") or []
         stop_reason = str(parsed.get("stop_reason") or "")
+
+        # Compute usage once — reused for both success result and any failure-path
+        # GenerationError so measurement scripts see the cost of failed runs too.
+        prompt_tokens, completion_tokens = _sum_usage(stdout_text)
+
+        def _gen_fail(msg: str, *, stop: str, **kw):
+            return GenerationError(
+                msg,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                wall_s=time.time() - t0,
+                stop_reason=stop,
+                codex_version=version,
+                **kw,
+            )
+
         if not ok_flag or not isinstance(config, dict):
-            raise GenerationError(
+            raise _gen_fail(
                 f"agent did not produce a passing config (stop_reason={stop_reason!r})",
+                stop=stop_reason or "agent_gave_up",
                 last_config=config if isinstance(config, dict) else None,
                 last_feedback=json.dumps(attempts, ensure_ascii=False)[:1000],
             )
         # `headless: false` reject (codex review LOW). N100 production = headless only.
         if _has_headless_false(config):
-            raise GenerationError(
+            raise _gen_fail(
                 "agent emitted `headless: false` — rejected (N100 = headless only)",
+                stop="headless_false_rejected",
                 last_config=config,
                 last_feedback="headless:false not allowed",
             )
@@ -650,13 +703,13 @@ async def run_codex_agentic(
         # until validate_built_config (fresh fetch) agrees.
         report = await validate_built_config(config, digest=digest, fetch_articles=1)
         if not report.ok:
-            raise GenerationError(
+            raise _gen_fail(
                 f"parent re-validate failed after agent claimed ok "
                 f"(stop_reason={stop_reason!r}): {report.feedback_text()[:500]}",
+                stop="parent_revalidate_fail",
                 last_config=config,
                 last_feedback=report.feedback_text(),
             )
-        prompt_tokens, completion_tokens = _sum_usage(stdout_text)
         return AgenticResult(
             config=config,
             report=report,
