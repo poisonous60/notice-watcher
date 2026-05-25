@@ -22,7 +22,9 @@ All inputs you need are already staged here:
 - `examples/*.json` — 2 curated prior configs (closest matches)
 - `examples/manifest.json` — why each example was picked
 - `config_writer_rules.txt` — the full ruleset for config authoring
-- `validate_config.py` — validator wrapper (run via `python`)
+- `validate_config.py` — validator wrapper
+- `python_path.txt` — python interpreter path used by the parent process
+- `run_validator.sh` / `run_validator.bat` — validator launcher using that python
 
 ## WORKFLOW
 
@@ -35,8 +37,9 @@ All inputs you need are already staged here:
 5. Before writing a config, perform SELF-VETO below. If it applies, STOP and
    emit final JSON with `ok:false` and the matching `stop_reason`.
 6. Write your candidate to `./candidate.json` (this tmpdir).
-7. Run validator:
-       python ./validate_config.py ./candidate.json
+7. Run validator using the staged launcher:
+       ./run_validator.sh ./candidate.json     # Linux
+       .\run_validator.bat ./candidate.json    # Windows
    Read JSON result.
 8. If `ok=true` → STOP, emit final.
 9. If failed: edit candidate.json once, re-run validator.

@@ -220,6 +220,7 @@ def run() -> list[tuple[str, bool, str]]:
                 "slug.txt": (wd / "slug.txt").exists(),
                 "url.txt": (wd / "url.txt").exists(),
                 "repo_path_absent": not (wd / "repo_path.txt").exists(),
+                "python_path": (wd / "python_path.txt").exists(),
                 "examples_dir": (wd / "examples").exists(),
                 "manifest": (wd / "examples" / "manifest.json").exists(),
                 "failure_packet": (wd / "failure_packet.json").exists(),
@@ -235,17 +236,97 @@ def run() -> list[tuple[str, bool, str]]:
                 slug_content == "testslug",
                 f"got slug={slug_content!r}",
             ))
+            python_path_content = (wd / "python_path.txt").read_text(encoding="utf-8").strip()
+            cases.append(_check(
+                "workdir_python_path_content",
+                python_path_content == sys.executable,
+                f"got python_path={python_path_content!r}, expected={sys.executable!r}",
+            ))
             got_packet = json.loads((wd / "failure_packet.json").read_text(encoding="utf-8"))
             cases.append(_check(
                 "workdir_failure_packet_content",
                 got_packet == failure_packet,
                 f"got packet={got_packet!r}",
             ))
+            launcher_name = "run_validator.bat" if sys.platform == "win32" else "run_validator.sh"
+            launcher = wd / launcher_name
+            launcher_text = launcher.read_text(encoding="utf-8") if launcher.exists() else ""
+            cases.append(_check(
+                "workdir_validator_launcher_present",
+                launcher.exists(),
+                f"expected {launcher_name} in workdir",
+            ))
+            cases.append(_check(
+                "workdir_validator_launcher_uses_sys_executable",
+                (sys.executable in launcher_text and "validate_config.py" in launcher_text),
+                f"launcher={launcher_text!r}",
+            ))
+            if sys.platform != "win32":
+                cases.append(_check(
+                    "workdir_validator_launcher_executable",
+                    os.access(launcher, os.X_OK),
+                    f"mode={oct(launcher.stat().st_mode) if launcher.exists() else 'missing'}",
+                ))
         finally:
             if wd is not None:
                 shutil.rmtree(wd, ignore_errors=True)
     finally:
         shutil.rmtree(fake_repo2, ignore_errors=True)
+
+    # ----- 8c. codex child PATH prepends current interpreter dir (venv first) -----
+    fake_repo3 = _make_tmp_repo()
+    captured: dict[str, object] = {}
+
+    class FakePopen:
+        def __init__(self, args, **kwargs):
+            captured["args"] = args
+            captured["env"] = kwargs.get("env") or {}
+            out_path = Path(args[args.index("--output-last-message") + 1])
+            out_path.write_text(
+                json.dumps({
+                    "ok": True,
+                    "config": {"site": "https://example.com/", "strategy": "httpx_html"},
+                    "attempts": [{"i": 1, "validate_ok": True, "error": ""}],
+                    "stop_reason": "validate_pass",
+                }),
+                encoding="utf-8",
+            )
+            self.returncode = 0
+
+        def communicate(self, input=None, timeout=None):  # noqa: A002 - subprocess API
+            return (
+                '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":2}}\n',
+                "",
+            )
+
+        def kill(self):
+            self.returncode = -9
+
+    async def fake_validate_built_config(config, *, digest=None, fetch_articles=1):
+        return type("Report", (), {"ok": True})()
+
+    try:
+        with mock.patch.object(ca, "_codex_preflight", return_value="codex-cli test"), \
+             mock.patch.object(ca, "_codex_bin", return_value="codex"), \
+             mock.patch.object(ca.subprocess, "Popen", FakePopen), \
+             mock.patch.object(ca, "validate_built_config", fake_validate_built_config):
+            asyncio.run(ca.run_codex_agentic(
+                digest={"url": "https://example.com/"},
+                slug="pathslug",
+                url="https://example.com/",
+                repo=fake_repo3,
+                timeout_s=5.0,
+            ))
+        child_env = captured.get("env") or {}
+        child_path = str(child_env.get("PATH", ""))
+        expected_first = str(Path(sys.executable).parent)
+        cases.append(_check(
+            "codex_child_path_prepends_sys_executable_dir",
+            child_path.split(os.pathsep)[0] == expected_first,
+            f"PATH first={child_path.split(os.pathsep)[0] if child_path else ''!r}, expected={expected_first!r}",
+        ))
+    finally:
+        shutil.rmtree(fake_repo3, ignore_errors=True)
 
     # ----- 8b. GenerationError carries token/wall meta on failure path -----
     err = ca.GenerationError(
@@ -293,6 +374,12 @@ def run() -> list[tuple[str, bool, str]]:
     ))
 
     return cases
+
+
+def test_codex_agentic_cases():
+    results = run()
+    failed = [(n, d) for n, ok, d in results if not ok]
+    assert not failed, "\n".join(f"{n}: {d}" for n, d in failed)
 
 
 if __name__ == "__main__":
