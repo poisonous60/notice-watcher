@@ -328,6 +328,66 @@ def run() -> list[tuple[str, bool, str]]:
     finally:
         shutil.rmtree(fake_repo3, ignore_errors=True)
 
+    # ----- 8d. ok=true final message can point at candidate.json instead of echoing config -----
+    fake_repo4 = _make_tmp_repo()
+
+    class CandidatePathPopen:
+        def __init__(self, args, **kwargs):
+            out_path = Path(args[args.index("--output-last-message") + 1])
+            workdir = out_path.parent
+            (workdir / "candidate.json").write_text(
+                json.dumps({
+                    "site": "https://example.com/",
+                    "strategy": "httpx_html",
+                    "list": {"selector": ".post"},
+                }),
+                encoding="utf-8",
+            )
+            out_path.write_text(
+                json.dumps({
+                    "ok": True,
+                    "candidate_path": "./candidate.json",
+                    "attempts": [{"i": 1, "validate_ok": True, "error": ""}],
+                    "stop_reason": "validate_pass",
+                }),
+                encoding="utf-8",
+            )
+            self.returncode = 0
+
+        def communicate(self, input=None, timeout=None):  # noqa: A002 - subprocess API
+            return (
+                '{"type":"turn.completed","usage":{"input_tokens":3,"output_tokens":4}}\n',
+                "",
+            )
+
+        def kill(self):
+            self.returncode = -9
+
+    try:
+        with mock.patch.object(ca, "_codex_preflight", return_value="codex-cli test"), \
+             mock.patch.object(ca, "_codex_bin", return_value="codex"), \
+             mock.patch.object(ca.subprocess, "Popen", CandidatePathPopen), \
+             mock.patch.object(ca, "validate_built_config", fake_validate_built_config):
+            result = asyncio.run(ca.run_codex_agentic(
+                digest={"url": "https://example.com/"},
+                slug="candidatepathslug",
+                url="https://example.com/",
+                repo=fake_repo4,
+                timeout_s=5.0,
+            ))
+        cases.append(_check(
+            "codex_final_can_reference_candidate_path",
+            (result.config.get("list") == {"selector": ".post"}
+             and result.stop_reason == "validate_pass"
+             and result.attempts == [{"i": 1, "validate_ok": True, "error": ""}]
+             and result.prompt_tokens == 3
+             and result.completion_tokens == 4),
+            f"config={result.config!r} stop={result.stop_reason!r} attempts={result.attempts!r} "
+            f"tokens={result.prompt_tokens}+{result.completion_tokens}",
+        ))
+    finally:
+        shutil.rmtree(fake_repo4, ignore_errors=True)
+
     # ----- 8b. GenerationError carries token/wall meta on failure path -----
     err = ca.GenerationError(
         "fake fail",
