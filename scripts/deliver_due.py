@@ -13,7 +13,7 @@ ADR 0017 — runs 추적:
   3. 후보 글 요약 — posts.summary 캐시 있으면 재사용, 없으면 1회 계산 후 캐시 (lazy).
   4. 필터 — 같은 slug 의 여러 구독자 필터를 OR (한 명이라도 통과시키면 발송). 채널 OR 보존.
   5. digest 묶음 1개로 발송 (REST). 성공 시 deliveries + last_delivered_date 박음 (하루 1회 멱등).
-  6. 새 글 0 + notify_empty 구독 있으면 "새 공지 없음" 한 줄.
+  6. slug 별 새 글 0 + notify_empty 구독 있으면 "새 공지 없음" 알림.
   7. posts TTL GC (prune_posts).
 
 봇 event loop 비블록 위해 *subprocess* 로 분리 (LLM·blocking Discord·sleep 포함). [codex HIGH]
@@ -66,6 +66,14 @@ def _ensure_summary(conn, slug: str, post: dict, sum_client) -> str:
     s = summarize_post(sum_client, dict(post), slug=slug)
     db.set_post_summary(conn, slug, post["post_id"], s)
     return s
+
+
+def _empty_notice_content(*, today_kst: str, slugs: list[str]) -> str:
+    if len(slugs) == 1:
+        return f"📭 `{slugs[0]}` — 오늘({today_kst}) 새로 올라온 공지가 없어요."
+    lines = [f"📭 오늘({today_kst}) 새로 올라온 공지가 없는 구독이에요."]
+    lines.extend(f"- `{slug}`" for slug in slugs)
+    return "\n".join(lines)
 
 
 def flush_target(conn, tok: Optional[str], target: dict, *, today_kst: str, dry_run: bool,
@@ -124,16 +132,17 @@ def _flush_target_inner(conn, tok: Optional[str], target: dict, *, today_kst: st
     subs_by_slug: dict[str, list] = defaultdict(list)
     for s in subs:
         subs_by_slug[s["slug"]].append(s)
-    any_notify_empty = any(int(s["notify_empty"]) for s in subs)
 
     sum_client = client_for("notify_summarize")
     flt_client = client_for("notify_filter")
 
     owed: list = []  # 발송 확정 글 (sqlite3.Row)
+    empty_slugs: list[str] = []
     for slug, slug_subs in subs_by_slug.items():
         # 그 slug 구독 중 가장 이른 created_at 하한 — 그 전 글은 어느 구독도 안 받음 (백로그 차단).
         since = min(s["created_at"] for s in slug_subs)
         posts = db.posts_for_slug_since(conn, slug, since)
+        n_slug_owed = 0
         for post in posts:
             pid = str(post["post_id"])
             if db.was_delivered(conn, slug, pid, target_id):
@@ -155,16 +164,19 @@ def _flush_target_inner(conn, tok: Optional[str], target: dict, *, today_kst: st
                 post_d = dict(post)
                 post_d["summary"] = summary
                 owed.append(post_d)
+                n_slug_owed += 1
+        if n_slug_owed == 0 and any(int(s["notify_empty"]) for s in slug_subs):
+            empty_slugs.append(slug)
 
     when = datetime.now(KST).strftime("%Y-%m-%d %H:%M")
+    empty_notice = _empty_notice_content(today_kst=today_kst, slugs=empty_slugs) if empty_slugs else None
     if not owed:
-        if any_notify_empty:
-            content = f"📭 오늘({today_kst}) 새로 올라온 공지가 없어요."
+        if empty_notice:
             if dry_run:
-                print(f"\n--- [{target_kind}:{target_id} EMPTY] ---\n{content}\n")
+                print(f"\n--- [{target_kind}:{target_id} EMPTY] ---\n{empty_notice}\n")
             elif tok:
                 try:
-                    deliver(tok, target_kind=target_kind, target_id=target_id, content=content)
+                    deliver(tok, target_kind=target_kind, target_id=target_id, content=empty_notice)
                 except (CannotDeliver, DiscordRestError) as e:
                     print(f"  ✗ {target_kind}:{target_id} empty 발송 실패: {e}", file=sys.stderr)
         if not dry_run:
@@ -175,6 +187,8 @@ def _flush_target_inner(conn, tok: Optional[str], target: dict, *, today_kst: st
     if dry_run:
         for ch in chunks:
             print(f"\n--- [{target_kind}:{target_id} DIGEST] ---\n{ch}\n")
+        if empty_notice:
+            print(f"\n--- [{target_kind}:{target_id} EMPTY] ---\n{empty_notice}\n")
         return len(owed), "ok", len(chunks)
 
     if not tok:
@@ -196,6 +210,11 @@ def _flush_target_inner(conn, tok: Optional[str], target: dict, *, today_kst: st
                 print(f"  ✗ {target_kind}:{target_id} digest chunk 발송 실패: {e}", file=sys.stderr)
                 break
     if ok_all:
+        if empty_notice:
+            try:
+                deliver(tok, target_kind=target_kind, target_id=target_id, content=empty_notice)
+            except (CannotDeliver, DiscordRestError) as e:
+                print(f"  ✗ {target_kind}:{target_id} empty 발송 실패: {e}", file=sys.stderr)
         for post in owed:
             db.mark_delivered(conn, post["slug"], str(post["post_id"]), target_id)
         db.mark_setting_delivered(conn, target_kind=target_kind, target_id=target_id, today_kst=today_kst)

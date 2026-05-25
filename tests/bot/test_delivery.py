@@ -155,6 +155,26 @@ def run() -> list[tuple[str, bool, str]]:
         cases.append(("flush_notify_empty_sends_line",
                       n2 == 0 and status2 == "empty" and len(sent) == 1 and "없어요" in sent[0][2],
                       f"n={n2} status={status2} sent={sent!r}"))
+
+        # ----- 11. notify_empty — 같은 target 에 새 글 있는 slug 와 빈 slug 가 섞여도 빈 slug 알림 -----
+        sent.clear()
+        conn8 = _conn()
+        for slug in ("s1", "s2"):
+            conn8.execute(
+                "INSERT INTO subscriptions(user_id,slug,url,filter_prompt,schedule,target_kind,target_id,notify_empty,created_at) "
+                "VALUES('u1',?,?,NULL,'realtime','dm','u1',1,'2000-01-01T00:00:00+00:00')",
+                (slug, f"https://example.com/{slug}"))
+        db.ensure_setting(conn8, target_kind="dm", target_id="u1")
+        conn8.commit()
+        db.upsert_post(conn8, "s2", _post("new"))
+        n3, status3 = dd.flush_target(conn8, "tok", {"target_kind": "dm", "target_id": "u1"},
+                                       today_kst="2026-05-20", dry_run=False)
+        contents3 = [row[2] for row in sent]
+        cases.append(("flush_notify_empty_mixed_with_digest_sends_per_empty_slug",
+                      n3 == 1 and status3 == "ok" and len(sent) == 2
+                      and any("s1" in c and "없어요" in c for c in contents3)
+                      and any("Tnew" in c for c in contents3),
+                      f"n={n3} status={status3} sent={sent!r}"))
     finally:
         dd.summarize_post, dd.filter_pass, dd.deliver, dd.client_for = orig
 
