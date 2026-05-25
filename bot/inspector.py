@@ -59,17 +59,21 @@ def _row_to_dict(row: Optional[sqlite3.Row]) -> Optional[dict]:
 
 
 def recent_jobs(conn: sqlite3.Connection, limit: int = 20, offset: int = 0,
-                status: Optional[str] = None) -> list[dict]:
-    """최근 register 잡 (kind='register'). 각 항목: id/slug/url/status/finished_at/via/requested_by(parsed)
-    /sub_payload(parsed) + `fail_kind`/`fail_subkind`/`fail_reason_short` (`bot.fail_taxonomy.classify_fail`
-    파생). preview 잡은 sub_payload=None.
+                status: Optional[str] = None,
+                kind: Optional[str] = "register") -> list[dict]:
+    """최근 잡. 각 항목: id/slug/url/status/finished_at/via/requested_by(parsed) /sub_payload(parsed) +
+    `fail_kind`/`fail_subkind`/`fail_reason_short` (`bot.fail_taxonomy.classify_fail` 파생).
+
+    `kind` (ADR 0019 Phase 2): None = 모든 kind, 기본 'register' (옛 동작), 또는 'reprobe'/'poll_site'/
+    'deliver_target' 지정. poll_site/deliver_target 은 register-orient classify_fail 이 적용 안 됨
+    (fail_kind = base status).
 
     `status` 인자는 SQL pushdown — base status (pending/running/done/failed) 한정. fail_kind sub 필터링은
     호출자(`dashboard/app.py:jobs_list`)가 결과 dict 의 `fail_kind` 로 추가 필터.
     """
     from bot.fail_taxonomy import classify_fail
     out: list[dict] = []
-    for r in db.recent_register_jobs(conn, limit=limit, offset=offset, status=status):
+    for r in db.recent_register_jobs(conn, limit=limit, offset=offset, status=status, kind=kind):
         d = dict(r)
         rb = d.get("requested_by")
         if rb:

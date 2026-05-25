@@ -24,20 +24,25 @@
     <span class="muted">· status={{ s }} · rc={{ job.result_rc }}</span>
     {% if fail_reason_short %}<div class="muted" style="font-size:0.85rem;margin-top:0.2rem;">{{ fail_reason_short }}</div>{% endif %}
   </dd>
+  <dt>kind</dt><dd><code>{{ job.kind }}</code></dd>
+  <dt>priority</dt><dd><code>{{ job.priority }}</code> <span class="muted" style="font-size:0.8rem;">(ADR 0019 §2g: 0=user, 1=reprobe, 2=deliver_target, 3=poll_site, 4=batch-retry, 5=batch)</span></dd>
   <dt>via</dt><dd><code>{{ job.via }}</code></dd>
   <dt>요청자</dt>
   <dd>
     {% set rb = job.requested_by %}
     {% if rb is mapping %}{{ rb.get('name', '?') }} (id={{ rb.get('id', '?') }}){% else %}?{% endif %}
   </dd>
-  <dt>제출 URL</dt><dd class="mono">
+  {% if job.dedupe_key %}<dt>dedupe_key</dt><dd class="mono"><code>{{ job.dedupe_key }}</code></dd>{% endif %}
+  {% if job.requeue_at %}<dt>requeue_at</dt><dd class="mono"><code>{{ job.requeue_at }}</code> <span class="muted" style="font-size:0.8rem;">(barrier 대기 중 — 이후 시각에 재claim)</span></dd>{% endif %}
+  {% if job.url %}<dt>제출 URL</dt><dd class="mono">
     {% if is_http_url(job.url) %}
       <a href="{{ job.url }}" target="_blank" rel="noopener">{{ job.url }}</a>
     {% else %}
       <code>{{ job.url or '' }}</code>
     {% endif %}
-  </dd>
+  </dd>{% endif %}
   {% if job.article_url %}<dt>article_url</dt><dd class="mono">{{ job.article_url }}</dd>{% endif %}
+  {% if job.sub_payload %}<dt>payload</dt><dd class="mono"><details><summary>JSON ({{ (job.sub_payload | length) if (job.sub_payload is string) else '...' }} chars)</summary><pre style="font-size:0.78rem;max-height:14em;overflow:auto;">{{ job.sub_payload if job.sub_payload is string else (job.sub_payload | tojson(indent=2)) }}</pre></details></dd>{% endif %}
   <dt>시작/종료</dt><dd>{{ job.started_at }} → {{ job.finished_at }}</dd>
 </dl>
 

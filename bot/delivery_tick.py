@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import sys
 from datetime import datetime
@@ -69,6 +70,64 @@ async def _run_deliver_subprocess() -> None:
         log.warning("deliver_due subprocess rc=%d", rc)
 
 
+def _parse_notify_test_targets() -> tuple[bool, set[str]]:
+    """NOTIFY_TEST_TARGETS env 파싱 (codex 2차 review MED 3). scripts/deliver_due._parse_test_targets
+    와 동일 semantics — allow-list 밖 target 은 enqueue 안 함 (옛 subprocess path 의 NOTIFY_TEST_TARGETS
+    가드 보존). 형식: 쉼표 구분 'kind:id', 특수 'owner' → 'dm:<OWNER_USER_ID>'.
+    """
+    import os
+    raw = os.environ.get("NOTIFY_TEST_TARGETS", "").strip()
+    if not raw:
+        return False, set()
+    out: set[str] = set()
+    for tok in [t.strip() for t in raw.split(",") if t.strip()]:
+        if tok.lower() == "owner":
+            try:
+                from bot.config import owner_user_id
+                owner = owner_user_id()
+                if owner:
+                    out.add(f"dm:{owner}")
+            except Exception:  # noqa: BLE001
+                pass
+            continue
+        if ":" in tok:
+            out.add(tok)
+    return True, out
+
+
+def _enqueue_due_targets(conn, *, now_hhmm: str, today_kst: str) -> int:
+    """ADR 0019 Phase 2 — enqueue due delivery targets for worker processing.
+
+    NOTIFY_TEST_TARGETS 가 설정되면 allow-list 안의 target 만 enqueue (codex 2차 review MED 3).
+    allow-list 밖 target 은 dedupe_key 안 박힘 → 다음 tick 에 env 풀리면 자연 복귀.
+    """
+    test_mode, test_allowed = _parse_notify_test_targets()
+    due = db.due_targets(conn, now_hhmm=now_hhmm, today_kst=today_kst)
+    inserted = 0
+    skipped_test = 0
+    for target in due:
+        target_kind = str(target["target_kind"])
+        target_id = str(target["target_id"])
+        key = f"{target_kind}:{target_id}"
+        if test_mode and key not in test_allowed:
+            skipped_test += 1
+            continue  # allow-list 밖 → enqueue 안 함, dedupe_key 안 박음
+        _job_id, newly = db.enqueue_job(
+            conn,
+            kind="deliver_target",
+            dedupe_key=f"deliver:{target_kind}:{target_id}:{today_kst}",
+            sub_payload=json.dumps(
+                {"target_kind": target_kind, "target_id": target_id, "today_kst": today_kst},
+                ensure_ascii=False,
+            ),
+        )
+        if newly:
+            inserted += 1
+    if test_mode and skipped_test:
+        log.info("delivery_tick NOTIFY_TEST_TARGETS skip — %d targets outside allow-list", skipped_test)
+    return inserted
+
+
 async def _loop(conn) -> None:
     while True:
         try:
@@ -76,10 +135,9 @@ async def _loop(conn) -> None:
             now_kst = datetime.now(KST)
             now_hhmm = now_kst.strftime("%H:%M")
             today = now_kst.strftime("%Y-%m-%d")
-            due = db.due_targets(conn, now_hhmm=now_hhmm, today_kst=today)
-            if due:
-                log.info("발송창 도래 — due 수신처 %d건, deliver_due 호출", len(due))
-                await _run_deliver_subprocess()
+            n = _enqueue_due_targets(conn, now_hhmm=now_hhmm, today_kst=today)
+            if n:
+                log.info("발송창 도래 — deliver_target job %d건 enqueue", n)
         except asyncio.CancelledError:
             log.info("delivery tick 종료 (cancel)")
             return

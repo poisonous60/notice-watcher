@@ -253,13 +253,14 @@ CREATE TABLE IF NOT EXISTS poll_runs (
     persist_mismatch_sites INTEGER NOT NULL DEFAULT 0,
     duration_ms INTEGER,
     status      TEXT NOT NULL DEFAULT 'running'
-                CHECK (status IN ('running','done','crashed','killed'))
+                CHECK (status IN ('running','enqueue_done','done','crashed','killed'))
 );
 CREATE INDEX IF NOT EXISTS idx_poll_runs_started ON poll_runs(started_at DESC);
 
 CREATE TABLE IF NOT EXISTS poll_site_runs (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id      INTEGER NOT NULL REFERENCES poll_runs(id),
+    job_id      INTEGER REFERENCES jobs(id),
     slug        TEXT NOT NULL,
     started_at  TEXT NOT NULL,
     ended_at    TEXT,
@@ -267,7 +268,7 @@ CREATE TABLE IF NOT EXISTS poll_site_runs (
                 ('ok','lurking','breakage','poll_timeout','task_exception',
                  'persist_mismatch','body_empty_drift','reprobe_enqueued',
                  'reprobe_skipped_bug','reprobe_enqueue_failed','run_crashed','error',
-                 'chromium_lock_timeout')),
+                 'chromium_lock_timeout','skipped_test_target')),
     n_posts            INTEGER NOT NULL DEFAULT 0,
     n_new              INTEGER NOT NULL DEFAULT 0,
     n_attempted_unique INTEGER NOT NULL DEFAULT 0,
@@ -423,10 +424,17 @@ def _migrate(conn: sqlite3.Connection) -> None:
     # ADR 0019 Phase 1 — chromium_lock_timeout 새 status + lock_wait_ms 새 컬럼 추가. probe 통과
     # 시 둘 다 한 번에 rebuild 됨 (rebuild 템플릿이 새 enum + 새 컬럼 둘 다 포함). 옛 'error'
     # probe 는 매우 옛 DB(아직 'error' enum 도 못 받은) 대비 보존.
+    _migrate_check_enum(conn, "poll_runs", "enqueue_done",
+                         new_create=_POLL_RUNS_REBUILD)
     _migrate_check_enum(conn, "poll_site_runs", "error",
                          new_create=_POLL_SITE_RUNS_REBUILD)
     _migrate_check_enum(conn, "poll_site_runs", "chromium_lock_timeout",
                          new_create=_POLL_SITE_RUNS_REBUILD)
+    _migrate_check_enum(conn, "poll_site_runs", "skipped_test_target",
+                         new_create=_POLL_SITE_RUNS_REBUILD)
+    poll_site_cols = {r[1] for r in conn.execute("PRAGMA table_info(poll_site_runs)").fetchall()}
+    if "job_id" not in poll_site_cols:
+        conn.execute("ALTER TABLE poll_site_runs ADD COLUMN job_id INTEGER REFERENCES jobs(id)")
     _migrate_check_enum(conn, "notify_target_runs", "skipped_test_target",
                          new_create=_NOTIFY_TARGET_RUNS_REBUILD)
     # ADR 0019 Phase 2a — jobs 테이블 generic 화. CHECK enum 확장 + url/slug NULL + 새 컬럼
@@ -463,10 +471,38 @@ def _migrate(conn: sqlite3.Connection) -> None:
 
 
 # ADR 0017 codex 2차 — rebuild 템플릿. _SCHEMA 의 정의와 동기 유지 필수.
+_POLL_RUNS_REBUILD = """
+CREATE TABLE poll_runs_new (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_label   TEXT NOT NULL,
+    started_at  TEXT NOT NULL,
+    ended_at    TEXT,
+    reaped_at   TEXT,
+    reap_reason TEXT,
+    pid         INTEGER NOT NULL,
+    host        TEXT,
+    git_sha     TEXT,
+    args_json   TEXT,
+    n_sites     INTEGER,
+    n_done      INTEGER NOT NULL DEFAULT 0,
+    n_timeout   INTEGER NOT NULL DEFAULT 0,
+    n_error     INTEGER NOT NULL DEFAULT 0,
+    n_lurking_skipped INTEGER NOT NULL DEFAULT 0,
+    n_attempted_unique INTEGER NOT NULL DEFAULT 0,
+    n_inserted        INTEGER NOT NULL DEFAULT 0,
+    n_present_after   INTEGER NOT NULL DEFAULT 0,
+    persist_mismatch_sites INTEGER NOT NULL DEFAULT 0,
+    duration_ms INTEGER,
+    status      TEXT NOT NULL DEFAULT 'running'
+                CHECK (status IN ('running','enqueue_done','done','crashed','killed'))
+);
+"""
+
 _POLL_SITE_RUNS_REBUILD = """
 CREATE TABLE poll_site_runs_new (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id      INTEGER NOT NULL REFERENCES poll_runs(id),
+    job_id      INTEGER REFERENCES jobs(id),
     slug        TEXT NOT NULL,
     started_at  TEXT NOT NULL,
     ended_at    TEXT,
@@ -474,7 +510,7 @@ CREATE TABLE poll_site_runs_new (
                 ('ok','lurking','breakage','poll_timeout','task_exception',
                  'persist_mismatch','body_empty_drift','reprobe_enqueued',
                  'reprobe_skipped_bug','reprobe_enqueue_failed','run_crashed','error',
-                 'chromium_lock_timeout')),
+                 'chromium_lock_timeout','skipped_test_target')),
     n_posts            INTEGER NOT NULL DEFAULT 0,
     n_new              INTEGER NOT NULL DEFAULT 0,
     n_attempted_unique INTEGER NOT NULL DEFAULT 0,
@@ -574,6 +610,8 @@ def _migrate_check_enum(conn: sqlite3.Connection, table: str, probe_token: str,
     fk_row = conn.execute("PRAGMA foreign_keys").fetchone()
     fk_state = int(fk_row[0]) if fk_row else 0
     try:
+        # SQLite ignores PRAGMA foreign_keys changes inside an active transaction.
+        conn.commit()
         if fk_state:
             conn.execute("PRAGMA foreign_keys=OFF")
         new_table = f"{table}_new"
@@ -589,6 +627,8 @@ def _migrate_check_enum(conn: sqlite3.Connection, table: str, probe_token: str,
         if after_rebuild_sql is not None:
             for sql in after_rebuild_sql:
                 conn.execute(sql)
+        elif table == "poll_runs":
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_poll_runs_started ON poll_runs(started_at DESC)")
         elif table == "poll_site_runs":
             conn.execute("CREATE INDEX IF NOT EXISTS idx_poll_site_runs_run ON poll_site_runs(run_id, slug)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_poll_site_runs_slug ON poll_site_runs(slug, started_at DESC)")
@@ -1110,7 +1150,8 @@ def enqueue_job(conn: sqlite3.Connection, *,
         return r.existing_id, False
 
 
-def claim_next_pending(conn: sqlite3.Connection) -> Optional[sqlite3.Row]:
+def claim_next_pending(conn: sqlite3.Connection, *,
+                        priority_max: Optional[int] = None) -> Optional[sqlite3.Row]:
     """가장 오래된 pending 잡 하나를 running 으로 표시하고 반환. 없으면 None.
 
     pool_size>1 + per-slug 직렬화: slug 이 이미 다른 worker 의 running 잡이면 *그 잡은 스킵* 하고
@@ -1118,14 +1159,25 @@ def claim_next_pending(conn: sqlite3.Connection) -> Optional[sqlite3.Row]:
     우선순위 큐 (ADR 0009): dequeue 순서 = ORDER BY priority ASC, id ASC (작은 priority 먼저, 동순위는
     FIFO). *non-blocked* pending 들 사이에서 유지. running 끝난 slug 의 pending 도 같은 정렬.
 
+    ADR 0019 Phase 2f — `priority_max` 가 주어지면 priority < priority_max 만 claim. interactive
+    lane reserve worker 가 user(0)/reprobe(1) 만 잡게 (priority_max=2 호출). 일반 worker 는 None.
+
     SELECT-then-UPDATE 패턴 (Python sqlite3 의 implicit 트랜잭션과 충돌 없도록 BEGIN IMMEDIATE 피함).
     UPDATE WHERE status='pending' 조건으로 race 가드 — 다른 워커가 같은 잡 채갔으면 rowcount=0, 다음 잡으로.
     """
+    priority_clause = ""
+    extra_params: tuple = ()
+    if priority_max is not None:
+        priority_clause = "AND priority < ? "
+        extra_params = (int(priority_max),)
     for _ in range(8):
         row = conn.execute(
             "SELECT id FROM jobs WHERE status='pending' "
-            "AND slug NOT IN (SELECT slug FROM jobs WHERE status='running') "
-            "ORDER BY priority ASC, id ASC LIMIT 1"
+            "AND (requeue_at IS NULL OR requeue_at <= ?) "
+            f"{priority_clause}"
+            "AND (slug IS NULL OR slug NOT IN (SELECT slug FROM jobs WHERE status='running' AND slug IS NOT NULL)) "
+            "ORDER BY priority ASC, id ASC LIMIT 1",
+            (_now_iso(), *extra_params),
         ).fetchone()
         if row is None:
             return None
@@ -1235,20 +1287,29 @@ def jobs_summary(conn: sqlite3.Connection) -> dict:
 
 def recent_register_jobs(conn: sqlite3.Connection, limit: int = 20,
                          offset: int = 0,
-                         status: Optional[str] = None) -> list[sqlite3.Row]:
-    """사용자 `/watch`·`/preview` 가 만든 잡만(=kind='register') 최신 순. inspector.recent_jobs 가 호출.
+                         status: Optional[str] = None,
+                         kind: Optional[str] = "register") -> list[sqlite3.Row]:
+    """잡 큐 최신순. inspector.recent_jobs 가 호출.
 
     `status` (pending/running/done/failed) 가 주어지면 SQL `WHERE status=?` pushdown — Python 쪽
     post-filter 가 LIMIT 윈도우 밖 행 누락하는 문제 방지 (대시보드 `/jobs?status=X`).
+
+    ADR 0019 Phase 2 — `kind` 파라미터 추가. 기본 = 'register' (옛 동작 유지). None = 모든 kind
+    (register / reprobe / poll_site / deliver_target). 특정 kind 지정 = SQL `WHERE kind=?` pushdown.
     """
-    if status is None:
-        return conn.execute(
-            "SELECT * FROM jobs WHERE kind='register' ORDER BY id DESC LIMIT ? OFFSET ?",
-            (limit, offset),
-        ).fetchall()
+    where = []
+    params: list = []
+    if kind is not None:
+        where.append("kind = ?")
+        params.append(kind)
+    if status is not None:
+        where.append("status = ?")
+        params.append(status)
+    where_sql = (" WHERE " + " AND ".join(where)) if where else ""
+    params.extend([limit, offset])
     return conn.execute(
-        "SELECT * FROM jobs WHERE kind='register' AND status=? ORDER BY id DESC LIMIT ? OFFSET ?",
-        (status, limit, offset),
+        f"SELECT * FROM jobs{where_sql} ORDER BY id DESC LIMIT ? OFFSET ?",
+        tuple(params),
     ).fetchall()
 
 
@@ -1668,7 +1729,159 @@ def poll_run_finish(conn: sqlite3.Connection, run_id: Optional[int], *,
         _tracking_warn("poll_run_finish", e)
 
 
+_POLL_SITE_TERMINAL_STATUSES = {
+    "ok",
+    "lurking",
+    "breakage",
+    "poll_timeout",
+    "task_exception",
+    "persist_mismatch",
+    "body_empty_drift",
+    "reprobe_enqueued",
+    "reprobe_skipped_bug",
+    "reprobe_enqueue_failed",
+    "run_crashed",
+    "error",
+    "chromium_lock_timeout",
+    "skipped_test_target",
+}
+
+
+def _kst_date_from_iso(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(KST).strftime("%Y-%m-%d")
+    except Exception:
+        return str(value)[:10]
+
+
+def _poll_run_children_terminal(conn: sqlite3.Connection, run_id: int,
+                                n_sites: Optional[int]) -> tuple[bool, int]:
+    rows = conn.execute(
+        "SELECT status FROM poll_site_runs WHERE run_id=?",
+        (run_id,),
+    ).fetchall()
+    child_count = len(rows)
+    expected = int(n_sites or 0)
+    if expected <= 0:
+        return True, child_count
+    if child_count < expected:
+        return False, child_count
+    return all(str(r["status"]) in _POLL_SITE_TERMINAL_STATUSES for r in rows), child_count
+
+
+def poll_run_mark_enqueue_done(conn: sqlite3.Connection, run_id: Optional[int]) -> None:
+    """ADR 0019 §2c — cron finished enqueueing chromium children; workers may still be running."""
+    if run_id is None:
+        return
+    try:
+        conn.execute(
+            "UPDATE poll_runs SET status='enqueue_done' WHERE id=? AND status='running'",
+            (run_id,),
+        )
+        conn.commit()
+    except Exception as e:  # noqa: BLE001
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        _tracking_warn("poll_run_mark_enqueue_done", e)
+
+
+def poll_run_blocking_for_today(conn: sqlite3.Connection, today_kst: str) -> tuple[bool, Optional[int], Optional[str]]:
+    """ADR 0019 §2c — active poll_run freshness barrier for delivery.
+
+    codex 2차 review LOW 7 fix — latest-only 가 아니라 *any* same-day poll_run 검사. 늦은
+    수동 부분 폴링이 'done' 이고 더 옛 full poll 이 'enqueue_done' 인 경우 latest-only 는 잘못
+    풀어줌. 모든 same-day row 중 hindering 1건이라도 있으면 block.
+    """
+    try:
+        rows = conn.execute(
+            "SELECT id, started_at, status, n_sites FROM poll_runs ORDER BY started_at DESC, id DESC LIMIT 50"
+        ).fetchall()
+        same_day = [r for r in rows if _kst_date_from_iso(r["started_at"]) == today_kst]
+        if not same_day:
+            return False, None, None
+        for row in same_day:
+            status = str(row["status"])
+            run_id = int(row["id"])
+            if status == "running":
+                return True, run_id, "running"
+            if status == "enqueue_done":
+                terminal, _child_count = _poll_run_children_terminal(conn, run_id, row["n_sites"])
+                if not terminal:
+                    return True, run_id, "enqueue_done_with_pending_children"
+        return False, None, None
+    except Exception as e:  # noqa: BLE001
+        _tracking_warn("poll_run_blocking_for_today", e)
+        return False, None, None
+
+
+def poll_run_maybe_finalize(conn: sqlite3.Connection, run_id: Optional[int]) -> bool:
+    """ADR 0019 §2c — mark enqueue_done poll_run as done once all child site runs are terminal."""
+    if run_id is None:
+        return False
+    try:
+        row = conn.execute("SELECT * FROM poll_runs WHERE id=?", (run_id,)).fetchone()
+        if row is None or row["status"] != "enqueue_done":
+            return False
+        terminal, _child_count = _poll_run_children_terminal(conn, int(run_id), row["n_sites"])
+        if not terminal:
+            return False
+        agg = conn.execute(
+            "SELECT "
+            "COUNT(*) AS n_done, "
+            "SUM(CASE WHEN status='poll_timeout' THEN 1 ELSE 0 END) AS n_timeout, "
+            "SUM(CASE WHEN status NOT IN ('ok','lurking','persist_mismatch') THEN 1 ELSE 0 END) AS n_error, "
+            "SUM(n_attempted_unique) AS n_attempted_unique, "
+            "SUM(n_inserted) AS n_inserted, "
+            "SUM(n_present_after) AS n_present_after, "
+            "SUM(CASE WHEN status='persist_mismatch' THEN 1 ELSE 0 END) AS persist_mismatch_sites "
+            "FROM poll_site_runs WHERE run_id=?",
+            (run_id,),
+        ).fetchone()
+        now = _now_iso()
+        started = row["started_at"]
+        duration_ms = row["duration_ms"]
+        try:
+            start_dt = datetime.fromisoformat(started)
+            if start_dt.tzinfo is None:
+                start_dt = start_dt.replace(tzinfo=timezone.utc)
+            duration_ms = int((datetime.now(timezone.utc) - start_dt.astimezone(timezone.utc)).total_seconds() * 1000)
+        except Exception:
+            pass
+        cur = conn.execute(
+            "UPDATE poll_runs SET ended_at=?, n_done=?, n_timeout=?, n_error=?, "
+            "n_attempted_unique=?, n_inserted=?, n_present_after=?, persist_mismatch_sites=?, "
+            "duration_ms=?, status='done' WHERE id=? AND status='enqueue_done'",
+            (now,
+             int(agg["n_done"] or 0),
+             int(agg["n_timeout"] or 0),
+             int(agg["n_error"] or 0),
+             int(agg["n_attempted_unique"] or 0),
+             int(agg["n_inserted"] or 0),
+             int(agg["n_present_after"] or 0),
+             int(agg["persist_mismatch_sites"] or 0),
+             duration_ms,
+             run_id),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    except Exception as e:  # noqa: BLE001
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        _tracking_warn("poll_run_maybe_finalize", e)
+        return False
+
+
 def poll_site_run_finish(conn: sqlite3.Connection, *, run_id: Optional[int], slug: str,
+                         job_id: Optional[int] = None,
                          started_at: str, ended_at: str, status: str,
                          n_posts: int = 0, n_new: int = 0,
                          n_attempted_unique: int = 0, n_inserted: int = 0,
@@ -1687,11 +1900,11 @@ def poll_site_run_finish(conn: sqlite3.Connection, *, run_id: Optional[int], slu
         return
     try:
         conn.execute(
-            "INSERT OR IGNORE INTO poll_site_runs(run_id,slug,started_at,ended_at,status,"
+            "INSERT OR IGNORE INTO poll_site_runs(run_id,job_id,slug,started_at,ended_at,status,"
             "n_posts,n_new,n_attempted_unique,n_inserted,n_present_after,"
             "duration_ms,lock_wait_ms,error_msg,note) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (run_id, slug, started_at, ended_at, status,
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (run_id, job_id, slug, started_at, ended_at, status,
              n_posts, n_new, n_attempted_unique, n_inserted, n_present_after,
              duration_ms, lock_wait_ms, error_msg, note),
         )

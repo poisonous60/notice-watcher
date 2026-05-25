@@ -32,7 +32,8 @@ REMOTE_SCRIPT = ROOT / "scripts" / "remote.py"
 TRACE_SOURCES = ("snapshot", "local")
 
 # index 줄에 들어오는 kind 들 — UI 필터 옵션 source.
-KNOWN_KINDS = ("poll", "poll_and_notify", "notify", "notify_idle", "probe", "probe_reprobe")
+KNOWN_KINDS = ("poll", "poll_cron", "notify", "notify_idle", "probe", "probe_reprobe",
+               "deliver_due", "deliver_target")
 
 
 @dataclass

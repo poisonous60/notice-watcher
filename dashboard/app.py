@@ -456,15 +456,30 @@ async def runs_notify_detail(request: Request, run_id: int, conn=Depends(get_con
                    active="runs")
 
 
+_VALID_JOB_KINDS = ("register", "reprobe", "poll_site", "deliver_target")
+
+
 @app.get("/jobs", response_class=HTMLResponse)
 async def jobs_list(request: Request, count: int = Query(50, ge=1, le=200),
                     page: int = Query(1, ge=1),
                     status: Optional[str] = None, q: Optional[str] = None,
+                    kind: Optional[str] = None,
                     conn=Depends(get_conn)):
     if conn is None:
         return _no_snapshot(request)
     offset = (page - 1) * count
     from bot.fail_taxonomy import BASE_STATUS_VALUES
+    # ADR 0019 Phase 2 — kind 필터. None or 'all' = 모든 kind. 'register'(default 옛 동작) /
+    # 'reprobe' / 'poll_site' / 'deliver_target' 지정 가능.
+    kind_filter: Optional[str]
+    if kind is None or kind == "":
+        kind_filter = "register"  # 기본 옛 동작 (사용자가 명시 안 하면 register only)
+    elif kind == "all":
+        kind_filter = None
+    elif kind in _VALID_JOB_KINDS:
+        kind_filter = kind
+    else:
+        kind_filter = "register"
     # base status (pending/running/done/failed) → SQL pushdown. fail_kind (gen_fail/policy_reject/gate_reject/bug)
     # → SQL pushdown 'failed' + Python sub-filter (page 폭 안 행에서 fail_kind 매칭 — 윈도우 밖 누락 가능,
     # 다음 페이지 가면 그 다음 50건 failed 안에서 다시 매칭).
@@ -475,7 +490,8 @@ async def jobs_list(request: Request, count: int = Query(50, ge=1, le=200),
         sql_status = "failed"
     else:
         sql_status = None
-    rows = inspector.recent_jobs(conn, limit=count + 1, offset=offset, status=sql_status)
+    rows = inspector.recent_jobs(conn, limit=count + 1, offset=offset, status=sql_status,
+                                  kind=kind_filter)
     has_next = len(rows) > count
     rows = rows[:count]
     if status and status not in BASE_STATUS_VALUES:
@@ -494,6 +510,8 @@ async def jobs_list(request: Request, count: int = Query(50, ge=1, le=200),
         rows = [r for r in rows if _match(r)]
     return _render("jobs.html", request,
                    rows=rows, count=count, filter_status=status, q=q,
+                   filter_kind=(kind or "register"),
+                   valid_kinds=("register", "reprobe", "poll_site", "deliver_target", "all"),
                    page=page, has_next=has_next, active="jobs")
 
 

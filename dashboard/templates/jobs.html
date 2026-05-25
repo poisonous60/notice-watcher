@@ -2,7 +2,7 @@
 {% block title %}Jobs — notice-watcher{% endblock %}
 {% block body %}
 
-<h2>📋 Jobs (최근 register)</h2>
+<h2>📋 Jobs — {{ filter_kind }}</h2>
 
 <form hx-get="/jobs"
       hx-target="#jobs-rows"
@@ -16,6 +16,13 @@
   <label style="margin:0;">개수
     <input type="number" name="count" value="{{ count }}" min="1" max="200" style="width:6em;">
   </label>
+  <label style="margin:0;">kind
+    <select name="kind">
+      {% for k in valid_kinds %}
+      <option value="{{ k }}" {{ 'selected' if filter_kind==k else '' }}>{{ k }}</option>
+      {% endfor %}
+    </select>
+  </label>
   <label style="margin:0;">status
     <select name="status">
       <option value="" {{ 'selected' if not filter_status else '' }}>전체</option>
@@ -27,21 +34,23 @@
 </form>
 
 <p class="muted" style="font-size:0.85rem;margin:0 0 0.5rem 0;">
-  {{ rows | length }}건 표시 · slug 클릭 → 해당 Sub 페이지
+  {{ rows | length }}건 표시 · slug 클릭 → 해당 Sub 페이지 · ADR 0019 — kind 별 dispatch (register/reprobe/poll_site/deliver_target)
 </p>
 
 <table class="compact striped">
   <thead>
     <tr>
-      <th>#</th><th>slug</th><th>status</th><th>via</th><th>요청자</th><th>URL</th><th>시각</th>
+      <th>#</th><th>kind</th><th>prio</th><th>slug</th><th>status</th><th>via</th><th>요청자</th><th>URL</th><th>시각</th>
     </tr>
   </thead>
   <tbody id="jobs-rows">
     {% for r in rows %}
     <tr>
       <td><a href="/jobs/{{ r.id }}">#{{ r.id }}</a></td>
+      <td class="mono" style="font-size:0.78rem;">{{ r.kind or "" }}</td>
+      <td class="mono muted" style="font-size:0.78rem;">{{ r.priority if r.priority is not none else "" }}</td>
       <td class="mono">
-        {% if r.slug %}<a href="/subs/{{ r.slug | urlencode }}">{{ r.slug }}</a>{% endif %}
+        {% if r.slug %}<a href="/subs/{{ r.slug | urlencode }}">{{ r.slug }}</a>{% else %}<span class="muted">—</span>{% endif %}
         {% if r.url and is_http_url(r.url) %} <a href="{{ r.url }}" target="_blank" rel="noopener noreferrer" title="원본 URL 새 탭 열기">↗</a>{% endif %}
       </td>
       <td title="{{ r.fail_reason_short or '' }}" style="white-space:nowrap;">
@@ -53,13 +62,13 @@
         {% set rb = r.requested_by %}
         {% if rb is mapping %}{{ rb.get('name', '?') }}{% else %}?{% endif %}
       </td>
-      <td class="mono" style="max-width:30em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+      <td class="mono" style="max-width:24em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
         <span title="{{ r.url or '' }}">{{ r.url or "" }}</span>
       </td>
       <td style="white-space:nowrap;">{{ (r.finished_at or r.created_at or "")[:16] }}</td>
     </tr>
     {% else %}
-    <tr><td colspan="7" class="muted">검색 결과 없음.</td></tr>
+    <tr><td colspan="9" class="muted">검색 결과 없음.</td></tr>
     {% endfor %}
   </tbody>
 </table>

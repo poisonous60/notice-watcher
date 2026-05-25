@@ -197,13 +197,13 @@ def _remote_python_cmd(*args: str) -> str:
 
 
 def cmd_poll_now_slug(slugs_csv: str) -> int:
-    """정상 pipeline — poll_and_notify.py 가 chromium_lock 안에서 poll.py 후 notify.py --no-digest --heartbeat 호출.
+    """정상 pipeline — poll_cron.py 가 poll.py 띄움 (chromium 사이트별 per-site lock, ADR 0019 Phase 1).
+    발송은 분리 (ADR 0006) — 봇 1분 tick + deliver_due.py 가 사용자 발송시각에 처리.
 
-    새 글 없어도 notify_empty=1 구독자에 'heartbeat' 발송. 새 글 있으면 그 slug 의 *모든* 구독자에게 fan-out.
-    격리 발송이 필요하면 `poll-now-slug-quiet` + `notify-target` 조합 (m1_solo).
+    이 명령은 폴링 즉시 1회. 새 글은 posts 캐시에 박힘 + collected/*.new.json. 발송은 별도 tick.
     """
     csv = _require_slugs_csv(slugs_csv)
-    return _ssh(_remote_python_cmd("scripts/poll_and_notify.py", "--sites", csv))
+    return _ssh(_remote_python_cmd("scripts/poll_cron.py", "--sites", csv))
 
 
 def cmd_poll_now_slug_quiet(slugs_csv: str) -> int:

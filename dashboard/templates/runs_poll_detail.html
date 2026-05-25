@@ -54,9 +54,9 @@
 <table class="compact striped">
   <thead>
     <tr>
-      <th>slug</th><th>status</th><th>dur</th>
+      <th>slug</th><th>status</th><th>dur</th><th>lock_wait</th>
       <th>posts/new</th><th>attempted/inserted/present</th>
-      <th>error</th><th>note</th>
+      <th>job</th><th>error</th><th>note</th>
     </tr>
   </thead>
   <tbody>
@@ -68,18 +68,21 @@
         {% elif s.status == 'lurking' %}<span style="color:#888;">💤 lurking</span>
         {% elif s.status == 'persist_mismatch' %}<span style="color:#dc322f;">⚠ persist_mismatch</span>
         {% elif s.status in ('poll_timeout','task_exception','run_crashed','error') %}<span style="color:#dc322f;">💀 {{ s.status }}</span>
+        {% elif s.status == 'chromium_lock_timeout' %}<span style="color:#dc322f;">🔒 chromium_lock_timeout</span>
         {% elif s.status == 'breakage' %}<span style="color:#cb4b16;">⚠ breakage</span>
         {% elif s.status == 'body_empty_drift' %}<span style="color:#cb4b16;">⚠ drift</span>
         {% else %}{{ s.status }}{% endif %}
       </td>
       <td>{% if s.duration_ms %}{{ (s.duration_ms/1000) | round(2) }}s{% else %}—{% endif %}</td>
+      <td><small>{% if s.lock_wait_ms is not none %}{{ s.lock_wait_ms }}ms{% else %}—{% endif %}</small></td>
       <td><small>{{ s.n_posts }} / {{ s.n_new }}</small></td>
       <td><small>{{ s.n_attempted_unique }} / {{ s.n_inserted }} / {{ s.n_present_after }}</small></td>
+      <td><small>{% if s.job_id %}<a href="/jobs/{{ s.job_id }}">#{{ s.job_id }}</a>{% else %}—{% endif %}</small></td>
       <td><small>{{ s.error_msg or '' }}</small></td>
       <td><small>{{ s.note or '' }}</small></td>
     </tr>
     {% else %}
-    <tr><td colspan="7" class="muted">사이트 결과 없음.</td></tr>
+    <tr><td colspan="9" class="muted">사이트 결과 없음.</td></tr>
     {% endfor %}
   </tbody>
 </table>
