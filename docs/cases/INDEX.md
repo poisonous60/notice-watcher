@@ -2,13 +2,18 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 308 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 313 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
+| [`host_usopen-org_en_US_ad97acdf`](host_usopen-org_en_US_ad97acdf.md) | ✅ 수동 config 등록 (relatedcontent JSON API) | 2026-05-25 | none | err_http2_protocol_error, render_navigation_failed | https://www.usopen.org/en_US/news/index.html |
+| [`host_the-afc-com_en_6207897b`](host_the-afc-com_en_6207897b.md) | ✅ 수동 config 등록 (RSS fallback, body optional) | 2026-05-25 | none | article_body_len, brittle_article_selector, rss_available | https://www.the-afc.com/en/about_afc/news.html |
 | [`host_oxide-computer_podcast_9f69bff0`](host_oxide-computer_podcast_9f69bff0.md) | ✅ 자동생성 성공 (옵션 A site_kind=hybrid med — N100 register 시도 2 PASS 30건). handcrafted config 도 보존 | 2026-05-25 | C+A+D+F | article_body_len, audio_share_host | https://oxide.computer/podcast/rss.xml |
+| [`host_masters-com_en_US_749a5209`](host_masters-com_en_US_749a5209.md) | ✅ 수동 config 등록 (relatedcontent JSON API) | 2026-05-25 | none | err_http2_protocol_error, render_navigation_failed | https://www.masters.com/en_US/news/index.html |
+| [`host_laliga-com_en-GB_bb18edb0`](host_laliga-com_en-GB_bb18edb0.md) | ✅ 수동 config 등록 (playwright_html render) | 2026-05-25 | none | probe_timeout, render_timeout | https://www.laliga.com/en-GB/news |
 | [`host_jleague-co_news_af0a9ee7`](host_jleague-co_news_af0a9ee7.md) | ✅ 수동 config 등록 (httpx_html, J.LEAGUE news card rows) | 2026-05-25 | F | post_id_stable_shape | https://www.jleague.co/news/ |
 | [`host_feeds-thisameri_talpodcast_c725ed7a`](host_feeds-thisameri_talpodcast_c725ed7a.md) | ✅ D-layer recipe 회복 — 자동 등록 완료 (15건) | 2026-05-25 | D | post_id_stable_shape, post_id_unique, rss_post_id | https://feeds.thisamericanlife.org/talpodcast |
+| [`host_atptour-com_en_3dfed836`](host_atptour-com_en_3dfed836.md) | ✅ 수동 config 등록 (playwright_html list, body optional) | 2026-05-25 | none | article_body_len, capability_blocked, cloudflare_challenge | https://www.atptour.com/en/news |
 | [`host_yongin-go-kr_user_f1eef610`](host_yongin-go-kr_user_f1eef610.md) | ✅ 수동 config — Playwright로 용인 시정소식 10건 추출 | 2026-05-24 | none | posts_nonempty, tls_handshake, playwright_required | https://www.yongin.go.kr/user/bbs/BD_selectBbsList.do?q_bbsCode=1001 |
 | [`host_worldbank-org_en_61b26912`](host_worldbank-org_en_61b26912.md) | 수동 config - World Bank news landing 의 정적 latest news cards 로 등록 | 2026-05-24 | none | posts_nonempty, matches_probe_first_article, count_ballpark | https://www.worldbank.org/en/news |
 | [`host_ulsan-go-kr_u_cdf4ac30`](host_ulsan-go-kr_u_cdf4ac30.md) | ⏸ deferred — 원 board 빈 shell, 다른 bbsId 등록은 scope 오염 | 2026-05-24 | none | posts_nonempty, empty_board, scope_pollution_risk | https://www.ulsan.go.kr/u/rep/bbs/list.ulsan?bbsId=BBS_0000000000000001 |
@@ -339,7 +344,7 @@
 | F+C | 3 |
 | adapter | 1 |
 | config | 3 |
-| none | 138 |
+| none | 143 |
 
 ### config_strategy 분포
 
@@ -348,14 +353,15 @@
 | (미기재) | 55 |
 | handwritten | 31 |
 | httpx_html | 112 |
-| httpx_json | 24 |
+| httpx_json | 26 |
 | httpx_json (미적용 — 콘텐츠 0) | 1 |
 | mixed | 1 |
 | none | 41 |
-| playwright_html | 42 |
+| playwright_html | 44 |
 | rejected | 1 |
+| rss | 1 |
 
 ### 최근 90일 (≥ 2026-02-24)
 
-케이스 308 건.
+케이스 313 건.
 
