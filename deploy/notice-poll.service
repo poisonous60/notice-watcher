@@ -17,6 +17,8 @@ ExecStart=/home/<user>/notice-watcher/.venv/bin/python scripts/poll_and_notify.p
 # ADR 0016 — outer safety net. poll.py 의 per-site asyncio.wait_for(180s) 가 1차 가드,
 # 그게 미작동(예: signal handler 무한 hang)이면 systemd 가 SIGTERM→SIGKILL.
 # 정상 폴링 ≈ 7분(2026-05-24). 20분 = 3× 여유.
-RuntimeMaxSec=1200
+# **Type=oneshot 은 RuntimeMaxSec 무시한다** (systemd warns at install). 대신 TimeoutStartSec
+# 가 oneshot 의 ExecStart 자체 wall cap — 같은 효과. SIGTERM 후 TimeoutStopSec 추가로 SIGKILL.
+TimeoutStartSec=1200
 KillMode=mixed
 TimeoutStopSec=30

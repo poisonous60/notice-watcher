@@ -61,12 +61,16 @@ CLI: `--site-timeout SECS` 로 override 가능.
 
 `deploy/notice-poll.service` 에:
 ```
-RuntimeMaxSec=1200
+TimeoutStartSec=1200
 KillMode=mixed
 TimeoutStopSec=30
 ```
 
 P1 의 코드 timeout 우선 작동, 그게 미작동(signal handler 무한 hang, GIL 데드락 등)이면 systemd 20분 후 SIGTERM→SIGKILL. 정상 폴링 ≈ 7분의 3× 여유.
+
+**Type=oneshot 함정** (2026-05-25 N100 install 시 surface): `RuntimeMaxSec=` 는 `Type=oneshot` 무시 (systemd warns `RuntimeMaxSec= has no effect in combination with Type=oneshot`). 대신 `TimeoutStartSec=` 가 oneshot 의 ExecStart 자체에 wall cap 박힘 — 같은 효과. `KillMode=mixed` 와 함께 SIGTERM → `TimeoutStopSec=` 후 SIGKILL.
+
+또 한가지 N100 install 함정: repo `deploy/notice-poll.service` 가 `<user>` placeholder (다른 dev 박스 fork 호환용) 라 `cp deploy/notice-poll.service ~/.config/systemd/user/` 그대로 하면 안 됨. install 시 `sed s/<user>/aaaa/g` 또는 N100 의 기존 unit 보존 후 부분 update 만. docs/배포 가이드.md §N100 setup 참조.
 
 ### P+. playwright_html.close_session cleanup 캡 (codex 권고 1)
 
