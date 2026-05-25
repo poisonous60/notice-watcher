@@ -75,4 +75,43 @@
 
 {% include "_pagination.html" %}
 
+<h3 style="margin-top:1.25rem;">Agentic usage</h3>
+<p class="muted" style="font-size:0.85rem;margin:0 0 0.5rem 0;">
+  <code>{{ agentic_usage_path }}</code> · 최근 {{ agentic_usage_rows | length }}건 · <code>config_generate_agentic</code>
+</p>
+{% if agentic_usage_error %}
+<p class="notice error">usage 읽기 실패: {{ agentic_usage_error }}</p>
+{% elif agentic_usage_rows %}
+<table class="compact striped">
+  <thead>
+    <tr>
+      <th>KST</th><th>slug</th><th>status</th>
+      <th style="text-align:right;">turns</th>
+      <th style="text-align:right;">in</th>
+      <th style="text-align:right;">out</th>
+      <th style="text-align:right;">ms</th>
+      <th style="text-align:right;">$</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in agentic_usage_rows %}
+    <tr>
+      <td class="mono">{{ r.ts_kst }}</td>
+      <td class="mono">
+        {% if r.slug %}<a href="/subs/{{ r.slug | urlencode }}">{{ r.slug }}</a>{% else %}<span class="muted">—</span>{% endif %}
+      </td>
+      <td><span class="badge {{ 'ok' if r.status=='ok' else 'error' }}">{{ r.status }}</span></td>
+      <td style="text-align:right;">{{ r.turns }}</td>
+      <td style="text-align:right;">{{ "{:,}".format(r.prompt_tokens or 0) }}</td>
+      <td style="text-align:right;">{{ "{:,}".format(r.completion_tokens or 0) }}</td>
+      <td style="text-align:right;">{{ "{:,}".format(r.latency_ms or 0) }}</td>
+      <td style="text-align:right;">{% if r.cost_usd is not none %}{{ "%.5f"|format(r.cost_usd) }}{% else %}—{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">agentic usage 없음.</p>
+{% endif %}
+
 {% endblock %}

@@ -133,6 +133,23 @@ def usage_recent(conn: sqlite3.Connection, *, since_iso: Optional[str],
     return rows
 
 
+def agentic_recent(conn: sqlite3.Connection, *, limit: int = 50) -> list[dict]:
+    q = """
+        SELECT rowid, ts, slug, status, attempt AS turns,
+               prompt_tokens, completion_tokens, latency_ms, cost_usd
+        FROM llm_calls
+        WHERE call_site = 'config_generate_agentic'
+        ORDER BY rowid DESC
+        LIMIT ?
+    """
+    rows = [dict(r) for r in conn.execute(q, [int(limit)]).fetchall()]
+    for r in rows:
+        r["ts_kst"] = _ts_to_kst_str(r.get("ts") or "")
+        if r.get("turns") is None:
+            r["turns"] = 1
+    return rows
+
+
 def usage_daily_series(conn: sqlite3.Connection, *, days: int = 14) -> dict:
     """일별 (call_site → tokens) 시계열. chart.js 입력 형태로 반환.
 

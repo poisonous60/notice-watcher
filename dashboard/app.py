@@ -507,11 +507,25 @@ async def jobs_list(request: Request, count: int = Query(50, ge=1, le=200),
                 return True
             return False
         rows = [r for r in rows if _match(r)]
+    agentic_usage_rows: list[dict] = []
+    agentic_usage_error: Optional[str] = None
+    usage_conn = usage_view.open_usage_conn(state.usage_db_path_local())
+    if usage_conn is not None:
+        try:
+            agentic_usage_rows = usage_view.agentic_recent(usage_conn, limit=count)
+        except Exception as e:  # noqa: BLE001 — dashboard must keep jobs visible
+            agentic_usage_error = f"{type(e).__name__}: {e}"
+        finally:
+            usage_conn.close()
     return _render("jobs.html", request,
                    rows=rows, count=count, filter_status=status, q=q,
                    filter_kind=(kind or "all"),
                    valid_kinds=("register", "reprobe", "poll_site", "deliver_target", "all"),
-                   page=page, has_next=has_next, active="jobs")
+                   page=page, has_next=has_next,
+                   agentic_usage_rows=agentic_usage_rows,
+                   agentic_usage_error=agentic_usage_error,
+                   agentic_usage_path=str(state.usage_db_path_local()),
+                   active="jobs")
 
 
 @app.get("/jobs/{job_id}", response_class=HTMLResponse)
