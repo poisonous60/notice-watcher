@@ -17,7 +17,7 @@ import json
 import time
 from pathlib import Path
 from typing import Optional
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 
 from engine.tracing import current_trace
 
@@ -28,6 +28,20 @@ from .llm_base import LLMClient, LLMError
 _SYSTEM = render_prompt("classify.system")
 _BODY_CAP = 2000
 _RETRY = 3
+_DETAIL_PATH_SEGMENTS = {"view", "detail", "article", "post"}
+_ARTICLE_ID_PARAMS = {
+    "articleid",
+    "article_id",
+    "article",
+    "postid",
+    "post_id",
+    "seq",
+    "no",
+    "id",
+    "idx",
+    "wr_id",
+}
+_BOARD_ID_PARAMS = {"bbsid", "bbs_id", "boardid", "board_id", "menuid", "menucd", "mid"}
 
 
 def _read_list_html(digest: dict) -> str:
@@ -62,6 +76,35 @@ def _extract_title_body(html: str, url: str) -> tuple[str, str]:
     return (getattr(doc, "title", "") or "", getattr(doc, "text", "") or "")
 
 
+def _has_detail_path_segment(path: str) -> bool:
+    for seg in (s.lower() for s in path.split("/") if s):
+        stem = seg.rsplit(".", 1)[0]
+        if stem in _DETAIL_PATH_SEGMENTS:
+            return True
+    return False
+
+
+def _is_article_id_param(name: str) -> bool:
+    n = name.lower().replace("-", "_")
+    compact = n.replace("_", "")
+    if compact in _BOARD_ID_PARAMS:
+        return False
+    return compact in _ARTICLE_ID_PARAMS or compact.endswith("articleid")
+
+
+def _view_link_signature(href: str) -> Optional[str]:
+    """Detail-page URL shape whose article identity lives in the query string."""
+    u = urlsplit(href)
+    if not u.query or not _has_detail_path_segment(u.path):
+        return None
+    id_params = [name for name, _ in parse_qsl(u.query, keep_blank_values=True)
+                 if _is_article_id_param(name)]
+    if not id_params:
+        return None
+    params = ",".join(dict.fromkeys(id_params[:3]))
+    return f"{u.path}?{params}=<id-like>"
+
+
 def _struct_hint(digest: dict, url: str) -> str:
     """list_candidates 의 같은-호스트 반복 cluster (글-링크/nav 모두) + 피드 신호 압축.
 
@@ -74,7 +117,7 @@ def _struct_hint(digest: dict, url: str) -> str:
     """
     lc = digest.get("list_candidates") or {}
     host = (urlsplit(url).hostname or "").lower()
-    clusters: list[tuple[int, str, str]] = []  # (cc, path_or_url, path_prefix)
+    clusters: list[tuple[int, str, str, Optional[str]]] = []  # (cc, path_or_url, path_prefix, view_sig)
     for p in (lc.get("html_repeating_patterns") or []):
         hp = p.get("href_pattern_guess") or p.get("sample_url") or ""
         if not hp:
@@ -89,20 +132,30 @@ def _struct_hint(digest: dict, url: str) -> str:
         path = urlsplit(hp).path or hp
         segs = [s for s in path.split("/") if s and not s.startswith("{")]
         prefix = "/" + (segs[0] if segs else "")
-        clusters.append((cc, path or hp, prefix))
+        clusters.append((cc, path or hp, prefix, _view_link_signature(hp)))
     clusters.sort(reverse=True)
     parts: list[str] = []
     if clusters:
-        prefixes = sorted({p for _, _, p in clusters})
-        samples = "; ".join(f"cc={cc} {p[:50]}" for cc, p, _ in clusters[:5])
+        prefixes = sorted({p for _, _, p, _ in clusters})
+        view_links = [(cc, sig) for cc, _, _, sig in clusters if sig]
+        samples = "; ".join(
+            f"cc={cc} {(sig or p)[:50]}{' (view-link cluster)' if sig else ''}"
+            for cc, p, _, sig in clusters[:5]
+        )
         parts.append(
             f"같은-호스트 반복 cluster {len(clusters)}종 "
             f"(path prefix {len(prefixes)}종: {', '.join(prefixes[:6])}; "
             f"top: {samples})"
         )
+        if view_links:
+            view_samples = "; ".join(f"cc={cc} {sig}" for cc, sig in view_links[:3])
+            parts.append(
+                f"view-link cluster {len(view_links)}종 = article cluster "
+                f"(path detail segment + query id-like param; top: {view_samples})"
+            )
         # 이질 카드 hub 강조 신호: path prefix ≥ 4 (서로 다른 섹션 루트 多 = 글-링크가 아닌 nav/카테고리)
         # → 분류기에 명시 red-flag (struct hint 가 body 보다 약해 false-accept 나는 케이스 봉합).
-        if len(prefixes) >= 4:
+        if len(prefixes) >= 4 and not view_links:
             parts.append(
                 f"⚠ 이질 카드 hub 신호: path prefix {len(prefixes)}종 ≥ 4 "
                 "(섹션별 카테고리 hub — 사람이 봤을 때 '카드 종류를 한 줄로 못 묶음'). "

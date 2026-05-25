@@ -16,6 +16,7 @@
 
 selector 를 억지로 만들 수 없을 때 fake/minimal config 로 때우지 마라.
 애매한 index/board 가능성이 있으면 self-veto 하지 말고 정상 config 작성과 검증으로 진행한다.
+non_board self-veto 예외: same-host cluster 의 URL set 이 같은 path + id-like query 를 가진 detail-view 패턴(`view?articleId=<id>`, `view.do?seq=<id>` 등)으로 3개 이상 반복되면 article cluster 로 보고 self-veto 하지 말고 config 작성을 계속한다.
 
 ## 엔진이 하는 일
 config 는 "무엇을 어떻게 긁을지"만 정한다. polite delay / robots / 차단대응 같은 정책은 엔진이 알아서 한다.
