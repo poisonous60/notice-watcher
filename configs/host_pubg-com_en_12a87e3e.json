@@ -1,0 +1,145 @@
+{
+  "version": 1,
+  "site": "pubg.com",
+  "board": "en/news",
+  "strategy": "playwright_html",
+  "_source_url": "https://www.pubg.com/en/news",
+  "_note": "track-A config; track-B fixed cookie modal click interception and Vue scoped row extraction for probe visibility.",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+    "Accept-Language": "en-US,en;q=0.9,ko;q=0.8"
+  },
+  "nav_timeout_ms": 20000,
+  "idle_timeout_ms": 4000,
+  "quiet_ms": 800,
+  "list": {
+    "url_template": "https://www.pubg.com/en/news",
+    "pagination": {
+      "kind": "none"
+    },
+    "wait_selector": "ul.post-contents__body > li.post-contents__card a.post[href^='/en/news/']",
+    "row_selector": "ul.post-contents__body > li.post-contents__card",
+    "row_required_selector": "a.post[href^='/en/news/'] .post__description dt",
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a.post[href^='/en/news/']",
+          "attr": "href",
+          "transform": [
+            [
+              "regex_extract",
+              "/en/news/(\\d+)"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": ".post__description dt",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a.post[href^='/en/news/']",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://www.pubg.com"
+            ],
+            [
+              "strip_query_fragment"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": ".post__bottom dd",
+          "text": true,
+          "transform": [
+            [
+              "iso8601",
+              [
+                "%Y.%m.%d"
+              ],
+              "Z"
+            ]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "css",
+          "selector": ".post__bottom dt",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "wait_selector": ".content-template__inner.fr-view",
+    "content": [
+      {
+        "from": "css",
+        "selector": ".content-template__inner.fr-view",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": ".news-detail__content",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": ".detail-header__title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": ".detail-header__date-info",
+          "text": true,
+          "transform": [
+            [
+              "regex_extract",
+              "(\\d{4}\\.\\d{2}\\.\\d{2})"
+            ],
+            [
+              "iso8601",
+              [
+                "%Y.%m.%d"
+              ],
+              "Z"
+            ]
+          ]
+        }
+      ]
+    }
+  }
+}

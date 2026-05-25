@@ -100,4 +100,29 @@ def run() -> list[tuple[str, bool, str]]:
                   len(out_real) >= 1 and out_real[0]["child_count"] == 6,
                   f"got {out_real!r}"))
 
+    # 9. Vue scoped rows: large head style/meta/link groups are chrome noise;
+    #    scoped data-v attrs must not prevent post anchors from grouping.
+    html_vue = (
+        "<html><head>"
+        + "".join(f"<style data-vue-ssr-id='{i}'>.x{i}{{}}</style>" for i in range(8))
+        + "</head><body><div class='post-contents__body' data-v-20f7ef50>"
+        + "".join(
+            f'''<a class="post post--pc" data-v-4a15cb84 data-v-20f7ef50 href="/en/news/{10000 + i}">
+                  <strong>PUBG notice {i}</strong>
+                </a>'''
+            for i in range(6)
+        )
+        + "</div></body></html>"
+    )
+    out_vue = html_repeating_patterns(html_vue, "https://www.pubg.com/en/news")
+    cases.append(("ignores_head_chrome_noise",
+                  all(not str(c.get("selector", "")).startswith("head >") for c in out_vue),
+                  f"got {out_vue!r}"))
+    cases.append(("vue_scoped_post_rows_grouped",
+                  len(out_vue) >= 1
+                  and out_vue[0]["selector"] == "div.post-contents__body > a.post.post--pc"
+                  and out_vue[0]["sample_url"] == "https://www.pubg.com/en/news/10000"
+                  and out_vue[0]["href_pattern_guess"] == "/en/news/{n}",
+                  f"got {out_vue[:2]!r}"))
+
     return cases

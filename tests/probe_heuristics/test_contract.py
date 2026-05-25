@@ -34,6 +34,15 @@ def run() -> list[tuple[str, bool, str]]:
     try:
         validate_payload("list_candidates.json", happy_obj)
         validate_payload("article_candidates.json", [])
+        validate_payload("article_click.json", {
+            "requested_url": "https://x.com/news",
+            "resolved_url": "https://x.com/news/1",
+            "status": 200,
+            "clicked_text": "News title",
+            "clicked_href": "/news/1",
+            "note": None,
+            "consent_dismissed": 1,
+        }, allow_extra=False)
         cases.append(("happy_object_and_object_list", True, ""))
     except ContractError as e:
         cases.append(("happy_object_and_object_list", False, f"unexpected raise: {e}"))
