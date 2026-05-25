@@ -152,3 +152,58 @@ row selector (`.radiolab-card .card-title-link .h2`) 못 추측:
 
 handcrafted config (이 case §해결) 가 정답인 사이트. recipe 가 모든 SPA 회복 가능한 건 아님 —
 정보 부족 사이트는 hand-config 필요.
+
+---
+
+## 2026-05-25 추가 — probe/digest 강화 3 option 적용 + 부분 회복
+
+`docs/cases/_plan_radiolab_probe_digest_2026-05-25.md` (codex 리뷰 통과) 3 option 박음:
+
+1. **CSS component class extract** (`engine/digest.py:_extract_css_component_classes`) —
+   raw HTML 의 `<style>` rule 에서 component class 추출. utility/chrome/generic blocklist
+   적용 후 top 8 by frequency.
+2. **probe hydration extra wait** (`probe/fetch_headless.py:_has_spa_hydration_marker`) —
+   strict SPA marker (Nuxt/Next/Vuex) 발견 시 추가 1500ms quiet 대기 후 capture.
+3. **skeleton descendant reject** (`probe/extract.py:_row_has_skeleton_descendant`) — row
+   의 첫 10 자손 class 에 skeleton/loading 박혔으면 후보 reject.
+
+### 효과
+
+Radiolab probe 재실행 결과:
+
+```
+=== top html_repeating_patterns ===
+   head > link child= 58 ...
+   head > meta child= 23 ...
+   head > style child= 17 ...
+   g > path.st0 child= 6 ...
+=== css_component_classes (top 8) ===
+   radiolab-card rule_count= 123 co= ['v-card', 'card-blurb', 'card-title-link']  ← 진짜 row!
+   v-card rule_count= 123 co= ['radiolab-card', 'card-blurb', 'card-title-link']
+   card-blurb rule_count= 75 ...
+   card-title-link rule_count= 27 ...
+```
+
+- ✅ skeleton container (`div.col-12.mb-6`) 가 html_repeating_patterns top 에서 사라짐
+- ✅ css_component_classes top 1 = `radiolab-card` (rule_count 123)
+- ✅ N100 register attempt 5 의 cfg = `row_selector: .radiolab-card`, `wait_selector:
+  .radiolab-card, .card-title-link, .card-blurb` — **LLM 이 진짜 selector 박음** (CSS extract
+  + _pick_spa_wait_selector fallback 효과)
+
+### 그러나 0건 — 남은 한계 (별도 plan 필요)
+
+attempt 5 의 LLM cfg vs handcrafted 비교:
+- LLM url: `https://radiolab.org/podcast`
+- handcrafted url: `https://radiolab.org/podcast?page={page}`
+
+Radiolab Nuxt 가 `?page` query 없는 URL 에서 podcast cards 안 그림 (페이지네이션 hint 필요).
+또는 `/podcast` 자체가 마케팅 redirect 페이지 (probe `S4.click` 결과 = `radiolab.org/the-lab`
+로 라우팅됨이 그 증거).
+
+= 사이트 별 URL pagination param 처리 — 일반화 어려움. handcrafted config (위 §해결) 가 정답
+유지. recipe + probe 강화로 *selector 추측은 봉합* 됐지만 *URL hint* 는 LLM 추가 휴리스틱
+필요 (별도 plan 후보).
+
+### commit chain
+
+- `19e1815` probe/digest 3 option (CSS extract + SPA wait + skeleton reject)
