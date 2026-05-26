@@ -151,10 +151,11 @@ _ARTIFACTS: dict[str, ArtifactContract] = {
                                 "각 dict={url, source: 'link_rel'|'html_body'|'har_resp_xml', type?}. "
                                 "RSS/Atom config 는 list.url_template 에 이 URL 을 그대로 쓴다."),
             _ContractField("pagination_hints", type_hint="list[dict]", required=False,
-                           note="URL pagination 후보 — 정적 HTML anchor 의 ?page=N + HAR XHR fetch URL 의 ?page=N. "
-                                "각 dict={kind: 'query_param', param, url_template, source: 'html_anchor'|'har_xhr', evidence_url}. "
-                                "Radiolab 류 SPA 가 ?page query 없으면 cards 안 그리는 사이트 봉합. config writer 는 "
-                                "hint 발견 시 list.url_template 에 그대로 박고 list.pagination={kind:'query_param', page_param:<param>}."),
+                           note="URL pagination 후보 — 정적 HTML anchor 의 ?page=N + /page/N + HAR XHR fetch URL 의 ?page=N. "
+                                "각 dict={kind: 'query_param'|'path_segment', param, url_template, source: 'html_anchor'|'har_xhr', evidence_url}. "
+                                "Radiolab 류 SPA 가 ?page query 없으면 cards 안 그리는 사이트 봉합 + atlus/fate-go 류 `/news/page/N` "
+                                "path-segment archive 봉합. config writer 는 hint 발견 시 list.url_template 에 그대로 박고 "
+                                "list.pagination={kind:<kind>, page_param:<param>}."),
             _ContractField("runtime_id_candidates", type_hint="list[dict]",
                            note="HTML 안 *런타임 ID/슬러그* 후보 — URL path 에 없지만 사이트가 페이지에 명시한 cafe_id/board_id/community_id 등. "
                                 "각 dict: {name, value, source: 'js_var'|'next_data'|'meta_og_url', context}. config 작성자가 이 값을 "

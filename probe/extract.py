@@ -2124,6 +2124,28 @@ _PAGE_PARAM_RE = re.compile(
     r"[?&](" + "|".join(re.escape(n) for n in _PAGE_PARAM_NAMES) + r")=(\d+)",
     re.IGNORECASE,
 )
+# path-segment pagination — `/page/N` at path end (atlus/fate-go/WordPress archives 류).
+# `/p/N` 은 ambiguous (`/p/posts/` 등) 라 채택 X — `/page/N` 만.
+_PATH_PAGE_RE = re.compile(r"/page/(\d+)/?$", re.IGNORECASE)
+
+
+def _pagination_path_template(url: str) -> Optional[str]:
+    """url 의 `/page/N` 자리에 `{page}` 박은 url_template 반환. 실패 시 None.
+
+    예: `https://www.atlus.co.jp/news/page/2` → `https://www.atlus.co.jp/news/page/{page}`.
+    """
+    try:
+        sp = urlsplit(url)
+    except ValueError:
+        return None
+    m = _PATH_PAGE_RE.search(sp.path)
+    if not m:
+        return None
+    trailing_slash = sp.path.endswith("/")
+    new_path = sp.path[:m.start()] + "/page/{page}"
+    if trailing_slash:
+        new_path += "/"
+    return urlunsplit((sp.scheme, sp.netloc, new_path, sp.query, ""))
 
 
 def _pagination_url_template(url: str, param: str) -> Optional[str]:
@@ -2151,11 +2173,11 @@ def _pagination_url_template(url: str, param: str) -> Optional[str]:
 
 @heuristic
 def pagination_hints(html: str, *, base_url: str, har_path: Optional[Path] = None) -> list[dict]:
-    """페이지네이션 query param 후보. 두 source 종합 (html anchor + HAR XHR).
+    """페이지네이션 후보 추출 — 두 source 종합 (html anchor + HAR XHR).
 
     출력: [{kind, param, url_template, source, evidence_url}, ...] — confidence 순.
-      - kind: "query_param" (현재 유일). path_segment 는 후속 plan.
-      - param: 검출된 param 이름 (page/p/offset/cursor/start/skip/cursor/_page/page_num).
+      - kind: "query_param" (`?page=N` 형식) | "path_segment" (`/page/N` 형식).
+      - param: 검출된 param 이름 (query_param) 또는 "page" (path_segment 고정).
       - url_template: base_url 기반 `?{param}={{page}}` 박은 URL. *page_url 의 path* 에 박음
         (XHR 의 API host 가 다른 경우 — 예: Radiolab radiolab.org 인데 XHR api.wnyc.org —
         config 의 list.url_template 은 page URL 의 path 에 query 박은 게 맞음).
@@ -2168,35 +2190,83 @@ def pagination_hints(html: str, *, base_url: str, har_path: Optional[Path] = Non
     hints: list[dict] = []
     seen: set[tuple[str, str]] = set()  # (param, url_template) 중복 제거
 
-    # (1) HTML anchor pagination
+    # (1) HTML anchor pagination — query_param + path_segment 동시 스캔
     if html:
         try:
             soup = BeautifulSoup(html, "lxml")
         except Exception:
             soup = None
         if soup:
+            base_host = (urlsplit(base_url).netloc or "").lower() if base_url else ""
+            # path_segment 누적: stem(`/news/page/`) → {page_numbers}, evidence_url first.
+            # in_pager_class: 같은 stem 이 `class~="pager|pagination|paging"` 안에 박혀있나 — fate-go
+            # 류 "Next → /page/2/" 단일 링크라도 pager wrapper 안이면 board pagination 신호.
+            path_stem_pages: dict[str, set[str]] = {}
+            path_stem_evidence: dict[str, str] = {}
+            path_stem_in_pager: dict[str, bool] = {}
+            pager_class_re = re.compile(r"\b(pager|pagination|paging|page-nav)\b", re.IGNORECASE)
             for a in soup.find_all("a", href=True)[:500]:  # 첫 500 만 검사
                 href = a.get("href") or ""
                 if not isinstance(href, str):
                     continue
-                m = _PAGE_PARAM_RE.search(href)
-                if not m:
-                    continue
-                param = m.group(1).lower()
                 abs_url = urljoin(base_url, href)
-                tmpl = _pagination_url_template(abs_url, param)
-                if not tmpl:
+                # 1a. query_param 스타일
+                m_q = _PAGE_PARAM_RE.search(href)
+                if m_q:
+                    param = m_q.group(1).lower()
+                    tmpl_q = _pagination_url_template(abs_url, param)
+                    if tmpl_q:
+                        key_q = (param, tmpl_q)
+                        if key_q not in seen:
+                            seen.add(key_q)
+                            hints.append({
+                                "kind": "query_param",
+                                "param": param,
+                                "url_template": tmpl_q,
+                                "source": "html_anchor",
+                                "evidence_url": abs_url,
+                            })
+                # 1b. path_segment 스타일 (`/page/N`) — same-host 만 누적
+                sp_abs = urlsplit(abs_url)
+                if base_host and (sp_abs.netloc or "").lower() != base_host:
                     continue
-                key = (param, tmpl)
-                if key in seen:
+                m_p = _PATH_PAGE_RE.search(sp_abs.path)
+                if not m_p:
                     continue
-                seen.add(key)
+                page_num = m_p.group(1)
+                stem = sp_abs.path[:m_p.start()] + "/page/"
+                path_stem_pages.setdefault(stem, set()).add(page_num)
+                path_stem_evidence.setdefault(stem, abs_url)
+                # ancestor class 검사 — `<div class="pager">` ... `<a href="/page/2/">`
+                in_pager = False
+                for anc in a.parents:
+                    if getattr(anc, "name", None) is None:
+                        continue
+                    cls = anc.get("class") if hasattr(anc, "get") else None
+                    if cls and pager_class_re.search(" ".join(cls)):
+                        in_pager = True
+                        break
+                if in_pager:
+                    path_stem_in_pager[stem] = True
+            # emit 조건: ≥2 distinct page numbers OR pager-class wrapper.
+            # 단일 `/page/N` 만 있어도 pager-class 안이면 board pagination 강신호 (fate-go 류 Next→ only).
+            for stem, pages in path_stem_pages.items():
+                if len(pages) < 2 and not path_stem_in_pager.get(stem):
+                    continue
+                ev = path_stem_evidence[stem]
+                tmpl_p = _pagination_path_template(ev)
+                if not tmpl_p:
+                    continue
+                key_p = ("page", tmpl_p)
+                if key_p in seen:
+                    continue
+                seen.add(key_p)
                 hints.append({
-                    "kind": "query_param",
-                    "param": param,
-                    "url_template": tmpl,
+                    "kind": "path_segment",
+                    "param": "page",
+                    "url_template": tmpl_p,
                     "source": "html_anchor",
-                    "evidence_url": abs_url,
+                    "evidence_url": ev,
                 })
 
     # (2) HAR XHR pagination — SPA 의 fetch URL 에 page param 박힌 것

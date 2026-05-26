@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 327 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 328 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -17,6 +17,7 @@
 | [`host_gamersky-com_news_b9043abf`](host_gamersky-com_news_b9043abf.md) | ✅ registered by hand config after batch retry gen_fail | 2026-05-26 | config | gen_fail, validator_timeout, selector_drift | https://www.gamersky.com/news/ |
 | [`host_focus-entmt-com_root_0966e52e`](host_focus-entmt-com_root_0966e52e.md) | 🧩 수동 config — Focus Entertainment /en/news static cards | 2026-05-26 | none | codex_agentic_timeout, root_marketing_homepage, article_fetch_timeout | https://www.focus-entmt.com/ |
 | [`host_finji-co_news_a591da3d`](host_finji-co_news_a591da3d.md) | 🧩 수동 config — /news HTML의 product link 후보 대신 검증된 /feed.xml RSS를 폴링 | 2026-05-26 | F | gen_fail, llm_api_unavailable, rss_available, product_link_first_candidate | https://www.finji.co/news/ |
+| [`host_atlus-co-jp_news_14abbfb2`](host_atlus-co-jp_news_14abbfb2.md) | ✅ improved — `_heterogeneous_hub_check` 가 정적 pagination + announcement-tab 으로 escape | 2026-05-26 | C+F | heterogeneous_hub_check, pagination_hints_path_segment, article_shape_underscore | https://www.atlus.co.jp/news/ |
 | [`host_annapurnaintera_news_72cf03d0`](host_annapurnaintera_news_72cf03d0.md) | ✅ 수동 config 등록 (httpx_html list, internal redirector URLs only) | 2026-05-26 | none | article_body_len, external_article_redirect | https://www.annapurnainteractive.com/news/ |
 | [`host_3dmgame-com_root_40371626`](host_3dmgame-com_root_40371626.md) | ✅ registered by hand config after batch retry gen_fail | 2026-05-26 | config | gen_fail, validator_timeout, mixed_homepage_rows | https://www.3dmgame.com/ |
 | [`bug_classify_wall_deadline_2026-05-26`](bug_classify_wall_deadline_2026-05-26.md) | 🟢 fixed (회귀 0 — probe_smoke 1491 PASS) | 2026-05-26 | F | register_wall_timeout, classify_llm_stall | (infra — no single url) |
@@ -348,7 +349,7 @@
 | C+A+D | 2 |
 | C+A+D+F | 1 |
 | C+D | 2 |
-| C+F | 2 |
+| C+F | 3 |
 | C+F+A | 1 |
 | C+config | 2 |
 | D | 2 |
@@ -371,12 +372,12 @@
 | httpx_json | 26 |
 | httpx_json (미적용 — 콘텐츠 0) | 1 |
 | mixed | 1 |
-| none | 41 |
+| none | 42 |
 | playwright_html | 47 |
 | rejected | 1 |
 | rss | 1 |
 
 ### 최근 90일 (≥ 2026-02-25)
 
-케이스 327 건.
+케이스 328 건.
 

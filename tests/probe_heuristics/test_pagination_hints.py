@@ -118,4 +118,78 @@ def run() -> list[tuple[str, bool, str]]:
                           for h in out_rt),
                       f"got {out_rt!r}"))
 
+    # 8. path_segment pagination — `/news/page/2`·`/news/page/3` 정적 archive
+    #    (atlus.co.jp/news/, fate-go.jp/news/ 류 — 2026-05-26 games-jp batch).
+    from probe.extract import _pagination_path_template
+    html_path_seg = """
+    <html><body>
+      <a href="/news/page/2">2</a>
+      <a href="/news/page/3">3</a>
+      <a href="/news/page/163">163</a>
+    </body></html>
+    """
+    out_ps = pagination_hints(html=html_path_seg, base_url="https://www.atlus.co.jp/news/")
+    path_seg_hints = [h for h in out_ps if h.get("kind") == "path_segment"]
+    cases.append(("path_segment_detected", len(path_seg_hints) >= 1, f"got {out_ps!r}"))
+    if path_seg_hints:
+        cases.append(("path_segment_template",
+                      path_seg_hints[0]["url_template"] == "https://www.atlus.co.jp/news/page/{page}",
+                      f"got {path_seg_hints[0]!r}"))
+        cases.append(("path_segment_param_page", path_seg_hints[0]["param"] == "page", ""))
+
+    # 9. path_segment requires ≥2 distinct page numbers OR pager-class wrapper.
+    # 9a. 단일 link + pager-class wrapper 없음 → 거부
+    html_single_page = '<html><body><a href="/news/page/2">2</a></body></html>'
+    out_single = pagination_hints(html=html_single_page, base_url="https://x.com/news/")
+    cases.append(("path_segment_single_page_no_wrapper_rejected",
+                  not any(h.get("kind") == "path_segment" for h in out_single),
+                  f"got {out_single!r}"))
+    # 9b. 단일 link 인데 `class="pager"` 안 → 허용 (fate-go 류 Next→ only).
+    html_pager_wrapper = """
+    <html><body>
+      <div class="pager">
+        <p class="prev"><a href="/page/2/">次へ »</a></p>
+      </div>
+    </body></html>
+    """
+    out_pw = pagination_hints(html=html_pager_wrapper, base_url="https://www.fate-go.jp/news/")
+    pager_hints = [h for h in out_pw if h.get("kind") == "path_segment"]
+    cases.append(("path_segment_pager_class_single_accepted", len(pager_hints) >= 1, f"got {out_pw!r}"))
+    if pager_hints:
+        cases.append(("path_segment_pager_class_template",
+                      pager_hints[0]["url_template"] == "https://www.fate-go.jp/page/{page}/",
+                      f"got {pager_hints[0]!r}"))
+
+    # 10. path_segment cross-host skip — `/page/N` 에 다른 host 인 link 는 collect X
+    html_cross_host = """
+    <html><body>
+      <a href="https://other.com/news/page/2">2</a>
+      <a href="https://other.com/news/page/3">3</a>
+    </body></html>
+    """
+    out_cross = pagination_hints(html=html_cross_host, base_url="https://x.com/news/")
+    cases.append(("path_segment_cross_host_skipped",
+                  not any(h.get("kind") == "path_segment" for h in out_cross),
+                  f"got {out_cross!r}"))
+
+    # 11. trailing slash 보존 — `/page/2/` → template `/page/{page}/`
+    html_trail = """
+    <html><body>
+      <a href="/page/2/">2</a>
+      <a href="/page/3/">3</a>
+    </body></html>
+    """
+    out_trail = pagination_hints(html=html_trail, base_url="https://x.com/")
+    trail_hints = [h for h in out_trail if h.get("kind") == "path_segment"]
+    cases.append(("path_segment_trailing_slash_preserved",
+                  trail_hints and trail_hints[0]["url_template"].endswith("/page/{page}/"),
+                  f"got {trail_hints!r}"))
+
+    # 12. _pagination_path_template helper
+    cases.append(("path_template_basic",
+                  _pagination_path_template("https://x.com/news/page/2") == "https://x.com/news/page/{page}",
+                  ""))
+    cases.append(("path_template_no_match_returns_none",
+                  _pagination_path_template("https://x.com/news/") is None, ""))
+
     return cases

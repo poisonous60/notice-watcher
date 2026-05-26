@@ -750,6 +750,12 @@ def _root_marketing_homepage_check(digest: dict, url: str) -> tuple[bool, str]:
                    + suggestion + f" [신호: {detail}]")
 
 
+_ANNOUNCEMENT_TAB_RE = re.compile(
+    r"/(news|notice|notices|announcement|announcements|topics|info|press|release|releases|notification|notifications|whatsnew|news-and-events|news-events)(/|$)",
+    re.IGNORECASE,
+)
+
+
 def _heterogeneous_hub_check(digest: dict, url: str) -> Optional[str]:
     """*content (글) 행이 페이지에서 dominant 한가* 검사 (gen_fail post-mortem 용).
 
@@ -784,7 +790,15 @@ def _heterogeneous_hub_check(digest: dict, url: str) -> Optional[str]:
     if _validated_feed_candidates(digest):
         return None
     lc = digest.get("list_candidates") or {}
-    board_path = (urlsplit(url).path or "").rstrip("/").lower() or "/"
+    # F-layer escape: URL path 에 명시적 announcement-tab segment (/news/·/notice/ 등)
+    # + 정적 pagination hint (≥1) = 사이트가 *공지 탭 분리 + 페이지네이션* 보유 = board 본질 신호.
+    # 2026-05-26 games-jp batch (atlus.co.jp/news/, fate-go.jp/news/) 박힘 — 정적 HTML
+    # 에 `/news/page/2`·`/news/page/3` 있어도 article 클러스터 슬러그 모양이 underscore/
+    # 외부 host 라 미검출 → false-reject. announcement-tab + pagination = explicit board 의도.
+    raw_path = (urlsplit(url).path or "").lower()
+    board_path = raw_path.rstrip("/") or "/"
+    if _ANNOUNCEMENT_TAB_RE.search(raw_path) and (lc.get("pagination_hints") or []):
+        return None
     article_clusters: list[tuple[int, str, str]] = []  # (cc, sample_path, prefix)
     nav_clusters: list[tuple[int, str]] = []           # (cc, sample_path)
     for p in (lc.get("html_repeating_patterns") or []):
@@ -808,8 +822,11 @@ def _heterogeneous_hub_check(digest: dict, url: str) -> Optional[str]:
         if len(segs) >= 2:
             last = segs[-1]
             has_pl = "{" in last and "}" in last
-            slug_shape = len(last) >= 8 and last.count("-") >= 2
-            id_shape = (len(last) >= 8 and last.replace(".", "").isalnum()
+            # slug_shape: 8+ char + 2+ separator (- or _). JP/CMS 가 `2026_grand_caster_cp`
+            # 같이 underscore 슬러그 박는 경우 (fate-go) 봉합.
+            slug_shape = len(last) >= 8 and (last.count("-") + last.count("_")) >= 2
+            # id_shape: underscore 도 식별자 정상 문자로 취급.
+            id_shape = (len(last) >= 8 and last.replace(".", "").replace("_", "").isalnum()
                         and any(c.isdigit() for c in last) and any(c.isalpha() for c in last))
             is_article_shape = has_pl or slug_shape or id_shape
         if is_article_shape:
