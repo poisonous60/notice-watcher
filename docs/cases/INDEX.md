@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 328 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 329 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -15,6 +15,7 @@
 | [`host_mobiusdigitalga_news_21205848`](host_mobiusdigitalga_news_21205848.md) | 🧩 수동 config — Weebly RSS feed 로 baseline 10건 등록 | 2026-05-26 |  | posts_nonempty, first_article_archive, rss_feed_available | https://www.mobiusdigitalgames.com/news/ |
 | [`host_macgamestore-co_news_9436b643`](host_macgamestore-co_news_9436b643.md) | ✅ registered by hand config after batch retry gen_fail | 2026-05-26 | config | gen_fail, validator_timeout, repeated_product_events | https://www.macgamestore.com/news/ |
 | [`host_gamersky-com_news_b9043abf`](host_gamersky-com_news_b9043abf.md) | ✅ registered by hand config after batch retry gen_fail | 2026-05-26 | config | gen_fail, validator_timeout, selector_drift | https://www.gamersky.com/news/ |
+| [`host_gamecity-ne-jp_news_ce778383`](host_gamecity-ne-jp_news_ce778383.md) | 🛠️ infra timeout + retry feedback fixed; N100 rerun pending | 2026-05-26 | D | validate_internal_timeout, posts_nonempty, infra_feedback_misguidance, agentic_selection | https://www.gamecity.ne.jp/news/ |
 | [`host_focus-entmt-com_root_0966e52e`](host_focus-entmt-com_root_0966e52e.md) | 🧩 수동 config — Focus Entertainment /en/news static cards | 2026-05-26 | none | codex_agentic_timeout, root_marketing_homepage, article_fetch_timeout | https://www.focus-entmt.com/ |
 | [`host_finji-co_news_a591da3d`](host_finji-co_news_a591da3d.md) | 🧩 수동 config — /news HTML의 product link 후보 대신 검증된 /feed.xml RSS를 폴링 | 2026-05-26 | F | gen_fail, llm_api_unavailable, rss_available, product_link_first_candidate | https://www.finji.co/news/ |
 | [`host_atlus-co-jp_news_14abbfb2`](host_atlus-co-jp_news_14abbfb2.md) | ✅ improved — `_heterogeneous_hub_check` 가 정적 pagination + announcement-tab 으로 escape | 2026-05-26 | C+F | heterogeneous_hub_check, pagination_hints_path_segment, article_shape_underscore | https://www.atlus.co.jp/news/ |
@@ -352,7 +353,7 @@
 | C+F | 3 |
 | C+F+A | 1 |
 | C+config | 2 |
-| D | 2 |
+| D | 3 |
 | E | 6 |
 | E+A+C+D | 1 |
 | F | 90 |
@@ -373,11 +374,11 @@
 | httpx_json (미적용 — 콘텐츠 0) | 1 |
 | mixed | 1 |
 | none | 42 |
-| playwright_html | 47 |
+| playwright_html | 48 |
 | rejected | 1 |
 | rss | 1 |
 
 ### 최근 90일 (≥ 2026-02-25)
 
-케이스 328 건.
+케이스 329 건.
 

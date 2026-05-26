@@ -33,6 +33,19 @@ class GenerationError(RuntimeError):
         self.last_feedback = last_feedback
 
 
+_INFRA_VALIDATION_RE = re.compile(
+    r"Temporary failure in name resolution|net::ERR_NAME_NOT_RESOLVED|"
+    r"Name or service not known|"
+    r"TargetClosedError|browser launch failed|Chromium sandbox launch failed|"
+    r"ConnectTimeout|ConnectError: \[Errno -3\]",
+    re.I,
+)
+
+
+def _validation_feedback_is_infra(text: str) -> bool:
+    return bool(_INFRA_VALIDATION_RE.search(text or ""))
+
+
 def _build_recipe_feedback_section(recipes: list[str], patched_candidate: Optional[dict]) -> str:
     """D-layer recipe text hint section — feedback text 뒤에 박힘.
 
@@ -94,14 +107,24 @@ def _enrich_retry_feedback(rep, prev_cfg: Optional[dict], digest: dict, attempt_
             lst_dump = lst_dump[:600] + "…(잘림)"
         if len(art_dump) > 600:
             art_dump = art_dump[:600] + "…(잘림)"
+        if _validation_feedback_is_infra(base):
+            guidance = (
+                "  → 이번 검증 실패는 DNS/브라우저 launch 같은 실행환경 실패다. "
+                "selector/strategy 가 틀렸다는 증거가 아니므로, probe 가 지지하는 "
+                "strategy/selector 를 버리지 말고 같은 방향을 재검증해라."
+            )
+        else:
+            guidance = (
+                "  → 위 selector/strategy 로 검증 실패했다. 같은 selector 살짝 변형은 똑같이 실패한다 — "
+                "**방향 자체**(strategy 또는 selector 의 root 컨테이너)를 바꿔라."
+            )
         parts.append(
-            "\n### 직전 시도가 박은 cfg (똑같이 박지 마라)\n"
+            "\n### 직전 시도가 박은 cfg (재시도 판단 근거)\n"
             f"  strategy: {strat!r}\n"
             f"  list: {lst_dump}\n"
             f"  article: {art_dump}\n"
             f"  headers: {json.dumps(prev_cfg.get('headers') or {}, ensure_ascii=False)[:200]}\n"
-            "  → 위 selector/strategy 로 검증 실패했다. 같은 selector 살짝 변형은 똑같이 실패한다 — "
-            "**방향 자체**(strategy 또는 selector 의 root 컨테이너)를 바꿔라."
+            f"{guidance}"
         )
 
     # (2) probe 정적 HTML top 반복 패턴 후보 재표시 (LLM 이 못 찾던 selector 후보)
@@ -139,15 +162,26 @@ def _enrich_retry_feedback(rep, prev_cfg: Optional[dict], digest: dict, attempt_
     if n_feed:
         counts.append(f"feed_candidates={n_feed}건 (RSS/Atom)")
     if counts:
-        parts.append(
-            "\n### probe 가 본 *다른* list 전략 후보 (지금 strategy 안 풀리면 검토)\n  "
-            + "\n  ".join(counts)
-            + "\n  → 후보가 있는데 못 풀고 있으면 strategy 자체를 바꿔라."
-        )
+        if _validation_feedback_is_infra(base):
+            parts.append(
+                "\n### probe 가 본 *다른* list 전략 후보 (infra 실패에서는 참고용)\n  "
+                + "\n  ".join(counts)
+                + "\n  → 이번 실패가 DNS/브라우저 launch 류면 strategy 실패 증거가 아니다. "
+                "probe 가 지지한 현재 방향을 버리는 근거로 쓰지 마라."
+            )
+        else:
+            parts.append(
+                "\n### probe 가 본 *다른* list 전략 후보 (지금 strategy 안 풀리면 검토)\n  "
+                + "\n  ".join(counts)
+                + "\n  → 후보가 있는데 못 풀고 있으면 strategy 자체를 바꿔라."
+            )
 
     # (4) attempt history — 누적 시도된 strategy/selector + fail detail
     if len(attempt_history) >= 1:
-        lines = [f"\n### 직전 {len(attempt_history)} 회 시도 누적 (같은 방향 X)"]
+        if _validation_feedback_is_infra(base):
+            lines = [f"\n### 직전 {len(attempt_history)} 회 시도 누적 (infra 실패 — 방향 전환 근거 아님)"]
+        else:
+            lines = [f"\n### 직전 {len(attempt_history)} 회 시도 누적 (같은 방향 X)"]
         for h in attempt_history:
             fails = h.get("fails_detail") or h.get("fails") or []
             lines.append(
@@ -158,11 +192,18 @@ def _enrich_retry_feedback(rep, prev_cfg: Optional[dict], digest: dict, attempt_
         # 같은 hard fail 반복 감지 (name set 비교)
         all_fails = [tuple(sorted(h.get("fails") or [])) for h in attempt_history]
         if len(all_fails) >= 2 and len(set(all_fails)) == 1:
-            lines.append(
-                "  ⚠ 직전 시도들 모두 *같은 hard fail 종류* 만 일으킴 — 같은 방향으론 절대 안 풀린다. "
-                "selector 미세 조정 대신 strategy 자체 또는 selector root 를 바꿔라. "
-                "본문 fail 반복이면 article.body_empty_acceptable:true 검토."
-            )
+            if _validation_feedback_is_infra(base):
+                lines.append(
+                    "  ⚠ 반복 실패가 DNS/브라우저 launch 같은 실행환경 실패다. "
+                    "같은 방향이 틀렸다는 증거가 아니다. probe 가 지지한 strategy/selector 를 유지하고 "
+                    "검증 가능한 필드만 조정해라."
+                )
+            else:
+                lines.append(
+                    "  ⚠ 직전 시도들 모두 *같은 hard fail 종류* 만 일으킴 — 같은 방향으론 절대 안 풀린다. "
+                    "selector 미세 조정 대신 strategy 자체 또는 selector root 를 바꿔라. "
+                    "본문 fail 반복이면 article.body_empty_acceptable:true 검토."
+                )
         parts.append("\n".join(lines))
 
     # (5) D-layer recipe hint — 호출부에서 계산해 주입

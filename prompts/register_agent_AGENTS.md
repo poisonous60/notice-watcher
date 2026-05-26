@@ -32,6 +32,12 @@ All inputs you need are already staged here:
 2. Read `examples/manifest.json` to see which examples are relevant.
 3. If `failure_packet.json` exists, read it to learn what already failed.
    You may reuse, patch, or discard that candidate completely.
+   If its failure text is DNS/network/browser infrastructure
+   (`ERR_NAME_NOT_RESOLVED`, `Temporary failure in name resolution`,
+   `TargetClosedError`, `browser launch failed`, Chromium sandbox/launch),
+   that is NOT evidence that the selector or strategy was wrong. Do not switch
+   away from a probe-grounded `playwright_html`/`httpx_html` direction solely
+   because of such an infra failure.
 4. Read 1-2 most relevant `examples/*.json`. Optionally skim
    `config_writer_rules.txt` only if uncertain about a field.
 5. Before writing a config, perform SELF-VETO below. If it applies, STOP and
@@ -64,6 +70,18 @@ patterns. If the target is clearly not a board/listing, stop early:
 Do not invent selectors or a minimal fake config for these cases. If the page is
 ambiguous but could be an index/board, continue with config authoring and
 validator feedback.
+
+## PROBE-GROUNDED SELECTION
+
+- Prefer selectors and URLs that appear verbatim in `digest.json`
+  (`list_candidates.html_repeating_patterns[].selector`, `sample_url`,
+  `first_article_url`, `clicked_resolved_url`, validated API candidates).
+- Do not invent class names such as `.list-item__text` or CMS JSON endpoints
+  unless digest evidence shows them. If the row itself contains title/date text,
+  extract from `:self` with regex instead of inventing child selectors.
+- If a previous candidate used a probe-grounded rendered selector and failed
+  with DNS/browser launch infra errors, keep that direction and fix only fields
+  that validation proves wrong.
 
 ## TOKEN DISCIPLINE
 
