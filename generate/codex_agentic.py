@@ -708,6 +708,7 @@ async def _run_codex_agentic_once(
                 creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
             child_env = os.environ.copy()
             child_env["REPO_ROOT"] = str(repo)  # validate wrapper uses this
+            child_env["VALIDATE_TIMING_DIR"] = str(workdir / "validate_timing")
             venv_bin = Path(sys.executable).parent
             child_env["PATH"] = str(venv_bin) + os.pathsep + child_env.get("PATH", "")
             proc = subprocess.Popen(
