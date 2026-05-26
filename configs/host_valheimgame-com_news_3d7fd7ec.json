@@ -1,0 +1,158 @@
+{
+  "version": 1,
+  "site": "www.valheimgame.com",
+  "board": "news",
+  "strategy": "playwright_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9"
+  },
+  "timeout": 20,
+  "nav_timeout_ms": 30000,
+  "idle_timeout_ms": 15000,
+  "polite_sleep": {
+    "min": 5,
+    "max": 7
+  },
+  "list": {
+    "url_template": "https://www.valheimgame.com/news/",
+    "pagination": {
+      "kind": "none"
+    },
+    "page_size_max": 9,
+    "wait_selector": "article.news-article-card a[href*='/news/']",
+    "row_selector": "article.news-article-card",
+    "row_required_selector": "a[href*='/news/']",
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a[href*='/news/']",
+          "attr": "href",
+          "transform": [
+            [
+              "strip_query_fragment"
+            ],
+            [
+              "regex_extract",
+              "/news/([^/?#]+)$"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "h1",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a[href*='/news/']",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://www.valheimgame.com"
+            ],
+            [
+              "strip_query_fragment"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "p.date",
+          "text": true,
+          "transform": [
+            [
+              "iso8601",
+              [
+                "%d %B %Y"
+              ],
+              "+00:00"
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "div.text-content",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "cover_image": [
+        {
+          "from": "attr",
+          "selector": "img",
+          "attr": "src",
+          "transform": [
+            [
+              "urljoin",
+              "https://www.valheimgame.com"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "wait_selector": "div.text-content.standard-content.news-article",
+    "content": [
+      {
+        "from": "css",
+        "selector": "div.text-content.standard-content.news-article",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "div.article-content-content h1",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "div.date-row p",
+          "text": true,
+          "transform": [
+            [
+              "iso8601",
+              [
+                "%B %d, %Y"
+              ],
+              "+00:00"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "_source_url": "https://www.valheimgame.com/news/",
+  "_note": "The news list is rendered by the Nuxt client: static GET contains the article page body shape but not the repeated article.news-article-card rows. Use playwright_html headless default with a row-scoped wait_selector. robots.txt returns 404, so no Crawl-Delay was declared; keep a conservative 5-7s polite_sleep."
+}
