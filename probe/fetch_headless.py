@@ -492,7 +492,9 @@ def fetch_with_capture(
                     try:
                         _cmp = _detect_cmp(page)
                         if _cmp:
-                            (out_dir / "consent.json").write_text(
+                            # target 별 분리 — list/article 호출이 같은 out_dir 쓰는데 단일 파일이면 overwrite.
+                            # codex P-6789 review finding 6 (2026-05-26).
+                            (out_dir / f"consent.{target}.json").write_text(
                                 json.dumps(_cmp, ensure_ascii=False, indent=2), encoding="utf-8")
                             cmp_note = f"cmp: {_cmp.get('vendor') or _cmp.get('api')}"
                         else:
