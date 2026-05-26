@@ -446,12 +446,25 @@ def fetch_with_capture(
                 page.on("response", _on_response)
 
                 try:
-                    response = page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+                    try:
+                        response = page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+                    except Exception as ge:
+                        # goto timeout 시 — CF interstitial 이 navigation 을 deadlock 시킬 수 있음 (codex
+                        # P-6789 review finding 4, 2026-05-26). 현 page 에 CF challenge 가 떴는지 확인하고
+                        # 떴으면 conditional wait 거친 후 content() 시도 (response 는 없을 수 있음).
+                        challenge, _ = _is_cloudflare_interstitial(page)
+                        if not challenge:
+                            raise
+                        wait_note = _wait_through_cloudflare_interstitial(page) or "goto_timeout_cf_wait"
+                        response = None
+                        error = f"goto_recovered_after_cf_wait: {type(ge).__name__}: {ge}"
                     if response is not None:
                         status = response.status
                         response_headers = dict(response.headers)
                         final_url = response.url
-                    wait_note = _wait_through_cloudflare_interstitial(page)
+                        wait_note = _wait_through_cloudflare_interstitial(page)
+                    elif "wait_note" not in locals():
+                        wait_note = None
                     # 데이터 XHR/fetch 응답 끝날 때까지 대기 — networkidle 보다 빠름 (광고 image 무시)
                     _wait_xhr_quiet(page, quiet_ms=300, hard_timeout_ms=idle_timeout_ms)
 
