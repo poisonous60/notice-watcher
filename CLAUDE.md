@@ -181,6 +181,22 @@ bash scripts/setup-hooks.sh   # 또는 pwsh scripts/setup-hooks.ps1
 
 **범위 = 사이트 등록 gap 뿐 아니라 *오케스트레이션·하네스·process 실수*도 포함** (2026-05-22 사용자 feedback). 자가개선 인프라(§6/ADR 0003)는 등록 품질(probe/prompt/recognizer) 대상이지만, *Claude 가 batch 를 모는 방식*의 실수 — watcher 를 shell `&` 로 띄워 알림 유실, two-dot diff 오진, URL 과도 remap, 남의 파일 stage 등 — 도 같은 룰을 받는다. **그런 실수를 잡으면 "재시도하고 넘어감"으로 끝내지 말고, 그 자리에서 durable layer 에 게이트를 박아라**: SKILL.md(§0c 등)·CLAUDE.md(§9 등)·해당 스크립트 docstring·`feedback-*` memory 중 맞는 곳. 게이트 박기가 한 줄이면 *이번 turn 에 같이* 박는다 (별도 follow-up 으로 미루기 X). "내가 알아챘으면 즉시 영구화" 가 기본 반사. (예: 2026-05-22 shell `&` watcher 유실 → `codex_watch.py` 멀티파일+docstring 경고 + SKILL §0c step 4 + 이 줄.)
 
+### 8b. perf/timeout/속도 진단 = real artifact 측정 의무 (deploy 게이트)
+
+성능·timeout·속도·렌더 시간 류 작업에서 **real artifact 측정 (사이트 1개 timing trace / API call ms / batch entry 1건 outcome) 없이 merge / push / N100 deploy / batch 재시도 금지**. unit fixture (mock/fake adapter) PASS + `probe_smoke` PASS = deploy 게이트 충족 X — code path 검증일 뿐 효과 검증 아님. NEW vs OLD ms 또는 outcome 비교 표가 진짜 게이트.
+
+**Why**: 2026-05-26 validator timeout 1차 patch — unit test (`article_calls=['P0','P1']`) PASS + `probe_smoke` 1522 PASS 만 보고 commit 734eda0 merge+push+N100 배포+19개 `batch --failed` 재시도. real 사이트 timing 0 측정. drain 결과 atlus_root 1개만 등록 (효과 거의 없음). 측정 없는 deploy = 사용자 시간 1 cycle + N100 자원 + 추적 노이즈 낭비. 사용자 분노 받고서야 측정 안 한 거 자인.
+
+**How to apply**: plan 단계에서 "성능 / 시간 / timeout / 속도 / 느림 / 빠름" 어휘 또는 사용자 "왜 느려/오래걸려" 질문 = **plan 첫 단계가 측정 명시** 의무. fix 후보 제시·코드 분석·codex 위임은 *측정 표 작성 후*. 측정 직접 못 함 (장비/접근 부족) 명시 또는 사용자가 "측정 skip" 명시 받기 전엔 deploy gate 닫힘. 진단 안 한 fix 추측 = 같은 결과 (1 cycle 낭비). [[feedback-c-layer-verify-on-real-artifact]] 의 perf 류 강화.
+
+### 8c. codex deferred 가 사용자 가설과 일치 = audit 정지 게이트
+
+codex 위임 결과 검토 시 deferred / "out of scope" / "global risk" / "defer to next PR" 항목이 *사용자가 직접 제기한 가설·의심·root-cause 후보* 와 일치하면 **audit PASS 선언 + merge 진행 금지**. §0c-회피 게이트 2 (일반화 punt) 발동 가정 — codex 가 safe-low-risk 만 박고 사용자 가설 punt 한 경우 효과 0. merge 전 사용자에게 명시 확인 ("codex 가 [사용자 가설] deferred 했는데 진행 OK?").
+
+**Why**: 2026-05-26 validator timeout codex chunk — 사용자 가설 (wait_until="commit", chromium reuse, probe-static→httpx bias) 3개 모두 deferred ("global 변경 risk 더 큼" 핑계). 내가 "§0c-5d audit PASS" 선언하고 merge. 결과 = 1차 patch 효과 거의 없음 — deferred 된 게 진짜 root fix 였음. [[feedback-codex-review-mandatory]] (blind accept 금지) 의 trigger 강화 — 표면 audit (ALLOW-LIST/HARD-STOP/surgical) PASS 가 곧 deferred 정당화 X.
+
+**How to apply**: codex 결과 chunk 검토 시 *deferred 항목 사용자 메시지 grep* — 사용자 message 안에 같은 표현·신호·가설 있으면 빨간 flag. merge 전 사용자에게 "codex 가 [정확한 deferred 항목 인용] 안 했음, 그래도 진행?" 묻기. 사용자 동의 받기 전 merge X. PASS 어휘 사용 시 deferred 항목까지 PASS 인지 명시.
+
 ## 9. 동시 dev 세션 — 병렬 git etiquette
 
 여러 Claude/codex 세션이 *같은 dev box·같은 로컬 repo* 에서 동시 작업 가능. 흔함 — 한 세션이 batch A, 다른 세션이 batch B. 핵심: **git 상태가 내 것만이 아님**. 2026-05-21·2026-05-24 동시 batch 중 오진·혼란으로 박힘.
