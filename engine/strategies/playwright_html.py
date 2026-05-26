@@ -22,6 +22,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from .. import cf_state_cache as _cf_cache
 from ..base_compat import NoticePost
 from ._common import apply_proxy, build_list_url
 from . import httpx_html as _h  # parse_list_html / parse_article_html / article_url_for 재사용
@@ -59,7 +60,7 @@ async def _is_cloudflare_interstitial_async(page) -> tuple[bool, bool]:
     return bool(_CF_INTERSTITIAL_RE.search(hay)), bool(_TURNSTILE_RE.search(hay))
 
 
-async def _wait_through_cloudflare_interstitial_async(page, *, timeout_ms: int = 30000) -> str:
+async def _wait_through_cloudflare_interstitial_async(page, *, timeout_ms: int = 8000) -> str:
     """polling 시 CF JS interstitial 통과 대기. 반환:
         "none"      — CF challenge 자체 없음 (정상 사이트)
         "cleared"   — challenge 검출 후 wait 안에 통과
@@ -173,10 +174,12 @@ async def open_session(adapter) -> None:
         await context.set_extra_http_headers(extra)
     page = await context.new_page()
     adapter._pw, adapter._browser, adapter._context, adapter._page = pw, browser, context, page
-    # CF cache — 같은 polling cycle 안 첫 _goto 가 CF challenge 통과(or none) 했으면 이후 _goto 는
-    # CF wait skip. context cookies 가 같은 cycle 안 cf_clearance 보관 → 재검사 불필요. 다음 cycle
-    # open_session 새로 호출되며 cache reset (codex perf review P1, 2026-05-26).
-    adapter._cf_state = "unchecked"   # unchecked → none|cleared (skip) or turnstile (raise) or timeout (raise)
+    # CF state — 같은 polling cycle (adapter 생명주기) 안 캐시 + 영구 cache 둘 다.
+    # 영구 cache (engine/cf_state_cache.py) 가 신선한 verdict 가지면 즉시 적용 → 첫 _goto 도
+    # detect+wait skip. 1000 사이트 × 100 CF × 8s = 13분/cycle 비용을 첫 cycle 이후 0 으로.
+    adapter._cf_cache_key = f"{adapter.host}__{adapter.board}"
+    cached = _cf_cache.get(adapter._cf_cache_key)
+    adapter._cf_state = cached if cached is not None else "unchecked"
 
 
 async def close_session(adapter) -> None:
@@ -202,7 +205,7 @@ async def _goto(adapter, url: str, *, wait_selector: Optional[str] = None) -> st
     nav_to = int(cfg.get("nav_timeout_ms", 15000))
     idle_to = int(cfg.get("idle_timeout_ms", 2000))
     quiet_to = int(cfg.get("quiet_ms", 500))
-    cf_wait_to = int(cfg.get("cf_wait_timeout_ms", 30000))
+    cf_wait_to = int(cfg.get("cf_wait_timeout_ms", 8000))
     await page.goto(url, wait_until="domcontentloaded", timeout=nav_to)
     # CF wait — adapter-level cache. unchecked 면 detect+wait, none|cleared 면 skip,
     # turnstile|timeout 이면 raise (caller 가 적절히 처리).
@@ -210,14 +213,22 @@ async def _goto(adapter, url: str, *, wait_selector: Optional[str] = None) -> st
     if cf_state == "unchecked":
         verdict = await _wait_through_cloudflare_interstitial_async(page, timeout_ms=cf_wait_to)
         adapter._cf_state = verdict
+        # 영구 cache 박음 — 다음 polling cycle 의 open_session 이 즉시 적용.
+        cache_key = getattr(adapter, "_cf_cache_key", None)
+        if cache_key:
+            try:
+                _cf_cache.put(cache_key, verdict)
+            except Exception:  # noqa: BLE001
+                pass
         if verdict == "turnstile":
             raise CloudflareUnsolvedError(f"Cloudflare Turnstile interactive on {url} — 자동 통과 X (cap_blocked).")
         if verdict == "timeout":
             raise CloudflareUnsolvedError(f"Cloudflare interstitial 통과 못 함 (>{cf_wait_to}ms) on {url} — cap_blocked 의심.")
     elif cf_state in ("turnstile", "timeout"):
-        # 같은 cycle 안 이전 _goto 가 unsolvable CF — 후속 _goto 도 같은 host 이므로 즉시 raise.
-        raise CloudflareUnsolvedError(f"adapter cf_state={cf_state!r} (이전 _goto 에서 결정) on {url}")
-    # cf_state in ("none", "cleared") → wait skip (cookie 공유로 재검사 불필요)
+        # 같은 cycle 안 이전 _goto 또는 영구 cache 의 unsolvable CF — 후속 _goto 도 같은 host 이므로
+        # 즉시 raise. 영구 cache TTL (7일) 안엔 재시도 X (다음 polling 1000 사이트 batch 시간 절약).
+        raise CloudflareUnsolvedError(f"adapter cf_state={cf_state!r} (cache 또는 이전 _goto) on {url}")
+    # cf_state in ("none", "cleared") → wait skip (cookie 공유 또는 cache hit)
     await _wait_xhr_quiet(page, quiet_ms=quiet_to, hard_timeout_ms=idle_to)
     if wait_selector:
         try:
