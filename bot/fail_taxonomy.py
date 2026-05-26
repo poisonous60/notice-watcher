@@ -65,6 +65,7 @@ class FailKind:
 # ============================================================================
 _FAIL_CHECK_RE = re.compile(r"\[FAIL\]\s+([A-Za-z_][A-Za-z0-9_]*)")
 _RECOGNIZER_RE = re.compile(r"recognize_reject\s+\(([^)]+)\)")
+_VALIDATE_TIMEOUT_RE = re.compile(r"validate_internal_timeout_\d+s")
 
 
 def _fail_check(name: str) -> Matcher:
@@ -80,6 +81,10 @@ def _has_any(*tokens: str, name: str) -> Matcher:
     def m(tail: str, _rc: Optional[int]) -> Optional[str]:
         return name if any(t in tail for t in tokens) else None
     return m
+
+
+def _validate_timeout(tail: str, _rc: Optional[int]) -> Optional[str]:
+    return "validate_timeout" if _VALIDATE_TIMEOUT_RE.search(tail) else None
 
 
 def _rc_eq(rc_val: int, name: str) -> Matcher:
@@ -188,6 +193,10 @@ FAIL_CATALOG: tuple[FailKind, ...] = (
             Subkind("title_nonempty", "제목 비어 있음",
                     "title selector 가 빈 문자열 반환.",
                     _fail_check("title_nonempty")),
+            Subkind("validate_timeout", "validator 내부 timeout",
+                    "agentic/config 검증 subprocess 가 내부 시간 제한을 초과. entry 차단 단정 X — "
+                    "Playwright launch, list/article fetch, selector wait 누적 비용을 확인.",
+                    _validate_timeout),
             # ▼ `[FAIL]` 라인 dynamic passthrough — fixed [FAIL] Subkind 다 미스했고 어쨌든 [FAIL] 라인이
             #   하나라도 있으면 그 마지막 이름 surface (catalog 미등록 check name 도). 토큰-기반 매처
             #   (`llm_parse` / `llm_api`) 보다 *앞* 에 와야 구 동작 보존: 구 `classify_fail` 은 `[FAIL]` 가 있으면
@@ -295,14 +304,6 @@ FAIL_CATALOG: tuple[FailKind, ...] = (
                     "403/451/429 등 접근 제한/레이트리밋. URL이 죽은 400/404와 구분해 capability_blocked 로 triage.",
                     _has_any("http_4xx_blocked", "403 Forbidden", "451 Unavailable", "429 Too Many Requests",
                              name="http_4xx_blocked")),
-            # 2026-05-26 박힘 (games-indie-studios-asia batch) — agentic 의 validate 단계에서 fetch_list 가
-            # 25s 안에 응답 못해 모든 attempt 가 validate_internal_timeout_<N>s. anti-bot 지연·느린 TLS
-            # 추정. LLM 잘못이 아닌 사이트 능력 — register.py 가 rc=5 로 재분류.
-            Subkind("validate_timeout_all_attempts", "validator timeout — 사이트 응답 지연",
-                    "agentic 의 모든 attempt 가 validate_internal_timeout 으로 실패. 사이트가 fetch_list 에 "
-                    "응답 안 함 (anti-bot 지연 / 느린 TLS). stealth/long-timeout 트랙 재도전.",
-                    _has_any("validator timed out on every agentic attempt",
-                             name="validate_timeout_all_attempts")),
             # generic fallback — rc=5 인데 위 토큰 다 미스 (분류 보류 / BLOCKED_BOT/IP/GEO 등). 마지막.
             # blocked_bot/ip/geo 세분화는 policy_reject(legacy rc=2)에만 — rc=5 는 entry_blocked 로 흡수.
             Subkind("entry_blocked", "진입 차단(미분류)",

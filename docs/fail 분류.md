@@ -38,6 +38,7 @@
 | `published_at_iso` | 날짜 파싱 실패 | ISO8601 변환 실패 — date selector / format 의심. |
 | `post_id_stable_shape` | post_id 형태 불안정 | post_id 가 매번 바뀌는 형태 — 새 게시물 감지 X. |
 | `title_nonempty` | 제목 비어 있음 | title selector 가 빈 문자열 반환. |
+| `validate_timeout` | validator 내부 timeout | agentic/config 검증 subprocess 가 내부 시간 제한을 초과. entry 차단 단정 X — Playwright launch, list/article fetch, selector wait 누적 비용을 확인. |
 | `[FAIL]:<check>` *(dynamic)* | 신규 fail_check 감지 | catalog 미등록 [FAIL] check_name — Subkind 추가 권장. |
 | `llm_parse` | LLM 응답 JSON 파싱 실패 | 응답 JSON 파싱 실패 — 모델이 malformed JSON 반환 (보통 codex/큰 응답). prompt schema 강화 / 다른 모델 라우팅 후보. API 호출 자체는 성공. |
 | `llm_api` | LLM API 호출 실패 | 429 RESOURCE_EXHAUSTED / UNAVAILABLE / 네트워크 오류. provider-agnostic. 구 `gemini_api` subkind 의 alias — 옛 DB row 의 'gemini 호출' 토큰도 잡음. |
@@ -69,7 +70,6 @@
 | `baseline_blocked` | 정적·headless 진입 차단 | static·headless 둘 다 차단 — anti-bot 의심. stealth 재도전. |
 | `probe_memory_guard` | probe RSS watchdog self-kill | probe 가 RSS 임계 초과해 자기-kill (heavy SPA OOM blower 추정). stealth 대상 X — root-cause 는 별도 (probe 메모리 누적 지점 tracemalloc 조사). |
 | `http_4xx_blocked` | HTTP 4xx 접근 차단 | 403/451/429 등 접근 제한/레이트리밋. URL이 죽은 400/404와 구분해 capability_blocked 로 triage. |
-| `validate_timeout_all_attempts` | validator timeout — 사이트 응답 지연 | agentic 의 모든 attempt 가 validate_internal_timeout 으로 실패. 사이트가 fetch_list 에 응답 안 함 (anti-bot 지연 / 느린 TLS). stealth/long-timeout 트랙 재도전. |
 | `entry_blocked` | 진입 차단(미분류) | anti-bot/captcha 추정 — verdict 미분류. stealth 재도전 후보. |
 
 ### gate_reject
