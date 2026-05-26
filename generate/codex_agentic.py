@@ -7,10 +7,11 @@ process **re-validates** the candidate independently and atomically publishes
 it to `configs/<slug>.json`.
 
 Trust boundary (rev 4 — see `output/plan_register_agentic.md`):
-- On Windows the codex sandbox blocks all `workspace-write` shell commands
-  (empirically — see `scripts/experiments/codex_sandbox_probe.py`), so we
-  use `--dangerously-bypass-approvals-and-sandbox` and rely on a SHA256+mtime
-  audit to detect any out-of-bounds write.
+- On Linux, run Codex with `workspace-write` sandbox rooted at the tmpdir so
+  repo writes are blocked before audit. On Windows the codex sandbox blocks all
+  `workspace-write` shell commands (empirically — see
+  `scripts/experiments/codex_sandbox_probe.py`), so Windows keeps the bypass
+  fallback and relies on SHA256+mtime audit to detect any out-of-bounds write.
 - Agent MAY only write to its tmpdir. Repo write of ANY kind (including
   `configs/<slug>.json`) → AUDIT_FAIL → `.BUG.json` (system violation).
 - Parent always reads `tmpdir/candidate.json`, runs `validate_built_config`,
@@ -528,6 +529,18 @@ def _kill_process_tree(pid: int) -> None:
             pass
 
 
+def _sandbox_args(workdir: Path) -> list[str]:
+    """Codex exec sandbox flags for the register agent.
+
+    Linux production can use workspace-write with the tmpdir as the only
+    writable workspace. Windows keeps the historical bypass path because
+    workspace-write rejects ordinary PowerShell validation commands there.
+    """
+    if sys.platform == "win32":
+        return ["--dangerously-bypass-approvals-and-sandbox"]
+    return ["--sandbox", "workspace-write", "--add-dir", str(workdir)]
+
+
 # --- codex usage extraction (multi-turn SUM) ---------------------------------
 
 
@@ -626,8 +639,8 @@ async def run_codex_agentic(
                 "-c", f"model={model}",
                 "-c", f"model_reasoning_effort={reasoning_effort}",
                 "--output-last-message", str(out_file),
-                "--dangerously-bypass-approvals-and-sandbox",
             ]
+            args.extend(_sandbox_args(workdir))
             # NOTE: --output-schema dropped — OpenAI structured output requires
             # additionalProperties:false on all nested objects, but `config` has
             # arbitrary user-defined keys. Schema kept as prompt context only.

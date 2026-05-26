@@ -74,6 +74,23 @@ def run() -> list[tuple[str, bool, str]]:
         "should not detect when key missing",
     ))
 
+    # ----- 1b. Codex child sandbox flags: Linux tmpdir sandbox, Windows legacy bypass. -----
+    with mock.patch.object(ca.sys, "platform", "linux"):
+        linux_workdir = Path("/tmp/reg_agent_test")
+        linux_args = ca._sandbox_args(linux_workdir)
+    cases.append(_check(
+        "sandbox_args_linux_workspace_write",
+        (linux_args == ["--sandbox", "workspace-write", "--add-dir", str(linux_workdir)]),
+        f"got {linux_args!r}",
+    ))
+    with mock.patch.object(ca.sys, "platform", "win32"):
+        win_args = ca._sandbox_args(Path("C:/Temp/reg_agent_test"))
+    cases.append(_check(
+        "sandbox_args_windows_bypass",
+        win_args == ["--dangerously-bypass-approvals-and-sandbox"],
+        f"got {win_args!r}",
+    ))
+
     # ----- 2. _score_example -----
     digest = {
         "url": "https://example.com/board",
@@ -320,10 +337,16 @@ def run() -> list[tuple[str, bool, str]]:
         child_env = captured.get("env") or {}
         child_path = str(child_env.get("PATH", ""))
         expected_first = str(Path(sys.executable).parent)
+        popen_args = captured.get("args") or []
         cases.append(_check(
             "codex_child_path_prepends_sys_executable_dir",
             child_path.split(os.pathsep)[0] == expected_first,
             f"PATH first={child_path.split(os.pathsep)[0] if child_path else ''!r}, expected={expected_first!r}",
+        ))
+        cases.append(_check(
+            "codex_child_uses_platform_sandbox_args",
+            all(arg in popen_args for arg in ca._sandbox_args(Path(popen_args[popen_args.index("-C") + 1]))),
+            f"args={popen_args!r}",
         ))
     finally:
         shutil.rmtree(fake_repo3, ignore_errors=True)

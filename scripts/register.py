@@ -1760,7 +1760,7 @@ def _gen_agentic(digest: dict, slug: str, url: str, failure_packet: Optional[dic
     실패 처리:
     - AuditFailError → 호출자가 잡아서 rc=-4 + .BUG.json
     - GenerationError → 호출자가 잡아서 rc=1 + .FAILED.json (기존 api_loop 와 같은 path)
-    - 기타 LLM 예외 → bubble up (위와 같음)
+    - 기타 LLM 예외 → GenerationError 로 번역해 rc=1 + .FAILED.json
 
     PHASE log 는 success 와 GenerationError 모두에서 출력 — 실패 run 의
     token/wall 비용도 측정 스크립트가 캡쳐할 수 있도록.
@@ -1859,7 +1859,15 @@ def _gen_agentic(digest: dict, slug: str, url: str, failure_packet: Optional[dic
             completion_tokens=getattr(e, "completion_tokens", 0),
             wall_s=getattr(e, "wall_s", 0.0),
         )
-        raise
+        translated = GenerationError(str(e))
+        translated.last_config = getattr(e, "last_config", None)
+        translated.last_feedback = str(e)
+        translated.prompt_tokens = getattr(e, "prompt_tokens", 0)
+        translated.completion_tokens = getattr(e, "completion_tokens", 0)
+        translated.wall_s = getattr(e, "wall_s", 0.0)
+        translated.stop_reason = getattr(e, "stop_reason", type(e).__name__)
+        translated.codex_version = getattr(e, "codex_version", "")
+        raise translated from e
     except Exception as e:  # noqa: BLE001
         span_cm.__exit__(type(e), e, e.__traceback__)
         raise

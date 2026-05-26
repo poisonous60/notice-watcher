@@ -16,7 +16,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from generate import GenerationError  # noqa: E402
+from generate import GenerationError, LLMHttpError  # noqa: E402
 from generate import generator as genmod  # noqa: E402
 
 
@@ -472,6 +472,37 @@ def run() -> list[tuple[str, bool, str]]:
                   and fail_span.attrs.get("stop_reason") == "max_cycles"
                   and fail_span.attrs.get("codex_version") == "codex-cli fail",
                   f"span={None if fail_span is None else (fail_span.name, fail_span.attrs)}"))
+
+    async def fake_run_agentic_llm_error(**kwargs):
+        raise LLMHttpError("codex exec failed (rc=1): sandbox denied", status_code=1)
+
+    rec_llm = FakeRecorder()
+    trace_llm = FakeTrace()
+    orig_run_agentic = reg._run_codex_agentic
+    orig_recorder = reg._get_default_recorder
+    orig_trace = reg.current_trace
+    reg._run_codex_agentic = fake_run_agentic_llm_error
+    reg._get_default_recorder = lambda: rec_llm
+    reg.current_trace = lambda: trace_llm
+    translated_llm = None
+    try:
+        try:
+            reg._gen_agentic({"url": "https://example.com/sandbox"},
+                             "slugsandbox", "https://example.com/sandbox")
+        except GenerationError as e:
+            translated_llm = e
+    finally:
+        reg._run_codex_agentic = orig_run_agentic
+        reg._get_default_recorder = orig_recorder
+        reg.current_trace = orig_trace
+    llm_row = rec_llm.rows[0] if rec_llm.rows else {}
+    cases.append(("agentic_llm_error_translates_to_generation_error",
+                  translated_llm is not None
+                  and "sandbox denied" in str(translated_llm)
+                  and getattr(translated_llm, "last_feedback", "") == str(translated_llm)
+                  and llm_row.get("call_site") == "config_generate_agentic"
+                  and llm_row.get("status") == "http_error",
+                  f"translated={translated_llm!r} row={llm_row}"))
 
     return cases
 
