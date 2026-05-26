@@ -36,6 +36,15 @@ _CF_INTERSTITIAL_RE = re.compile(
     re.IGNORECASE,
 )
 _TURNSTILE_RE = re.compile(r"turnstile|cf-turnstile|challenges.cloudflare.com", re.IGNORECASE)
+_TRANSIENT_NAV_ERROR_MARKERS = (
+    "ERR_NAME_NOT_RESOLVED",
+    "Temporary failure in name resolution",
+)
+
+
+def _is_transient_nav_error(exc: BaseException) -> bool:
+    msg = str(exc)
+    return any(marker in msg for marker in _TRANSIENT_NAV_ERROR_MARKERS)
 
 
 async def _is_cloudflare_interstitial_async(page) -> tuple[bool, bool]:
@@ -220,8 +229,16 @@ async def _goto(adapter, url: str, *, wait_selector: Optional[str] = None) -> st
         pass
     cf_wait_to = int(cfg.get("cf_wait_timeout_ms", _default_cf_wait))
     tr = current_trace()
-    with tr.span("goto_dom", attrs={"url": url, "timeout_ms": nav_to}):
-        await page.goto(url, wait_until="domcontentloaded", timeout=nav_to)
+    for attempt in range(2):
+        with tr.span("goto_dom", attrs={"url": url, "timeout_ms": nav_to, "attempt": attempt + 1}):
+            try:
+                await page.goto(url, wait_until="domcontentloaded", timeout=nav_to)
+                break
+            except Exception as exc:
+                if attempt == 0 and _is_transient_nav_error(exc):
+                    await asyncio.sleep(0.25)
+                    continue
+                raise
     # CF wait — adapter-level cache. unchecked 면 detect+wait, none|cleared 면 skip,
     # turnstile|timeout 이면 raise (caller 가 적절히 처리).
     cf_state = getattr(adapter, "_cf_state", "unchecked")

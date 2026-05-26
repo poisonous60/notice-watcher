@@ -91,9 +91,12 @@ def diagnose(
     # static_ok + headless_ok 둘 다 있을 때만 의미 있음. piku 처럼 같은 URL 정적=14kb·data-id=0 vs
     # Playwright=44kb·data-id=20 인 케이스 → static_insufficient=True → "정적 HTTP로 충분" verdict 정정.
     static_vs_headless: Optional[dict] = None
-    if static_ok and headless_ok and headless is not None:
+    static_like_ok = list(static_ok)
+    if captured_ok and captured_retry is not None:
+        static_like_ok.append(captured_retry)
+    if static_like_ok and headless_ok and headless is not None:
         biggest_static = max(
-            (r for r in static_ok if r.body_path),
+            (r for r in static_like_ok if r.body_path),
             key=lambda r: (Path(r.body_path).stat().st_size if Path(r.body_path).exists() else 0),
             default=None,
         )
@@ -109,8 +112,10 @@ def diagnose(
                 if static_vs_headless.get("static_insufficient"):
                     trigger = static_vs_headless.get("trigger_rule") or "?"
                     if trigger == "size":
-                        # 강한 신호 — 정적 응답이 진짜 빈 shell. static_ok 무효화.
+                        # 강한 신호 — 정적 계열 응답이 진짜 빈 shell. 일반 정적뿐 아니라
+                        # S1.Hcap 도 같은 빈 shell 이면 httpx 권장으로 되살리지 않는다.
                         static_ok = []
+                        captured_ok = False
                         notes.append(
                             f"{STATIC_INSUFFICIENT_SIZE_PREFIX} — Playwright 응답이 정적보다 "
                             f"{static_vs_headless.get('ratio'):.1f}배 크고 row-like 요소 "

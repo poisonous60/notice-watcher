@@ -112,3 +112,36 @@ Fix decision:
   - `python tests/llm/test_codex_agentic.py`
 - Run required smoke:
   - `python scripts/probe_smoke.py --stage 3 --stage 5`
+
+## 2026-05-26 v3 — actual agentic log root cause
+
+After deploying agentic workdir preservation and rerunning the actual
+`2026-05-24-games-jp` URLs on N100, the preserved logs changed the diagnosis:
+
+| slug | actual log evidence | root cause | fix surface |
+|---|---|---|---|
+| `capcom-games.com/news` | Before sandbox fix, validator failed with DNS inside Codex sandbox. After `3443f04`, the actual URL registered. | Agentic sandbox network, not site slowness. | `generate/codex_agentic.py` sandbox mode. |
+| `falcom.co.jp` | Before sandbox fix, same DNS/timeout class. After `3443f04`, the actual URL registered. | Agentic sandbox network, plus article body quality handled by agentic. | sandbox mode + preserved logs. |
+| `gamecity.ne.jp/news` | Probe Playwright loaded rows, but diagnosis said both `S1.Hcap` httpx and `정적 응답이 빈 shell / playwright_html 필수`. api-loop Playwright then hit fast `ERR_NAME_NOT_RESOLVED`; agentic switched to `httpx_html` and got 0 rows. | Agentic selection was misled by contradictory probe strategy plus transient Playwright DNS. The rendered selector was correct. | probe diagnosis, agent prompt, Playwright transient retry. |
+
+The failure is therefore not a single validator timeout bug. The actual batch
+had three layers:
+
+1. missing logs: agentic tmpdirs were deleted, hiding the candidate and validator inputs;
+2. sandbox infra: Codex `workspace-write` broke validator DNS/browser launch on N100;
+3. selection: once infra was fixed, GAMECITY still got a contradictory probe hint and agentic fell back to static HTTP for a rendered-only list.
+
+Additional surgical fixes:
+
+- `probe/diagnose.py` now treats `S1.Hcap` as a static-like response during
+  static-vs-headless comparison. If the best static-like response is still an
+  empty shell, `S1.Hcap` cannot win `recommended_strategy` or verdict.
+- `prompts/config_writer.system.txt` and `prompts/register_agent_AGENTS.md`
+  make the empty-shell / `playwright_html 필수` note stronger than a stale
+  `recommended_strategy=httpx/S1.Hcap` hint.
+- `engine/strategies/playwright_html.py` retries `page.goto` once for fast
+  transient DNS navigation errors only. It does not extend timeouts, does not
+  switch to `wait_until="commit"`, and does not change default strategy.
+
+This keeps Q1's constraint: probe verdict does not hard-force strategy. It only
+removes a contradiction and lets the agent choose from consistent evidence.

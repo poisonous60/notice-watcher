@@ -76,6 +76,11 @@ validator feedback.
 - Prefer selectors and URLs that appear verbatim in `digest.json`
   (`list_candidates.html_repeating_patterns[].selector`, `sample_url`,
   `first_article_url`, `clicked_resolved_url`, validated API candidates).
+- If `recommended_strategy` says httpx/S1.Hcap but `notes` or
+  `escalation_hint` says static HTML is an empty shell or
+  `strategy=playwright_html` is required, treat the empty-shell note as the
+  stronger signal. Use rendered `list_candidates` selectors with
+  `playwright_html` unless you can point to a real static JSON/list source.
 - Do not invent class names such as `.list-item__text` or CMS JSON endpoints
   unless digest evidence shows them. If the row itself contains title/date text,
   extract from `:self` with regex instead of inventing child selectors.
