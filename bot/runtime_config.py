@@ -44,6 +44,11 @@ class PollSection:
     # 초과 시 그 사이트만 status='chromium_lock_timeout' 으로 종료. register subprocess 가 영구
     # hang 해도 poll cron 이 systemd 외각 timeout 까지 안 매달리게 차단.
     chromium_lock_wait_budget_s: float = 300.0
+    # Cloudflare interstitial wait timeout (ms). 전역 default — per-site config 의
+    # `cf_wait_timeout_ms` 가 있으면 그쪽이 우선. 8000ms 면 옛 JS challenge (3~5s) 통과 충분.
+    # 30000ms 같이 크게 잡으면 통과 못 하는 사이트 (Turnstile PoW, WAPPLES FEC) 가 cycle 마다
+    # 그만큼 대기. 영구 cache (output/cf_state.json) 가 첫 cycle 이후 재시도 막음.
+    cf_wait_timeout_ms: int = 8000
 
 
 @dataclass

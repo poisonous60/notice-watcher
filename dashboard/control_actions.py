@@ -383,6 +383,7 @@ RUNTIME_FIELDS: list[tuple[str, str, type, object, str]] = [
     ("poll", "max_new_articles",     int,   10,     "한 사이클 최대 새 글"),
     ("poll", "breakage_threshold",   int,   2,      "연속 실패 임계 (이후 FAILED)"),
     ("poll", "seen_cap",             int,   5000,   "seen post id 보관 상한"),
+    ("poll", "cf_wait_timeout_ms",   int,   8000,   "Cloudflare interstitial wait 상한 (ms). 8000 default. per-site config 의 cf_wait_timeout_ms 가 우선. 못 통과면 cap_blocked (영구 cache)"),
     ("worker", "idle_poll_seconds",  float, 2.0,    "워커 idle 주기 (초)"),
     ("worker", "pool_size",          int,   2,      "동시 처리 register/reprobe 잡 수 (chromium_lock.slots 와 같이 올림)"),
     ("chromium_lock", "bot_timeout",                   float, 900.0,  "봇 chromium lock 타임아웃 (초)"),
