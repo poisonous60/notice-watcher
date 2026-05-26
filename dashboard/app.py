@@ -62,7 +62,11 @@ from bot.fail_taxonomy import (  # noqa: E402
     severity_for_kind as _severity_for_kind,
     label_for_kind as _label_for_kind,
 )
-templates.env.globals["fail_filter_options"] = _fail_filter_options
+def _job_filter_options() -> list[str]:
+    return [*_fail_filter_options(), "rejected"]
+
+
+templates.env.globals["fail_filter_options"] = _job_filter_options
 templates.env.globals["severity_for_kind"] = _severity_for_kind
 templates.env.globals["label_for_kind"] = _label_for_kind
 
@@ -479,11 +483,11 @@ async def jobs_list(request: Request, count: int = Query(50, ge=1, le=200),
         kind_filter = kind
     else:
         kind_filter = None
-    # base status (pending/running/done/failed) → SQL pushdown. fail_kind (gen_fail/policy_reject/gate_reject/bug)
+    # base status (pending/running/done/failed/rejected) → SQL pushdown. fail_kind (gen_fail/policy_reject/gate_reject/bug)
     # → SQL pushdown 'failed' + Python sub-filter (page 폭 안 행에서 fail_kind 매칭 — 윈도우 밖 누락 가능,
     # 다음 페이지 가면 그 다음 50건 failed 안에서 다시 매칭).
     sql_status: Optional[str]
-    if status and status in BASE_STATUS_VALUES:
+    if status and (status in BASE_STATUS_VALUES or status == "rejected"):
         sql_status = status
     elif status:
         sql_status = "failed"
@@ -493,7 +497,7 @@ async def jobs_list(request: Request, count: int = Query(50, ge=1, le=200),
                                   kind=kind_filter)
     has_next = len(rows) > count
     rows = rows[:count]
-    if status and status not in BASE_STATUS_VALUES:
+    if status and status not in BASE_STATUS_VALUES and status != "rejected":
         rows = [r for r in rows if r.get("fail_kind") == status]
     if q:
         ql = q.strip().lower()

@@ -184,6 +184,43 @@ def _test_register_kind_requires_url_slug() -> tuple[str, bool, str]:
         conn.close()
 
 
+def _test_reject_rcs_finish_as_rejected() -> tuple[str, bool, str]:
+    """rc=2/3/4 are terminal normal rejects, not gen/system failures."""
+    p = _legacy_db_path()
+    from bot import db
+    conn = db.connect(p)
+    try:
+        conn.execute("DELETE FROM jobs"); conn.commit()
+        got: dict[int, str] = {}
+        for rc in (2, 3, 4, 1):
+            jid, inserted = db.enqueue_job(
+                conn, kind="register",
+                url=f"https://x.example/{rc}",
+                slug=f"slug_{rc}",
+                via="batch-retry",
+            )
+            if not inserted:
+                return ("reject_rc_status", False, f"enqueue unexpectedly deduped rc={rc}")
+            row = db.claim_next_pending(conn)
+            if row is None or row["id"] != jid:
+                return ("reject_rc_status", False, f"claim mismatch rc={rc} row={dict(row) if row else None}")
+            db.mark_job_finished(conn, jid, ok=False, rc=rc, tail=f"rc={rc}")
+            out = conn.execute("SELECT status FROM jobs WHERE id=?", (jid,)).fetchone()
+            got[rc] = out["status"] if out else "<missing>"
+            pos = db.queue_position(conn, jid)
+            if pos != -1:
+                return ("reject_rc_status", False, f"terminal rc={rc} queue_position={pos}")
+        expected = {2: "rejected", 3: "rejected", 4: "rejected", 1: "failed"}
+        if got != expected:
+            return ("reject_rc_status", False, f"status mismatch expected={expected} got={got}")
+        summary = db.jobs_summary(conn)
+        if summary.get("rejected") != 3 or summary.get("failed") != 1:
+            return ("reject_rc_status", False, f"summary mismatch: {summary}")
+        return ("reject_rc_status", True, f"statuses={got} summary={summary}")
+    finally:
+        conn.close()
+
+
 def run() -> list[tuple[str, bool, str]]:
     return [
         _test_migrate_then_enqueue_new_kinds(),
@@ -191,7 +228,14 @@ def run() -> list[tuple[str, bool, str]]:
         _test_legacy_kind_slug_dedupe(),
         _test_priority_canonical(),
         _test_register_kind_requires_url_slug(),
+        _test_reject_rcs_finish_as_rejected(),
     ]
+
+
+def test_jobs_schema_migrate_cases():
+    results = run()
+    failed = [(n, d) for n, ok, d in results if not ok]
+    assert not failed, "\n".join(f"{n}: {d}" for n, d in failed)
 
 
 if __name__ == "__main__":

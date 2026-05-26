@@ -38,7 +38,7 @@ except ImportError:
     from generate.validate import validate_built_config  # type: ignore  # noqa: E402
 
 
-INTERNAL_TIMEOUT_S = 60.0
+INTERNAL_TIMEOUT_S = 25.0
 
 
 def _emit_error(reason: str, *, rc: int = 2) -> int:

@@ -68,7 +68,7 @@ def recent_jobs(conn: sqlite3.Connection, limit: int = 20, offset: int = 0,
     'deliver_target' 지정. poll_site/deliver_target 은 register-orient classify_fail 이 적용 안 됨
     (fail_kind = base status).
 
-    `status` 인자는 SQL pushdown — base status (pending/running/done/failed) 한정. fail_kind sub 필터링은
+    `status` 인자는 SQL pushdown — base status (pending/running/done/failed/rejected) 한정. fail_kind sub 필터링은
     호출자(`dashboard/app.py:jobs_list`)가 결과 dict 의 `fail_kind` 로 추가 필터.
     """
     from bot.fail_taxonomy import classify_fail

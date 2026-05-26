@@ -119,6 +119,17 @@ class _AuditEntry:
     mtime_ns: int
 
 
+def _audit_path_is_ignored(path: Path) -> bool:
+    """Runtime cache files can change as a side effect of Python/tooling startup."""
+    name = path.name
+    if name in (".DS_Store", "Thumbs.db"):
+        return True
+    if name.endswith((".pyc", ".pyo")):
+        return True
+    parts = set(path.parts)
+    return bool(parts & {"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"})
+
+
 def _sha_of(path: Path, *, chunk: int = 1 << 16) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:
@@ -140,6 +151,8 @@ def _audit_snapshot_paths(repo: Path, slug: str) -> dict[str, _AuditEntry]:
     """
     out: dict[str, _AuditEntry] = {}
     for p in _iter_audit_paths(repo, slug):
+        if _audit_path_is_ignored(p):
+            continue
         try:
             st = p.stat()
         except OSError:
@@ -165,6 +178,8 @@ def _audit_snapshot_paths(repo: Path, slug: str) -> dict[str, _AuditEntry]:
             continue
         for p in d.rglob("*"):
             if not p.is_file():
+                continue
+            if _audit_path_is_ignored(p):
                 continue
             key = str(p)
             if key in out:
@@ -244,6 +259,8 @@ def _audit_diff(before: dict[str, _AuditEntry], after: dict[str, _AuditEntry],
     for k in keys:
         b, a = before.get(k), after.get(k)
         kp = Path(k)
+        if _audit_path_is_ignored(kp):
+            continue
         is_other_slug_cfg = (
             str(kp.parent) == cfg_root_str and kp.name != self_cfg_name
         )
@@ -611,7 +628,7 @@ class AgenticResult:
     wall_s: float
 
 
-async def run_codex_agentic(
+async def _run_codex_agentic_once(
     *,
     digest: dict,
     slug: str,
@@ -835,6 +852,59 @@ async def run_codex_agentic(
     finally:
         if not keep_workdir and not os.environ.get("KEEP_AGENT_WORKDIR"):
             shutil.rmtree(workdir, ignore_errors=True)
+
+
+def _is_retryable_codex_agentic_error(exc: LLMNetworkError) -> bool:
+    msg = str(exc)
+    return (
+        "codex_agentic_transient_session_stdin_closed" in msg
+        or "codex_agentic_transient_timeout" in msg
+    )
+
+
+async def run_codex_agentic(
+    *,
+    digest: dict,
+    slug: str,
+    url: str,
+    repo: Path,
+    timeout_s: float = DEFAULT_TIMEOUT_S,
+    max_cycles: int = DEFAULT_MAX_CYCLES,
+    model: str = "gpt-5.4-mini",
+    reasoning_effort: str = "low",
+    keep_workdir: bool = False,
+    failure_packet: Optional[dict] = None,
+) -> AgenticResult:
+    """Run codex agentic generation, retrying one known transient CLI/session fault."""
+    try:
+        return await _run_codex_agentic_once(
+            digest=digest,
+            slug=slug,
+            url=url,
+            repo=repo,
+            timeout_s=timeout_s,
+            max_cycles=max_cycles,
+            model=model,
+            reasoning_effort=reasoning_effort,
+            keep_workdir=keep_workdir,
+            failure_packet=failure_packet,
+        )
+    except LLMNetworkError as e:
+        if not _is_retryable_codex_agentic_error(e):
+            raise
+        print(f"[codex_agentic] transient CLI fault; retrying once: {e}", flush=True)
+    return await _run_codex_agentic_once(
+        digest=digest,
+        slug=slug,
+        url=url,
+        repo=repo,
+        timeout_s=timeout_s,
+        max_cycles=max_cycles,
+        model=model,
+        reasoning_effort=reasoning_effort,
+        keep_workdir=keep_workdir,
+        failure_packet=failure_packet,
+    )
 
 
 def _has_headless_false(cfg: dict) -> bool:

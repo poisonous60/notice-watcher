@@ -21,7 +21,7 @@ DB 파일: output/bot.sqlite3 (이미 .gitignore 됨).
       claim(dequeue) 순서 = ORDER BY priority ASC, id ASC (작은 priority 먼저). ADR 0009.
       kind = 'register' (사용자 /watch·/preview) | 'reprobe' (poll.py 의 깨짐 감지)
       priority = enqueue_job 이 via/kind 에서 도출: user(watch/preview)=0 > reprobe=1 > batch-retry(테스트/재시도)=2 > batch(신규 bulk)=3.
-      status = 'pending' → 'running' → 'done' | 'failed'
+      status = 'pending' → 'running' → 'done' | 'failed' | 'rejected'
   reports(id, user_id, username, slug, issue, created_at, status, resolved_at, resolved_note)
       사용자 `/report` 가 쌓는 신고. open → resolved. bot/inspector.py 의 진단 + admin 명령에서 사용.
   announce_prefs(scope_kind, scope_id, opted_out, updated_at)
@@ -131,7 +131,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     ack_message_id  TEXT,
     sub_payload     TEXT,
     status          TEXT NOT NULL DEFAULT 'pending'
-                    CHECK (status IN ('pending','running','done','failed')),
+                    CHECK (status IN ('pending','running','done','failed','rejected')),
     created_at      TEXT NOT NULL,
     started_at      TEXT,
     finished_at     TEXT,
@@ -443,6 +443,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
     _migrate_check_enum(conn, "jobs", "poll_site",
                          new_create=_JOBS_REBUILD,
                          after_rebuild_sql=_JOBS_INDEXES_SQL)
+    _migrate_check_enum(conn, "jobs", "rejected",
+                         new_create=_JOBS_REBUILD,
+                         after_rebuild_sql=_JOBS_INDEXES_SQL)
     # rebuild 가 skip 됐어도 (fresh DB — _SCHEMA 가 이미 새 jobs 만듦) 인덱스는 박혀야 함.
     # _SCHEMA 단계는 dedupe_key 미존재 옛 DB 차단 위해 인덱스 생성 안 함 — 여기서 idempotent CREATE.
     for sql in _JOBS_INDEXES_SQL:
@@ -559,7 +562,7 @@ CREATE TABLE jobs_new (
     ack_message_id  TEXT,
     sub_payload     TEXT,
     status          TEXT NOT NULL DEFAULT 'pending'
-                    CHECK (status IN ('pending','running','done','failed')),
+                    CHECK (status IN ('pending','running','done','failed','rejected')),
     created_at      TEXT NOT NULL,
     started_at      TEXT,
     finished_at     TEXT,
@@ -1194,11 +1197,19 @@ def claim_next_pending(conn: sqlite3.Connection, *,
     return None
 
 
+def _finished_job_status(*, ok: bool, rc: Optional[int]) -> str:
+    if ok:
+        return "done"
+    if rc in (2, 3, 4):
+        return "rejected"
+    return "failed"
+
+
 def mark_job_finished(conn: sqlite3.Connection, job_id: int, *,
                       ok: bool, rc: Optional[int], tail: Optional[str]) -> None:
-    """잡을 done/failed 로 표시. status='running' 조건으로 멱등(두 번 불려도 두 번째는 no-op).
+    """잡을 done/failed/rejected 로 표시. status='running' 조건으로 멱등(두 번 불려도 두 번째는 no-op).
     이래서 _process_job 의 try/except finalizer 가 이미 mark 끝낸 잡을 또 fail 로 뒤집지 않음."""
-    status = "done" if ok else "failed"
+    status = _finished_job_status(ok=ok, rc=rc)
     def _do():
         conn.execute(
             "UPDATE jobs SET status=?, finished_at=?, result_rc=?, result_tail=? "
@@ -1210,7 +1221,7 @@ def mark_job_finished(conn: sqlite3.Connection, job_id: int, *,
 
 
 def queue_position(conn: sqlite3.Connection, job_id: int) -> int:
-    """이 잡의 큐 위치 (1-base). 이미 running 이면 0, done/failed 면 -1, 없는 잡이면 -1.
+    """이 잡의 큐 위치 (1-base). 이미 running 이면 0, terminal 이면 -1, 없는 잡이면 -1.
 
     우선순위 큐 (ADR 0009) — claim 정렬(priority ASC, id ASC)과 같은 기준으로 *앞에 dequeue 될*
     pending 수를 셈: priority 가 더 낮거나(=먼저), 같은 priority 면서 id≤. id 단독 카운트면 뒤로
@@ -1221,7 +1232,7 @@ def queue_position(conn: sqlite3.Connection, job_id: int) -> int:
         return -1
     if row["status"] == "running":
         return 0
-    if row["status"] in ("done", "failed"):
+    if row["status"] in ("done", "failed", "rejected"):
         return -1
     return int(conn.execute(
         "SELECT COUNT(*) FROM jobs WHERE status='pending' "
@@ -1291,7 +1302,7 @@ def recent_register_jobs(conn: sqlite3.Connection, limit: int = 20,
                          kind: Optional[str] = "register") -> list[sqlite3.Row]:
     """잡 큐 최신순. inspector.recent_jobs 가 호출.
 
-    `status` (pending/running/done/failed) 가 주어지면 SQL `WHERE status=?` pushdown — Python 쪽
+    `status` (pending/running/done/failed/rejected) 가 주어지면 SQL `WHERE status=?` pushdown — Python 쪽
     post-filter 가 LIMIT 윈도우 밖 행 누락하는 문제 방지 (대시보드 `/jobs?status=X`).
 
     ADR 0019 Phase 2 — `kind` 파라미터 추가. 기본 = 'register' (옛 동작 유지). None = 모든 kind

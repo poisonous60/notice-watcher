@@ -207,6 +207,25 @@ def run() -> list[tuple[str, bool, str]]:
             any(f"{slug}.json" in d for d in diff5),
             f"diff={diff5} (agent shouldn't touch its own slug config)",
         ))
+
+        # ----- 7b. Python bytecode/cache rewrites are runtime noise, not agent writes. -----
+        pycache = fake_repo / "scripts" / "__pycache__"
+        pycache.mkdir(parents=True, exist_ok=True)
+        pyc = pycache / "register.cpython-313.pyc"
+        real_script = fake_repo / "scripts" / "real_violation.py"
+        pyc.write_bytes(b"old-bytecode")
+        real_script.write_text("old", encoding="utf-8")
+        pre_cache = ca._audit_snapshot_paths(fake_repo, slug)
+        pyc.write_bytes(b"new-bytecode")
+        real_script.write_text("new", encoding="utf-8")
+        post_cache = ca._audit_snapshot_paths(fake_repo, slug)
+        diff_cache = ca._audit_diff(pre_cache, post_cache, self_slug=slug, configs_root=cfg_root)
+        cases.append(_check(
+            "audit_ignores_python_bytecode_but_keeps_real_violations",
+            (not any("__pycache__" in d or d.endswith(".pyc (CONTENT CHANGED)") for d in diff_cache)
+             and any("real_violation.py" in d and "CONTENT" in d for d in diff_cache)),
+            f"diff={diff_cache}",
+        ))
     finally:
         shutil.rmtree(fake_repo, ignore_errors=True)
 
@@ -460,8 +479,8 @@ def run() -> list[tuple[str, bool, str]]:
 
     # ----- 10. validate_config internal timeout emits JSON and rc=0 -----
     cases.append(_check(
-        "validate_config_internal_timeout_default_60s",
-        int(validate_config_cli.INTERNAL_TIMEOUT_S) == 60,
+        "validate_config_internal_timeout_default_25s",
+        int(validate_config_cli.INTERNAL_TIMEOUT_S) == 25,
         f"got {validate_config_cli.INTERNAL_TIMEOUT_S!r}",
     ))
     with tempfile.TemporaryDirectory(prefix="validate_timeout_test_") as td:
@@ -515,6 +534,68 @@ sys.exit(vc.main(["validate_config.py", {str(candidate)!r}]))
          and "codex_agentic_transient_session_stdin_closed" in str(closed_stdin_err)),
         f"got {type(closed_stdin_err).__name__}: {closed_stdin_err}",
     ))
+
+    # ----- 11b. one transient codex session fault retries with a fresh subprocess. -----
+    fake_repo_retry = _make_tmp_repo()
+    retry_calls = {"n": 0}
+
+    class TransientThenSuccessPopen:
+        def __init__(self, args, **kwargs):
+            retry_calls["n"] += 1
+            self.pid = 999998
+            self.returncode = 1
+            self._attempt = retry_calls["n"]
+            out_path = Path(args[args.index("--output-last-message") + 1])
+            if self._attempt == 2:
+                out_path.write_text(
+                    json.dumps({
+                        "ok": True,
+                        "config": {"site": "https://example.com/", "strategy": "httpx_html"},
+                        "attempts": [{"i": 1, "validate_ok": True, "error": ""}],
+                        "stop_reason": "validate_pass",
+                    }),
+                    encoding="utf-8",
+                )
+
+        def communicate(self, input=None, timeout=None):  # noqa: A002 - subprocess API
+            if self._attempt == 1:
+                self.returncode = 1
+                return (
+                    "",
+                    "error=write_stdin failed: stdin is closed for this session; "
+                    "rerun exec_command with tty=true",
+                )
+            self.returncode = 0
+            return (
+                '{"type":"turn.completed","usage":{"input_tokens":5,"output_tokens":6}}\n',
+                "",
+            )
+
+        def kill(self):
+            self.returncode = -9
+
+    try:
+        with mock.patch.object(ca, "_codex_preflight", return_value="codex-cli test"), \
+             mock.patch.object(ca, "_codex_bin", return_value="codex"), \
+             mock.patch.object(ca.subprocess, "Popen", TransientThenSuccessPopen), \
+             mock.patch.object(ca, "validate_built_config", fake_validate_built_config):
+            retry_result = asyncio.run(ca.run_codex_agentic(
+                digest={"url": "https://example.com/"},
+                slug="transientretry",
+                url="https://example.com/",
+                repo=fake_repo_retry,
+                timeout_s=5.0,
+            ))
+        cases.append(_check(
+            "codex_transient_session_stdin_closed_retries_once",
+            (retry_calls["n"] == 2
+             and retry_result.stop_reason == "validate_pass"
+             and retry_result.prompt_tokens == 5
+             and retry_result.completion_tokens == 6),
+            f"calls={retry_calls['n']} result={retry_result!r}",
+        ))
+    finally:
+        shutil.rmtree(fake_repo_retry, ignore_errors=True)
 
     # ----- 12. codex startup-only timeout is transient -----
     fake_repo5 = _make_tmp_repo()

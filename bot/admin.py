@@ -117,7 +117,8 @@ def build_admin_tree(client: discord.Client, conn, *, admin_guild: discord.Objec
                      + f"  · blacklist: {url_gate.blacklist_status()}"
                      + ("" if safe_browsing_api_key() else "  · ⚠SAFE_BROWSING_API_KEY 미설정 — 신규 등록 전부 거부됨"))
         jq_line = (f"• 잡 큐: pending {jq.get('pending', 0)}건 / running {jq.get('running', 0)}건 "
-                   f"/ done {jq.get('done', 0)} / failed {jq.get('failed', 0)}")
+                   f"/ done {jq.get('done', 0)} / rejected {jq.get('rejected', 0)} "
+                   f"/ failed {jq.get('failed', 0)}")
         lines = [
             "**봇 상태**",
             f"• uptime: {up // 3600}h {(up % 3600) // 60}m",
