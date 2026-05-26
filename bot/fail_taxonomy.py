@@ -332,6 +332,12 @@ FAIL_CATALOG: tuple[FailKind, ...] = (
                     "LLM 재호출 없음.",
                     _has_any("agent_self_veto:non_board", "agent self-veto(non_board)",
                              name="agent_self_veto_non_board")),
+            Subkind("post_preflight_no_first", "preflight 후 첫 글 0 + 구조 신호 0",
+                    "preflight 가 첫 글 URL 못 잡고 정적 same-host 반복/JSON/inline/hydration 후보 모두 0. "
+                    "agentic 가 같은 digest 로 self-veto(non_board) 할 패턴 사전 차단 "
+                    "(2026-05-26 games-cn batch 22/53 quota 절약). feed 만 있는 catalog/landing 패턴 흔함.",
+                    _has_any("post-preflight NO_FIRST", "post_preflight_no_first",
+                             name="post_preflight_no_first")),
             Subkind("classifier_reject", "분류기 비-게시판 판정",
                     "LLM page-type 분류기가 content/catalog 등 비-게시판으로 판정해 거부 "
                     "(ADR 0007 accept-path / ADR 0011 catalog=아티팩트·비최신순 listing). 수동 config 는 허용.",

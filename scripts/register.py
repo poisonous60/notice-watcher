@@ -870,6 +870,68 @@ def _board_shape_check(digest: dict, url: str) -> tuple[bool, str]:
                    f"[신호: {detail}]" + sm_hint)
 
 
+def _no_first_post_preflight_check(digest: dict, url: str) -> tuple[bool, str]:
+    """preflight 직후 + generate 직전 게이트. board_shape_check 가 feed 신호로 통과(혹은
+    classifier veto 로 override) 된 뒤, preflight 가 first_article 을 못 찾고 정적 same-host
+    반복/JSON/inline/hydration 까지 0 이면 agentic 도 같은 digest 로 self-veto(non_board) 한다.
+    그 비용(agentic ~17s × N) 을 미리 차단 — 게이트 자체는 LLM 0콜 (preflight 이후라 classifier
+    veto 는 이미 board_shape 단계에서 1콜 끝남, 재호출 X).
+
+    조건 (모두 만족 시 거부):
+      - first_article_url 가 None 또는 다른 호스트
+      - clicked_resolved_url 가 None / 다른 호스트 / anti-bot 차단
+      - html_repeating_patterns 중 same-host 0건
+      - traffic_json_api_candidates / inline_js_data_candidates / hydration_list_candidates 다 0
+
+    feed_candidates 가 있어도 — 본 게이트는 거부. feed 만 있는 경우 알려진 feed 플랫폼은
+    이미 recognize() 단계에서 잡혔고, 여기까지 온 건 *feed 후보는 있지만 진짜 board 아닌*
+    catalog/landing 패턴 (게임회사 홈 등 — 2026-05-26 games-cn batch 22/53 self-veto rc=3).
+    """
+    host = (urlsplit(url).netloc or "").lower()
+    if not host:
+        return True, ""
+    lc = digest.get("list_candidates") or {}
+    ah = digest.get("article_sample") or {}
+
+    def _same_host(u: Optional[str]) -> bool:
+        if not u:
+            return False
+        try:
+            return (urlsplit(u).netloc or "").lower() == host
+        except ValueError:
+            return False
+
+    fau = lc.get("first_article_url")
+    fau_same = _same_host(fau)
+    clicked_url = ah.get("clicked_resolved_url")
+    clicked_blocked = _is_antibot_redirect(clicked_url)
+    clicked_same = _same_host(clicked_url) and not clicked_blocked
+
+    if fau_same or clicked_same:
+        return True, ""
+
+    n_html_same = sum(
+        1 for p in (lc.get("html_repeating_patterns") or [])
+        if _same_host(p.get("href_pattern_guess")) or _same_host(p.get("sample_url"))
+    )
+    n_json = len(lc.get("traffic_json_api_candidates") or [])
+    n_inline = len(lc.get("inline_js_data_candidates") or [])
+    n_hyd = len(lc.get("hydration_list_candidates") or [])
+    if (n_html_same + n_json + n_inline + n_hyd) > 0:
+        return True, ""
+
+    n_feed = _count_board_feed_signals(digest, lc)
+    detail = (f"first_article_same_host={fau_same} clicked_same_host={clicked_same} "
+              f"html_same_host={n_html_same} traffic_json={n_json} inline_js={n_inline} "
+              f"hydration={n_hyd} feed={n_feed}"
+              + (f" clicked_blocked_by_antibot={clicked_url}" if clicked_blocked else ""))
+    return False, ("preflight 후에도 첫 글 URL 없음 + 정적 same-host 반복/JSON API/inline JS/hydration 후보 0 — "
+                   "agentic 가 같은 digest 로 self-veto(non_board) 할 패턴. "
+                   "feed 신호만 남아있어도 알려진 feed 플랫폼이면 recognize 단계에서 잡혔어야 함 "
+                   "(여기까지 왔으면 catalog/landing 가능성). "
+                   f"[신호: {detail}]")
+
+
 # --------------------------------------------------------------------------- #
 # LLM 분류기 veto — 위 5개 구조 게이트의 false-reject 봉합.
 # 게이트가 거부하려 할 때 LLM index/content 분류기를 호출. 'index'(게시판) 면 거부 취소.
@@ -2985,6 +3047,22 @@ def _main_inner(argv) -> int:
                               last_config=None, last_feedback=f"[FAIL] register_timeout: {e}")
             print(f"[register] ❌ 자동 처리 불가 — preflight timeout. → {fp}")
             return 1
+
+    # post-preflight NO_FIRST 게이트 — agentic 가 self-veto(non_board) 할 패턴을 미리 차단.
+    # 2026-05-26 games-cn batch 53건 rc=3 중 22건이 이 패턴 (board_shape 가 feed 만으로 통과/veto-override
+    # → preflight 에서 첫 글 URL 못 찾음 → agentic 호출 → non_board self-veto). agentic ~17s × 22 quota 절약.
+    # --gate-only 모드면 _gate_reject_or_veto 자리들과 같은 정신으로 미통과 시 rc=3 반환 (LLM 0콜 보장).
+    if not args.gate_only:
+        nf_ok, nf_msg = _no_first_post_preflight_check(digest, url)
+        if not nf_ok:
+            print(f"[register] 🔴 post-preflight NO_FIRST: {nf_msg}")
+            try:
+                _save_rejected(slug, url, f"post-preflight NO_FIRST: {nf_msg}",
+                               note="gate: post_preflight_no_first", learn=False)
+            except Exception as e:  # noqa: BLE001
+                print(f"[register] ⚠ REJECTED 마커 저장 실패 (rc=3): {e}", file=sys.stderr)
+            print("[register] ❌ 등록 거부 — preflight 후에도 게시판 구조 신호 0 (agentic 호출 0).")
+            return 3
 
     out_path = Path(args.out) if args.out else (CONFIGS_DIR / f"{slug}.json")
     if out_path.exists() and not args.force:

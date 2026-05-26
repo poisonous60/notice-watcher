@@ -157,6 +157,9 @@ CASES: list[tuple[str, tuple[Optional[str], Optional[int], Optional[str]], str, 
      "gate_reject", "classifier_reject"),
     ("agent_self_veto_non_board", ("failed", 3, "agent_self_veto:non_board ..."),
      "gate_reject", "agent_self_veto_non_board"),
+    ("gate_post_preflight_no_first",
+     ("failed", 3, "[register] 🔴 post-preflight NO_FIRST: preflight 후에도 첫 글 URL 없음 + 정적 same-host 반복/JSON API/inline JS/hydration 후보 0 ...\n[register] ❌ 등록 거부 — preflight 후에도 게시판 구조 신호 0 (agentic 호출 0)."),
+     "gate_reject", "post_preflight_no_first"),
     ("gate_no_match", ("failed", 3, "something"), "gate_reject", None),
 
     # unknown rc ----

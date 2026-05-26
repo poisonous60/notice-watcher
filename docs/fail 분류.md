@@ -82,6 +82,7 @@
 | `root_marketing_homepage` | root 마케팅 랜딩 | 메이저 미디어/플랫폼 root 도메인 — board 아님. 카테고리 URL 권장. |
 | `board_shape` | 게시판 형식 아님 | post 리스트 구조 인식 실패. |
 | `agent_self_veto_non_board` | agent self-veto 비-게시판 | api_loop/agentic 이 스스로 content/single-article/catalog 로 판정해 self-veto. LLM 재호출 없음. |
+| `post_preflight_no_first` | preflight 후 첫 글 0 + 구조 신호 0 | preflight 가 첫 글 URL 못 잡고 정적 same-host 반복/JSON/inline/hydration 후보 모두 0. agentic 가 같은 digest 로 self-veto(non_board) 할 패턴 사전 차단 (2026-05-26 games-cn batch 22/53 quota 절약). feed 만 있는 catalog/landing 패턴 흔함. |
 | `classifier_reject` | 분류기 비-게시판 판정 | LLM page-type 분류기가 content/catalog 등 비-게시판으로 판정해 거부 (ADR 0007 accept-path / ADR 0011 catalog=아티팩트·비최신순 listing). 수동 config 는 허용. |
 
 ### bug
