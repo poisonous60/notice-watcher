@@ -196,3 +196,40 @@ normal worker path. The generated config correctly uses `httpx_json` for both th
 list and article body APIs. Remaining caveat: its list URL is the observed
 current-month `news_202605.json`; this is operationally valid now but not a
 general date/fallback engine solution.
+
+## 2026-05-27 v5 — probe evidence grounding guardrail
+
+The next failure mode was not that a wrong selector or URL is inherently slow.
+It is slow only when the wrong candidate is validated through Playwright:
+`page.goto` may succeed, then `wait_selector` is allowed to miss and still burn
+`idle_timeout_ms` before extraction returns 0 rows/body. A missing URL usually
+fails quickly with DNS/HTTP/navigation errors; a selector/list mismatch can burn
+inside an otherwise loaded page.
+
+Generic fix applied:
+
+- `generate.validate.validate_built_config` now runs a pre-network
+  `probe_grounding_*` guard after adapter construction and before
+  `fetch_list`. It fails fast when a generated candidate contradicts concrete
+  probe evidence:
+  - HTML row/list wait selectors match 0 nodes in complete `list_html`.
+  - Playwright article wait selector matches 0 nodes in complete
+    `article_sample.html`.
+  - HTML article content selectors all match 0 nodes in complete
+    `article_sample.html`.
+  - JSON article `url_template` is outside captured useful
+    `article_sample.api_candidates`.
+- The guard is evidence-based, not an allowlist. Synthesized selectors are
+  allowed when they actually match probe HTML.
+- Missing, truncated, or prompt-compressed HTML is treated as unknown and fails
+  open. This avoids rejecting legitimate configs from incomplete probe samples.
+- Agentic workdirs now keep compressed `digest.json` for the model and a full
+  `validator_digest.json` for `validate_config.py`, so child validation can use
+  full evidence without asking the small agent to read the large file.
+- `prompts/register_agent_AGENTS.md` documents `probe_grounding_*` feedback so
+  the retry loop fixes the selector/API choice instead of increasing waits.
+
+This improves agentic config generation **indirectly**: it does not add new
+site evidence or make the model intrinsically smarter, but it turns vague
+25-second validation failures into specific, cheap feedback that points the
+agent back to probe-grounded selectors and APIs.

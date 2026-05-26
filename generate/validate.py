@@ -14,8 +14,10 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Optional
+from urllib.parse import urlsplit
 
 from engine import make_adapter, NoticePost
+from engine.extract_helpers import parse_html
 from engine.tracing import current_trace
 
 
@@ -165,6 +167,192 @@ def _expected_count_hint(digest: Optional[dict]) -> Optional[int]:
     return best or None
 
 
+def _digest_html_safe(section: Any) -> bool:
+    """True when digest HTML is complete enough to use as hard evidence.
+
+    Agentic workdirs may contain prompt-compressed HTML. That is useful for the
+    model, but not safe as negative evidence because repeated rows can be
+    collapsed or the sample can be char-capped without the original digest
+    `truncated` flag changing.
+    """
+    if not isinstance(section, dict):
+        return False
+    html = section.get("html")
+    if not isinstance(html, str) or not html.strip():
+        return False
+    if section.get("truncated") or section.get("prompt_compressed"):
+        return False
+    if "<!-- [digest] HTML truncated -->" in html or "<!-- collapsed " in html:
+        return False
+    return True
+
+
+def _selector_count(html: str, selector: str) -> Optional[int]:
+    if not selector or selector == ":self":
+        return None
+    try:
+        return len(parse_html(html).select(selector))
+    except Exception:
+        return None
+
+
+def _source_basename(section: Any) -> str:
+    if not isinstance(section, dict):
+        return ""
+    raw = str(section.get("source") or "")
+    return raw.replace("\\", "/").rsplit("/", 1)[-1].lower()
+
+
+def _rendered_list_evidence(section: Any) -> bool:
+    return _source_basename(section) in {"list.html", "list.captured.html"}
+
+
+def _rendered_article_evidence(section: Any) -> bool:
+    return _source_basename(section) in {"article_click.html", "article.captured.html"}
+
+
+def _content_css_selectors(specs: Any) -> list[str]:
+    out: list[str] = []
+
+    def walk(v: Any) -> None:
+        if isinstance(v, list):
+            for item in v:
+                walk(item)
+            return
+        if not isinstance(v, dict):
+            return
+        if v.get("from") == "css" and isinstance(v.get("selector"), str):
+            out.append(v["selector"])
+
+    walk(specs)
+    return out
+
+
+def _norm_ground_url(u: Optional[str]) -> str:
+    if not u:
+        return ""
+    placeholder = "__SCHEME_SEP__"
+    return re.sub(r"/+", "/", u.split("#", 1)[0].rstrip("/").lower().replace("://", placeholder)).replace(placeholder, "://")
+
+
+def _url_template_matches(template: str, url: str) -> bool:
+    if not template or not url:
+        return False
+    t = _norm_ground_url(template)
+    u = _norm_ground_url(url)
+    if t == u:
+        return True
+    pattern = re.escape(t)
+    for key in ("post_id", "id", "board", "page"):
+        pattern = pattern.replace(r"\{" + key + r"\}", r"[^/?#&]+")
+    return re.fullmatch(pattern, u) is not None
+
+
+def _same_endpoint_family(template: str, url: str) -> bool:
+    try:
+        tt = urlsplit(template.replace("{post_id}", "0"))
+        uu = urlsplit(url)
+    except Exception:
+        return False
+    if not tt.netloc or tt.netloc.lower() != uu.netloc.lower():
+        return False
+    t_path = re.sub(r"\{post_id\}|\d+", "*", tt.path.rstrip("/").lower())
+    u_path = re.sub(r"\d+", "*", uu.path.rstrip("/").lower())
+    return t_path == u_path
+
+
+def _article_api_grounded(template: str, candidates: list[Any]) -> bool:
+    urls = [str(c.get("url") or "") for c in candidates if isinstance(c, dict)]
+    return any(_url_template_matches(template, u) or _same_endpoint_family(template, u) for u in urls)
+
+
+def _add_probe_grounding_checks(rep: ValidationReport, cfg: dict, digest: Optional[dict]) -> None:
+    """Fail fast on generated candidates that contradict concrete probe evidence.
+
+    This is deliberately a narrow guardrail, not a strategy override. Missing or
+    compressed evidence is treated as unknown so existing configs and legitimate
+    inferred selectors keep the old validation path.
+    """
+    if not isinstance(digest, dict):
+        return
+
+    strategy = str(cfg.get("strategy") or "")
+    lst = cfg.get("list") or {}
+    art = cfg.get("article") or {}
+    list_html = digest.get("list_html") or {}
+    article_sample = digest.get("article_sample") or {}
+
+    if _digest_html_safe(list_html):
+        html = str(list_html.get("html") or "")
+        row_selector = str(lst.get("row_selector") or "")
+        list_negative_is_safe = strategy != "playwright_html" or _rendered_list_evidence(list_html)
+        if row_selector and list_negative_is_safe:
+            n = _selector_count(html, row_selector)
+            if n == 0:
+                rep.add(
+                    "probe_grounding_list_row_selector",
+                    False,
+                    hard=True,
+                    detail=f"row_selector {row_selector!r} matched 0 nodes in probe list_html; choose a selector grounded in digest evidence",
+                )
+        wait_selector = str(lst.get("wait_selector") or "")
+        if strategy == "playwright_html" and wait_selector and _rendered_list_evidence(list_html):
+            n = _selector_count(html, wait_selector)
+            if n == 0:
+                rep.add(
+                    "probe_grounding_list_wait_selector",
+                    False,
+                    hard=True,
+                    detail=f"list.wait_selector {wait_selector!r} matched 0 nodes in probe list_html; this would burn Playwright selector wait",
+                )
+
+    article_negative_is_safe = strategy != "playwright_html" or _rendered_article_evidence(article_sample)
+
+    if strategy == "playwright_html" and _digest_html_safe(article_sample) and _rendered_article_evidence(article_sample):
+        html = str(article_sample.get("html") or "")
+        wait_selector = str(art.get("wait_selector") or "")
+        if wait_selector:
+            n = _selector_count(html, wait_selector)
+            if n == 0:
+                rep.add(
+                    "probe_grounding_article_wait_selector",
+                    False,
+                    hard=True,
+                    detail=f"article.wait_selector {wait_selector!r} matched 0 nodes in probe article_sample.html; this would burn Playwright selector wait",
+                )
+
+    if str(art.get("fetch_kind") or "html") != "json" and not art.get("body_empty_acceptable"):
+        if _digest_html_safe(article_sample) and article_negative_is_safe:
+            html = str(article_sample.get("html") or "")
+            selectors = [s for s in _content_css_selectors(art.get("content")) if s and s != ":self"]
+            if selectors:
+                hits = [(s, _selector_count(html, s)) for s in selectors]
+                if all(n == 0 for _, n in hits):
+                    rep.add(
+                        "probe_grounding_article_content_selector",
+                        False,
+                        hard=True,
+                        detail="article.content CSS selectors matched 0 nodes in probe article_sample.html: "
+                               + ", ".join(repr(s) for s, _ in hits[:5]),
+                    )
+
+    if str(art.get("fetch_kind") or "") == "json":
+        candidates = article_sample.get("api_candidates") or []
+        template = str(art.get("url_template") or "")
+        if template and isinstance(candidates, list) and candidates:
+            useful = [
+                c for c in candidates
+                if isinstance(c, dict) and c.get("url") and (c.get("url_id_match") or c.get("body_looks_html") or c.get("body_field_path"))
+            ]
+            if useful and not _article_api_grounded(template, useful):
+                rep.add(
+                    "probe_grounding_article_json_api",
+                    False,
+                    hard=True,
+                    detail=f"article JSON url_template {template!r} is not grounded in article_sample.api_candidates",
+                )
+
+
 async def validate_built_config(
     cfg: dict,
     *,
@@ -182,6 +370,11 @@ async def validate_built_config(
     except Exception as e:
         rep.error = f"make_adapter 실패: {type(e).__name__}: {e}"
         rep.add("build_adapter", False, hard=True, detail=rep.error)
+        return rep
+
+    _add_probe_grounding_checks(rep, cfg, digest)
+    if rep.hard_failures():
+        rep.ok = False
         return rep
 
     posts: list[NoticePost] = []

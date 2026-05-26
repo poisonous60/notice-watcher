@@ -96,6 +96,10 @@ validator feedback.
 - Do not invent class names such as `.list-item__text` or CMS JSON endpoints
   unless digest evidence shows them. If the row itself contains title/date text,
   extract from `:self` with regex instead of inventing child selectors.
+- Validator feedback named `probe_grounding_*` means the candidate contradicted
+  concrete probe evidence before live crawling. Fix by choosing selectors/API
+  URLs that match `digest.json` HTML or HAR/API candidates; do not retry the
+  same made-up selector with longer Playwright waits.
 - If a previous candidate used a probe-grounded rendered selector and failed
   with DNS/browser launch infra errors, keep that direction and fix only fields
   that validation proves wrong.

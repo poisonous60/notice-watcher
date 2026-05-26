@@ -63,9 +63,22 @@ def _emit_error(reason: str, *, rc: int = 2) -> int:
     return rc
 
 
-async def _run_with_timeout(cfg: dict):
+def _load_digest_for_candidate(candidate_path: Path) -> dict | None:
+    for name in ("validator_digest.json", "digest.json"):
+        path = candidate_path.parent / name
+        if not path.is_file():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        return payload if isinstance(payload, dict) else None
+    return None
+
+
+async def _run_with_timeout(cfg: dict, *, digest: dict | None):
     return await asyncio.wait_for(
-        validate_built_config(cfg, digest=None, fetch_articles=1),
+        validate_built_config(cfg, digest=digest, fetch_articles=1),
         timeout=INTERNAL_TIMEOUT_S,
     )
 
@@ -166,6 +179,7 @@ def main(argv: list[str]) -> int:
         return _emit_error(f"candidate JSON is not an object, got {type(cfg).__name__}")
     if args.strategy and args.strategy != "auto":
         cfg = {**cfg, "strategy": args.strategy}
+    digest = _load_digest_for_candidate(candidate_path)
     verbose_timing = args.verbose_timing or os.environ.get("VALIDATE_TIMING", "").strip().lower() in ("1", "true", "yes", "on")
     timing_dir = args.timing_dir or os.environ.get("VALIDATE_TIMING_DIR", "").strip()
     started = time.perf_counter()
@@ -180,7 +194,7 @@ def main(argv: list[str]) -> int:
     old_alarm = _install_hard_timeout(INTERNAL_TIMEOUT_S)
     try:
         try:
-            rep = asyncio.run(_run_with_timeout(cfg))
+            rep = asyncio.run(_run_with_timeout(cfg, digest=digest))
         except (asyncio.TimeoutError, _HardTimeout):
             status = "timeout"
             err_text = f"validate_internal_timeout_{int(INTERNAL_TIMEOUT_S)}s"

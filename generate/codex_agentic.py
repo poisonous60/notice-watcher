@@ -495,11 +495,13 @@ def _compress_digest_html(digest: dict, *, max_html_chars: int = 60_000) -> dict
     if isinstance(lh, dict) and isinstance(lh.get("html"), str):
         lh2 = dict(lh)
         lh2["html"] = _compress_html(lh["html"])[:max_html_chars]
+        lh2["prompt_compressed"] = True
         out["list_html"] = lh2
     asmp = out.get("article_sample")
     if isinstance(asmp, dict) and isinstance(asmp.get("html"), str):
         asmp2 = dict(asmp)
         asmp2["html"] = _compress_html(asmp["html"])[:max_html_chars]
+        asmp2["prompt_compressed"] = True
         out["article_sample"] = asmp2
     return out
 
@@ -515,6 +517,12 @@ def _setup_workdir(digest: dict, slug: str, url: str, repo: Path,
     digest_for_agent = _compress_digest_html(digest, max_html_chars=60_000)
     (workdir / "digest.json").write_text(
         json.dumps(digest_for_agent, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    # Full digest for validate_config.py only. The child prompt points at the
+    # compressed digest.json; the validator needs uncompressed HTML so grounding
+    # failures are evidence, not prompt-compression artifacts.
+    (workdir / "validator_digest.json").write_text(
+        json.dumps(digest, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     (workdir / "slug.txt").write_text(slug + "\n", encoding="utf-8")
     (workdir / "url.txt").write_text(url + "\n", encoding="utf-8")
