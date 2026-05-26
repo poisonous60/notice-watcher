@@ -67,6 +67,11 @@ def hand_config_triage_queue(*, failed_slugs: list[str]) -> str:
         "1b. **실전 경로 유지**: batch/FAILED 재시도는 현재 기본 `auto` 그대로 둔다 "
         "(api_loop_once → agentic). `--no-agentic` 은 cheap 가설 확인 전용이지 batch 성공률 판단에 쓰지 않는다. "
         "개선 포인트는 agent 호출 억제가 아니라 agent 입력 축소/품질 개선: `failure_packet`·curated examples·rules compact 를 확인한다.",
+        "1c. **agentic-first / per-site codex 는 최후 수단** (SKILL.md §0c-0, 2026-05-26). "
+        "default `auto` 가 agentic 까지 자동 타기 때문에 *2+ slug 가 같은 fail 신호* 면 그 generic 해결을 "
+        "**agentic 입력/휴리스틱/프롬프트**(C/B/A/F-layer) 자리에 박는다 — 한 PR 봉합 → batch 재시도 시 agentic 자동 처리. "
+        "per-site codex 는 *cross-site 일반화 0인 잔여만*. 위임 시에도 **각 task 에 같은 batch 동료 slug 의 (URL, fail_reason) 목록 박기 의무** — "
+        "isolated brief 만 주면 codex 가 'site 전용' punt 하여 §0c-회피 게이트 2 무력화 (2026-05-26 games-indie 박힘).",
         "2. **disjoint 파일소유 청크 분할** (`codex_batch.py plan` 은 단서). 공유 충돌파일=`scripts/register.py`(detect dispatch)+`probe/extract.py`(detect_*): "
         "path-match recognizer·수동 config=공유파일 0=병렬안전, probe-detect 플랫폼(root-URL)=한 청크만 소유·나머지 직렬. 소유 기록 output/codex_file_claims.json.",
         "3. **병렬 launch (ALLOW-LIST 박아서)** — 각 codex 프롬프트(`codex_handoff.py generic --task-file`)에 '이 파일만 편집, 나머지 금지' 제약. "
@@ -145,6 +150,15 @@ def catalog_run_and_fix(*, catalog_name: str,
     lines.append("3b. **실전 경로 유지**: batch/FAILED 재시도는 현재 기본 `auto` 그대로 둔다 "
                  "(api_loop_once → agentic). `--no-agentic` 은 cheap 가설 확인 전용이지 batch 성공률 판단에 쓰지 않는다. "
                  "개선 포인트는 agent 호출 억제가 아니라 agent 입력 축소/품질 개선: `failure_packet`·curated examples·rules compact 를 확인한다.")
+    lines.append("3c. **agentic-first / per-site codex 는 최후 수단** (SKILL.md §0c-0, 2026-05-26 박힘). "
+                 "default `auto` 가 agentic(codex) 까지 자동 타기 때문에 *같은 batch 의 2+ sites 가 같은 fail 신호* 면 "
+                 "그 generic 해결을 **agentic 입력/휴리스틱/프롬프트** 자리(C/B/A/F-layer) 에 박는다 — "
+                 "indie studio /news/ subpath, RSS feed 자동 detect, SPA shell row-count 분기 같은 cross-site 패턴은 "
+                 "여기서 한 PR 로 봉합하면 batch 재시도 시 agentic 이 자동 처리. "
+                 "per-site codex 위임으로 site 별 수동 config 찍어내는 건 *cross-site 일반화 0인 잔여만* — "
+                 "위임 시에도 **각 task 에 같은 batch 동료 sites 의 (URL, fail_reason) 목록 박기 의무** "
+                 "(없으면 codex 가 isolated brief 라 cross-site 패턴 못 보고 '이 사이트 전용' punt — §0c-회피 게이트 2 무력화). "
+                 "위임 전 1분 rubric: '같은 fail_reason/신호/fix layer 가 2+ sites?' YES → agentic 자리. NO → per-site codex (동료 brief 포함).")
     lines.append("4. **아래 우선순위대로** 처리 (2026-05-21 사용자 결정 — SKILL.md §0a):")
     lines.append("   1) **bug** (rc=-1/-2/-3/-5/-99, `.BUG.json`): *무조건 fix*, 최우선. traceback → bot/scripts/engine 코드 수정 (bug-fix workflow). `register.py 실행 시간 초과(300s)` 류 timeout 도 여기 — root-cause.")
     lines.append("   2) **gate_reject** (rc=3): board_shape/nav_only/single-article 게이트 거부 + LLM index/content 분류기(veto)도 content 판정(ADR 0007). 게시판/비게시판 false-reject 봉합은 *분류기 layer 의 일* — 임의로 '의도된 거부'라 신뢰 X. **사용자에게 분포·샘플 보고하고 확인 대기**, 받으면 fix 순서 = ① `prompts/classify.system.txt`/모델 보강 (게이트 휴리스틱 추가 X) → ② SPA(정적 HTML 에 목록 없음)면 render 트랙. SKILL.md §0a-2.")

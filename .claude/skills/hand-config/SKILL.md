@@ -119,6 +119,20 @@ gen_fail(rc=1) 큐로 *새는* false-negative 2종. 둘 다 진짜 게시판이 
 
 dashboard `/triage` 의 "FAILED 큐 codex 위임 처리" 프롬프트를 붙여넣어 들어온 경우 (또는 큐가 여러 건이라 Claude quota 절약이 필요할 때). ADR 0008 결정: *중간 orchestration* (probe 읽기·§1~§2 진단·fix 작성·probe_smoke) 은 **codex CLI 에 위임**, Claude 토큰 0. **진입·diff 검토·commit·배포는 Claude** (이 절차).
 
+### §0c-0 agentic-first / per-site codex 는 최후 수단 (2026-05-26 박힘)
+
+**default `auto` 경로 = api_loop_once → codex agentic** 이므로 같은 batch 안에서 *여러 site 가 같은 fail 신호* 를 보이면 그 generic 해결은 **agentic 의 입력/프롬프트/휴리스틱** 자리에 박는다. per-site codex 위임으로 site 별 수동 config 6개 찍어내는 건 *cross-site 일반화 0인 잔여만의 최후 수단* — 패턴 보이는데 per-site 로 덮으면 다음 batch 에서 같은 패턴 다시 fail.
+
+**fail 패턴이 보이면 위임 순서 (위에서부터)**:
+
+1. **agentic 입력/휴리스틱 개선** (C/B/A/F-layer 위임 1순위) — `prompts/config_writer.system.txt`·`probe/extract.py` heuristic·`failure_packet` builder·curated examples. 같은 batch 의 2+ sites 가 한 패턴(예: indie studio /news/ subpath, RSS feed 자동 detect, SPA shell row-count 분기) 이면 그 자리에 박아 *batch 재시도 시 agentic 이 자동 처리* 하게 만든다. 한 PR 에 박고 같은 batch 의 잔여 사이트 `register.py --reuse-probe` 로 회복 검증.
+2. **per-site codex (수동 config/recognizer)** — 위 1번이 진짜 일반화 불가능한 잔여만. 위임 시 **각 task 에 같은 batch 동료 sites 의 (URL, fail_reason) 목록 박기 의무** — codex 가 cross-site 패턴 발견 시 §0c-회피 게이트 2 (일반화 신호 punt) 발동해서 *case body 일반화 후보 섹션* 채우게 함. 동료 목록 없이 isolated brief 만 주면 codex 는 무조건 "이 사이트 전용" punt 함 (2026-05-26 games-indie batch 박힘).
+
+**판정 rubric** — codex 위임 전 1분 점검:
+- "같은 fail_reason / 같은 신호 / 같은 fix layer 가 batch 내 2+ sites 에 보이나?" YES → §0c-0 1번 (agentic 자리 박기).
+- "각 site 가 진짜 idiosyncratic (다른 패턴) 인가?" YES → §0c-0 2번 (per-site codex, 단 동료 brief 포함).
+- 모호 → 1번 한 PR 박아보고 회복률 본 다음 잔여만 2번.
+
 **역할 분담 — entry=Claude / middle=codex / exit=Claude**:
 - Claude: 큐 pull → 청크 분할 → codex 위임(보이는 창) → **각 청크 diff 검토** → 공유 인덱스·commit·push·N100 배포.
 - codex: 청크 안의 진단·fix·case 작성. **commit 전 STOP** (HARD-STOP 프롬프트). codex 결과 *맹신 X* — Claude 가 git diff 로 검토 (codex 는 명시 제약도 위반·over-edit 한 전례).

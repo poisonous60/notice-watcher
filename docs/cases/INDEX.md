@@ -2,12 +2,18 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 316 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 322 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
+| [`host_yachtclubgames-_root_67bf3b65`](host_yachtclubgames-_root_67bf3b65.md) | ✅ 수동 config 등록 (httpx_html, baseline 25건) | 2026-05-26 |  | llm_api | https://www.yachtclubgames.com/ |
+| [`host_valheimgame-com_news_3d7fd7ec`](host_valheimgame-com_news_3d7fd7ec.md) | ✅ 수동 config 등록 (playwright_html, baseline 9건) | 2026-05-26 | none | posts_nonempty, js_rendered_list, static_list_missing | https://www.valheimgame.com/news/ |
 | [`host_pubg-com_en_12a87e3e`](host_pubg-com_en_12a87e3e.md) | ✅ 등록 — Vue cookie-banner + scoped-row 캡처/추출 보정 + 수동 config | 2026-05-26 | C | cookie_modal_click_intercept, vue_scoped_row_miss | https://www.pubg.com/en/news |
 | [`host_plaync-com_ko-kr_a0ec8736`](host_plaync-com_ko-kr_a0ec8736.md) | ✅ view-link cluster 분류 개선 + PlayNC 공지 config 등록 | 2026-05-26 | A+C | agent_self_veto_view_link_misclassified, kr_cms_view_url_pattern | https://www.plaync.com/ko-kr/board/notice/list |
+| [`host_mobiusdigitalga_news_21205848`](host_mobiusdigitalga_news_21205848.md) | 🧩 수동 config — Weebly RSS feed 로 baseline 10건 등록 | 2026-05-26 |  | posts_nonempty, first_article_archive, rss_feed_available | https://www.mobiusdigitalgames.com/news/ |
+| [`host_focus-entmt-com_root_0966e52e`](host_focus-entmt-com_root_0966e52e.md) | 🧩 수동 config — Focus Entertainment /en/news static cards | 2026-05-26 | none | codex_agentic_timeout, root_marketing_homepage, article_fetch_timeout | https://www.focus-entmt.com/ |
+| [`host_finji-co_news_a591da3d`](host_finji-co_news_a591da3d.md) | 🧩 수동 config — /news HTML의 product link 후보 대신 검증된 /feed.xml RSS를 폴링 | 2026-05-26 | F | gen_fail, llm_api_unavailable, rss_available, product_link_first_candidate | https://www.finji.co/news/ |
+| [`host_annapurnaintera_news_72cf03d0`](host_annapurnaintera_news_72cf03d0.md) | ✅ 수동 config 등록 (httpx_html list, internal redirector URLs only) | 2026-05-26 | none | article_body_len, external_article_redirect | https://www.annapurnainteractive.com/news/ |
 | [`bug_classify_wall_deadline_2026-05-26`](bug_classify_wall_deadline_2026-05-26.md) | 🟢 fixed (회귀 0 — probe_smoke 1491 PASS) | 2026-05-26 | F | register_wall_timeout, classify_llm_stall | (infra — no single url) |
 | [`host_usopen-org_en_US_ad97acdf`](host_usopen-org_en_US_ad97acdf.md) | ✅ 수동 config 등록 (relatedcontent JSON API) | 2026-05-25 | none | err_http2_protocol_error, render_navigation_failed | https://www.usopen.org/en_US/news/index.html |
 | [`host_the-afc-com_en_6207897b`](host_the-afc-com_en_6207897b.md) | ✅ 수동 config 등록 (RSS fallback, body optional) | 2026-05-25 | none | article_body_len, brittle_article_selector, rss_available | https://www.the-afc.com/en/about_afc/news.html |
@@ -329,7 +335,7 @@
 
 | layer | count |
 |---|---|
-| (미기재) | 36 |
+| (미기재) | 38 |
 | A+C | 1 |
 | B | 1 |
 | C | 18 |
@@ -343,12 +349,12 @@
 | D | 2 |
 | E | 6 |
 | E+A+C+D | 1 |
-| F | 89 |
+| F | 90 |
 | F+A | 1 |
 | F+C | 3 |
 | adapter | 1 |
 | config | 3 |
-| none | 143 |
+| none | 146 |
 
 ### config_strategy 분포
 
@@ -356,16 +362,16 @@
 |---|---|
 | (미기재) | 56 |
 | handwritten | 31 |
-| httpx_html | 112 |
+| httpx_html | 117 |
 | httpx_json | 26 |
 | httpx_json (미적용 — 콘텐츠 0) | 1 |
 | mixed | 1 |
 | none | 41 |
-| playwright_html | 46 |
+| playwright_html | 47 |
 | rejected | 1 |
 | rss | 1 |
 
 ### 최근 90일 (≥ 2026-02-25)
 
-케이스 316 건.
+케이스 322 건.
 
