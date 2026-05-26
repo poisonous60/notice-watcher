@@ -155,8 +155,13 @@ def _is_cloudflare_interstitial(page) -> tuple[bool, bool]:
     return bool(_CF_INTERSTITIAL_RE.search(hay)), bool(_TURNSTILE_RE.search(hay))
 
 
-def _wait_through_cloudflare_interstitial(page, *, timeout_ms: int = 8000) -> str | None:
-    """Cloudflare JS interstitial can clear itself; Turnstile/captcha should not be bypassed."""
+def _wait_through_cloudflare_interstitial(page, *, timeout_ms: int = 30000) -> str | None:
+    """Cloudflare JS interstitial can clear itself; Turnstile/captcha should not be bypassed.
+
+    timeout_ms 30s default (2026-05-26 이전 8s). 2026 의 CF non-interactive PoW (Turnstile invisible)
+    가 10~20s 걸리는 케이스 — 8s timeout 으로 통과율 손실. *조건부* — CF challenge HTML 검출 시만
+    이 wait 진입 (위 _is_cloudflare_interstitial 가드). 일반 사이트는 early return → 영향 0.
+    근거: research_cloudflare_findings.md §1.5 + §7.6 (무조건 30s 박지 X — 조건부만 OK)."""
     challenge, turnstile = _is_cloudflare_interstitial(page)
     if not challenge or turnstile:
         return "turnstile_present" if turnstile else None
