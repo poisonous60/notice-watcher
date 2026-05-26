@@ -85,7 +85,7 @@ def hand_config_triage_queue(*, failed_slugs: list[str]) -> str:
         "② `Later` (capability_blocked auto-defer 또는 dev box `triage_later.json` 손-park, rc=5 류만), "
         "③ `gate-fail park` (분류기 개선 대기, `triage.py park-gate-fail <slug> --reason=…`), "
         "④ **`REJECTED`** (영구 거부 — N100 `.FAILED.json` → `.REJECTED.json`). "
-        "**`.FAILED.json` 잔존 금지** (봇 자동 retry 계속 + dashboard 잔여 표시). dev box config 작동 하지만 N100 환경 한계(TLS reset / Chromium DNS / 정책상 우회 X) = `_save_rejected(slug, url, 'capability_blocked: <원인>', learn=False)` ssh remote 호출 (register.py 가 sibling cleanup 다 함). "
+        "**`.FAILED.json` 잔존 금지** (다음 batch/세션이 작업큐서 또 보임 + 응답 'failed=재시도 가능' 분류). dev box config 작동 하지만 N100 환경 한계(TLS reset / Chromium DNS / 정책상 우회 X) = `_save_rejected(slug, url, 'capability_blocked: <원인>', learn=False)` ssh remote 호출 (register.py 가 sibling cleanup·triage_queue prune 다 함, 응답 'rejected=영구'). "
         "dev box `triage_later.json` *만* 박는 건 X — 그건 dev box dashboard view 만, N100 봇·register 거동 영향 0. "
         "보고 시 종료 분포 명시 (`registered N / Later N / gate-fail-park N / REJECTED N / 정상거부 N = total`).",
         "",
@@ -179,13 +179,13 @@ def catalog_run_and_fix(*, catalog_name: str,
                  "청크별 `codex_watch.py <result> --loop` 완료 → **git diff+result 검토 게이트(파일셋 ALLOW-LIST 내·HARD-STOP·semantic 충돌)** → 직렬 commit(청크별 git add) → 배포.")
     lines.append(f"5. 재시도: `python scripts/remote.py batch-register --catalog={catalog_name} --failed` (rc∈{{1,5,-1,-2,-3,-99}} — capability_blocked 포함).")
     lines.append("6. registered 100% 또는 root-cause 못 잡는 사이트만 남을 때까지 반복.")
-    lines.append("6b. **모든 fail 의 종료 상태 박기 의무** (2026-05-26 박힘) — batch 끝났다 보고 전에 *각 미등록 slug* 가 다음 4종 종료 상태 중 하나에 들어가야 한다. `.FAILED.json` 그대로 놔두지 X (봇 자동 retry 계속 + dashboard 잔여):"
+    lines.append("6b. **모든 fail 의 종료 상태 박기 의무** (2026-05-26 박힘) — batch 끝났다 보고 전에 *각 미등록 slug* 가 다음 4종 종료 상태 중 하나에 들어가야 한다. `.FAILED.json` 그대로 놔두지 X (다음 batch/세션이 작업큐서 또 보임 + 응답 'failed=재시도 가능' 분류; *dashboard KPI 정리 목적 아님* — dashboard fail-kind 는 jobs row 기반 history):"
                  " ① `registered` (config 박힘),"
                  " ② `Later` (capability_blocked auto-defer 또는 dev box `triage_later.json` 손-park — rc=5 류만),"
                  " ③ `gate-fail park` (분류기 개선 대기, `python scripts/triage.py park-gate-fail <slug> --reason=…`),"
                  " ④ **`REJECTED`** (영구 거부, N100 `.FAILED.json`→`.REJECTED.json`. dev box config 작동 하지만 N100 환경 한계(TLS reset/DNS 환경/Chromium issue)·정책상 우회 X 인 경우 = capability_blocked 영구. ssh remote 로 `_save_rejected(slug, url, 'capability_blocked: <원인>', learn=False)` 호출 — register.py 가 sibling cleanup 다 함)."
                  " 보고 시 종료 분포 명시 (예: `registered 19 / Later 7 / gate-fail-park 0 / REJECTED 2 / 정상거부 72 = 100`).")
-    lines.append("6c. **dev box `triage_later.json` 만 박는 건 X** — 그건 dev box dashboard view 뿐, N100 봇·register 거동에 영향 0. 봇이 같은 URL `/preview`/`/watch` 받으면 또 register.py 호출 → 또 fail. N100 측 `.REJECTED.json` 까지 박아야 `is_rejected(slug)` 자동 차단됨.")
+    lines.append("6c. **dev box `triage_later.json` 만 박는 건 X** — 그건 dev box `triage.py list --skip-later` filter 뿐, N100 봇·register 거동에 영향 0 (`is_blocked(slug)` 는 N100 marker REJECTED/FAILED/BUG 봄, `triage_later.json` 은 dev box gitignored). FAILED 만 있어도 봇 진입은 차단되지만 응답 'failed=재시도 가능' 이라 영구 거부 의미 아님. 영구면 N100 `.REJECTED.json` 까지 박아야 응답 'rejected=영구' + sibling cleanup.")
     lines.append("")
     lines.append("각 fail 두 트랙 *동시* 진행 (한쪽 막는 게이트 X):")
     lines.append("  - 트랙 A (사용자 향 — 사이트 즉시 작동): 수동 config / 손어댑터 → configs/ → 배포.")

@@ -400,18 +400,20 @@ dynamic family (`recognizer:*`, `[FAIL]:<check>`) 는 추가 필요 X — 자동
    - `requirements.txt` 변경 시 앞에 `.venv/bin/pip install -r requirements.txt &&`.
    - 확인: `register.py --list` 에 slug 가 `registered`. SSH 안 되면 Tailscale 먼저 (`tailscale status` 로 `n100-noticewatcher` 보이는지) → LAN-only 면 콘솔 `ip a` 로 IP 확인 (운영 메모 §1~2).
 
-8c. **모든 fail 의 종료 상태 박기 의무** (2026-05-26 박힘) — batch/triage 작업 *종료 보고 전* 각 미등록 slug 가 다음 4종 중 하나여야 한다. `.FAILED.json` *잔존 금지* (봇 자동 retry 계속 + dashboard 잔여):
+8c. **모든 fail 의 종료 상태 박기 의무** (2026-05-26 박힘) — batch/triage 작업 *종료 보고 전* 각 미등록 slug 가 다음 4종 중 하나여야 한다. **목적 = triage/FAILED marker 잔존 X (다음 batch/세션이 작업큐서 또 안 봄) + 사용자 향 응답 분류 정확화 (FAILED='재시도 가능' / REJECTED='영구 거부') + sibling state.json/FAILED.json/triage_queue 일괄 cleanup**. dashboard fail-kind KPI 는 jobs row 기반 history 통계라 marker 영향 X — *dashboard KPI 정리 목적 아님*.
 
 | 종료 상태 | 언제 | 박는 법 |
 |---|---|---|
-| `registered` | config 박힘 | `register.py --config configs/<slug>.json` 성공 |
+| `registered` | config 박힘 (regular `.json` state) | `register.py --config configs/<slug>.json` 성공 |
 | `Later` | rc=5 cap_blocked (anti-bot/captcha/cloudflare) — 능력 도착 대기 | `triage.py pull` auto-defer 또는 dev `triage_later.json` 손-park |
 | `gate-fail park` | 비-게시판인데 분류기 `?`/미신뢰 — 분류기 개선 대기 | `python scripts/triage.py park-gate-fail <slug> --reason=…` |
-| **`REJECTED`** | dev box config 작동 하지만 N100 환경 한계(TLS reset/Chromium DNS) 또는 정책상 우회 X = capability_blocked 영구 | `ssh ... '.venv/bin/python -c "from scripts.register import _save_rejected; _save_rejected(<slug>, <url>, \"capability_blocked: <원인>\", learn=False)"'` — sibling cleanup (FAILED.json 삭제·triage_queue prune·signal log) 함수가 다 함 |
+| **`REJECTED`** (영구) | rc=2/3/4 = `register.py` 가 *자동* REJECTED 박음 (1013/1023/1051 라인). gen_fail rc=1 인데 어떻게 시도해도 N100 retry 무의미한 경우 (probe_timeout / TLS reset / Chromium DNS env / 정책상 우회 X) = **손-박기** | `ssh ... '.venv/bin/python -c "from scripts.register import _save_rejected; _save_rejected(<slug>, <url>, \"capability_blocked: <원인>\", learn=False)"'` — sibling cleanup (FAILED.json 삭제·triage_queue prune·signal log) 함수가 다 함 |
 
-**dev box `triage_later.json` *만* 박는 건 X** — 그건 dev box dashboard view 뿐, N100 봇·register 거동에 영향 0. 봇이 같은 URL `/preview`/`/watch` 받으면 또 register.py 호출 → 또 fail → 또 `.FAILED.json`. N100 측 `.REJECTED.json` 까지 박아야 `is_rejected(slug)` 자동 차단됨.
+**dev box `triage_later.json` *만* 박는 건 X** — N100 봇·register 거동에 영향 0 (`is_blocked(slug)` 가 *N100* `.REJECTED.json`/`.FAILED.json`/`.BUG.json` 마커 중 하나라도 보면 차단; `triage_later.json` 은 dev box gitignored 파일이라 N100 에는 없음). FAILED 만 있어도 봇 진입은 차단되지만 응답 문구가 "이전 등록 실패" 라 *재시도 가능* 의미 — 영구 거부면 REJECTED 박아야 응답 'rejected' (영구) + sibling state.json/FAILED.json/triage_queue 일괄 cleanup 됨.
 
-**보고 형식**: 종료 분포 명시 (예: `registered 19 / Later 7 / gate-fail-park 0 / REJECTED 2 / 정상거부 72 = 100`). 2026-05-26 games-indie batch 에서 2 sites (focus-entmt N100 TLS reset + valheim N100 patchright DNS) `triage_later.json` 박고 끝났다 보고 → 사용자 지적 → N100 `_save_rejected` 호출 추가 → 영구 처리.
+**보고 형식**: 종료 분포 명시 (예: `registered 19 / Later 7 / gate-fail-park 0 / REJECTED(손-박음) 4 / 자동거부(rc=2/3/4 자동 REJECTED) 72 = 100`). dashboard KPI 의 fail-kind 카운트와 다른 view — KPI 는 history (jobs row), 종료 분포는 *처리 완료 상태*.
+
+2026-05-26 games-indie batch 에서: 처음에 focus-entmt + valheim `triage_later.json` 만 박고 끝났다 보고 → 사용자 지적 → 4 sites (focus + valheim + hadesgame×2) N100 `_save_rejected` 호출 추가 → 영구 처리.
 
 8b. **post-fix-cleanup** (영구 게이트 박는 변경 *후*) — `python scripts/triage.py post-fix-cleanup --execute` 호출.
    - **언제**: engine/probe/scripts/register 의 *게이트 로직* 자리 박은 변경 (예: 새 휴리스틱 + `_<gate>_check` + register 게이트 추가). N100 의 옛 FAILED.json 큐가 새 게이트로 자동 cleanup.
