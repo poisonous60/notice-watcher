@@ -167,6 +167,7 @@ def main(argv: list[str]) -> int:
     if args.strategy and args.strategy != "auto":
         cfg = {**cfg, "strategy": args.strategy}
     verbose_timing = args.verbose_timing or os.environ.get("VALIDATE_TIMING", "").strip().lower() in ("1", "true", "yes", "on")
+    timing_dir = args.timing_dir or os.environ.get("VALIDATE_TIMING_DIR", "").strip()
     started = time.perf_counter()
     started_wall = time.time()
     status = "ok"
@@ -199,7 +200,7 @@ def main(argv: list[str]) -> int:
                 error=err_text,
                 started=started,
                 started_wall=started_wall,
-                out_dir=Path(args.timing_dir) if args.timing_dir else None,
+                out_dir=Path(timing_dir) if timing_dir else None,
             )
             trace_cm.__exit__(None, None, None)
     out = {

@@ -463,17 +463,37 @@ def _setup_workdir(digest: dict, slug: str, url: str, repo: Path,
     (workdir / "python_path.txt").write_text(py + "\n", encoding="utf-8")
     if sys.platform == "win32":
         (workdir / "run_validator.bat").write_text(
-            f'@echo off\r\n"{py}" "%~dp0validate_config.py" %*\r\n',
+            f'@echo off\r\nset "VALIDATE_TIMING_DIR=%~dp0validate_timing"\r\n"{py}" "%~dp0validate_config.py" %*\r\n',
             encoding="utf-8",
         )
     else:
         sh_path = workdir / "run_validator.sh"
         sh_path.write_text(
-            f'#!/bin/sh\nexec "{py}" "$(dirname "$0")/validate_config.py" "$@"\n',
+            '#!/bin/sh\n'
+            'export VALIDATE_TIMING_DIR="$(dirname "$0")/validate_timing"\n'
+            f'exec "{py}" "$(dirname "$0")/validate_config.py" "$@"\n',
             encoding="utf-8",
         )
         sh_path.chmod(0o755)
     return workdir
+
+
+def _copy_timing_artifacts(workdir: Path, repo: Path) -> None:
+    if os.environ.get("VALIDATE_TIMING", "").strip().lower() not in ("1", "true", "yes", "on"):
+        return
+    src = workdir / "validate_timing"
+    if not src.is_dir():
+        return
+    dst = repo / "output" / "validate_timing"
+    try:
+        dst.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return
+    for p in src.glob("*.json"):
+        try:
+            shutil.copy2(p, dst / p.name)
+        except OSError:
+            pass
 
 
 def _example_reason(cfg: dict, digest: dict) -> str:
@@ -850,6 +870,7 @@ async def _run_codex_agentic_once(
             wall_s=time.time() - t0,
         )
     finally:
+        _copy_timing_artifacts(workdir, repo)
         if not keep_workdir and not os.environ.get("KEEP_AGENT_WORKDIR"):
             shutil.rmtree(workdir, ignore_errors=True)
 
