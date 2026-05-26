@@ -400,6 +400,19 @@ dynamic family (`recognizer:*`, `[FAIL]:<check>`) 는 추가 필요 X — 자동
    - `requirements.txt` 변경 시 앞에 `.venv/bin/pip install -r requirements.txt &&`.
    - 확인: `register.py --list` 에 slug 가 `registered`. SSH 안 되면 Tailscale 먼저 (`tailscale status` 로 `n100-noticewatcher` 보이는지) → LAN-only 면 콘솔 `ip a` 로 IP 확인 (운영 메모 §1~2).
 
+8c. **모든 fail 의 종료 상태 박기 의무** (2026-05-26 박힘) — batch/triage 작업 *종료 보고 전* 각 미등록 slug 가 다음 4종 중 하나여야 한다. `.FAILED.json` *잔존 금지* (봇 자동 retry 계속 + dashboard 잔여):
+
+| 종료 상태 | 언제 | 박는 법 |
+|---|---|---|
+| `registered` | config 박힘 | `register.py --config configs/<slug>.json` 성공 |
+| `Later` | rc=5 cap_blocked (anti-bot/captcha/cloudflare) — 능력 도착 대기 | `triage.py pull` auto-defer 또는 dev `triage_later.json` 손-park |
+| `gate-fail park` | 비-게시판인데 분류기 `?`/미신뢰 — 분류기 개선 대기 | `python scripts/triage.py park-gate-fail <slug> --reason=…` |
+| **`REJECTED`** | dev box config 작동 하지만 N100 환경 한계(TLS reset/Chromium DNS) 또는 정책상 우회 X = capability_blocked 영구 | `ssh ... '.venv/bin/python -c "from scripts.register import _save_rejected; _save_rejected(<slug>, <url>, \"capability_blocked: <원인>\", learn=False)"'` — sibling cleanup (FAILED.json 삭제·triage_queue prune·signal log) 함수가 다 함 |
+
+**dev box `triage_later.json` *만* 박는 건 X** — 그건 dev box dashboard view 뿐, N100 봇·register 거동에 영향 0. 봇이 같은 URL `/preview`/`/watch` 받으면 또 register.py 호출 → 또 fail → 또 `.FAILED.json`. N100 측 `.REJECTED.json` 까지 박아야 `is_rejected(slug)` 자동 차단됨.
+
+**보고 형식**: 종료 분포 명시 (예: `registered 19 / Later 7 / gate-fail-park 0 / REJECTED 2 / 정상거부 72 = 100`). 2026-05-26 games-indie batch 에서 2 sites (focus-entmt N100 TLS reset + valheim N100 patchright DNS) `triage_later.json` 박고 끝났다 보고 → 사용자 지적 → N100 `_save_rejected` 호출 추가 → 영구 처리.
+
 8b. **post-fix-cleanup** (영구 게이트 박는 변경 *후*) — `python scripts/triage.py post-fix-cleanup --execute` 호출.
    - **언제**: engine/probe/scripts/register 의 *게이트 로직* 자리 박은 변경 (예: 새 휴리스틱 + `_<gate>_check` + register 게이트 추가). N100 의 옛 FAILED.json 큐가 새 게이트로 자동 cleanup.
    - **언제 X**: 수동 config 변경 (configs/ 만) — 게이트 영향 X.
