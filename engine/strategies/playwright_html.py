@@ -205,12 +205,14 @@ async def _goto(adapter, url: str, *, wait_selector: Optional[str] = None) -> st
     nav_to = int(cfg.get("nav_timeout_ms", 15000))
     idle_to = int(cfg.get("idle_timeout_ms", 2000))
     quiet_to = int(cfg.get("quiet_ms", 500))
-    # cf_wait_timeout_ms 우선순위: per-site config > runtime settings.poll > 코드 default 8000ms.
+    # cf_wait_timeout_ms 우선순위: per-site config > runtime settings.poll > 코드 default 4000ms.
     # runtime settings 는 dashboard /control 페이지 또는 config.local.toml 에서 조절.
-    _default_cf_wait = 8000
+    # 2026-05-26: 8000ms → 4000ms — non-CF 사이트가 대부분이고 그 사이트에선 4s 그냥 낭비
+    # (interstitial 빨리 사라짐). 진짜 CF 챌린지면 4s 안에 못 풀고 raise → 어차피 cap_blocked.
+    _default_cf_wait = 4000
     try:
         from bot.runtime_config import settings as _rt_settings
-        _default_cf_wait = int(getattr(_rt_settings.poll, "cf_wait_timeout_ms", 8000))
+        _default_cf_wait = int(getattr(_rt_settings.poll, "cf_wait_timeout_ms", 4000))
     except Exception:  # noqa: BLE001
         pass
     cf_wait_to = int(cfg.get("cf_wait_timeout_ms", _default_cf_wait))

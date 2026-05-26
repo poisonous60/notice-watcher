@@ -42,7 +42,7 @@ except ImportError:
     from generate.validate import validate_built_config  # type: ignore  # noqa: E402
 
 
-INTERNAL_TIMEOUT_S = 25.0
+INTERNAL_TIMEOUT_S = 40.0
 
 
 class _HardTimeout(TimeoutError):
