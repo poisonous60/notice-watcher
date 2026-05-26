@@ -24,6 +24,7 @@ from typing import Optional
 
 from .. import cf_state_cache as _cf_cache
 from ..base_compat import NoticePost
+from ..tracing import current_trace
 from ._common import apply_proxy, build_list_url
 from . import httpx_html as _h  # parse_list_html / parse_article_html / article_url_for 재사용
 
@@ -152,27 +153,29 @@ async def open_session(adapter) -> None:
 
     cfg = adapter.cfg
     headless = cfg.get("headless", True)
-    pw = await async_playwright().start()
-    browser = await pw.chromium.launch(headless=headless)
-    ua = _ua_from_headers(cfg.get("headers") or {})
-    ctx_kwargs: dict = {"locale": "ko-KR", "viewport": {"width": 1366, "height": 900}}
-    if ua:
-        ctx_kwargs["user_agent"] = ua
-    ssp = cfg.get("storage_state_path")
-    if ssp and Path(ssp).exists():
-        ctx_kwargs["storage_state"] = str(ssp)
-    context = await browser.new_context(**ctx_kwargs)
-    # stealth (선택)
-    try:
-        from playwright_stealth import Stealth  # type: ignore
-        await Stealth().apply_stealth_async(context)
-    except Exception:
-        pass
-    # 추가 헤더(UA 제외)도 주입
-    extra = {k: v for k, v in (cfg.get("headers") or {}).items() if k.lower() != "user-agent"}
-    if extra:
-        await context.set_extra_http_headers(extra)
-    page = await context.new_page()
+    tr = current_trace()
+    with tr.span("playwright_launch", attrs={"headless": bool(headless), "engine": getattr(adapter, "_engine_label", "")}):
+        pw = await async_playwright().start()
+        browser = await pw.chromium.launch(headless=headless)
+        ua = _ua_from_headers(cfg.get("headers") or {})
+        ctx_kwargs: dict = {"locale": "ko-KR", "viewport": {"width": 1366, "height": 900}}
+        if ua:
+            ctx_kwargs["user_agent"] = ua
+        ssp = cfg.get("storage_state_path")
+        if ssp and Path(ssp).exists():
+            ctx_kwargs["storage_state"] = str(ssp)
+        context = await browser.new_context(**ctx_kwargs)
+        # stealth (선택)
+        try:
+            from playwright_stealth import Stealth  # type: ignore
+            await Stealth().apply_stealth_async(context)
+        except Exception:
+            pass
+        # 추가 헤더(UA 제외)도 주입
+        extra = {k: v for k, v in (cfg.get("headers") or {}).items() if k.lower() != "user-agent"}
+        if extra:
+            await context.set_extra_http_headers(extra)
+        page = await context.new_page()
     adapter._pw, adapter._browser, adapter._context, adapter._page = pw, browser, context, page
     # CF state — 같은 polling cycle (adapter 생명주기) 안 캐시 + 영구 cache 둘 다.
     # 영구 cache (engine/cf_state_cache.py) 가 신선한 verdict 가지면 즉시 적용 → 첫 _goto 도
@@ -216,12 +219,15 @@ async def _goto(adapter, url: str, *, wait_selector: Optional[str] = None) -> st
     except Exception:  # noqa: BLE001
         pass
     cf_wait_to = int(cfg.get("cf_wait_timeout_ms", _default_cf_wait))
-    await page.goto(url, wait_until="domcontentloaded", timeout=nav_to)
+    tr = current_trace()
+    with tr.span("goto_dom", attrs={"url": url, "timeout_ms": nav_to}):
+        await page.goto(url, wait_until="domcontentloaded", timeout=nav_to)
     # CF wait — adapter-level cache. unchecked 면 detect+wait, none|cleared 면 skip,
     # turnstile|timeout 이면 raise (caller 가 적절히 처리).
     cf_state = getattr(adapter, "_cf_state", "unchecked")
     if cf_state == "unchecked":
-        verdict = await _wait_through_cloudflare_interstitial_async(page, timeout_ms=cf_wait_to)
+        with tr.span("cf_wait", attrs={"url": url, "timeout_ms": cf_wait_to, "cached": False}):
+            verdict = await _wait_through_cloudflare_interstitial_async(page, timeout_ms=cf_wait_to)
         adapter._cf_state = verdict
         # 영구 cache 박음 — 다음 polling cycle 의 open_session 이 즉시 적용.
         cache_key = getattr(adapter, "_cf_cache_key", None)
@@ -239,13 +245,16 @@ async def _goto(adapter, url: str, *, wait_selector: Optional[str] = None) -> st
         # 즉시 raise. 영구 cache TTL (7일) 안엔 재시도 X (다음 polling 1000 사이트 batch 시간 절약).
         raise CloudflareUnsolvedError(f"adapter cf_state={cf_state!r} (cache 또는 이전 _goto) on {url}")
     # cf_state in ("none", "cleared") → wait skip (cookie 공유 또는 cache hit)
-    await _wait_xhr_quiet(page, quiet_ms=quiet_to, hard_timeout_ms=idle_to)
+    with tr.span("xhr_quiet_wait", attrs={"url": url, "quiet_ms": quiet_to, "timeout_ms": idle_to}):
+        await _wait_xhr_quiet(page, quiet_ms=quiet_to, hard_timeout_ms=idle_to)
     if wait_selector:
-        try:
-            await page.wait_for_selector(wait_selector, timeout=idle_to)
-        except Exception:
-            pass
-    return await page.content()
+        with tr.span("selector_wait", attrs={"url": url, "selector": wait_selector, "timeout_ms": idle_to}):
+            try:
+                await page.wait_for_selector(wait_selector, timeout=idle_to)
+            except Exception:
+                pass
+    with tr.span("page_content", attrs={"url": url}):
+        return await page.content()
 
 
 async def fetch_list(adapter, *, page: int = 1, page_size: int = 30) -> list[NoticePost]:

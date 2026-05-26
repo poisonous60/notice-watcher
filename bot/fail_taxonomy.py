@@ -19,6 +19,7 @@ tail 은 `bot/site_ops.py` 가 last ~4000 chars 만 보존 — 잘려도 마지�
 """
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from typing import Callable, Optional
@@ -66,6 +67,7 @@ class FailKind:
 _FAIL_CHECK_RE = re.compile(r"\[FAIL\]\s+([A-Za-z_][A-Za-z0-9_]*)")
 _RECOGNIZER_RE = re.compile(r"recognize_reject\s+\(([^)]+)\)")
 _VALIDATE_TIMEOUT_RE = re.compile(r"validate_internal_timeout_\d+s")
+_ATTEMPT_ERROR_RE = re.compile(r'"error"\s*:\s*"((?:\\.|[^"\\])*)"')
 
 
 def _fail_check(name: str) -> Matcher:
@@ -84,6 +86,14 @@ def _has_any(*tokens: str, name: str) -> Matcher:
 
 
 def _validate_timeout(tail: str, _rc: Optional[int]) -> Optional[str]:
+    errors: list[str] = []
+    for raw in _ATTEMPT_ERROR_RE.findall(tail or ""):
+        try:
+            errors.append(json.loads(f'"{raw}"'))
+        except json.JSONDecodeError:
+            errors.append(raw)
+    if errors:
+        return "validate_timeout" if _VALIDATE_TIMEOUT_RE.search(errors[-1]) else None
     return "validate_timeout" if _VALIDATE_TIMEOUT_RE.search(tail) else None
 
 

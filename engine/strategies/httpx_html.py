@@ -13,6 +13,7 @@ import httpx
 from .._http import build_async_client, get_with_tls_fallback
 from ..base_compat import NoticePost
 from ..extract_helpers import extract_field, extract_row, parse_html, parse_html_or_xml
+from ..tracing import current_trace
 from ._common import apply_proxy, build_list_url, render_template
 
 
@@ -31,7 +32,8 @@ async def close_session(adapter) -> None:
 
 
 async def _get(adapter, url: str) -> httpx.Response:
-    return await get_with_tls_fallback(adapter, url)
+    with current_trace().span("httpx_get", attrs={"url": url}):
+        return await get_with_tls_fallback(adapter, url)
 
 
 def _decode(adapter, r: httpx.Response) -> str:
@@ -88,35 +90,36 @@ def _build_post(adapter, extracted: dict, *, strategy: str) -> Optional[NoticePo
 
 
 def parse_list_html(adapter, html: str, *, page_size: int, strategy: str = "httpx_html") -> list[NoticePost]:
-    cfg = adapter.cfg
-    lst = cfg["list"]
-    # RSS/Atom 응답이면 XML parser. lxml HTML parser 가 `<link>`/`<guid>` 등 HTML void
-    # element 를 self-closing 으로 처리 → text 빈 문자열 → posts_nonempty 0건 fail.
-    soup = parse_html_or_xml(html)
-    rows = soup.select(lst["row_selector"])
-    dropped = _drop_ids(soup, lst.get("exclude_selector"))
-    include_notices = lst.get("include_notices", True)
-    notice_class_absent = lst.get("notice_class_absent")
-    row_required = lst.get("row_required_selector")
-    fields_spec = lst["fields"]
-    ctx_base = {"site": adapter.site, "board": adapter.board}
+    with current_trace().span("parse_list_html", attrs={"strategy": strategy, "page_size": page_size}):
+        cfg = adapter.cfg
+        lst = cfg["list"]
+        # RSS/Atom 응답이면 XML parser. lxml HTML parser 가 `<link>`/`<guid>` 등 HTML void
+        # element 를 self-closing 으로 처리 → text 빈 문자열 → posts_nonempty 0건 fail.
+        soup = parse_html_or_xml(html)
+        rows = soup.select(lst["row_selector"])
+        dropped = _drop_ids(soup, lst.get("exclude_selector"))
+        include_notices = lst.get("include_notices", True)
+        notice_class_absent = lst.get("notice_class_absent")
+        row_required = lst.get("row_required_selector")
+        fields_spec = lst["fields"]
+        ctx_base = {"site": adapter.site, "board": adapter.board}
 
-    out: list[NoticePost] = []
-    for row in rows:
-        if id(row) in dropped:
-            continue
-        if row_required and row.select_one(row_required) is None:
-            continue
-        if (not include_notices) and notice_class_absent and notice_class_absent not in _classes(row):
-            continue
-        extracted = extract_row(root=row, fields_spec=fields_spec, context_base=ctx_base)
-        post = _build_post(adapter, extracted, strategy=strategy)
-        if post is None:
-            continue
-        out.append(post)
-        if len(out) >= page_size:
-            break
-    return out
+        out: list[NoticePost] = []
+        for row in rows:
+            if id(row) in dropped:
+                continue
+            if row_required and row.select_one(row_required) is None:
+                continue
+            if (not include_notices) and notice_class_absent and notice_class_absent not in _classes(row):
+                continue
+            extracted = extract_row(root=row, fields_spec=fields_spec, context_base=ctx_base)
+            post = _build_post(adapter, extracted, strategy=strategy)
+            if post is None:
+                continue
+            out.append(post)
+            if len(out) >= page_size:
+                break
+        return out
 
 
 def _copy_post(post: NoticePost, *, content_html, url=None, overrides: Optional[dict] = None, raw_note: Optional[dict] = None) -> NoticePost:
@@ -147,21 +150,22 @@ def article_url_for(adapter, post: NoticePost) -> str:
 
 
 def parse_article_html(adapter, html: str, *, post: NoticePost, url: str) -> NoticePost:
-    art = adapter.cfg.get("article") or {}
-    soup = parse_html(html)
-    ctx = {"site": adapter.site, "board": adapter.board}
-    content = None
-    if art.get("content"):
-        content = extract_field(art["content"], root=soup, item=None, context=ctx)
-    overrides: dict = {}
-    for name, spec in (art.get("enrich") or {}).items():
-        v = extract_field(spec if isinstance(spec, list) else [spec], root=soup, item=None, context=ctx)
-        if v is None:
-            continue
-        cur = getattr(post, name, None)
-        if cur is None or cur == "":
-            overrides[name] = v
-    return _copy_post(post, content_html=content, url=url, overrides=overrides, raw_note={"fetched_url": url})
+    with current_trace().span("parse_article_html", attrs={"url": url, "post_id": post.post_id}):
+        art = adapter.cfg.get("article") or {}
+        soup = parse_html(html)
+        ctx = {"site": adapter.site, "board": adapter.board}
+        content = None
+        if art.get("content"):
+            content = extract_field(art["content"], root=soup, item=None, context=ctx)
+        overrides: dict = {}
+        for name, spec in (art.get("enrich") or {}).items():
+            v = extract_field(spec if isinstance(spec, list) else [spec], root=soup, item=None, context=ctx)
+            if v is None:
+                continue
+            cur = getattr(post, name, None)
+            if cur is None or cur == "":
+                overrides[name] = v
+        return _copy_post(post, content_html=content, url=url, overrides=overrides, raw_note={"fetched_url": url})
 
 
 # ---------- ConfigAdapter 진입점 ----------

@@ -64,6 +64,43 @@ No global `wait_until` change in this patch. No Chromium reuse in this patch.
 
 `generate.validate` already emits trace spans for adapter build, list fetch, and each article fetch through `engine.tracing.current_trace()`. If the next batch still shows validator timeouts, the next low-risk instrumentation is a gated `validate_config.py --verbose-timing` mode that keeps stdout JSON-compatible and adds per-span durations to the JSON payload only when explicitly requested.
 
+## 2026-05-26 v2 — measured follow-up
+
+The first patch above was not enough: it answered the work-budget hypothesis but did not prove whether the batch was burning time in site navigation, selector waits, browser launch, or stale classification.
+
+Changes made for measurement:
+
+- `scripts/validate_config.py --verbose-timing` / `VALIDATE_TIMING=1` writes JSON timing artifacts under `output/validate_timing/` while preserving stdout as the validator result JSON.
+- `--strategy=httpx_html|playwright_html|auto` lets the same candidate be compared under both HTML strategies.
+- `engine/strategies/playwright_html.py` now emits spans for `playwright_launch`, `goto_dom`, `cf_wait`, `xhr_quiet_wait`, `selector_wait`, and `page_content`.
+- `engine/strategies/httpx_html.py` now emits spans for `httpx_get`, `parse_list_html`, and `parse_article_html`.
+
+Measured evidence:
+
+| scope | result |
+|---|---|
+| Dev-box minimal 5-site comparison | `httpx_html` candidates finished in ~0.3-0.6s except Capcom 403; Playwright candidates finished in ~1.2-11.8s. Dominant Playwright cost was launch + `xhr_quiet_wait`; CF wait was ~0ms and no 15s nav hang reproduced. |
+| Actual `2026-05-24-games-jp` batch rows | N100 DB snapshot covered 100 catalog entries and 146 job rows. 19 unique entries had a `validate_timeout` token somewhere in their history; the latest state had 8 `gen_fail/validate_timeout` rows. Dev-box reruns of the latest timeout rows did not reproduce 25s validator burn: observed validator artifacts for the same URLs were ~0.3-5.4s. Several reruns registered successfully (`capcom-games.com/news`, `drecom.co.jp/news`, `hoyoverse.com/news`, earlier `shadowverse.jp/news`). |
+| Failure label check | Some dashboard rows were stale/misleading: `bot.fail_taxonomy._validate_timeout` matched any `validate_internal_timeout_*` token anywhere in agentic history, even when the last attempt failed for a different reason. |
+
+Scenario mapping from measured reruns:
+
+| slug/name | measured validator cost | dominant phase | scenario |
+|---|---:|---|---|
+| capcom-games.com/news | 0.3-2.1s | `httpx_get` on first run, then tiny | Not B/C; recovered with `httpx_html`. |
+| gamecity.ne.jp/news | 2.9-5.4s | Playwright `goto_dom` + `xhr_quiet_wait` | Not timeout now; generated selector/path still yields `posts_nonempty`. |
+| umamusume.jp/news | 0.3-1.7s after schema failure | `httpx_get` | Not timeout now; agentic max_cycles / bad candidates. |
+| falcom.co.jp | no validator burn; gate/classifier rejected root | WordPress marker false start then content reject | Not validator timeout. |
+| hoyoverse.com | 2.5-2.9s | Playwright `xhr_quiet_wait`; also `run_validator.sh` command mistake in one agent attempt | Not nav hang; agentic candidate/tool-use issue. |
+| hoyoverse.com/news | 0.5s when `httpx_json`, 3.6-5.2s when Playwright | `xhr_quiet_wait` if Playwright | Recovered; JSON API is the right path. |
+| drecom.co.jp/news | registered on dev rerun | no wrapper timing because it passed through direct api-loop validation | Recovered; not evidence for timeout. |
+
+Fix decision:
+
+- Do **not** apply global `wait_until="commit"`, Chromium reuse, CF cache changes, or a hard strategy override. The measured data did not show CF wait, browser launch, or navigation timeout as the current dominant root cause across the batch.
+- Apply a narrow taxonomy fix: when agentic attempts are serialized as JSON, classify `validate_timeout` only if the **last** attempt error is `validate_internal_timeout_*`. A stale timeout from an earlier attempt no longer hides the current failure reason.
+- Keep the new timing instrumentation so the same failed-batch retry can produce N100-side timing JSON after deployment.
+
 ## Verification plan
 
 - Add a validator unit test proving `fetch_articles=1` only attempts two article fetches when article fetches keep failing.

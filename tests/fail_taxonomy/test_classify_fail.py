@@ -50,6 +50,16 @@ CASES: list[tuple[str, tuple[Optional[str], Optional[int], Optional[str]], str, 
     ("gen_fail_validate_timeout",
      ("failed", 1, "agent did not produce a passing config: validate_internal_timeout_40s"),
      "gen_fail", "validate_timeout"),
+    ("gen_fail_validate_timeout_last_attempt",
+     ("failed", 1,
+      '마지막 실패 사유:\n[{"i": 1, "validate_ok": false, "error": "posts_nonempty: 0건"}, '
+      '{"i": 2, "validate_ok": false, "error": "validate_internal_timeout_25s"}]'),
+     "gen_fail", "validate_timeout"),
+    ("gen_fail_stale_validate_timeout_not_current",
+     ("failed", 1,
+      '마지막 실패 사유:\n[{"i": 1, "validate_ok": false, "error": "validate_internal_timeout_25s"}, '
+      '{"i": 2, "validate_ok": false, "error": "posts_nonempty: 0건"}]'),
+     "gen_fail", None),
     # llm_api — API 단 실패 (429/UNAVAILABLE/네트워크). provider-agnostic. 새 split 라벨 + alias 둘 다 잡음.
     ("gen_fail_llm_api_new_split_label",
      ("failed", 1, "생성 실패: LLM 호출 실패 (gemini): 429 RESOURCE_EXHAUSTED"),
