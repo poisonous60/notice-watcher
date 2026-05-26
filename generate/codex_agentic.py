@@ -38,6 +38,7 @@ import contextlib
 import hashlib
 import json
 import os
+import secrets
 import shutil
 import signal
 import subprocess
@@ -74,6 +75,97 @@ SCHEMA_PATH = REPO_ROOT / "schemas" / "register_agentic_result.json"
 PROMPT_USER_PATH = REPO_ROOT / "prompts" / "register_agent_user.txt"
 PROMPT_AGENTS_PATH = REPO_ROOT / "prompts" / "register_agent_AGENTS.md"
 VALIDATE_WRAPPER_PATH = REPO_ROOT / "scripts" / "validate_config.py"
+
+
+VALIDATOR_ATTEMPT_LOGGER = r'''from __future__ import annotations
+
+import json
+import os
+import sys
+import time
+from pathlib import Path
+
+
+def _write(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _safe_slug() -> str:
+    for raw in (Path(a).stem for a in sys.argv[2:] if a):
+        if raw and raw != "candidate":
+            return raw[:80]
+    return "candidate"
+
+
+def _new_path() -> Path:
+    target = Path(os.environ.get("VALIDATE_TIMING_DIR") or "validate_timing")
+    ts = time.strftime("%Y%m%dT%H%M%S", time.localtime())
+    name = f"agentic_attempt__{_safe_slug()}__{ts}__pid{os.getpid()}__ppid{os.getppid()}.json"
+    return target / name
+
+
+def _payload(status: str, *, rc: int | None = None, argv_start: int = 2) -> dict:
+    now = time.time()
+    return {
+        "type": "agentic_validator_attempt",
+        "status": status,
+        "rc": rc,
+        "wall_time": now,
+        "pid": os.getpid(),
+        "ppid": os.getppid(),
+        "cwd": os.getcwd(),
+        "argv": sys.argv[argv_start:],
+        "repo_root": os.environ.get("REPO_ROOT"),
+        "validate_timing_dir": os.environ.get("VALIDATE_TIMING_DIR"),
+    }
+
+
+def main() -> int:
+    mode = sys.argv[1] if len(sys.argv) > 1 else ""
+    if mode == "start":
+        path = _new_path()
+        payload = _payload("started")
+        payload["started_wall"] = payload["wall_time"]
+        _write(path, payload)
+        print(path)
+        return 0
+    if mode == "start-path":
+        if len(sys.argv) < 3:
+            return 2
+        path = Path(sys.argv[2])
+        payload = _payload("started", argv_start=3)
+        payload["started_wall"] = payload["wall_time"]
+        _write(path, payload)
+        print(path)
+        return 0
+    if mode == "end":
+        if len(sys.argv) < 4:
+            return 2
+        path = Path(sys.argv[2])
+        try:
+            rc = int(sys.argv[3])
+        except ValueError:
+            rc = None
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(payload, dict):
+                payload = {}
+        except Exception:
+            payload = {}
+        end_payload = _payload("ended", rc=rc)
+        started_wall = payload.get("started_wall")
+        if isinstance(started_wall, (int, float)):
+            end_payload["total_ms"] = (end_payload["wall_time"] - float(started_wall)) * 1000.0
+        payload.update(end_payload)
+        _write(path, payload)
+        return 0
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+'''
 
 
 # --- errors ------------------------------------------------------------------
@@ -459,11 +551,22 @@ def _setup_workdir(digest: dict, slug: str, url: str, repo: Path,
     # validate wrapper — agent runs it. Copy so agent doesn't need to touch repo.
     if VALIDATE_WRAPPER_PATH.is_file():
         shutil.copy2(VALIDATE_WRAPPER_PATH, workdir / "validate_config.py")
+    (workdir / "validator_attempt_log.py").write_text(
+        VALIDATOR_ATTEMPT_LOGGER, encoding="utf-8"
+    )
     py = sys.executable
     (workdir / "python_path.txt").write_text(py + "\n", encoding="utf-8")
     if sys.platform == "win32":
         (workdir / "run_validator.bat").write_text(
-            f'@echo off\r\nset "VALIDATE_TIMING_DIR=%~dp0validate_timing"\r\n"{py}" "%~dp0validate_config.py" %*\r\n',
+            "@echo off\r\n"
+            "setlocal\r\n"
+            "set \"VALIDATE_TIMING_DIR=%~dp0validate_timing\"\r\n"
+            "set \"VALIDATOR_ATTEMPT_LOG=%VALIDATE_TIMING_DIR%\\agentic_attempt__candidate__%RANDOM%_%RANDOM%.json\"\r\n"
+            f"\"{py}\" \"%~dp0validator_attempt_log.py\" start-path \"%VALIDATOR_ATTEMPT_LOG%\" %* >NUL 2>NUL\r\n"
+            f"\"{py}\" \"%~dp0validate_config.py\" %*\r\n"
+            "set \"VALIDATOR_RC=%ERRORLEVEL%\"\r\n"
+            f"if defined VALIDATOR_ATTEMPT_LOG \"{py}\" \"%~dp0validator_attempt_log.py\" end \"%VALIDATOR_ATTEMPT_LOG%\" %VALIDATOR_RC% >NUL 2>NUL\r\n"
+            "exit /b %VALIDATOR_RC%\r\n",
             encoding="utf-8",
         )
     else:
@@ -471,7 +574,11 @@ def _setup_workdir(digest: dict, slug: str, url: str, repo: Path,
         sh_path.write_text(
             '#!/bin/sh\n'
             'export VALIDATE_TIMING_DIR="$(dirname "$0")/validate_timing"\n'
-            f'exec "{py}" "$(dirname "$0")/validate_config.py" "$@"\n',
+            f'VALIDATOR_ATTEMPT_LOG=$("{py}" "$(dirname "$0")/validator_attempt_log.py" start "$@")\n'
+            f'"{py}" "$(dirname "$0")/validate_config.py" "$@"\n'
+            'VALIDATOR_RC=$?\n'
+            f'if [ -n "$VALIDATOR_ATTEMPT_LOG" ]; then "{py}" "$(dirname "$0")/validator_attempt_log.py" end "$VALIDATOR_ATTEMPT_LOG" "$VALIDATOR_RC" >/dev/null 2>&1; fi\n'
+            'exit "$VALIDATOR_RC"\n',
             encoding="utf-8",
         )
         sh_path.chmod(0o755)
@@ -494,6 +601,98 @@ def _copy_timing_artifacts(workdir: Path, repo: Path) -> None:
             shutil.copy2(p, dst / p.name)
         except OSError:
             pass
+
+
+def _agentic_timing_enabled() -> bool:
+    return os.environ.get("VALIDATE_TIMING", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _preserve_agentic_workdir_enabled() -> bool:
+    return os.environ.get("VALIDATE_TIMING_PRESERVE_WORKDIR", "").strip().lower() in (
+        "1", "true", "yes", "on"
+    )
+
+
+def _safe_log_slug(slug: str) -> str:
+    safe = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in slug)
+    return safe[:120] or "unknown"
+
+
+def _agentic_run_log_path(repo: Path, slug: str) -> Path:
+    ts = time.strftime("%Y%m%dT%H%M%S", time.localtime())
+    suffix = secrets.token_hex(3)
+    return repo / "output" / "validate_timing" / f"agentic_run__{_safe_log_slug(slug)}__{ts}__pid{os.getpid()}__{suffix}.json"
+
+
+def _read_json_optional(path: Path) -> object | None:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _read_text_optional(path: Path, *, max_chars: int = 300_000) -> str | None:
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + f"\n...[truncated {len(text) - max_chars} chars]"
+
+
+def _workdir_file_listing(workdir: Path) -> list[dict]:
+    out: list[dict] = []
+    try:
+        files = sorted(p for p in workdir.rglob("*") if p.is_file())
+    except OSError:
+        return out
+    for p in files:
+        try:
+            st = p.stat()
+        except OSError:
+            continue
+        out.append({
+            "path": str(p.relative_to(workdir)),
+            "size": st.st_size,
+            "mtime": st.st_mtime,
+        })
+    return out
+
+
+def _update_agentic_run_log(path: Path | None, event: str, **fields) -> None:
+    if path is None:
+        return
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = _read_json_optional(path)
+        if not isinstance(payload, dict):
+            payload = {}
+        events = payload.get("events")
+        if not isinstance(events, list):
+            events = []
+        events.append({"event": event, "wall_time": time.time()})
+        payload["events"] = events
+        payload.update(fields)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(path)
+    except OSError:
+        pass
+
+
+def _copy_agentic_workdir_snapshot(workdir: Path, repo: Path, slug: str) -> Path | None:
+    if not _preserve_agentic_workdir_enabled():
+        return None
+    dst_root = repo / "output" / "validate_timing" / "agentic_workdirs"
+    ts = time.strftime("%Y%m%dT%H%M%S", time.localtime())
+    dst = dst_root / f"{_safe_log_slug(slug)}__{ts}__pid{os.getpid()}__{secrets.token_hex(3)}"
+    try:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(workdir, dst, symlinks=True, dirs_exist_ok=False)
+    except OSError:
+        return None
+    return dst
 
 
 def _example_reason(cfg: dict, digest: dict) -> str:
@@ -675,6 +874,19 @@ async def _run_codex_agentic_once(
     """
     version = _codex_preflight()
     workdir = _setup_workdir(digest, slug, url, repo, failure_packet=failure_packet)
+    run_log_path = _agentic_run_log_path(repo, slug) if _agentic_timing_enabled() else None
+    _update_agentic_run_log(
+        run_log_path,
+        "workdir_created",
+        slug=slug,
+        url=url,
+        workdir=str(workdir),
+        preserve_workdir=_preserve_agentic_workdir_enabled(),
+        digest_path=str(workdir / "digest.json"),
+        failure_packet_path=str(workdir / "failure_packet.json") if failure_packet else None,
+        digest=_read_json_optional(workdir / "digest.json"),
+        failure_packet=_read_json_optional(workdir / "failure_packet.json"),
+    )
     pre = _audit_snapshot_paths(repo, slug)
     t0 = time.time()
     stdout_text = ""
@@ -684,6 +896,8 @@ async def _run_codex_agentic_once(
         with _per_slug_lock(repo, slug):
             out_file = workdir / "last.json"
             user_prompt = _build_user_prompt(slug, url, repo)
+            if run_log_path is not None:
+                (workdir / "codex_user_prompt.txt").write_text(user_prompt, encoding="utf-8")
             args = [
                 _codex_bin(), "exec",
                 "-C", str(workdir),
@@ -711,6 +925,21 @@ async def _run_codex_agentic_once(
             child_env["VALIDATE_TIMING_DIR"] = str(workdir / "validate_timing")
             venv_bin = Path(sys.executable).parent
             child_env["PATH"] = str(venv_bin) + os.pathsep + child_env.get("PATH", "")
+            _update_agentic_run_log(
+                run_log_path,
+                "codex_start",
+                codex_version=version,
+                codex_args=args,
+                child_env={
+                    "REPO_ROOT": child_env.get("REPO_ROOT"),
+                    "VALIDATE_TIMING": child_env.get("VALIDATE_TIMING"),
+                    "VALIDATE_TIMING_DIR": child_env.get("VALIDATE_TIMING_DIR"),
+                    "VALIDATE_TIMING_PRESERVE_WORKDIR": child_env.get("VALIDATE_TIMING_PRESERVE_WORKDIR"),
+                    "PATH_first": child_env.get("PATH", "").split(os.pathsep)[0],
+                },
+                user_prompt_path=str(workdir / "codex_user_prompt.txt") if run_log_path is not None else None,
+                user_prompt=user_prompt,
+            )
             proc = subprocess.Popen(
                 args,
                 stdin=subprocess.PIPE,
@@ -737,6 +966,39 @@ async def _run_codex_agentic_once(
                     f"{prefix} after {timeout_s}s "
                     f"(stderr tail: {stderr_text[-300:]!r})"
                 )
+            finally:
+                if run_log_path is not None:
+                    (workdir / "codex_stdout.jsonl").write_text(stdout_text, encoding="utf-8", errors="replace")
+                    (workdir / "codex_stderr.txt").write_text(stderr_text, encoding="utf-8", errors="replace")
+                    (workdir / "codex_run_meta.json").write_text(
+                        json.dumps({
+                            "rc": rc,
+                            "timeout_s": timeout_s,
+                            "wall_s": time.time() - t0,
+                            "stdout_path": "codex_stdout.jsonl",
+                            "stderr_path": "codex_stderr.txt",
+                            "last_json_exists": (workdir / "last.json").exists(),
+                            "candidate_json_exists": (workdir / "candidate.json").exists(),
+                            "validate_timing_files": [
+                                str(p.relative_to(workdir))
+                                for p in sorted((workdir / "validate_timing").glob("*.json"))
+                            ] if (workdir / "validate_timing").is_dir() else [],
+                        }, ensure_ascii=False, indent=2),
+                        encoding="utf-8",
+                    )
+                    _update_agentic_run_log(
+                        run_log_path,
+                        "codex_end",
+                        rc=rc,
+                        wall_s=time.time() - t0,
+                        stdout_path=str(workdir / "codex_stdout.jsonl"),
+                        stderr_path=str(workdir / "codex_stderr.txt"),
+                        stdout_tail=stdout_text[-5000:],
+                        stderr_tail=stderr_text[-5000:],
+                        last_json=_read_json_optional(workdir / "last.json"),
+                        candidate_json=_read_json_optional(workdir / "candidate.json"),
+                        workdir_files=_workdir_file_listing(workdir),
+                    )
             # post-audit — any change outside tmpdir = violation
             post = _audit_snapshot_paths(repo, slug)
             violations = _audit_diff(pre, post,
@@ -872,6 +1134,13 @@ async def _run_codex_agentic_once(
         )
     finally:
         _copy_timing_artifacts(workdir, repo)
+        snapshot_path = _copy_agentic_workdir_snapshot(workdir, repo, slug)
+        _update_agentic_run_log(
+            run_log_path,
+            "cleanup",
+            workdir_files=_workdir_file_listing(workdir),
+            preserved_workdir=str(snapshot_path) if snapshot_path is not None else None,
+        )
         if not keep_workdir and not os.environ.get("KEEP_AGENT_WORKDIR"):
             shutil.rmtree(workdir, ignore_errors=True)
 

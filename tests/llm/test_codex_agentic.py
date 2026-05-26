@@ -260,6 +260,7 @@ def run() -> list[tuple[str, bool, str]]:
                 "url.txt": (wd / "url.txt").exists(),
                 "repo_path_absent": not (wd / "repo_path.txt").exists(),
                 "python_path": (wd / "python_path.txt").exists(),
+                "attempt_logger": (wd / "validator_attempt_log.py").exists(),
                 "examples_dir": (wd / "examples").exists(),
                 "manifest": (wd / "examples" / "manifest.json").exists(),
                 "failure_packet": (wd / "failure_packet.json").exists(),
@@ -297,7 +298,9 @@ def run() -> list[tuple[str, bool, str]]:
             ))
             cases.append(_check(
                 "workdir_validator_launcher_uses_sys_executable",
-                (sys.executable in launcher_text and "validate_config.py" in launcher_text),
+                (sys.executable in launcher_text
+                 and "validate_config.py" in launcher_text
+                 and "validator_attempt_log.py" in launcher_text),
                 f"launcher={launcher_text!r}",
             ))
             if sys.platform != "win32":
@@ -306,11 +309,59 @@ def run() -> list[tuple[str, bool, str]]:
                     os.access(launcher, os.X_OK),
                     f"mode={oct(launcher.stat().st_mode) if launcher.exists() else 'missing'}",
                 ))
+            candidate = wd / "candidate.json"
+            candidate.write_text(json.dumps({"site": "https://example.com/"}), encoding="utf-8")
+            env = os.environ.copy()
+            env["REPO_ROOT"] = str(REPO)
+            env["TRACE_ENABLED"] = "0"
+            proc = subprocess.run(
+                [str(launcher), str(candidate)],
+                cwd=wd,
+                env=env,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=10,
+            )
+            attempt_files = sorted((wd / "validate_timing").glob("agentic_attempt__*.json"))
+            attempt_payload = {}
+            if attempt_files:
+                attempt_payload = json.loads(attempt_files[0].read_text(encoding="utf-8"))
+            cases.append(_check(
+                "workdir_validator_launcher_writes_attempt_log",
+                (proc.returncode == 0
+                 and bool(attempt_files)
+                 and attempt_payload.get("status") == "ended"
+                 and attempt_payload.get("rc") == 0
+                 and isinstance(attempt_payload.get("total_ms"), (int, float))),
+                f"rc={proc.returncode} stdout={proc.stdout[:200]!r} stderr={proc.stderr[:200]!r} "
+                f"attempt_files={[p.name for p in attempt_files]} payload={attempt_payload!r}",
+            ))
         finally:
             if wd is not None:
                 shutil.rmtree(wd, ignore_errors=True)
     finally:
         shutil.rmtree(fake_repo2, ignore_errors=True)
+
+    # ----- 8a. _copy_timing_artifacts moves attempt logs from tmpdir to repo output. -----
+    fake_repo_copy = _make_tmp_repo()
+    with tempfile.TemporaryDirectory(prefix="ca_timing_copy_") as td:
+        workdir_copy = Path(td)
+        src_dir = workdir_copy / "validate_timing"
+        src_dir.mkdir(parents=True, exist_ok=True)
+        src_file = src_dir / "agentic_attempt__candidate__copy.json"
+        src_file.write_text(json.dumps({"type": "agentic_validator_attempt"}), encoding="utf-8")
+        try:
+            with mock.patch.dict(os.environ, {"VALIDATE_TIMING": "1"}):
+                ca._copy_timing_artifacts(workdir_copy, fake_repo_copy)
+            dst_file = fake_repo_copy / "output" / "validate_timing" / src_file.name
+            cases.append(_check(
+                "copy_timing_artifacts_copies_agentic_attempt",
+                dst_file.exists(),
+                f"expected copied file at {dst_file}",
+            ))
+        finally:
+            shutil.rmtree(fake_repo_copy, ignore_errors=True)
 
     # ----- 8c. codex child PATH prepends current interpreter dir (venv first) -----
     fake_repo3 = _make_tmp_repo()
@@ -348,7 +399,11 @@ def run() -> list[tuple[str, bool, str]]:
         with mock.patch.object(ca, "_codex_preflight", return_value="codex-cli test"), \
              mock.patch.object(ca, "_codex_bin", return_value="codex"), \
              mock.patch.object(ca.subprocess, "Popen", FakePopen), \
-             mock.patch.object(ca, "validate_built_config", fake_validate_built_config):
+             mock.patch.object(ca, "validate_built_config", fake_validate_built_config), \
+             mock.patch.dict(os.environ, {
+                 "VALIDATE_TIMING": "1",
+                 "VALIDATE_TIMING_PRESERVE_WORKDIR": "1",
+             }):
             asyncio.run(ca.run_codex_agentic(
                 digest={"url": "https://example.com/"},
                 slug="pathslug",
@@ -369,6 +424,29 @@ def run() -> list[tuple[str, bool, str]]:
             "codex_child_uses_platform_sandbox_args",
             all(arg in popen_args for arg in ca._sandbox_args(Path(popen_args[popen_args.index("-C") + 1]))),
             f"args={popen_args!r}",
+        ))
+        run_logs = sorted((fake_repo3 / "output" / "validate_timing").glob("agentic_run__pathslug__*.json"))
+        snapshots = sorted((fake_repo3 / "output" / "validate_timing" / "agentic_workdirs").glob("pathslug__*"))
+        run_log = json.loads(run_logs[0].read_text(encoding="utf-8")) if run_logs else {}
+        cases.append(_check(
+            "codex_agentic_timing_logs_agent_input_and_execution",
+            (bool(run_logs)
+             and run_log.get("slug") == "pathslug"
+             and run_log.get("digest") == {"url": "https://example.com/"}
+             and isinstance(run_log.get("codex_args"), list)
+             and "TASK:" in str(run_log.get("user_prompt") or "")
+             and run_log.get("rc") == 0
+             and bool(run_log.get("stdout_tail"))),
+            f"run_logs={[p.name for p in run_logs]} run_log={run_log!r}",
+        ))
+        cases.append(_check(
+            "codex_agentic_preserves_workdir_snapshot",
+            (bool(snapshots)
+             and (snapshots[0] / "codex_stdout.jsonl").exists()
+             and (snapshots[0] / "codex_stderr.txt").exists()
+             and (snapshots[0] / "codex_run_meta.json").exists()
+             and (snapshots[0] / "last.json").exists()),
+            f"snapshots={[str(p) for p in snapshots]}",
         ))
     finally:
         shutil.rmtree(fake_repo3, ignore_errors=True)
