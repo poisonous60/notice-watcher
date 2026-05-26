@@ -364,8 +364,21 @@ dynamic family (`recognizer:*`, `[FAIL]:<check>`) 는 추가 필요 X — 자동
 순서 중요 — `case_log` 의 `commit_sha`/`files_changed` derive 가 *현재 HEAD* + `git diff HEAD~1..HEAD` 라 **반드시 commit + push 뒤에** 호출해야 본 case 의 commit 잡힘. commit 전 호출하면 직전 commit (의 sha + diff) 가 잘못 박힘.
 
 1. `python scripts/probe_smoke.py` 그린.
+1b. **C-layer (probe 휴리스틱) 변경 시 실제 artifact replay 의무** — probe_smoke 의 unit fixture PASS 는 *합성 input* 만 증명. 영향 받은 *실제 probe artifact (`output/probe/<trigger-slug>/`) 의 list_candidates.json* 로 영향 함수 (`pick_first_article_url`/`_article_url_score`/`extract_*`) 직접 호출해 결과가 의도대로 바뀌는지 확인. 안 돌리면 *합성 case 에만 맞고 실데이터 안 도는* 휴리스틱 박힐 위험. 2026-05-26 archive penalty 박힘. format:
+   ```
+   python -c "
+   from probe.extract import pick_first_article_url
+   import json
+   d=json.load(open(r'output/probe/<slug>/list_candidates.json',encoding='utf-8'))
+   print('NEW:', pick_first_article_url(html_candidates=d.get('html_repeating_patterns',[]),
+       json_api_candidates=[], hydration_candidates=[], base_url='<url>', page_html=''))
+   print('OLD:', d.get('first_article_url'))
+   "
+   ```
+   bug-fix workflow 도 동일 (반복 reproducer 로 실제 fail 사라지는지 손-확인).
 2. 자가 점검 7-질문 (↓ §6) — 비워도 commit 막진 X, 그저 생각해두는 게이트.
 3. `docs/cases/<slug>.md` 작성 + `python scripts/cases_index.py --backfill-db output/cases.sqlite3` (frontmatter 기반 row 박힘).
+3b. **generic improvement (C/B/A/F-layer, site config 없이 휴리스틱·prompt·engine 만 변경) 도 case file 의무** — `docs/cases/<trigger-slug>.md` 의 *follow-up 섹션* 추가 또는 신규 `docs/cases/_generic_<heuristic-name>.md` 작성. mobius escalate → archive penalty 같이 *trigger case body 가 일반화 후보 명시* 한 경우, 후속 chunk 에서 그 case body 의 escalate 섹션 아래 `## 후속 (<commit>): <어디 박았나>` 1줄 명시 + `docs/cases/_deferred_heuristics.md` 의 매칭 항목 lift (`[lifted YYYY-MM-DD commit \`<sha>\`]` 접두). case file 없는 generic improvement 는 *다음 사람이 트리거 못 보는* dead heuristic 위험 (CLAUDE.md §8a 의 일반화 흔적).
 4. (권장) `hand-config-reviewer` subagent 호출 (↓ §7). PASS 받으면. (이 시점 DB row = frontmatter backfill 만 — `case_log log` 는 아직 X.)
 5. `docs/사이트별 등록 시도 기록.md` 갱신 (상태 이모지·원인·해결).
 6. **commit + push** — 단일 commit 정책 (track A+B 한 묶음). `case_log` 의 `files_changed` derive 가 `git diff HEAD~1..HEAD` 만 봐서 다중 commit 시 첫 commit 미캡쳐.

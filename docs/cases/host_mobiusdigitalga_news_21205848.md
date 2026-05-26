@@ -45,3 +45,14 @@ probe digest 는 HTTP 200, 정적 HTML 충분, HTML 반복 후보 14건이었다
 ## escalate (allow-list 밖 일반화 후보)
 archive/category/sidebar 링크가 반복 후보 상위에 오고, 같은 DOM 안에 더 낮은 순위의 article/blog post row가 존재하는 경우 `first_article_url` 랭킹을 보정하는 C-layer probe heuristic 후보가 있다. 다음 chunk에서 `probe/extract.py` 또는 후보 랭킹 로직 소유권을 명시해 별도 처리하는 것이 맞다.
 
+## 후속 (commit 7e59fff): archive penalty 박힘
+`probe/extract.py:_article_url_score` 에 페널티 2종 추가 — `/archives?/` segment 와 `/<word>_list` ending 각 -3. 누적 3건 (mobius + comic-days + nexon-bluearchive) 봉합. regression test `tests/probe_heuristics/test_article_url_score.py` case 14~16 추가. `_deferred_heuristics.md` 에 lifted entry 박음.
+
+**실제 artifact replay 검증** (SKILL.md §5 step 1b 의무):
+- input: `output/probe/host_mobiusdigitalga_news_21205848/list_candidates.json` + 새 `_article_url_score`
+- NEW first_article_url = `https://www.mobiusdigitalgames.com/news/patch-16-finishes-rolling-out-steam-gets-a-hotfix` (실제 글)
+- OLD first_article_url = `https://www.mobiusdigitalgames.com/news/archives/06-2025` (archive page)
+- 점수 변화: archive 8→5, post 6 (unchanged) → flip 성공
+
+같은 패턴의 다음 site 는 probe 가 자동으로 진짜 글 URL 을 first_article 로 잡음 → LLM config 생성기가 archive page 를 article 로 오인하는 실패 차단.
+
