@@ -12,6 +12,19 @@ batch `2026-05-24-games-kr` 의 rc=5 (capability_blocked) 9건이 트리거:
 세션 2 = Cloudflare 우회 심층 조사 (`output/research_cloudflare_findings.md`).
 세션 3 = 통합 디자인 + 실측 (`output/research_session3_integration.md`).
 
+## 1b. perf 후속 (같은 날, 사용자 지적 → codex perf review)
+
+코드 박은 직후 사용자 지적: "polling 1000 사이트 × 100 CF × 30s = 50분/cycle 비현실적". codex perf review 13 finding 처리.
+
+추가 commit:
+- 1991f70 (merge c68e4eb): cheap-first CF detect (title+url miss 면 content() skip) + adapter-level CF state cache (cycle 내 공유) + CF wait return value enum (`none|cleared|turnstile|timeout`) + `_detect_cmp` opt-in (env `NW_PROBE_CMP=1`) + curl_cffi close stderr trace
+- 1f28612 (merge 515ca75): CF wait timeout 30s → **8s** default (probe + engine 양쪽, cfg `cf_wait_timeout_ms` override) + **영구 per-site cache** `output/cf_state.json` (TTL 7일, atomic rename)
+
+비용 시뮬 (1000 사이트 × 100 CF):
+- 박기 전: 매 cycle 100 × 30s = **50분** (timer interval 1시간 초과 위험)
+- 8s default: 100 × 8s = **13분**
+- + 영구 cache: 첫 cycle 13분 → 이후 cycle **~0s** (cache hit → detect+wait 둘 다 skip)
+
 ## 2. 박힌 commit (시간 순)
 
 | commit | scope |
@@ -26,6 +39,9 @@ batch `2026-05-24-games-kr` 의 rc=5 (capability_blocked) 9건이 트리거:
 | 0e37125 | _detect_cmp + consent.json artifact (IAB TCF/CCPA/GPP) |
 | f00c3b4 | curl_cffi_html JSON schema/validate + runtime CF wait + goto-timeout CF recovery |
 | 74e972f | consent.<target>.json — target-aware artifact name |
+| **(perf 후속)** | merge c68e4eb · 515ca75 |
+| 1991f70 | cheap-first CF detect + adapter cache + CF wait verdict enum + CMP opt-in + curl_cffi close trace |
+| 1f28612 | CF wait 30s → 8s + `output/cf_state.json` 영구 cache (TTL 7일, atomic rename) |
 
 ## 3. 자동화 매트릭스 (어디까지 자동인가)
 
