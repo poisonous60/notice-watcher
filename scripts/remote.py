@@ -450,6 +450,20 @@ def cmd_announce_scoped(b64: str) -> int:
 _IN_FLIGHT_STATUSES = ("pending", "running")
 
 
+def _jobs_status_bucket_expr() -> str:
+    """SQL expression for the status buckets shown by `remote.py jobs`.
+
+    rc=5 is `capability_blocked`: operationally failed, but not a gen_fail work item.
+    Show it separately so batch drain output does not merge blocked sites into failed.
+    """
+    return (
+        "CASE "
+        "WHEN status='failed' AND result_rc=5 THEN 'blocked' "
+        "WHEN status='failed' THEN 'failed' "
+        "ELSE status END"
+    )
+
+
 def _jobs_query(kind: str, since_minutes: int, min_id: int) -> tuple[int, str, str, dict[str, int], int]:
     """jobs 테이블 1회 조회. returns (rc, stdout_human, stderr, status_counts, total).
 
@@ -460,13 +474,14 @@ def _jobs_query(kind: str, since_minutes: int, min_id: int) -> tuple[int, str, s
     if min_id > 0:
         where += f" AND id >= {int(min_id)}"
     # 두 SQL 한 ssh 호출에 묶음 — 사람 view (column) + 파싱 view (pipe-list).
+    bucket = _jobs_status_bucket_expr()
     sql = (
         f".headers on\n.mode column\n"
-        f"SELECT status, COUNT(*) AS n FROM jobs WHERE {where} GROUP BY status ORDER BY status;\n"
+        f"SELECT {bucket} AS status, COUNT(*) AS n FROM jobs WHERE {where} GROUP BY 1 ORDER BY 1;\n"
         f"SELECT 'total' AS status, COUNT(*) AS n FROM jobs WHERE {where};\n"
         f".headers off\n.mode list\n.separator '|'\n"
         f"SELECT '__parse__';\n"
-        f"SELECT status, COUNT(*) FROM jobs WHERE {where} GROUP BY status;\n"
+        f"SELECT {bucket}, COUNT(*) FROM jobs WHERE {where} GROUP BY 1;\n"
         f"SELECT '__total__', COUNT(*) FROM jobs WHERE {where};\n"
     )
     remote = f"cd {DEPLOY_PATH_RAW} && sqlite3 output/bot.sqlite3"

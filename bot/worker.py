@@ -50,6 +50,11 @@ _tasks: list[asyncio.Task] = []
 ATTEMPTS_LIMIT = 2
 
 
+def _should_append_triage_queue_for_register_failure(rc: int) -> bool:
+    """Whether a failed register job should become active hand-config triage work."""
+    return rc not in {-4, -3, -2, -1, 2, 3, 4, 5}
+
+
 def _display_title_from_state(slug: str) -> Optional[str]:
     try:
         title = json.loads((STATE_DIR / f"{slug}.json").read_text(encoding="utf-8")).get("display_title")
@@ -672,7 +677,27 @@ async def _process_job_inner(client, conn, job, dm_owner) -> None:
                     await edit_channel_message(
                         client, job["ack_channel_id"], job["ack_message_id"],
                         msg("worker_url_dead", slug=slug))
+                elif rc == 5:
+                    # capability_blocked (anti-bot/captcha/cloudflare/timeout) — 능력 부족 보류.
+                    # register.py 가 .FAILED.json 을 남기면 triage.py pull 의 auto-defer 가 Later 로 분리한다.
+                    # active triage_queue 에 넣으면 gen_fail 수동 config 작업처럼 섞여 batch/triage 를 오염한다.
+                    try:
+                        from scripts.register import _prune_triage_queue
+                        _prune_triage_queue(slug)
+                    except Exception as _e:  # noqa: BLE001
+                        log.warning("rc=5 triage_queue prune 실패 — slug=%s err=%r", slug, _e)
+                    await edit_channel_message(
+                        client, job["ack_channel_id"], job["ack_message_id"],
+                        msg("worker_register_fail", slug=slug,
+                            err="사이트 접근이 차단되어 나중에 다시 시도할 항목으로 분류했어요."))
                 else:
+                    # rc=1 (gen_fail) + 미지 rc 의 fallback. 위 elif 가 rc∈{2,3,4,-1,-2,-3,-4,5} 다 잡아서
+                    # 여기엔 자동 등록이 실패한 *손-config 후보* 만 남음 → 활성 triage 큐로.
+                    # 헬퍼 `_should_append_triage_queue_for_register_failure` 는 같은 invariant 의
+                    # 단위 테스트 anchor (tests/bot/test_worker_failure_routing.py).
+                    assert _should_append_triage_queue_for_register_failure(rc), (
+                        f"rc={rc} unexpectedly reached active-triage append fallback"
+                    )
                     append_triage_queue(url, slug, job["via"], req_by, tail)
                     await edit_channel_message(client, job["ack_channel_id"], job["ack_message_id"],
                                                msg("worker_register_fail", slug=slug,
