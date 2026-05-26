@@ -63,8 +63,10 @@ async def close_session(adapter) -> None:
         return
     try:
         await sess.close()
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as e:  # noqa: BLE001
+        # codex perf review P3 (2026-05-26) — close 실패 silent 면 socket leak 표시 X.
+        import sys
+        print(f"[curl_cffi_html] ⚠ close_session 실패 (silent leak 위험): {type(e).__name__}: {e}", file=sys.stderr)
     adapter._curl_session = None
 
 
