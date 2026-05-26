@@ -1,0 +1,118 @@
+{
+  "version": 1,
+  "site": "www.focus-entmt.com",
+  "board": "news",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.focus-entmt.com/"
+  },
+  "timeout": 20.0,
+  "polite_sleep": {
+    "min": 5,
+    "max": 6
+  },
+  "list": {
+    "url_template": "https://www.focus-entmt.com/en/news",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "main a[href*='/en/news/']",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": ":self",
+          "attr": "href",
+          "transform": [
+            ["strip_query_fragment"],
+            ["regex_extract", "/en/news/([^/?#]+)$"]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "h3",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": ":self",
+          "attr": "href",
+          "transform": [
+            ["strip_query_fragment"],
+            ["urljoin", "https://www.focus-entmt.com/"]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "p.text-sm",
+          "text": true,
+          "transform": [
+            ["collapse_ws"],
+            ["iso8601", ["%d %B %Y"]]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "css",
+          "selector": "div[style*='background']",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "p.mt-3",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ],
+      "cover_image": [
+        {
+          "from": "attr",
+          "selector": "img[src]",
+          "attr": "src",
+          "transform": [
+            ["strip_query_fragment"],
+            ["urljoin", "https://www.focus-entmt.com/"]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "main article",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "main .prose",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "main",
+        "html": true
+      }
+    ],
+    "body_empty_acceptable": true
+  },
+  "_source_url": "https://www.focus-entmt.com/",
+  "_note": "The submitted root page is a marketing homepage, but its static HTML exposes six latest-news cards and the canonical board is /en/news. N100 probe S1.H2 returned 200 with those cards; article direct fetch timed out, so polling relies on list title/category/date/summary and treats body extraction as optional."
+}
