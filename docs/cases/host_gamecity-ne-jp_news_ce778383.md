@@ -1,7 +1,7 @@
 ---
 slug: host_gamecity-ne-jp_news_ce778383
 url: https://www.gamecity.ne.jp/news/
-status: "🛠️ JSON list signal identified; generic engine fallback deferred"
+status: "✅ registered by generic JSON list/body API handoff; monthly fallback deferred"
 outcome: improved
 date: 2026-05-26
 fix_layer: C+D
@@ -93,6 +93,20 @@ That left a generic agentic handoff issue: when `article_sample.api_candidates` 
 same SPA-body pattern the preflight already tries to surface. The case frontmatter keeps cumulative
 `fix_layer: C+D`: the JSON row-shape fix is C-layer, and this follow-up is D-layer agentic input.
 
+Sixth, after deploying that agentic handoff fix, N100 job `#3623` passed through the real worker path:
+
+- api-loop generated a `strategy="httpx_json"` config.
+- list uses the captured monthly news JSON.
+- article uses the captured body JSON API: `/cms-data/json/news/{post_id}.json` with
+  `article.fetch_kind="json"` and `content` path `[0, "text_content"]`.
+- Validation passed in the normal registration path and baseline registered 15 posts.
+
+This is a real generic recovery of the SPA list/body API handoff. It is not a durable solution to the
+monthly URL generation problem: the registered list URL is still the observed current-month
+`news_202605.json`. `/js/news.js` proves the page computes current `YYYYMM` and falls back to older
+months, so a future month will require either an engine-supported date/fallback URL surface or a
+handwritten adapter. That broader engine surface was not added from this single site.
+
 ## Fix
 
 - `generate/generator.py`: retry feedback now detects DNS/browser-launch infra failures and does not
@@ -149,3 +163,10 @@ previous months on 404. A hard-coded `news_202605.json` would become stale event
 generic date-token/fallback URL engine surface from this single site is too broad without another
 same-pattern batch case. Keep it as a documented follow-up unless more sites show the same monthly
 JSON pattern.
+
+N100 verification after the agentic handoff prompt:
+
+- Job `#3623`: `done`, rc=0.
+- Registered config on N100:
+  `/home/aaaa/notice-watcher/configs/host_gamecity-ne-jp_news_ce778383.json`.
+- Caveat: that runtime config is an auto-generated N100 artifact and is not a generic code change.

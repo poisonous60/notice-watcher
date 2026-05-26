@@ -190,3 +190,9 @@ picked the JSON list but ignored the already captured body JSON candidate
 `article_body_len` / JSON decode failures instead of timeout. The generic follow-up
 is to put the JSON list/body handoff rules directly into the agentic tmpdir
 `AGENTS.md`, not only the larger `config_writer_rules.txt`.
+
+After that D-layer handoff fix, N100 job `#3623` registered GAMECITY through the
+normal worker path. The generated config correctly uses `httpx_json` for both the
+list and article body APIs. Remaining caveat: its list URL is the observed
+current-month `news_202605.json`; this is operationally valid now but not a
+general date/fallback engine solution.
