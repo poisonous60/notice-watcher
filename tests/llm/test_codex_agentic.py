@@ -19,6 +19,7 @@ import asyncio
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -30,6 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from generate import codex_agentic as ca  # noqa: E402
 from generate.llm_base import LLMNetworkError  # noqa: E402
+import scripts.validate_config as validate_config_cli  # noqa: E402
 
 
 REPO = Path(__file__).resolve().parent.parent.parent
@@ -455,6 +457,107 @@ def run() -> list[tuple[str, bool, str]]:
         in_t == 300 and out_t == 130,
         f"got input={in_t} output={out_t} (expected 300, 130)",
     ))
+
+    # ----- 10. validate_config internal timeout emits JSON and rc=0 -----
+    cases.append(_check(
+        "validate_config_internal_timeout_default_60s",
+        int(validate_config_cli.INTERNAL_TIMEOUT_S) == 60,
+        f"got {validate_config_cli.INTERNAL_TIMEOUT_S!r}",
+    ))
+    with tempfile.TemporaryDirectory(prefix="validate_timeout_test_") as td:
+        candidate = Path(td) / "candidate.json"
+        candidate.write_text(json.dumps({"site": "https://example.com/"}), encoding="utf-8")
+        code = f"""
+import asyncio
+import sys
+from pathlib import Path
+import scripts.validate_config as vc
+
+vc.INTERNAL_TIMEOUT_S = 1.0
+
+async def slow_validate_built_config(cfg, *, digest=None, fetch_articles=1):
+    await asyncio.sleep(65)
+
+vc.validate_built_config = slow_validate_built_config
+sys.exit(vc.main(["validate_config.py", {str(candidate)!r}]))
+"""
+        proc = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=REPO,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=5,
+        )
+        try:
+            payload = json.loads(proc.stdout)
+        except json.JSONDecodeError:
+            payload = {}
+        cases.append(_check(
+            "validate_config_internal_timeout_json_rc0",
+            (proc.returncode == 0
+             and payload.get("ok") is False
+             and payload.get("error") == "validate_internal_timeout_1s"
+             and payload.get("checks") == []
+             and payload.get("sample_posts") == []),
+            f"rc={proc.returncode} stdout={proc.stdout!r} stderr={proc.stderr!r}",
+        ))
+
+    # ----- 11. codex agentic classifier marks closed session stdin as transient network -----
+    closed_stdin_err = ca._codex_classify_error(
+        "error=write_stdin failed: stdin is closed for this session; rerun exec_command with tty=true",
+        "",
+        1,
+    )
+    cases.append(_check(
+        "codex_classify_session_stdin_closed",
+        (isinstance(closed_stdin_err, LLMNetworkError)
+         and "codex_agentic_transient_session_stdin_closed" in str(closed_stdin_err)),
+        f"got {type(closed_stdin_err).__name__}: {closed_stdin_err}",
+    ))
+
+    # ----- 12. codex startup-only timeout is transient -----
+    fake_repo5 = _make_tmp_repo()
+
+    class StartupTimeoutPopen:
+        def __init__(self, args, **kwargs):
+            self.pid = 999999
+            self.returncode = None
+            self._calls = 0
+
+        def communicate(self, input=None, timeout=None):  # noqa: A002 - subprocess API
+            self._calls += 1
+            if self._calls == 1:
+                raise subprocess.TimeoutExpired(cmd="codex exec", timeout=timeout)
+            self.returncode = -9
+            return ("", "Reading prompt from stdin...\n")
+
+        def kill(self):
+            self.returncode = -9
+
+    try:
+        with mock.patch.object(ca, "_codex_preflight", return_value="codex-cli test"), \
+             mock.patch.object(ca, "_codex_bin", return_value="codex"), \
+             mock.patch.object(ca, "_kill_process_tree", lambda pid: None), \
+             mock.patch.object(ca.subprocess, "Popen", StartupTimeoutPopen):
+            try:
+                asyncio.run(ca.run_codex_agentic(
+                    digest={"url": "https://example.com/"},
+                    slug="startuptimeout",
+                    url="https://example.com/",
+                    repo=fake_repo5,
+                    timeout_s=0.01,
+                ))
+                timeout_err = None
+            except LLMNetworkError as e:
+                timeout_err = e
+        cases.append(_check(
+            "codex_timeout_classified_transient",
+            (timeout_err is not None and "codex_agentic_transient_timeout" in str(timeout_err)),
+            f"got {type(timeout_err).__name__ if timeout_err else None}: {timeout_err}",
+        ))
+    finally:
+        shutil.rmtree(fake_repo5, ignore_errors=True)
 
     return cases
 
