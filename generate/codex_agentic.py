@@ -787,13 +787,12 @@ def _codex_timeout_prefix(stderr_text: str) -> str:
 def _sandbox_args(workdir: Path) -> list[str]:
     """Codex exec sandbox flags for the register agent.
 
-    Linux production can use workspace-write with the tmpdir as the only
-    writable workspace. Windows keeps the historical bypass path because
-    workspace-write rejects ordinary PowerShell validation commands there.
+    The validator must make real network requests from inside the agent loop.
+    N100 measurement showed Linux workspace-write breaks that path with DNS
+    failures, so the trust boundary is prompt + AGENTS + post-run audit +
+    parent re-validation, as accepted in ADR 0020.
     """
-    if sys.platform == "win32":
-        return ["--dangerously-bypass-approvals-and-sandbox"]
-    return ["--sandbox", "workspace-write", "--add-dir", str(workdir)]
+    return ["--dangerously-bypass-approvals-and-sandbox"]
 
 
 # --- codex usage extraction (multi-turn SUM) ---------------------------------

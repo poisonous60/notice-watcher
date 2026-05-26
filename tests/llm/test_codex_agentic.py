@@ -77,13 +77,13 @@ def run() -> list[tuple[str, bool, str]]:
         "should not detect when key missing",
     ))
 
-    # ----- 1b. Codex child sandbox flags: Linux tmpdir sandbox, Windows legacy bypass. -----
+    # ----- 1b. Codex child sandbox flags: networked agentic path. -----
     with mock.patch.object(ca.sys, "platform", "linux"):
         linux_workdir = Path("/tmp/reg_agent_test")
         linux_args = ca._sandbox_args(linux_workdir)
     cases.append(_check(
-        "sandbox_args_linux_workspace_write",
-        (linux_args == ["--sandbox", "workspace-write", "--add-dir", str(linux_workdir)]),
+        "sandbox_args_linux_bypass_for_networked_validator",
+        linux_args == ["--dangerously-bypass-approvals-and-sandbox"],
         f"got {linux_args!r}",
     ))
     with mock.patch.object(ca.sys, "platform", "win32"):
