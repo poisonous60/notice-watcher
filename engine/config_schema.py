@@ -20,8 +20,11 @@ config 한 개 = 게시판 한 개. 최상위 키:
 
 list:
   url_template : "https://.../?id={board}"   ({board},{page},{page_size} 치환)
-  pagination   : {kind:"query_param"|"offset"|"none", page_param?, size_param?,
+  pagination   : {kind:"query_param"|"offset"|"path_segment"|"none", page_param?, size_param?,
                   offset_param?, page_unit?(int), extra_params_when_paged?:dict}
+                  # path_segment: url_template 안 {page} 자리만 render — atlus/fate-go 류
+                  # `/news/page/{page}` 정적 archive. 폴링은 보통 page 1 만 → kind:"none" 권장
+                  # (page 1 이 보통 base URL 이고 `/page/1` 은 404/redirect — 0b-2 P3 참고).
   page_size_max: int (선택; 서버가 page_size 를 cap 하는 경우)
   tls_fallback : "playwright" | "none" (선택; httpx TLS handshake 실패 시 playwright_html 로 재생성 힌트)
   # --- httpx_html / playwright_html ---
@@ -301,7 +304,7 @@ def validate_config(cfg: dict) -> None:
                 errs.append("httpx_json 은 list.list_path(리스트) 필요")
             pag = lst.get("pagination")
             if pag is not None:
-                if pag.get("kind") not in ("query_param", "offset", "none", None):
+                if pag.get("kind") not in ("query_param", "offset", "none", "path_segment", None):
                     errs.append(f"list.pagination.kind 가 이상함: {pag.get('kind')!r}")
         art = cfg.get("article")
         if art is not None:

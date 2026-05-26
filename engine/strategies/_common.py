@@ -70,6 +70,12 @@ def build_list_url(
                 updates[pag["offset_param"]] = str((page - 1) * unit)
             if pag.get("size_param"):
                 updates[pag["size_param"]] = str(unit)
+    elif kind == "path_segment":
+        # url_template 안 {page} 자리만 render_url_template 가 처리 — extra param 없음.
+        # atlus/fate-go 류 `/news/page/{page}` archive. 폴링용으로는 보통 kind:"none" +
+        # base URL 이 더 안전 (page 1 = `/news/page/1` 가 404/redirect 인 사이트 多 — atlus,
+        # fate-go 확인). 이 kind 는 LLM 이 hint 의 `kind` 값 그대로 박았을 때 안전한 no-op 으로 통과시키는 목적.
+        pass
     # extra_params_when_paged: kind 무관, page>1 일 때만 추가하는 쿼리 파라미터.
     if page > 1:
         for k, v in (pag.get("extra_params_when_paged") or {}).items():
