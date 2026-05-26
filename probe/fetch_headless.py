@@ -559,7 +559,7 @@ _ID_DATA_KEY_RE = re.compile(r"(^|[-_])(id|no|seq|article|thread|data|post|board
 _CONSENT_DISMISS_JS = r"""() => {
     // Known CMP selector IDs — reject 우선(PIPA/CNIL 2025 권고: 자동 Accept = informed consent 부정).
     // 출처: duckduckgo/autoconsent (MPL-2.0) lib/cmps/{onetrust,cookiebot,trustarc,quantcast,didomi}.ts
-    // — selector 문자열만 발췌 (factual data).
+    // — selector 문자열만 발췌 (factual data). 라이선스 의무 충족: THIRD_PARTY_NOTICES.md (repo root).
     const KNOWN_CMP_REJECT = [
         '#onetrust-reject-all-handler', '.ot-pc-refuse-all-handler',
         '#CybotCookiebotDialogBodyLevelButtonLevelOptinDeclineAll',
@@ -637,8 +637,11 @@ _CONSENT_DISMISS_JS = r"""() => {
 
     let clicked = 0;
 
-    // 1) Known CMP ID — reject 먼저 (정책 안전), fail 시 accept (light-touch dismiss).
-    //    queryDeep 로 open shadow root 도 piercing. 1개 hit 면 충분 — banner 가 사라지므로.
+    // 정책 (research_session1_cookie_banner.md §5):
+    //   reject(consent 거부) → hide(banner DOM 숨김 — 비-consent 처리) → accept(최후 fallback).
+    //   자동 Accept 우선 X — PIPA 2024 / CNIL 2025-06 의 "informed consent" 정신 위반.
+
+    // 1) Known CMP REJECT — open shadow root 도 piercing. 1개 hit 면 banner 사라짐.
     for (const sel of KNOWN_CMP_REJECT) {
         const el = queryDeep(sel);
         if (el && visible(el)) {
@@ -646,6 +649,24 @@ _CONSENT_DISMISS_JS = r"""() => {
             if (clicked >= 1) break;
         }
     }
+    // 2) reject 못 찾았으면 → banner-like 컨테이너 HIDE (display:none). consent 발생 X, accept 아님.
+    //    KNOWN_CMP_ACCEPT 의 부모 트리에서 가장 가까운 banner-like 컨테이너 잡아 hide.
+    if (clicked === 0) {
+        for (const sel of KNOWN_CMP_ACCEPT) {
+            const el = queryDeep(sel);
+            if (!el || !visible(el)) continue;
+            let cur = el, hid = false;
+            for (let depth = 0; cur && depth < 7; depth += 1, cur = cur.parentElement) {
+                const idClass = `${cur.id || ""} ${cur.className || ""}`;
+                if (bannerHint.test(idClass)) {
+                    try { cur.style.setProperty("display", "none", "important"); clicked += 1; hid = true; } catch (_) {}
+                    break;
+                }
+            }
+            if (hid) break;
+        }
+    }
+    // 3) hide 도 못 했으면 → 최후 accept (rejection UI 도 banner-like 컨테이너 도 못 찾는 사이트).
     if (clicked === 0) {
         for (const sel of KNOWN_CMP_ACCEPT) {
             const el = queryDeep(sel);
@@ -688,9 +709,39 @@ _CMP_FRAME_URL_HINTS = (
 )
 
 
+# iframe reject 우선 selectors — Sourcepoint secondary / autoconsent reject affordances + text 매칭.
+# 정책: 자동 accept 우선 X (PIPA 2024 / CNIL 2025-06). reject 못 찾으면 *iframe hide* 시도, 그것도
+# 못 하면 최후 accept fallback.
+_FRAME_REJECT_SELECTORS = (
+    ".message-component.message-button.no-children.focusable.secondary-button",  # Sourcepoint secondary (reject/non-consent)
+    'button[aria-label*="Reject" i]',
+    'button[aria-label*="Decline" i]',
+    'button[aria-label*="Refuse" i]',
+    'button:has-text("Reject")',
+    'button:has-text("Decline")',
+    'button:has-text("Refuse")',
+    'button:has-text("거부")',
+    'button:has-text("나중에")',
+)
+_FRAME_ACCEPT_SELECTORS = (
+    ".message-component.message-button.no-children.focusable.primary-button",  # Sourcepoint primary (accept)
+    'button[aria-label*="Consent" i]',
+    'button[aria-label*="Agree" i]',
+    'button[aria-label*="Accept" i]',
+    'button:has-text("Consent")',
+    'button:has-text("Agree")',
+    'button:has-text("Accept")',
+    'button:has-text("동의")',
+)
+
+
 def _dismiss_consent_in_frames(page) -> int:
     """iframe CMP 처리 (Sourcepoint / Google Funding Choices / Quantcast 등 — main DOM 바깥).
-    main page 는 _dismiss_consent_modals 가 page.evaluate 로 직접 처리하므로 여기서 제외."""
+    main page 는 _dismiss_consent_modals 가 page.evaluate 로 직접 처리하므로 여기서 제외.
+
+    3단계: reject → hide(iframe element 자체) → accept (fallback). codex P-1~3 review finding 1
+    (2026-05-26) — frame 처리도 reject-first 분리 의무.
+    """
     dismissed = 0
     try:
         frames = list(page.frames)
@@ -710,23 +761,39 @@ def _dismiss_consent_in_frames(page) -> int:
             continue
         if not any(h in url for h in _CMP_FRAME_URL_HINTS):
             continue
-        # frame 안의 1차 reject 우선 (정책 안전), fail 시 accept 텍스트 매칭.
-        for sel in (
-            ".message-component.message-button.no-children.focusable.primary-button",  # Sourcepoint primary
-            'button[aria-label*="Consent" i]',
-            'button[aria-label*="Agree" i]',
-            'button:has-text("Consent")',
-            'button:has-text("Agree")',
-            'button:has-text("동의")',
-        ):
+        # 1) reject 우선
+        hit = False
+        for sel in _FRAME_REJECT_SELECTORS:
             try:
                 loc = frame.locator(sel).first
                 if loc.count() and loc.is_visible(timeout=500):
                     loc.click(timeout=2000, no_wait_after=True)
                     dismissed += 1
+                    hit = True
                     break
             except Exception:  # noqa: BLE001
                 continue
+        # 2) reject 못 찾으면 iframe element 자체 hide (consent 발생 X).
+        if not hit:
+            try:
+                fe = frame.frame_element()
+                if fe is not None:
+                    fe.evaluate("(el) => { el.style.setProperty('display', 'none', 'important'); }")
+                    dismissed += 1
+                    hit = True
+            except Exception:  # noqa: BLE001
+                pass
+        # 3) hide 도 못 했으면 최후 accept fallback.
+        if not hit:
+            for sel in _FRAME_ACCEPT_SELECTORS:
+                try:
+                    loc = frame.locator(sel).first
+                    if loc.count() and loc.is_visible(timeout=500):
+                        loc.click(timeout=2000, no_wait_after=True)
+                        dismissed += 1
+                        break
+                except Exception:  # noqa: BLE001
+                    continue
         if dismissed >= 2:
             break
     return dismissed
