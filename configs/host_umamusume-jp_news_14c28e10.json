@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "site": "umamusume.jp",
+  "board": "news",
+  "_source_url": "https://umamusume.jp/news/",
+  "_note": "Nuxt SPA — list/article 둘 다 /api/ajax/pr_info_* JSON 사용. 정적 HTML 은 빈 shell.",
+  "strategy": "httpx_json",
+  "headers": {
+    "Accept": "application/json",
+    "Accept-Language": "ja-JP,ja;q=0.9,en;q=0.8",
+    "Referer": "https://umamusume.jp/news/",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
+  },
+  "timeout": 15,
+  "list": {
+    "url_template": "https://umamusume.jp/api/ajax/pr_info_index?format=json&announce_label=0&device&per_page={size}&page={page}",
+    "pagination": {
+      "kind": "query_param",
+      "page_param": "page",
+      "size_param": "per_page"
+    },
+    "page_size_max": 10,
+    "list_path": ["information_list"],
+    "fields": {
+      "post_id": [
+        { "from": "json", "path": ["announce_id"] }
+      ],
+      "title": [
+        { "from": "json", "path": ["title"] }
+      ],
+      "url": [
+        { "from": "template", "value": "https://umamusume.jp/news/detail?id={post_id}" }
+      ],
+      "published_at": [
+        {
+          "from": "json",
+          "path": ["post_at"],
+          "transform": [["replace", " ", "T"], ["append", "+09:00"], ["iso8601"]]
+        }
+      ]
+    }
+  },
+  "article": {
+    "url_template": "https://umamusume.jp/api/ajax/pr_info_detail?format=json&announce_id={post_id}&device&transition_id=0",
+    "fetch_kind": "json",
+    "data_path": ["detail"],
+    "content": [
+      { "from": "json", "path": ["message"] }
+    ]
+  }
+}
