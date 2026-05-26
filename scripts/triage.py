@@ -286,27 +286,38 @@ def cmd_pull(skip_later: bool = False, auto_defer: bool = True) -> int:
     # 사전 안전 장치 — ssh 실패 (네트워크/권한/DEPLOY_PATH 오타) 시 remote 가 empty 라 *오해* 해서 모든 local
     # FAILED 를 stale 로 판정해 일괄 삭제하는 사고 방지. 두 sentinel (__OK__/__QOK__) 가 *둘 다* 출력에
     # 있어야 remote 응답이 신뢰 가능. 하나라도 없으면 sync delete 자체를 skip — local 보존이 default-safe.
+    # `stat -c '%Y %n'` 로 mtime 도 같이 받아온다 — step 3 의 probe re-download skip 게이트용
+    # (로컬 probe mtime ≥ remote FAILED mtime 이면 이미 받은 상태 → 196회 scp 핸드셰이크 회피).
     sentinel_ok = "__TRIAGE_PULL_OK__"
     sentinel_qok = "__TRIAGE_QUEUE_OK__"
     sentinel_qmiss = "__TRIAGE_QUEUE_MISSING__"
     remote_cmd = (
         f"cd {DEPLOY_PATH} && "
-        f"(ls output/poll_state/*{_FAILED_SUFFIX} 2>/dev/null; echo {sentinel_ok}) && "
+        f"(stat -c '%Y %n' output/poll_state/*{_FAILED_SUFFIX} 2>/dev/null; echo {sentinel_ok}) && "
         f"(test -f output/triage_queue.jsonl && echo {sentinel_qok} || echo {sentinel_qmiss})"
     )
     rc_ls, out_ls = _run(["ssh", deploy_host, remote_cmd])
     remote_response_trusted = (rc_ls == 0 and sentinel_ok in out_ls
                                 and (sentinel_qok in out_ls or sentinel_qmiss in out_ls))
     remote_failed: set[str] = set()
+    remote_failed_mtime: dict[str, int] = {}
     remote_queue_missing = False
     if remote_response_trusted:
         for line in out_ls.splitlines():
             line = line.strip()
             if not line or line == sentinel_ok or line.startswith("__TRIAGE_"):
                 continue
-            name = Path(line).name
+            parts = line.split(None, 1)
+            if len(parts) != 2:
+                continue
+            try:
+                mt = int(parts[0])
+            except ValueError:
+                continue
+            name = Path(parts[1]).name
             if name.endswith(_FAILED_SUFFIX):
                 remote_failed.add(name)
+                remote_failed_mtime[name[: -len(_FAILED_SUFFIX)]] = mt
         remote_queue_missing = sentinel_qmiss in out_ls
     else:
         sys.stderr.write(f"[triage pull] ⚠ remote 응답 검증 실패 (rc={rc_ls}, sentinel 누락) — "
@@ -368,13 +379,55 @@ def cmd_pull(skip_later: bool = False, auto_defer: bool = True) -> int:
     _run(["scp", "-q", f"{deploy_host}:{DEPLOY_PATH}/output/triage_queue.jsonl", str(QUEUE)])
 
     # 3) 각 실패 slug 의 probe 산출물 디렉토리 (진단 재료). Later 는 건너뜀 + 이미 받은 거 정리.
+    # 최적화: (a) 로컬 probe mtime ≥ remote FAILED.json mtime 이면 이미 최신 → skip,
+    #          (b) 남은 fetch 는 단일 `ssh ... tar c | tar x` stream — 1 핸드셰이크.
+    # before: per-slug scp 196회 (~1초 핸드셰이크 × 196 = ~3분20초)
     PROBE_DIR.mkdir(parents=True, exist_ok=True)
     slugs = _failed_slugs()
     pruned_probe = 0
+    to_fetch: list[str] = []
+    skipped_uptodate = 0
     for slug in slugs:
         if slug in later:
             continue
-        _run(["scp", "-rq", f"{deploy_host}:{DEPLOY_PATH}/output/probe/{slug}", f"{PROBE_DIR}{os.sep}"])
+        pd = PROBE_DIR / slug
+        remote_mt = remote_failed_mtime.get(slug)
+        if pd.exists() and remote_mt is not None:
+            diag = pd / "diagnosis.json"
+            ref = diag if diag.exists() else pd
+            try:
+                local_mt = int(ref.stat().st_mtime)
+            except OSError:
+                local_mt = 0
+            if local_mt >= remote_mt:
+                skipped_uptodate += 1
+                continue
+        to_fetch.append(slug)
+
+    if to_fetch:
+        remote_paths = " ".join(f"output/probe/{s}" for s in to_fetch)
+        remote_tar = f"cd {DEPLOY_PATH} && tar c --ignore-failed-read {remote_paths}"
+        try:
+            ssh_proc = subprocess.Popen(
+                ["ssh", deploy_host, remote_tar],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+            tar_proc = subprocess.Popen(
+                ["tar", "x", "-C", str(ROOT)],
+                stdin=ssh_proc.stdout, stderr=subprocess.PIPE,
+            )
+            assert ssh_proc.stdout is not None
+            ssh_proc.stdout.close()  # tar 가 EOF 받게
+            tar_rc = tar_proc.wait()
+            ssh_proc.wait()
+            if tar_rc != 0:
+                err = (tar_proc.stderr.read() if tar_proc.stderr else b"") or b""
+                sys.stderr.write(f"[triage pull] probe tar 추출 경고 (rc={tar_rc}): "
+                                 f"{err.decode(errors='replace')[:400]}\n")
+        except OSError as e:
+            sys.stderr.write(f"[triage pull] probe tar stream 실패 — per-slug scp fallback: {e}\n")
+            for slug in to_fetch:
+                _run(["scp", "-rq", f"{deploy_host}:{DEPLOY_PATH}/output/probe/{slug}", f"{PROBE_DIR}{os.sep}"])
     if later:
         for slug in later:
             pd = PROBE_DIR / slug
@@ -400,6 +453,8 @@ def cmd_pull(skip_later: bool = False, auto_defer: bool = True) -> int:
     nq = len({e.get("slug") for e in _read_queue()})
     print(f"[triage pull] {deploy_host}:{DEPLOY_PATH}/output → {OUTPUT}")
     print(f"  FAILED.json: {len(slugs)}건   triage_queue slug: {nq}건   probe 디렉토리: {sum(1 for s in slugs if (PROBE_DIR / s).exists())}개")
+    if skipped_uptodate or to_fetch:
+        print(f"  probe up-to-date 스킵: {skipped_uptodate}건 / 신규 fetch: {len(to_fetch)}건 (tar stream 1 ssh)")
     if pruned_stale or pruned_stale_probe:
         print(f"  stale 정리 (운영 호스트에서 이미 REJECTED/등록 완료): FAILED.json {pruned_stale}건 / probe {pruned_stale_probe}개")
     if auto_deferred:
