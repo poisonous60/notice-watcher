@@ -202,7 +202,7 @@ async def validate_built_config(
             body_optional = bool((cfg.get("article") or {}).get("body_empty_acceptable"))
             if posts and fetch_articles > 0:
                 want = max(1, fetch_articles)
-                budget = min(len(posts), max(want + 2, 5))  # skip 대비 여유
+                budget = min(len(posts), want + 1)  # skip 대비 1건 여유. agentic validator 에서 5-page burn 방지.
                 real_seen = 0
                 verdict_added = False
                 for p in posts[:budget]:
