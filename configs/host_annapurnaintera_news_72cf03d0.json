@@ -1,0 +1,86 @@
+{
+  "version": 1,
+  "site": "www.annapurnainteractive.com",
+  "board": "news",
+  "strategy": "httpx_html",
+  "_source_url": "https://www.annapurnainteractive.com/news/",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9"
+  },
+  "timeout": 20,
+  "polite_sleep": {
+    "min": 5,
+    "max": 6
+  },
+  "list": {
+    "url_template": "https://www.annapurnainteractive.com/en/news",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "ul.pages-list > li.pages__item.border-color",
+    "row_required_selector": "a.reset-link[href^='https://www.annapurnainteractive.com/en/news/']",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a.reset-link[href^='https://www.annapurnainteractive.com/en/news/']",
+          "attr": "href",
+          "transform": [
+            [
+              "strip_query_fragment"
+            ],
+            [
+              "regex_extract",
+              "/en/news/([^/?#]+)"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "p.pages__title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a.reset-link[href^='https://www.annapurnainteractive.com/en/news/']",
+          "attr": "href",
+          "transform": [
+            [
+              "strip_query_fragment"
+            ]
+          ]
+        }
+      ],
+      "author": [
+        {
+          "from": "css",
+          "selector": "p.pages__author",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [],
+    "body_empty_acceptable": true
+  },
+  "_note": "Annapurna news is a press-link index. Rows expose stable internal /en/news/ redirector URLs, but those redirect to external outlets during article fetch. Keep list polling on internal URLs only and accept empty bodies so notifications use title + internal URL."
+}
