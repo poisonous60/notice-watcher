@@ -205,7 +205,15 @@ async def _goto(adapter, url: str, *, wait_selector: Optional[str] = None) -> st
     nav_to = int(cfg.get("nav_timeout_ms", 15000))
     idle_to = int(cfg.get("idle_timeout_ms", 2000))
     quiet_to = int(cfg.get("quiet_ms", 500))
-    cf_wait_to = int(cfg.get("cf_wait_timeout_ms", 8000))
+    # cf_wait_timeout_ms 우선순위: per-site config > runtime settings.poll > 코드 default 8000ms.
+    # runtime settings 는 dashboard /control 페이지 또는 config.local.toml 에서 조절.
+    _default_cf_wait = 8000
+    try:
+        from bot.runtime_config import settings as _rt_settings
+        _default_cf_wait = int(getattr(_rt_settings.poll, "cf_wait_timeout_ms", 8000))
+    except Exception:  # noqa: BLE001
+        pass
+    cf_wait_to = int(cfg.get("cf_wait_timeout_ms", _default_cf_wait))
     await page.goto(url, wait_until="domcontentloaded", timeout=nav_to)
     # CF wait — adapter-level cache. unchecked 면 detect+wait, none|cleared 면 skip,
     # turnstile|timeout 이면 raise (caller 가 적절히 처리).
