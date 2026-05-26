@@ -368,7 +368,14 @@ def fetch_with_capture(
             error="playwright not installed",
         )
 
-    from playwright.sync_api import sync_playwright
+    # Patchright = Playwright 의 stealth-patched drop-in (binary patch). 미설치 시 playwright fallback.
+    # 회귀 0 — API 100% 호환. 설치 후 trace `engine: patchright` 박힘.
+    try:
+        from patchright.sync_api import sync_playwright  # type: ignore
+        _engine_label = "patchright"
+    except ImportError:
+        from playwright.sync_api import sync_playwright
+        _engine_label = "playwright"
 
     try:
         from playwright_stealth import Stealth  # type: ignore
@@ -498,6 +505,7 @@ def fetch_with_capture(
         error=error,
         baseline_blocked=baseline_blocked,
     )
+    notable.append(f"engine: {_engine_label}")
     notable.append(f"har: {har_path.name}")
     if "wait_note" in locals() and wait_note:
         notable.append(wait_note)
@@ -812,7 +820,12 @@ def fetch_article_by_click(
         return (_result(Classification.METHOD_INCOMPATIBLE, None, None, 0,
                         ["playwright not installed"], "playwright not installed", list_url), meta)
 
-    from playwright.sync_api import sync_playwright
+    try:
+        from patchright.sync_api import sync_playwright  # type: ignore
+        _engine_label = "patchright"
+    except ImportError:
+        from playwright.sync_api import sync_playwright
+        _engine_label = "playwright"
     from urllib.parse import urlsplit
     try:
         from playwright_stealth import Stealth  # type: ignore
@@ -959,6 +972,7 @@ def fetch_article_by_click(
     cls, notable = classify(status=status, body=body, headers={}, final_url=final_url,
                             error=error or (meta.get("note") if body is None else None),
                             baseline_blocked=baseline_blocked)
+    notable.append(f"engine: {_engine_label}")
     if final_url:
         notable.append(f"clicked → {final_url[:80]}")
     if html_truncated:

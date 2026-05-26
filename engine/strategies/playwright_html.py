@@ -74,10 +74,17 @@ def _ua_from_headers(headers: dict) -> Optional[str]:
 
 
 async def open_session(adapter) -> None:
+    # Patchright = Playwright 의 stealth-patched drop-in. 미설치 시 playwright fallback.
+    # adapter._engine_label 에 기록 → polling trace 가 어느 엔진 썼는지 분리 측정 가능.
     try:
-        from playwright.async_api import async_playwright
-    except ImportError as e:
-        raise RuntimeError("playwright 미설치 — playwright_html strategy 사용 불가. `pip install playwright; playwright install chromium`") from e
+        from patchright.async_api import async_playwright  # type: ignore
+        adapter._engine_label = "patchright"
+    except ImportError:
+        try:
+            from playwright.async_api import async_playwright
+            adapter._engine_label = "playwright"
+        except ImportError as e:
+            raise RuntimeError("playwright 미설치 — playwright_html strategy 사용 불가. `pip install playwright; playwright install chromium` (또는 patchright + `patchright install chromium`)") from e
 
     cfg = adapter.cfg
     headless = cfg.get("headless", True)
