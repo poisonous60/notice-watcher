@@ -54,9 +54,9 @@ from .llm_base import (
 from .validate import ValidationReport, validate_built_config
 
 try:
-    from generate.codex import _classify_error as _codex_classify_error, _codex_bin
+    from generate.codex import _classify_error as _codex_base_classify_error, _codex_bin
 except ImportError:  # codex.py not on path in some test setups
-    from .codex import _classify_error as _codex_classify_error, _codex_bin  # type: ignore
+    from .codex import _classify_error as _codex_base_classify_error, _codex_bin  # type: ignore
 
 try:
     from engine.digest import compress_html_for_prompt as _compress_html
@@ -529,6 +529,25 @@ def _kill_process_tree(pid: int) -> None:
             pass
 
 
+def _codex_classify_error(stderr_text: str, stdout_text: str, rc: int) -> LLMError:
+    if "stdin is closed for this session" in stderr_text:
+        return LLMNetworkError(
+            f"codex_agentic_transient_session_stdin_closed (rc={rc}, "
+            f"stderr tail: {stderr_text[-300:]!r})"
+        )
+    return _codex_base_classify_error(stderr_text, stdout_text, rc)
+
+
+def _codex_timeout_prefix(stderr_text: str) -> str:
+    marker = "Reading prompt from stdin"
+    stderr_substantive = stderr_text.strip()
+    if marker in stderr_substantive:
+        tail = stderr_substantive.split(marker, 1)[-1].strip()
+        if len(tail) < 200:
+            return "codex_agentic_transient_timeout"
+    return "codex_agentic timeout"
+
+
 def _sandbox_args(workdir: Path) -> list[str]:
     """Codex exec sandbox flags for the register agent.
 
@@ -675,8 +694,9 @@ async def run_codex_agentic(
                 except subprocess.TimeoutExpired:
                     proc.kill()
                     stdout_text, stderr_text = proc.communicate(timeout=5.0)
+                prefix = _codex_timeout_prefix(stderr_text)
                 raise LLMNetworkError(
-                    f"codex_agentic timeout after {timeout_s}s "
+                    f"{prefix} after {timeout_s}s "
                     f"(stderr tail: {stderr_text[-300:]!r})"
                 )
             # post-audit — any change outside tmpdir = violation

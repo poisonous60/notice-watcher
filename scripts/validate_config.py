@@ -38,11 +38,21 @@ except ImportError:
     from generate.validate import validate_built_config  # type: ignore  # noqa: E402
 
 
+INTERNAL_TIMEOUT_S = 60.0
+
+
 def _emit_error(reason: str, *, rc: int = 2) -> int:
     json.dump({"ok": False, "error": reason, "checks": [], "sample_posts": []},
               sys.stdout, ensure_ascii=False)
     sys.stdout.write("\n")
     return rc
+
+
+async def _run_with_timeout(cfg: dict):
+    return await asyncio.wait_for(
+        validate_built_config(cfg, digest=None, fetch_articles=1),
+        timeout=INTERNAL_TIMEOUT_S,
+    )
 
 
 def main(argv: list[str]) -> int:
@@ -58,7 +68,9 @@ def main(argv: list[str]) -> int:
     if not isinstance(cfg, dict):
         return _emit_error(f"candidate JSON is not an object, got {type(cfg).__name__}")
     try:
-        rep = asyncio.run(validate_built_config(cfg, digest=None, fetch_articles=1))
+        rep = asyncio.run(_run_with_timeout(cfg))
+    except asyncio.TimeoutError:
+        return _emit_error(f"validate_internal_timeout_{int(INTERNAL_TIMEOUT_S)}s", rc=0)
     except Exception as e:  # noqa: BLE001 — any exception during validate is a soft fail (signal to agent)
         return _emit_error(f"validate raised: {type(e).__name__}: {e}")
     out = {
