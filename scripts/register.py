@@ -948,7 +948,8 @@ _CLASSIFY_REJECT_MIN_CONF = 0.7
 _CLASSIFY_VETO_CACHE: dict[tuple[int, str, str], dict] = {}
 
 
-def _classify_veto(digest: dict, url: str, slug: str, gate_only: bool) -> Optional[dict]:
+def _classify_veto(digest: dict, url: str, slug: str, gate_only: bool, *,
+                   wall_deadline: Optional[float] = None) -> Optional[dict]:
     """LLM 분류 결과 dict 반환 (memoized). gate_only 면 None (분류 skip)."""
     if gate_only:
         return None
@@ -956,7 +957,11 @@ def _classify_veto(digest: dict, url: str, slug: str, gate_only: bool) -> Option
     if key not in _CLASSIFY_VETO_CACHE:
         try:
             from generate.classify import classify_index_content
-            _CLASSIFY_VETO_CACHE[key] = classify_index_content(url=url, digest=digest, slug=slug)
+            if wall_deadline is None:
+                _CLASSIFY_VETO_CACHE[key] = classify_index_content(url=url, digest=digest, slug=slug)
+            else:
+                _CLASSIFY_VETO_CACHE[key] = classify_index_content(url=url, digest=digest, slug=slug,
+                                                                   wall_deadline=wall_deadline)
         except Exception as e:  # noqa: BLE001 — 분류기 import/호출 실패가 등록을 막으면 안 됨
             _CLASSIFY_VETO_CACHE[key] = {"class": "?", "confidence": 0.0, "reason": f"veto_error: {e}"}
     return _CLASSIFY_VETO_CACHE[key]
@@ -987,10 +992,11 @@ def _classify_decisive_rc(res: Optional[dict]) -> Optional[int]:
 
 
 def _gate_reject_or_veto(digest: dict, url: str, slug: str, gate_only: bool, *,
-                         reason: str, note: str, learn: bool = False) -> Optional[int]:
+                         reason: str, note: str, learn: bool = False,
+                         wall_deadline: Optional[float] = None) -> Optional[int]:
     """게이트 거부 시점 공통 처리. 분류기가 board(index) 판단하면 None(거부 취소 → 계속),
     아니면 _save_rejected 후 3 반환. _save_rejected *전* 에 veto 결정 → override 시 마커/learn 미발생."""
-    res = _classify_veto(digest, url, slug, gate_only)
+    res = _classify_veto(digest, url, slug, gate_only, wall_deadline=wall_deadline)
     if _veto_override(res):
         print(f"[register] 🔵 '{note}' 거부를 LLM 분류기가 board(index)로 판단 — 거부 취소 "
               f"(conf={res.get('confidence')}, {res.get('reason', '')[:80]})")
@@ -1020,7 +1026,8 @@ def _gate_reject_or_veto(digest: dict, url: str, slug: str, gate_only: bool, *,
     return 3
 
 
-def _accept_path_content_reject(digest: dict, url: str, slug: str, gate_only: bool) -> Optional[int]:
+def _accept_path_content_reject(digest: dict, url: str, slug: str, gate_only: bool, *,
+                                wall_deadline: Optional[float] = None) -> Optional[int]:
     """모든 구조 게이트 *통과* 후 마지막 분류기 체크 — 분류기가 비-게시판(content/not_found/login)을
     conf≥_CLASSIFY_REJECT_MIN_CONF 로 판단하면 거부. 게이트가 놓친 false-accept(비-게시판이 게이트
     다 뚫고 등록되어 폴링 junk/generation 헛돔) 차단. ADR 0007 의 reject-veto 와 대칭 — 같은 분류기를
@@ -1031,7 +1038,7 @@ def _accept_path_content_reject(digest: dict, url: str, slug: str, gate_only: bo
     'index'/'?'/저신뢰 → None(계속, 수락) = recall 우선 유지. gate_only → _classify_veto 가 None
     (LLM skip) → 항상 None (cheap 모드 보존). 알려진 플랫폼(discourse/xenforo)은 이 함수 도달 전
     early-return 이라 영향 없음."""
-    res = _classify_veto(digest, url, slug, gate_only)
+    res = _classify_veto(digest, url, slug, gate_only, wall_deadline=wall_deadline)
     rc = _classify_decisive_rc(res)
     if rc is None:
         return None
@@ -2723,7 +2730,7 @@ def _main_inner(argv) -> int:
         #   ?·저신뢰 → fail-safe 진행(recall 우선). gate_only 면 분류기 skip → 아래 hard 경로에서 login(rc=2) 취급.
         soft_login_handled = False
         if "login_marker" in verdict and not args.gate_only:
-            res = _classify_veto(digest, url, slug, args.gate_only)
+            res = _classify_veto(digest, url, slug, args.gate_only, wall_deadline=wall_deadline)
             if _veto_override(res):
                 print(f"[register] 🔵 'login_marker'(퍼지) 거부를 분류기가 board(index)로 판단 — 정책 거부 "
                       f"취소·진행 (conf={res.get('confidence')}, {res.get('reason', '')[:80]})")
@@ -2939,7 +2946,8 @@ def _main_inner(argv) -> int:
         # *board-specific* 거부 (그 article 페이지만), path_prefix 자동 학습은 false-positive 큼.
         rc = _gate_reject_or_veto(digest, url, slug, args.gate_only,
                                   reason="single_article_nav_only 거부 (nav 안 사이드바 메뉴만 잡힘)",
-                                  note="gate: _single_article_nav_only_check", learn=False)
+                                  note="gate: _single_article_nav_only_check", learn=False,
+                                  wall_deadline=wall_deadline)
         if rc is not None:
             print("[register] ❌ 등록 거부 — 단일 article (nav-only same-host).")
             return rc
@@ -2953,7 +2961,8 @@ def _main_inner(argv) -> int:
         print(f"[register] {meta_msg}")
         rc = _gate_reject_or_veto(digest, url, slug, args.gate_only,
                                   reason="meta_article_diverging 거부 (og/schema article + first_article 다른 섹션)",
-                                  note="gate: _meta_article_diverging_check", learn=False)
+                                  note="gate: _meta_article_diverging_check", learn=False,
+                                  wall_deadline=wall_deadline)
         if rc is not None:
             print("[register] ❌ 등록 거부 — 단일 article (meta 선언 + 발산 first_article).")
             return rc
@@ -2966,7 +2975,8 @@ def _main_inner(argv) -> int:
         print(f"[register] {hub_msg}")
         rc = _gate_reject_or_veto(digest, url, slug, args.gate_only,
                                   reason="multi_host_hub 거부 (3+ unique external hosts, ratio≥0.95)",
-                                  note="gate: _multi_host_hub_check", learn=False)
+                                  note="gate: _multi_host_hub_check", learn=False,
+                                  wall_deadline=wall_deadline)
         if rc is not None:
             print("[register] ❌ 등록 거부 — multi-host hub root.")
             return rc
@@ -2979,7 +2989,8 @@ def _main_inner(argv) -> int:
         print(f"[register] {rmh_msg}")
         rc = _gate_reject_or_veto(digest, url, slug, args.gate_only,
                                   reason="root_marketing_homepage 거부 (root + nav/carousel-heavy + same-host rows 작음)",
-                                  note="gate: _root_marketing_homepage_check", learn=False)
+                                  note="gate: _root_marketing_homepage_check", learn=False,
+                                  wall_deadline=wall_deadline)
         if rc is not None:
             print("[register] ❌ 등록 거부 — root 도메인 마케팅 랜딩/허브.")
             return rc
@@ -2993,7 +3004,8 @@ def _main_inner(argv) -> int:
         # 빈 페이지여서 거부됐을 때 같은 host 의 다른 채널까지 막으면 false-positive 큼).
         rc = _gate_reject_or_veto(digest, url, slug, args.gate_only,
                                   reason="board_shape_check 거부 (게시판 형식 아님)",
-                                  note="gate: _board_shape_check", learn=False)
+                                  note="gate: _board_shape_check", learn=False,
+                                  wall_deadline=wall_deadline)
         if rc is not None:
             print("[register] ❌ 등록 거부 — 게시판 형식 아님.")
             return rc
@@ -3001,7 +3013,7 @@ def _main_inner(argv) -> int:
     # accept-path 분류기 체크 (ADR 0007 대칭) — 구조 게이트 전부 통과해도 LLM 분류기가 'content'
     # (비-게시판) 고신뢰면 거부. 게이트가 놓친 false-accept 차단 (비-게시판 등록 → 폴링 junk 영구).
     # 거부 veto 와 같은 memoized 분류 1콜 공유. gate_only 면 skip(None).
-    rc = _accept_path_content_reject(digest, url, slug, args.gate_only)
+    rc = _accept_path_content_reject(digest, url, slug, args.gate_only, wall_deadline=wall_deadline)
     if rc is not None:
         return rc
 
