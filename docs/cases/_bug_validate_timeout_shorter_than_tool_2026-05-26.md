@@ -58,6 +58,8 @@ This is below the observed 30-second tool cap, so slow validation returns struct
 
 The agent can then use the failure as feedback instead of seeing a shell timeout with no JSON.
 
+Follow-up from the live retry showed `asyncio.wait_for` alone is insufficient when validation enters a synchronous block and the event loop cannot tick. The wrapper now also installs a POSIX `SIGALRM` hard watchdog around validation on Linux/N100. That preserves the same `validate_internal_timeout_25s` JSON path even when a sync network/library call hangs.
+
 ## Regression
 
-`tests/llm/test_codex_agentic.py` now expects the default internal timeout to be 25 seconds and still verifies that a patched 1-second timeout emits JSON with rc=0.
+`tests/llm/test_codex_agentic.py` now expects the default internal timeout to be 25 seconds and still verifies that a patched 1-second timeout emits JSON with rc=0. On POSIX, it also covers a blocking validator path that would otherwise prevent `asyncio.wait_for` from firing.

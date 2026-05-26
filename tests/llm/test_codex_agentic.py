@@ -19,6 +19,7 @@ import asyncio
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -520,6 +521,51 @@ sys.exit(vc.main(["validate_config.py", {str(candidate)!r}]))
              and payload.get("checks") == []
              and payload.get("sample_posts") == []),
             f"rc={proc.returncode} stdout={proc.stdout!r} stderr={proc.stderr!r}",
+        ))
+
+    # POSIX hard alarm catches sync blocks that prevent asyncio.wait_for from ticking.
+    if hasattr(signal, "SIGALRM") and hasattr(signal, "setitimer"):
+        with tempfile.TemporaryDirectory(prefix="validate_hard_timeout_test_") as td:
+            candidate = Path(td) / "candidate.json"
+            candidate.write_text(json.dumps({"site": "https://example.com/"}), encoding="utf-8")
+            code = f"""
+import asyncio
+import sys
+import time
+import scripts.validate_config as vc
+
+vc.INTERNAL_TIMEOUT_S = 1.0
+
+async def blocking_validate_built_config(cfg, *, digest=None, fetch_articles=1):
+    time.sleep(65)
+
+vc.validate_built_config = blocking_validate_built_config
+sys.exit(vc.main(["validate_config.py", {str(candidate)!r}]))
+"""
+            proc = subprocess.run(
+                [sys.executable, "-c", code],
+                cwd=REPO,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=5,
+            )
+            try:
+                payload = json.loads(proc.stdout)
+            except json.JSONDecodeError:
+                payload = {}
+            cases.append(_check(
+                "validate_config_hard_timeout_blocks_json_rc0",
+                (proc.returncode == 0
+                 and payload.get("ok") is False
+                 and payload.get("error") == "validate_internal_timeout_1s"),
+                f"rc={proc.returncode} stdout={proc.stdout!r} stderr={proc.stderr!r}",
+            ))
+    else:
+        cases.append(_check(
+            "validate_config_hard_timeout_posix_only",
+            True,
+            "SIGALRM unavailable on this platform",
         ))
 
     # ----- 11. codex agentic classifier marks closed session stdin as transient network -----

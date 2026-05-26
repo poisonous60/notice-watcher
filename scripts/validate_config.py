@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import signal
 import sys
 from pathlib import Path
 
@@ -41,6 +42,10 @@ except ImportError:
 INTERNAL_TIMEOUT_S = 25.0
 
 
+class _HardTimeout(TimeoutError):
+    pass
+
+
 def _emit_error(reason: str, *, rc: int = 2) -> int:
     json.dump({"ok": False, "error": reason, "checks": [], "sample_posts": []},
               sys.stdout, ensure_ascii=False)
@@ -55,6 +60,27 @@ async def _run_with_timeout(cfg: dict):
     )
 
 
+def _install_hard_timeout(timeout_s: float):
+    """POSIX watchdog for sync blocks that prevent asyncio.wait_for from firing."""
+    if not hasattr(signal, "SIGALRM") or not hasattr(signal, "setitimer"):
+        return None
+    old_handler = signal.getsignal(signal.SIGALRM)
+
+    def _raise_timeout(_signum, _frame):
+        raise _HardTimeout
+
+    signal.signal(signal.SIGALRM, _raise_timeout)
+    signal.setitimer(signal.ITIMER_REAL, max(1.0, float(timeout_s)))
+    return old_handler
+
+
+def _clear_hard_timeout(old_handler) -> None:
+    if old_handler is None:
+        return
+    signal.setitimer(signal.ITIMER_REAL, 0.0)
+    signal.signal(signal.SIGALRM, old_handler)
+
+
 def main(argv: list[str]) -> int:
     if len(argv) != 2:
         return _emit_error(f"usage: {argv[0]} <candidate.json>")
@@ -67,12 +93,15 @@ def main(argv: list[str]) -> int:
         return _emit_error(f"candidate JSON parse failed: {type(e).__name__}: {e}")
     if not isinstance(cfg, dict):
         return _emit_error(f"candidate JSON is not an object, got {type(cfg).__name__}")
+    old_alarm = _install_hard_timeout(INTERNAL_TIMEOUT_S)
     try:
         rep = asyncio.run(_run_with_timeout(cfg))
-    except asyncio.TimeoutError:
+    except (asyncio.TimeoutError, _HardTimeout):
         return _emit_error(f"validate_internal_timeout_{int(INTERNAL_TIMEOUT_S)}s", rc=0)
     except Exception as e:  # noqa: BLE001 — any exception during validate is a soft fail (signal to agent)
         return _emit_error(f"validate raised: {type(e).__name__}: {e}")
+    finally:
+        _clear_hard_timeout(old_alarm)
     out = {
         "ok": rep.ok,
         "n_posts": rep.n_posts,
