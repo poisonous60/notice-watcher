@@ -63,6 +63,17 @@ def run() -> list[tuple[str, bool, str]]:
     except ConfigError as e:
         cases.append(("self_selector_skipped", False, str(e)))
 
+    # 6) pseudo-element(`::before`/`::after`) → 거부 (whirlpool.co.jp/news/ 케이스).
+    #    soupsieve.compile 이 SelectorSyntaxError 가 아닌 NotImplementedError 를 raise →
+    #    이전 게이트는 통과해 fetch_list 도중 rc=1 크래시. validate 시점 차단.
+    try:
+        validate_config(_cfg(row_selector="div::before"))
+        cases.append(("pseudo_element_rejected", False, "거부 안 됨"))
+    except ConfigError as e:
+        msg = str(e)
+        ok = "CSS 선택자 컴파일 실패" in msg and "pseudo-element" in msg.lower()
+        cases.append(("pseudo_element_rejected", ok, msg.splitlines()[1] if "\n" in msg else msg))
+
     return cases
 
 

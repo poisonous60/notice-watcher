@@ -189,6 +189,11 @@ def _check_css_selector(sel: Any, where: str, errs: list[str]) -> None:
         first = str(ex).splitlines()[0] if str(ex) else ex.__class__.__name__
         errs.append(f"{where}: CSS 선택자 컴파일 실패 — {first}. "
                     f"Tailwind 숫자 클래스(`space-y-1.5`)의 점은 `\\.` escape 필요 (예: `space-y-1\\.5`). 선택자={s!r}")
+    except NotImplementedError as ex:
+        first = str(ex).splitlines()[0] if str(ex) else ex.__class__.__name__
+        errs.append(f"{where}: CSS 선택자 컴파일 실패 — {first}. "
+                    f"soupsieve(bs4 `.select`)는 pseudo-element(`::before`/`::after`/`::first-line` 등)를 지원하지 않음 — "
+                    f"엔진은 DOM 노드만 매칭하므로 pseudo-element 제거 또는 일반 자식 selector 로 대체 필요. 선택자={s!r}")
 
 
 _ALWAYS_CONTEXT = {"site", "board"}  # extract_row 가 항상 context 에 넣는 키

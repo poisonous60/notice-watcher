@@ -78,6 +78,7 @@ MIN_AGENTIC_TIMEOUT_S = 30.0
 _GENERATION_HTTP_4XX_BLOCKED_RE = re.compile(
     r"HTTPStatusError:.*\b(403|429|451)\b", re.IGNORECASE | re.DOTALL
 )
+_VALIDATE_INTERNAL_TIMEOUT_RE = re.compile(r"validate_internal_timeout_\d+s")
 
 
 class RegisterTimeoutError(RuntimeError):
@@ -85,17 +86,54 @@ class RegisterTimeoutError(RuntimeError):
 
 
 def _generation_error_capability_blocked_reason(e: BaseException) -> Optional[str]:
-    """Selected HTTP 4xx generation failures are access/capability blocks, not gen_fail."""
+    """Selected generation failures are access/capability blocks, not gen_fail.
+
+    Two patterns trigger reclassification to rc=5 capability_blocked:
+    - HTTP 4xx (403/429/451) during generation/probe fetch.
+    - All agentic attempts hit `validate_internal_timeout_<N>s` — target site too slow
+      for fetch_list within the validator hard-timeout (anti-bot delay / slow TLS).
+      The LLM produced a config it could not verify because the site itself stalled.
+    """
     texts = [str(e)]
     lf = getattr(e, "last_feedback", None)
     if lf:
         texts.append(str(lf))
     blob = "\n".join(texts)
     m = _GENERATION_HTTP_4XX_BLOCKED_RE.search(blob)
-    if not m:
-        return None
-    code = m.group(1)
-    return f"capability_blocked (HTTP {code} during generation/probe fetch): {blob[:300]}"
+    if m:
+        code = m.group(1)
+        return f"capability_blocked (HTTP {code} during generation/probe fetch): {blob[:300]}"
+    if _all_attempts_validate_timeout(lf):
+        return ("capability_blocked (validator timed out on every agentic attempt — "
+                "target site too slow for fetch_list within hard-timeout, "
+                "likely anti-bot delay or slow TLS handshake)")
+    return None
+
+
+def _all_attempts_validate_timeout(last_feedback) -> bool:
+    """True iff `last_feedback` is the agentic attempts JSON list and every attempt
+    failed with `validate_internal_timeout_<N>s`. Conservative — requires >=2 attempts
+    and no other failure modes mixed in."""
+    if not isinstance(last_feedback, str):
+        return False
+    s = last_feedback.strip()
+    if not s.startswith("["):
+        return False
+    try:
+        attempts = json.loads(s)
+    except (json.JSONDecodeError, ValueError):
+        return False
+    if not isinstance(attempts, list) or len(attempts) < 2:
+        return False
+    for a in attempts:
+        if not isinstance(a, dict):
+            return False
+        if a.get("validate_ok"):
+            return False
+        err = a.get("error") or ""
+        if not _VALIDATE_INTERNAL_TIMEOUT_RE.search(str(err)):
+            return False
+    return True
 
 
 def _kill_process_tree(proc: subprocess.Popen) -> None:

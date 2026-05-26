@@ -69,6 +69,7 @@
 | `baseline_blocked` | 정적·headless 진입 차단 | static·headless 둘 다 차단 — anti-bot 의심. stealth 재도전. |
 | `probe_memory_guard` | probe RSS watchdog self-kill | probe 가 RSS 임계 초과해 자기-kill (heavy SPA OOM blower 추정). stealth 대상 X — root-cause 는 별도 (probe 메모리 누적 지점 tracemalloc 조사). |
 | `http_4xx_blocked` | HTTP 4xx 접근 차단 | 403/451/429 등 접근 제한/레이트리밋. URL이 죽은 400/404와 구분해 capability_blocked 로 triage. |
+| `validate_timeout_all_attempts` | validator timeout — 사이트 응답 지연 | agentic 의 모든 attempt 가 validate_internal_timeout 으로 실패. 사이트가 fetch_list 에 응답 안 함 (anti-bot 지연 / 느린 TLS). stealth/long-timeout 트랙 재도전. |
 | `entry_blocked` | 진입 차단(미분류) | anti-bot/captcha 추정 — verdict 미분류. stealth 재도전 후보. |
 
 ### gate_reject

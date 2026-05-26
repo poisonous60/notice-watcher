@@ -129,6 +129,9 @@ CASES: list[tuple[str, tuple[Optional[str], Optional[int], Optional[str]], str, 
     ("cap_http_429",
      ("failed", 5, "HTTPStatusError: Client error '429 Too Many Requests' for url 'https://example.com/feed'"),
      "capability_blocked", "http_4xx_blocked"),
+    ("cap_validate_timeout_all_attempts",
+     ("failed", 5, "[register] ❌ 자동 처리 불가 — 4xx capability_blocked. capability_blocked (validator timed out on every agentic attempt — target site too slow for fetch_list within hard-timeout, likely anti-bot delay or slow TLS handshake)"),
+     "capability_blocked", "validate_timeout_all_attempts"),
 
     # gate_reject (rc=3) ----
     ("gate_recognizer",
