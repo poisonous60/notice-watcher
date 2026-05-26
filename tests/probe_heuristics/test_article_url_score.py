@@ -87,4 +87,58 @@ def run() -> list[tuple[str, bool, str]]:
     s_kr_article = _article_url_score("https://www.humoruniv.com/board/humor/read.html?table=pds&number=1410805", "www.humoruniv.com")
     cases.append(("kr_read_article_still_high", s_kr_article >= 7, f"kr_article={s_kr_article}"))
 
+    # 14. archive 엔드포인트 페널티 (2026-05-26 누적 3건: nexon/comic-days/mobius).
+    #     mobius: `/news/archives/MM-YYYY` 가 진짜 글 row 보다 낮아야 first_article 이 글로 잡힘.
+    s_archive_mobius = _article_url_score(
+        "https://www.mobiusdigitalgames.com/news/archives/06-2025",
+        "www.mobiusdigitalgames.com",
+    )
+    s_post_mobius = _article_url_score(
+        "https://www.mobiusdigitalgames.com/news/patch-16-finishes-rolling-out-steam-gets-a-hotfix",
+        "www.mobiusdigitalgames.com",
+    )
+    cases.append((
+        "archive_lower_than_post_mobius",
+        s_archive_mobius < s_post_mobius,
+        f"archive={s_archive_mobius} post={s_post_mobius}",
+    ))
+
+    # 15. `<word>_list` ending 페널티 — `/list/` slash 형태 외에 `board_list`/`news_list` 류 목록 endpoint.
+    #     nexon-bluearchive sidebar `/bluearchive/board_list?board=1618` (다른 board 목록) 케이스.
+    s_board_list = _article_url_score(
+        "https://forum.nexon.com/bluearchive/board_list?board=1618",
+        "forum.nexon.com",
+    )
+    s_board_view = _article_url_score(
+        "https://forum.nexon.com/bluearchive/board_view?board=1018&thread=123456",
+        "forum.nexon.com",
+    )
+    cases.append((
+        "board_list_lower_than_board_view",
+        s_board_list < s_board_view,
+        f"board_list={s_board_list} board_view={s_board_view}",
+    ))
+
+    # 16. 회귀: `/archives` 가 path 의 *중간 segment* 가 아니라 *bare endpoint* 인 경우만 깎이는지.
+    #     comic-days `/info/archive/2026/05/19` 도 깎여야 (date archive). 단 `/archived-items/foo` 같이
+    #     "archive" 의 단어 일부면 깎으면 안 됨 (현재 regex `/archives?(?:/|$)` 가 단어 경계).
+    s_archive_dated = _article_url_score(
+        "https://comic-days.com/info/archive/2026/05/19",
+        "comic-days.com",
+    )
+    s_archived_word = _article_url_score(
+        "https://x.com/archived-items/123",
+        "x.com",
+    )
+    cases.append((
+        "archive_segment_penalized",
+        s_archive_dated < 7,
+        f"archive_dated={s_archive_dated}",
+    ))
+    cases.append((
+        "archived_word_not_penalized_by_archive_rule",
+        s_archived_word >= 6,
+        f"archived_word={s_archived_word}",
+    ))
+
     return cases

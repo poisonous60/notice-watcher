@@ -768,6 +768,17 @@ def _article_url_score(u: Optional[str], base_host: str) -> int:
     if (re.search(r"/(forums|boards|categories)(?:/|$)", path_l)
             or re.search(r"/(board|forum|node|category)/\d+/?$", path_l)):
         s -= 2
+    # 페널티: archive(s) 또는 `<word>_list` 류 endpoint — 날짜/월 archive 페이지 또는 다른 board 목록 링크.
+    #   누적 3건 (2026-05-26 mobius `/news/archives/MM-YYYY` 글 6점 vs archive 8점으로 졌음 + 2026-05-21
+    #   comic-days `/info/archive/YYYY/MM/DD` first_article 오인 + 2026-05-11 nexon-bluearchive sidebar
+    #   `/bluearchive/board_list?board=1618` 다른 board 목록 → first_article 오인). _list ending 은
+    #   기존 `/list/` slash 형태가 못 잡는 `board_list`/`news_list` 류를 잡는다. -3 = `/search` 류와 동일
+    #   강도 (archive path 의 date segment `/06-2025` 가 machine-name 보너스 +1 을 받아 -2 로는 동률만
+    #   되니 -3 필요).
+    if re.search(r"/archives?(?:/|$)", path_l):
+        s -= 3
+    if re.search(r"/[a-z]+_list(?:/|$|\?)", path_l):
+        s -= 3
     # 보너스: path-only 깨끗한 URL (machine-name 패턴, query 없음)
     if not sp.query and re.search(r"/[a-z0-9][a-z0-9_\-]{4,}/?$", path_l):
         s += 1
