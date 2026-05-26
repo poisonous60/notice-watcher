@@ -1,0 +1,198 @@
+{
+  "version": 1,
+  "site": "www.yachtclubgames.com",
+  "board": "root",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.yachtclubgames.com/"
+  },
+  "timeout": 15,
+  "polite_sleep": {
+    "min": 5,
+    "max": 6
+  },
+  "_source_url": "https://www.yachtclubgames.com/",
+  "_note": "handcrafted: root page exposes static blog teaser cards linking to /blog/<slug>; no JS render required",
+  "list": {
+    "url_template": "https://www.yachtclubgames.com/",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "article.card.card-post",
+    "row_required_selector": "a.block[href^='/blog/']",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a.block[href^='/blog/']",
+          "attr": "href",
+          "transform": [
+            [
+              "regex_extract",
+              "^/blog/([^/?#]+)/?"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "h1.title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a.block[href^='/blog/']",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://www.yachtclubgames.com"
+            ],
+            [
+              "strip_query_fragment"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "p.date",
+          "text": true,
+          "transform": [
+            [
+              "regex_extract",
+              "([A-Z][a-z]+ \\d{1,2}, \\d{4})"
+            ],
+            [
+              "iso8601",
+              [
+                "%b %d, %Y",
+                "%B %d, %Y"
+              ],
+              "+00:00"
+            ]
+          ]
+        }
+      ],
+      "author": [
+        {
+          "from": "css",
+          "selector": "p.date",
+          "text": true,
+          "transform": [
+            [
+              "regex_extract",
+              "^By:\\s*(.+?)\\s+on\\s+"
+            ],
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "css",
+          "selector": "div.categories a.category",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "div.intro",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "cover_image": [
+        {
+          "from": "attr",
+          "selector": "div.card-image img",
+          "attr": "src",
+          "transform": [
+            [
+              "urljoin",
+              "https://www.yachtclubgames.com"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "div.article-content-block",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "h1.article-title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "div.article-meta p.detail span",
+          "text": true,
+          "transform": [
+            [
+              "iso8601",
+              [
+                "%b %d, %Y",
+                "%B %d, %Y"
+              ],
+              "+00:00"
+            ]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "css",
+          "selector": "div.article-meta a.category",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  }
+}
