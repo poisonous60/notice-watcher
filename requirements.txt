@@ -4,6 +4,10 @@ lxml>=5.2
 jsonschema>=4.0
 playwright>=1.45
 playwright-stealth>=1.0.6
+# optional — Playwright binary-patched drop-in (CDP Runtime.enable leak / Headless UA /
+# navigator.webdriver 등 우회). 설치 시 fetch_headless·playwright_html 가 자동 swap.
+# 미설치 시 fallback to playwright (회귀 0). 설치 후: `patchright install chromium`.
+patchright>=1.59
 curl-cffi>=0.7
 firecrawl-py>=1.0
 crawl4ai>=0.4

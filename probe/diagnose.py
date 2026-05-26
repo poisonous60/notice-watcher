@@ -222,6 +222,12 @@ def diagnose(
             verdict_parts.append("CERT_OR_DNS_BROKEN")
         elif not baseline_ok:
             verdict_parts.append("BASELINE_BLOCKED")
+        # 자체 WAF (KR IDC NHN/Naver/WAPPLES 패턴) — 모든 정적 진입이 HTTP 406 면 vendor 가 Cloudflare/Akamai 가
+        # 아니라 origin 자체 WAF 가 UA/Accept-Language/TLS 콤보를 거른 것. register 가 "Cloudflare" 메시지 대신
+        # curl_cffi 임퍼소네이트 트랙 안내하도록 별도 verdict 태그.
+        # 2026-05-26 batch games-kr valofe×4 사례 (research_cloudflare_findings.md §G).
+        if static_results and all(r.status == 406 for r in static_results):
+            verdict_parts.append("WAF_406_BLOCK")
         if static_ok and not any("Cloudflare" in n for r in static_results for n in r.notable):
             verdict_parts.append("정적 HTTP로 충분")
         elif captured_ok:

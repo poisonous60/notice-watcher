@@ -7,12 +7,13 @@
 """
 from __future__ import annotations
 
-from . import httpx_html, httpx_json, playwright_html
+from . import httpx_html, httpx_json, playwright_html, curl_cffi_html
 
 STRATEGIES = {
     "httpx_html": httpx_html,
     "httpx_json": httpx_json,
     "playwright_html": playwright_html,  # 모듈 자체는 playwright 없어도 import 됨 — open_session 에서만 필요
+    "curl_cffi_html": curl_cffi_html,    # TLS impersonate (Chrome JA3) — 자체 WAF 406/UA 게이트 통과용
 }
 
 

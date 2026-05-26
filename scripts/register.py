@@ -386,6 +386,11 @@ def _policy_check(digest: dict, url: str) -> tuple[bool, list[str]]:
             return False, [f"입력 URL 의 글이 존재하지 않음 — 모든 진입 시도가 HTTP 404 "
                            f"(verdict={digest.get('verdict')!r}). 도메인 자체는 정상이므로 사이트 차단이 아니라 "
                            "URL 이 잘못됐거나 글이 삭제된 것 — 게시판 목록 URL 또는 다른 글 URL 로 재시도."]
+        if "waf_406_block" in verdict:
+            return False, [f"자체 WAF (HTTP 406 Not Acceptable) 차단 (verdict={digest.get('verdict')!r}) — "
+                           "Cloudflare/Akamai 가 아닌 origin 자체 WAF (KR IDC NHN/Naver/WAPPLES 등) 가 "
+                           "UA/Accept-Language/TLS 콤보를 거름. curl_cffi 'chrome' 임퍼소네이트 트랙 권장 "
+                           "(S1.curl strategy). stealth playwright 만으론 통과 못 함."]
         return False, [f"목록 페이지에 정적으로도 headless 로도 접근 실패 (verdict={digest.get('verdict')!r}). "
                        "anti-bot/captcha 차단 — 능력 부족(정책 아님). stealth/storage_state 어댑터 재도전 대상."]
     # robots Disallow — 경고만 (와일드카드 * / 끝앵커 $ 도 처리)
@@ -2691,11 +2696,14 @@ def _main_inner(argv) -> int:
                     if rc is not None:
                         return rc
                 try:
+                    # last_feedback 는 _policy_check 가 만든 specific msg(WAF_406 → curl_cffi 권장 등) 를
+                    # 그대로 propagate — 일반 "stealth/storage_state" 문구가 vendor-specific guidance 를
+                    # 덮어쓰면 dashboard/show 가 stale 메시지 표시 (codex P-5 review finding 2, 2026-05-26).
                     _save_failed(slug, url,
                                  reason=f"capability_blocked (anti-bot/captcha): {'; '.join(msgs)[:200]}",
                                  last_config=None,
-                                 last_feedback=(f"[BLOCKED] verdict={verdict} — 정적·headless 진입 차단 "
-                                                "(능력 부족, 정책 아님). stealth/storage_state 어댑터 재도전 대상."))
+                                 last_feedback=(f"[BLOCKED] verdict={verdict} — " + ("; ".join(msgs) if msgs else
+                                                "정적·headless 진입 차단 (능력 부족, 정책 아님). stealth/storage_state 어댑터 재도전 대상.")))
                 except Exception as e:  # noqa: BLE001
                     print(f"[register] ⚠ FAILED 마커 저장 실패 (rc=5): {e}", file=sys.stderr)
             else:

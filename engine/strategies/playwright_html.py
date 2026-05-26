@@ -17,6 +17,7 @@ adapters/arca.py 를 일반화. 파싱(HTML→NoticePost)은 httpx_html 의 pars
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from pathlib import Path
 from typing import Optional
@@ -24,6 +25,44 @@ from typing import Optional
 from ..base_compat import NoticePost
 from ._common import apply_proxy, build_list_url
 from . import httpx_html as _h  # parse_list_html / parse_article_html / article_url_for 재사용
+
+
+# Cloudflare interstitial detection — runtime polling 도 probe 와 같은 challenge 통과 wait 필요.
+# probe/fetch_headless.py 의 동일 regex sync 버전 미러링 — codex P-6789 review finding 3 (2026-05-26).
+_CF_INTERSTITIAL_RE = re.compile(
+    r"just a moment|checking your browser|cdn-cgi/challenge-platform|__cf_chl|cf-chl-opt",
+    re.IGNORECASE,
+)
+_TURNSTILE_RE = re.compile(r"turnstile|cf-turnstile|challenges.cloudflare.com", re.IGNORECASE)
+
+
+async def _is_cloudflare_interstitial_async(page) -> tuple[bool, bool]:
+    try:
+        title = await page.title() or ""
+    except Exception:  # noqa: BLE001
+        title = ""
+    try:
+        html = (await page.content())[:120_000]
+    except Exception:  # noqa: BLE001
+        html = ""
+    hay = f"{title}\n{page.url}\n{html}"
+    return bool(_CF_INTERSTITIAL_RE.search(hay)), bool(_TURNSTILE_RE.search(hay))
+
+
+async def _wait_through_cloudflare_interstitial_async(page, *, timeout_ms: int = 30000) -> None:
+    """polling 시 CF JS interstitial 통과 대기 (Turnstile 은 통과 시도 X)."""
+    challenge, turnstile = await _is_cloudflare_interstitial_async(page)
+    if not challenge or turnstile:
+        return
+    deadline = time.perf_counter() + (timeout_ms / 1000.0)
+    while time.perf_counter() < deadline:
+        try:
+            await page.wait_for_timeout(500)
+        except Exception:  # noqa: BLE001
+            break
+        challenge, turnstile = await _is_cloudflare_interstitial_async(page)
+        if turnstile or not challenge:
+            break
 
 
 async def _wait_xhr_quiet(page, *, quiet_ms: int = 500, hard_timeout_ms: int = 2000) -> None:
@@ -74,10 +113,17 @@ def _ua_from_headers(headers: dict) -> Optional[str]:
 
 
 async def open_session(adapter) -> None:
+    # Patchright = Playwright 의 stealth-patched drop-in. 미설치 시 playwright fallback.
+    # adapter._engine_label 에 기록 → polling trace 가 어느 엔진 썼는지 분리 측정 가능.
     try:
-        from playwright.async_api import async_playwright
-    except ImportError as e:
-        raise RuntimeError("playwright 미설치 — playwright_html strategy 사용 불가. `pip install playwright; playwright install chromium`") from e
+        from patchright.async_api import async_playwright  # type: ignore
+        adapter._engine_label = "patchright"
+    except ImportError:
+        try:
+            from playwright.async_api import async_playwright
+            adapter._engine_label = "playwright"
+        except ImportError as e:
+            raise RuntimeError("playwright 미설치 — playwright_html strategy 사용 불가. `pip install playwright; playwright install chromium` (또는 patchright + `patchright install chromium`)") from e
 
     cfg = adapter.cfg
     headless = cfg.get("headless", True)
@@ -129,6 +175,7 @@ async def _goto(adapter, url: str, *, wait_selector: Optional[str] = None) -> st
     idle_to = int(cfg.get("idle_timeout_ms", 2000))
     quiet_to = int(cfg.get("quiet_ms", 500))
     await page.goto(url, wait_until="domcontentloaded", timeout=nav_to)
+    await _wait_through_cloudflare_interstitial_async(page)
     await _wait_xhr_quiet(page, quiet_ms=quiet_to, hard_timeout_ms=idle_to)
     if wait_selector:
         try:

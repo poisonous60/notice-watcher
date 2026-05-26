@@ -155,8 +155,13 @@ def _is_cloudflare_interstitial(page) -> tuple[bool, bool]:
     return bool(_CF_INTERSTITIAL_RE.search(hay)), bool(_TURNSTILE_RE.search(hay))
 
 
-def _wait_through_cloudflare_interstitial(page, *, timeout_ms: int = 8000) -> str | None:
-    """Cloudflare JS interstitial can clear itself; Turnstile/captcha should not be bypassed."""
+def _wait_through_cloudflare_interstitial(page, *, timeout_ms: int = 30000) -> str | None:
+    """Cloudflare JS interstitial can clear itself; Turnstile/captcha should not be bypassed.
+
+    timeout_ms 30s default (2026-05-26 이전 8s). 2026 의 CF non-interactive PoW (Turnstile invisible)
+    가 10~20s 걸리는 케이스 — 8s timeout 으로 통과율 손실. *조건부* — CF challenge HTML 검출 시만
+    이 wait 진입 (위 _is_cloudflare_interstitial 가드). 일반 사이트는 early return → 영향 0.
+    근거: research_cloudflare_findings.md §1.5 + §7.6 (무조건 30s 박지 X — 조건부만 OK)."""
     challenge, turnstile = _is_cloudflare_interstitial(page)
     if not challenge or turnstile:
         return "turnstile_present" if turnstile else None
@@ -368,7 +373,14 @@ def fetch_with_capture(
             error="playwright not installed",
         )
 
-    from playwright.sync_api import sync_playwright
+    # Patchright = Playwright 의 stealth-patched drop-in (binary patch). 미설치 시 playwright fallback.
+    # 회귀 0 — API 100% 호환. 설치 후 trace `engine: patchright` 박힘.
+    try:
+        from patchright.sync_api import sync_playwright  # type: ignore
+        _engine_label = "patchright"
+    except ImportError:
+        from playwright.sync_api import sync_playwright
+        _engine_label = "playwright"
 
     try:
         from playwright_stealth import Stealth  # type: ignore
@@ -434,12 +446,25 @@ def fetch_with_capture(
                 page.on("response", _on_response)
 
                 try:
-                    response = page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+                    try:
+                        response = page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+                    except Exception as ge:
+                        # goto timeout 시 — CF interstitial 이 navigation 을 deadlock 시킬 수 있음 (codex
+                        # P-6789 review finding 4, 2026-05-26). 현 page 에 CF challenge 가 떴는지 확인하고
+                        # 떴으면 conditional wait 거친 후 content() 시도 (response 는 없을 수 있음).
+                        challenge, _ = _is_cloudflare_interstitial(page)
+                        if not challenge:
+                            raise
+                        wait_note = _wait_through_cloudflare_interstitial(page) or "goto_timeout_cf_wait"
+                        response = None
+                        error = f"goto_recovered_after_cf_wait: {type(ge).__name__}: {ge}"
                     if response is not None:
                         status = response.status
                         response_headers = dict(response.headers)
                         final_url = response.url
-                    wait_note = _wait_through_cloudflare_interstitial(page)
+                        wait_note = _wait_through_cloudflare_interstitial(page)
+                    elif "wait_note" not in locals():
+                        wait_note = None
                     # 데이터 XHR/fetch 응답 끝날 때까지 대기 — networkidle 보다 빠름 (광고 image 무시)
                     _wait_xhr_quiet(page, quiet_ms=300, hard_timeout_ms=idle_timeout_ms)
 
@@ -462,6 +487,20 @@ def fetch_with_capture(
                         pass
 
                     body, html_truncated = _capture_page_content(page)
+                    # CMP 진단 — IAB TCF/CCPA/GPP API ping. 자동 consent 발생 X (factual probe only).
+                    # 결과는 out_dir/consent.json 으로 저장 → 통계로 selector 우선순위 조정 (P-4, 2026-05-26).
+                    try:
+                        _cmp = _detect_cmp(page)
+                        if _cmp:
+                            # target 별 분리 — list/article 호출이 같은 out_dir 쓰는데 단일 파일이면 overwrite.
+                            # codex P-6789 review finding 6 (2026-05-26).
+                            (out_dir / f"consent.{target}.json").write_text(
+                                json.dumps(_cmp, ensure_ascii=False, indent=2), encoding="utf-8")
+                            cmp_note = f"cmp: {_cmp.get('vendor') or _cmp.get('api')}"
+                        else:
+                            cmp_note = None
+                    except Exception:  # noqa: BLE001
+                        cmp_note = None
                     try:
                         page.screenshot(path=str(screenshot_path), full_page=False)
                     except Exception:
@@ -498,11 +537,14 @@ def fetch_with_capture(
         error=error,
         baseline_blocked=baseline_blocked,
     )
+    notable.append(f"engine: {_engine_label}")
     notable.append(f"har: {har_path.name}")
     if "wait_note" in locals() and wait_note:
         notable.append(wait_note)
     if "spa_extra_wait_note" in locals() and spa_extra_wait_note:
         notable.append(spa_extra_wait_note)
+    if "cmp_note" in locals() and cmp_note:
+        notable.append(cmp_note)
     if html_truncated:
         notable.append(f"html_truncated: {len(body or '')}/{_MAX_CAPTURED_HTML_CHARS} chars")
     if captured_nav_headers:
@@ -549,6 +591,43 @@ _ARTICLE_HINT_RE = re.compile(r"(view|detail|article|notice|read|thread|post|bbs
 _ID_DATA_KEY_RE = re.compile(r"(^|[-_])(id|no|seq|article|thread|data|post|board|nid|cid|aid)", re.IGNORECASE)
 
 _CONSENT_DISMISS_JS = r"""() => {
+    // Known CMP selector IDs — reject 우선(PIPA/CNIL 2025 권고: 자동 Accept = informed consent 부정).
+    // 출처: duckduckgo/autoconsent (MPL-2.0) lib/cmps/{onetrust,cookiebot,trustarc,quantcast,didomi}.ts
+    // — selector 문자열만 발췌 (factual data). 라이선스 의무 충족: THIRD_PARTY_NOTICES.md (repo root).
+    const KNOWN_CMP_REJECT = [
+        '#onetrust-reject-all-handler', '.ot-pc-refuse-all-handler',
+        '#CybotCookiebotDialogBodyLevelButtonLevelOptinDeclineAll',
+        '#didomi-notice-disagree-button',
+        '.qc-cmp2-summary-buttons button[mode="secondary"]',
+        '.iubenda-cs-reject-btn', '.cmplz-btn.cmplz-deny',
+    ];
+    const KNOWN_CMP_ACCEPT = [
+        '#onetrust-accept-btn-handler', '#accept-recommended-btn-handler', '.js-accept-cookies',
+        '#CybotCookiebotDialogBodyLevelButtonAccept', '#CybotCookiebotDialogBodyButtonAccept', '.h-dtcookie-accept',
+        '#truste-consent-button', '.trustarc-agree-btn',
+        '.qc-cmp2-summary-buttons button[mode="primary"]',
+        '#didomi-notice-agree-button',
+        '[data-testid="uc-accept-all-button"]',
+        '.message-component.message-button.no-children.focusable.primary-button',
+        '.cc-btn.cc-allow', '.cookie-notice-accept', '.cmplz-btn.cmplz-accept',
+        '.cli_action_button.wt-cli-accept-all-btn', '#cn-accept-cookie', '.iubenda-cs-accept-btn',
+    ];
+
+    // shadow-aware querySelector — open shadow root piercing. closed shadow root 은 표준상 접근 불가 → fail.
+    function queryDeep(sel, root) {
+        root = root || document;
+        const direct = root.querySelector(sel);
+        if (direct) return direct;
+        const all = root.querySelectorAll('*');
+        for (const el of all) {
+            if (el.shadowRoot && el.shadowRoot.mode === 'open') {
+                const found = queryDeep(sel, el.shadowRoot);
+                if (found) return found;
+            }
+        }
+        return null;
+    }
+
     const textPatterns = [
         /accept/i, /agree/i, /^ok$/i, /allow/i, /got it/i,
         /동의/, /확인/, /허용/, /수락/, /모두\s*동의/,
@@ -591,6 +670,49 @@ _CONSENT_DISMISS_JS = r"""() => {
     }
 
     let clicked = 0;
+
+    // 정책 (research_session1_cookie_banner.md §5):
+    //   reject(consent 거부) → hide(banner DOM 숨김 — 비-consent 처리) → accept(최후 fallback).
+    //   자동 Accept 우선 X — PIPA 2024 / CNIL 2025-06 의 "informed consent" 정신 위반.
+
+    // 1) Known CMP REJECT — open shadow root 도 piercing. 1개 hit 면 banner 사라짐.
+    for (const sel of KNOWN_CMP_REJECT) {
+        const el = queryDeep(sel);
+        if (el && visible(el)) {
+            try { el.click(); clicked += 1; } catch (_) {}
+            if (clicked >= 1) break;
+        }
+    }
+    // 2) reject 못 찾았으면 → banner-like 컨테이너 HIDE (display:none). consent 발생 X, accept 아님.
+    //    KNOWN_CMP_ACCEPT 의 부모 트리에서 가장 가까운 banner-like 컨테이너 잡아 hide.
+    if (clicked === 0) {
+        for (const sel of KNOWN_CMP_ACCEPT) {
+            const el = queryDeep(sel);
+            if (!el || !visible(el)) continue;
+            let cur = el, hid = false;
+            for (let depth = 0; cur && depth < 7; depth += 1, cur = cur.parentElement) {
+                const idClass = `${cur.id || ""} ${cur.className || ""}`;
+                if (bannerHint.test(idClass)) {
+                    try { cur.style.setProperty("display", "none", "important"); clicked += 1; hid = true; } catch (_) {}
+                    break;
+                }
+            }
+            if (hid) break;
+        }
+    }
+    // 3) hide 도 못 했으면 → 최후 accept (rejection UI 도 banner-like 컨테이너 도 못 찾는 사이트).
+    if (clicked === 0) {
+        for (const sel of KNOWN_CMP_ACCEPT) {
+            const el = queryDeep(sel);
+            if (el && visible(el)) {
+                try { el.click(); clicked += 1; } catch (_) {}
+                if (clicked >= 1) break;
+            }
+        }
+    }
+    if (clicked > 0) return clicked;
+
+    // 2) Fallback — 기존 textPatterns + bannerLike 휴리스틱 (unknown CMP / 일반 cookie banner).
     const candidates = Array.from(document.querySelectorAll(
         '[id*="cookie" i] button, [class*="cookie" i] button,' +
         '[id*="consent" i] button, [class*="consent" i] button,' +
@@ -610,12 +732,169 @@ _CONSENT_DISMISS_JS = r"""() => {
 }"""
 
 
+# CMP API 검출 — IAB TCF v2.x · CCPA · GPP · TCF v1. ping 응답으로 vendor cmpId 추출 (factual probe only,
+# 자동 consent 발생 X). 결과는 out_dir/consent.json 에 저장 → 통계로 KNOWN_CMP_*_SELECTORS 우선순위 조정.
+# 근거: research_session1_cookie_banner.md §4.
+_CMP_DETECT_JS = r"""
+async () => {
+    const tcf = await new Promise((resolve) => {
+        if (typeof window.__tcfapi !== 'function') return resolve(null);
+        try {
+            window.__tcfapi('ping', 2, (pingReturn, success) => {
+                if (!success || !pingReturn) return resolve(null);
+                resolve({api: 'tcfv2', cmpId: pingReturn.cmpId, cmpLoaded: !!pingReturn.cmpLoaded,
+                        cmpStatus: pingReturn.cmpStatus, gdprApplies: pingReturn.gdprApplies});
+            });
+            setTimeout(() => resolve(null), 800);
+        } catch (e) { resolve(null); }
+    });
+    if (tcf) return tcf;
+    const usp = await new Promise((resolve) => {
+        if (typeof window.__uspapi !== 'function') return resolve(null);
+        try {
+            window.__uspapi('getUSPData', 1, (uspData, success) => {
+                resolve(success ? {api: 'ccpa', uspString: uspData && uspData.uspString} : null);
+            });
+            setTimeout(() => resolve(null), 500);
+        } catch (e) { resolve(null); }
+    });
+    if (usp) return usp;
+    if (typeof window.__gpp === 'function') return {api: 'gpp'};
+    if (typeof window.__cmp === 'function') return {api: 'tcfv1'};
+    return null;
+}
+""".strip()
+
+# IAB-registered CMP ID → vendor 이름 (자주 보이는 것). 전체 list: https://cmplist.consensu.org/
+_CMP_ID_NAMES = {
+    5: "Quantcast Choice", 7: "TrustArc", 10: "Cookiebot (Usercentrics)",
+    28: "Sourcepoint", 91: "Didomi", 300: "OneTrust", 412: "Osano",
+}
+
+
+def _detect_cmp(page) -> Optional[dict]:
+    """페이지의 IAB-등록 CMP 존재 검출 (TCF/CCPA/GPP). None = 없음 또는 timeout. 자동 consent 발생 X."""
+    try:
+        info = page.evaluate(_CMP_DETECT_JS)
+    except Exception:  # noqa: BLE001
+        return None
+    if not info:
+        return None
+    if info.get("api") == "tcfv2":
+        info["vendor"] = _CMP_ID_NAMES.get(info.get("cmpId"), f"unknown-id-{info.get('cmpId')}")
+    return info
+
+
+_CMP_FRAME_URL_HINTS = (
+    "privacy-mgmt.com",         # Sourcepoint
+    "fundingchoicesmessages",   # Google Funding Choices
+    "cmp.quantcast.com",        # Quantcast Choice
+    "consent.cookiebot.com",    # Cookiebot iframe variant
+    "consent.trustarc.com",     # TrustArc
+    "consensu.org",             # IAB TCF iframe
+    "didomi.io",
+)
+
+
+# iframe reject 우선 selectors — Sourcepoint secondary / autoconsent reject affordances + text 매칭.
+# 정책: 자동 accept 우선 X (PIPA 2024 / CNIL 2025-06). reject 못 찾으면 *iframe hide* 시도, 그것도
+# 못 하면 최후 accept fallback.
+_FRAME_REJECT_SELECTORS = (
+    ".message-component.message-button.no-children.focusable.secondary-button",  # Sourcepoint secondary (reject/non-consent)
+    'button[aria-label*="Reject" i]',
+    'button[aria-label*="Decline" i]',
+    'button[aria-label*="Refuse" i]',
+    'button:has-text("Reject")',
+    'button:has-text("Decline")',
+    'button:has-text("Refuse")',
+    'button:has-text("거부")',
+    'button:has-text("나중에")',
+)
+_FRAME_ACCEPT_SELECTORS = (
+    ".message-component.message-button.no-children.focusable.primary-button",  # Sourcepoint primary (accept)
+    'button[aria-label*="Consent" i]',
+    'button[aria-label*="Agree" i]',
+    'button[aria-label*="Accept" i]',
+    'button:has-text("Consent")',
+    'button:has-text("Agree")',
+    'button:has-text("Accept")',
+    'button:has-text("동의")',
+)
+
+
+def _dismiss_consent_in_frames(page) -> int:
+    """iframe CMP 처리 (Sourcepoint / Google Funding Choices / Quantcast 등 — main DOM 바깥).
+    main page 는 _dismiss_consent_modals 가 page.evaluate 로 직접 처리하므로 여기서 제외.
+
+    3단계: reject → hide(iframe element 자체) → accept (fallback). codex P-1~3 review finding 1
+    (2026-05-26) — frame 처리도 reject-first 분리 의무.
+    """
+    dismissed = 0
+    try:
+        frames = list(page.frames)
+    except Exception:  # noqa: BLE001
+        return 0
+    main = None
+    try:
+        main = page.main_frame
+    except Exception:  # noqa: BLE001
+        main = None
+    for frame in frames:
+        if frame is main:
+            continue
+        try:
+            url = (frame.url or "").lower()
+        except Exception:  # noqa: BLE001
+            continue
+        if not any(h in url for h in _CMP_FRAME_URL_HINTS):
+            continue
+        # 1) reject 우선
+        hit = False
+        for sel in _FRAME_REJECT_SELECTORS:
+            try:
+                loc = frame.locator(sel).first
+                if loc.count() and loc.is_visible(timeout=500):
+                    loc.click(timeout=2000, no_wait_after=True)
+                    dismissed += 1
+                    hit = True
+                    break
+            except Exception:  # noqa: BLE001
+                continue
+        # 2) reject 못 찾으면 iframe element 자체 hide (consent 발생 X).
+        if not hit:
+            try:
+                fe = frame.frame_element()
+                if fe is not None:
+                    fe.evaluate("(el) => { el.style.setProperty('display', 'none', 'important'); }")
+                    dismissed += 1
+                    hit = True
+            except Exception:  # noqa: BLE001
+                pass
+        # 3) hide 도 못 했으면 최후 accept fallback.
+        if not hit:
+            for sel in _FRAME_ACCEPT_SELECTORS:
+                try:
+                    loc = frame.locator(sel).first
+                    if loc.count() and loc.is_visible(timeout=500):
+                        loc.click(timeout=2000, no_wait_after=True)
+                        dismissed += 1
+                        break
+                except Exception:  # noqa: BLE001
+                    continue
+        if dismissed >= 2:
+            break
+    return dismissed
+
+
 def _dismiss_consent_modals(page) -> int:
-    """Dismiss visible cookie/consent overlays before click probing."""
+    """Dismiss visible cookie/consent overlays before click probing.
+    main page (KNOWN_CMP_REJECT/ACCEPT ID + queryDeep open-shadow piercing + 기존 휴리스틱)
+    + iframe CMP (Sourcepoint/Google Funding Choices 등 URL hint) 둘 다 처리."""
     try:
         dismissed = int(page.evaluate(_CONSENT_DISMISS_JS) or 0)
     except Exception:  # noqa: BLE001
-        return 0
+        dismissed = 0
+    dismissed += _dismiss_consent_in_frames(page)
     if dismissed > 0:
         try:
             page.wait_for_timeout(500)
@@ -695,7 +974,12 @@ def fetch_article_by_click(
         return (_result(Classification.METHOD_INCOMPATIBLE, None, None, 0,
                         ["playwright not installed"], "playwright not installed", list_url), meta)
 
-    from playwright.sync_api import sync_playwright
+    try:
+        from patchright.sync_api import sync_playwright  # type: ignore
+        _engine_label = "patchright"
+    except ImportError:
+        from playwright.sync_api import sync_playwright
+        _engine_label = "playwright"
     from urllib.parse import urlsplit
     try:
         from playwright_stealth import Stealth  # type: ignore
@@ -842,6 +1126,7 @@ def fetch_article_by_click(
     cls, notable = classify(status=status, body=body, headers={}, final_url=final_url,
                             error=error or (meta.get("note") if body is None else None),
                             baseline_blocked=baseline_blocked)
+    notable.append(f"engine: {_engine_label}")
     if final_url:
         notable.append(f"clicked → {final_url[:80]}")
     if html_truncated:

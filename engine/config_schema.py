@@ -71,7 +71,7 @@ CONFIG_JSON_SCHEMA: dict = {
         "version": {"type": "integer"},
         "site": {"type": "string", "minLength": 1},
         "board": {"type": "string"},
-        "strategy": {"enum": ["httpx_html", "httpx_json", "playwright_html", "handwritten"]},
+        "strategy": {"enum": ["httpx_html", "httpx_json", "playwright_html", "curl_cffi_html", "handwritten"]},
         "headers": {"type": "object"},
         "timeout": {"type": "number"},
         "encoding": {"type": "string"},
@@ -271,7 +271,7 @@ def validate_config(cfg: dict) -> None:
     if strategy == "handwritten":
         if not cfg.get("adapter"):
             errs.append("handwritten strategy 는 'adapter'(클래스명) 필요")
-    elif strategy in ("httpx_html", "httpx_json", "playwright_html"):
+    elif strategy in ("httpx_html", "httpx_json", "playwright_html", "curl_cffi_html"):
         lst = cfg.get("list")
         if not isinstance(lst, dict):
             errs.append("'list' 객체 필요")
@@ -287,8 +287,8 @@ def validate_config(cfg: dict) -> None:
                 if "title" not in fields:
                     errs.append("list.fields 에 'title' 필수")
                 _check_fields(fields, "list.fields", errs)
-            if strategy in ("httpx_html", "playwright_html") and not lst.get("row_selector"):
-                errs.append("httpx_html/playwright_html 은 list.row_selector 필요")
+            if strategy in ("httpx_html", "playwright_html", "curl_cffi_html") and not lst.get("row_selector"):
+                errs.append("httpx_html/playwright_html/curl_cffi_html 은 list.row_selector 필요")
             # top-level list 선택자 컴파일 검증 (field source 아닌 selector — _check_source 미경유).
             for _sk in ("row_selector", "row_required_selector", "exclude_selector", "wait_selector"):
                 _check_css_selector(lst.get(_sk), f"list.{_sk}", errs)
