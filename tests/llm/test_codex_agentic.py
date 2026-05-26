@@ -270,6 +270,17 @@ def run() -> list[tuple[str, bool, str]]:
                 all(files_present.values()),
                 f"present={files_present}",
             ))
+            agents_text = (wd / "AGENTS.md").read_text(encoding="utf-8")
+            cases.append(_check(
+                "workdir_agents_mentions_article_api_priority",
+                ("article_sample.api_candidates" in agents_text
+                 and 'article.fetch_kind="json"' in agents_text
+                 and "source_script_hints" in agents_text
+                 and "url_id_match=true" in agents_text
+                 and "body_looks_html=true" in agents_text
+                 and "body_field_path" in agents_text),
+                "agent tmpdir instructions should preserve evidence-guarded JSON list/body API handoff rules",
+            ))
             slug_content = (wd / "slug.txt").read_text(encoding="utf-8").strip()
             cases.append(_check(
                 "workdir_slug_content",

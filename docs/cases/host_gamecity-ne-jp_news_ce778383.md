@@ -78,6 +78,21 @@ The HAR contained the better path all along: `/js/news.js` builds monthly JSON U
 explicit `id/no/slug` key as post rows. GAMECITY rows use `name + link_url + date`, so the real latest
 news JSON was filtered out while stale `access_ranking.json` survived.
 
+Fifth, after deploying the JSON list signal fix, N100 job `#3613` showed the generic signal worked:
+
+- `traffic_json_api_candidates` now included six candidates; the top three were the monthly news JSON
+  files, each linked back to `/js/news.js` through `source_script_hints`.
+- api-loop selected `httpx_json` for the list, but chose the HTML article page instead of the captured
+  body JSON candidate `/cms-data/json/news/28541.json`.
+- Validation no longer timed out. It failed quickly with `article_body_len` and then
+  `fetch_article JSONDecodeError` after the retry candidate changed the article path incorrectly.
+
+That left a generic agentic handoff issue: when `article_sample.api_candidates` has
+`url_id_match=true`, `body_looks_html=true`, and a `body_field_path`, the agent should use that API for
+`article.fetch_kind="json"` before trying HTML selectors. This is not specific to GAMECITY; it is the
+same SPA-body pattern the preflight already tries to surface. The case frontmatter keeps cumulative
+`fix_layer: C+D`: the JSON row-shape fix is C-layer, and this follow-up is D-layer agentic input.
+
 ## Fix
 
 - `generate/generator.py`: retry feedback now detects DNS/browser-launch infra failures and does not
@@ -98,12 +113,17 @@ news JSON was filtered out while stale `access_ranking.json` survived.
   `news_YYYYMM.json` style rows to `traffic_json_api_candidates`.
 - `scripts/register.py` now tells the agent to inspect verified JSON API candidates before
   Playwright when static HTML is a shell but HAR shows a rendered-list JSON source.
+- `prompts/register_agent_AGENTS.md`: agentic tmpdir instructions now carry the same list/body JSON
+  API handoff rules directly, so the agent does not have to skim the full ruleset to learn that
+  `source_script_hints` and `article_sample.api_candidates` are high-priority evidence.
 - `tests/llm/test_retry_feedback.py`: locks the infra-feedback path, including attempt history and
   alternate strategy candidate sections.
 - `tests/probe_heuristics/test_diagnose_static_hcap_contradiction.py` and
   `tests/probe_heuristics/test_playwright_transient_nav.py`: lock the GAMECITY-specific generic
   regressions without hard-coding the slug into production code.
 - `tests/probe_heuristics/test_json_list_url_identity.py`: locks the JSON row-shape signal.
+- `tests/llm/test_codex_agentic.py`: locks that the tmpdir `AGENTS.md` includes JSON list/body API
+  handoff rules.
 
 ## Regression Notes
 

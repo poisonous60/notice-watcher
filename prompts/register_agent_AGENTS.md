@@ -81,6 +81,18 @@ validator feedback.
   `strategy=playwright_html` is required, treat the empty-shell note as the
   stronger signal. Use rendered `list_candidates` selectors with
   `playwright_html` unless you can point to a real static JSON/list source.
+- If `list_candidates.traffic_json_api_candidates` contains a candidate whose
+  rows match the rendered latest list (same titles, dates, or article URLs),
+  prefer `strategy="httpx_json"` over browser polling. `source_script_hints`
+  is evidence for where the JSON URL comes from; do not invent URL templates
+  beyond what the engine can express.
+- If `article_sample.api_candidates` contains a candidate with
+  `url_id_match=true`, `body_looks_html=true`, and `body_field_path`, use it
+  for article fetch: replace the article id in that candidate URL with
+  `{post_id}`, set `article.fetch_kind="json"`, and set
+  `article.content=[{"from":"json","path":<body_field_path>}]`. Do this before
+  falling back to HTML article selectors; a static or rendered article page can
+  be only a shell while the JSON candidate is the real body.
 - Do not invent class names such as `.list-item__text` or CMS JSON endpoints
   unless digest evidence shows them. If the row itself contains title/date text,
   extract from `:self` with regex instead of inventing child selectors.

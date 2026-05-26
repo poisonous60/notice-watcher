@@ -181,3 +181,12 @@ The month rollover behavior is proven by `/js/news.js`, not HAR alone: the
 script computes the current `YYYYMM`, fetches `news_YYYYMM.json`, and falls back
 to older months on error. A hard-coded monthly URL is therefore a site-specific
 temporary config, not a robust generic engine solution.
+
+N100 job `#3613` then confirmed the JSON list signal itself was fixed: the
+monthly list JSON candidates appeared at the top of `traffic_json_api_candidates`
+with `source_script_hints`. The next failure was different and faster: agentic
+picked the JSON list but ignored the already captured body JSON candidate
+(`/cms-data/json/news/{post_id}.json`) and tried the HTML article page, producing
+`article_body_len` / JSON decode failures instead of timeout. The generic follow-up
+is to put the JSON list/body handoff rules directly into the agentic tmpdir
+`AGENTS.md`, not only the larger `config_writer_rules.txt`.
