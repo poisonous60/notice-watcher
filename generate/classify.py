@@ -13,10 +13,11 @@ PoC 실측 (board recall 0.905, article precision 1.000, gemini-2.5-flash).
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 import json
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Any, Iterator, Optional
 from urllib.parse import parse_qsl, urlsplit
 
 from engine.tracing import current_trace
@@ -28,6 +29,8 @@ from .llm_base import LLMClient, LLMError
 _SYSTEM = render_prompt("classify.system")
 _BODY_CAP = 2000
 _RETRY = 3
+_MIN_WALL_REMAINING_S = 5.0
+_MAX_ATTEMPT_TIMEOUT_S = 60.0
 _DETAIL_PATH_SEGMENTS = {"view", "detail", "article", "post"}
 _ARTICLE_ID_PARAMS = {
     "articleid",
@@ -185,9 +188,58 @@ def _parse(text: str) -> dict:
     return {"class": "?", "confidence": 0.0, "reason": f"parse_fail: {text[:80]}"}
 
 
+def _remaining_wall_budget(wall_deadline: Optional[float]) -> Optional[float]:
+    if wall_deadline is None:
+        return None
+    return max(0.0, wall_deadline - time.monotonic())
+
+
+def _wall_deadline_result(rem: float) -> dict:
+    return {"class": "?", "confidence": 0.0, "reason": f"wall_deadline_exhausted: rem={rem:.1f}s"}
+
+
+def _client_timeout_targets(client: LLMClient) -> list[tuple[Any, float]]:
+    out: list[tuple[Any, float]] = []
+    seen: set[int] = set()
+
+    def visit(obj: Any) -> None:
+        oid = id(obj)
+        if oid in seen:
+            return
+        seen.add(oid)
+        if hasattr(obj, "timeout"):
+            try:
+                out.append((obj, float(getattr(obj, "timeout"))))
+            except (TypeError, ValueError):
+                pass
+        for child_name in ("primary", "fallback"):
+            child = getattr(obj, child_name, None)
+            if child is not None:
+                visit(child)
+
+    visit(client)
+    return out
+
+
+@contextmanager
+def _temporary_client_timeout(client: LLMClient, timeout_s: Optional[float]) -> Iterator[None]:
+    if timeout_s is None:
+        yield
+        return
+    targets = _client_timeout_targets(client)
+    try:
+        for obj, _old in targets:
+            setattr(obj, "timeout", timeout_s)
+        yield
+    finally:
+        for obj, old in targets:
+            setattr(obj, "timeout", old)
+
+
 def classify_index_content(*, url: str, digest: dict,
                            client: Optional[LLMClient] = None,
-                           slug: Optional[str] = None) -> dict:
+                           slug: Optional[str] = None,
+                           wall_deadline: Optional[float] = None) -> dict:
     """페이지 타입 분류 — index(게시판) / content(단일 글) / not_found(없음 shell) / login(로그인 게이트).
 
     반환: {"class": "index"|"content"|"not_found"|"login"|"?", "confidence": float, "reason": str}.
@@ -212,17 +264,31 @@ def classify_index_content(*, url: str, digest: dict,
     last: Optional[Exception] = None
     with tr.span("classify_index_content", attrs={"slug": slug, "retries": _RETRY}):
         for attempt in range(1, _RETRY + 1):
+            rem = _remaining_wall_budget(wall_deadline)
+            if rem is not None and rem < _MIN_WALL_REMAINING_S:
+                return _wall_deadline_result(rem)
+            timeout_s = min(rem, _MAX_ATTEMPT_TIMEOUT_S) if rem is not None else None
             try:
-                with tr.span("classify_call", attrs={"attempt": attempt, "call_site": "classify_index_content"}):
-                    resp = cli.generate(system_instruction=_SYSTEM, user_text=user,
-                                        temperature=0.0, json_mode=True,
-                                        call_site="classify_index_content", slug=slug,
-                                        attempt=attempt)
+                with tr.span("classify_call", attrs={"attempt": attempt,
+                                                     "call_site": "classify_index_content",
+                                                     "timeout_s": timeout_s}):
+                    with _temporary_client_timeout(cli, timeout_s):
+                        resp = cli.generate(system_instruction=_SYSTEM, user_text=user,
+                                            temperature=0.0, json_mode=True,
+                                            call_site="classify_index_content", slug=slug,
+                                            attempt=attempt)
                 return _parse(resp.text)
             except LLMError as e:
                 last = e
                 if attempt < _RETRY:
-                    time.sleep(2 * attempt)
+                    rem = _remaining_wall_budget(wall_deadline)
+                    if rem is not None and rem < _MIN_WALL_REMAINING_S:
+                        return _wall_deadline_result(rem)
+                    delay_s = 2 * attempt
+                    if rem is not None:
+                        delay_s = min(delay_s, max(0.0, rem - _MIN_WALL_REMAINING_S))
+                    if delay_s > 0:
+                        time.sleep(delay_s)
         return {"class": "?", "confidence": 0.0, "reason": f"llm_fail: {last}"}
 
 
