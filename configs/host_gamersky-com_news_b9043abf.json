@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "site": "gamersky.com",
+  "board": "news",
+  "strategy": "httpx_html",
+  "encoding": "utf-8",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 notice-watcher"
+  },
+  "timeout": 15,
+  "list": {
+    "url_template": "https://www.gamersky.com/news/",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "ul.pictxt.contentpaging > li",
+    "row_required_selector": "a.tt[href*=\"/news/\"]",
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a.tt",
+          "attr": "href",
+          "transform": [
+            ["regex_extract", "/news/\\d+/(\\d+)\\.shtml"]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "a.tt",
+          "text": true,
+          "transform": [
+            ["collapse_ws"]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a.tt",
+          "attr": "href"
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "div.time",
+          "text": true,
+          "transform": [
+            ["collapse_ws"],
+            ["iso8601", ["%Y-%m-%d %H:%M"], "+08:00"]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "div.txt",
+          "text": true,
+          "transform": [
+            ["collapse_ws"]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "content": [
+      {
+        "from": "css",
+        "selector": "div.Mid2L_con",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "h1",
+          "text": true,
+          "transform": [
+            ["collapse_ws"]
+          ]
+        }
+      ]
+    }
+  }
+}

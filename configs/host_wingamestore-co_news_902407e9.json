@@ -1,0 +1,118 @@
+{
+  "version": 1,
+  "site": "wingamestore.com",
+  "board": "news",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 notice-watcher"
+  },
+  "timeout": 15,
+  "list": {
+    "url_template": "https://www.wingamestore.com/news/",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "tbody > tr.result-row",
+    "row_required_selector": "td.detail",
+    "fields": {
+      "post_id": [
+        {
+          "from": "concat",
+          "parts": [
+            {
+              "from": "attr",
+              "selector": "a[href*=\"/product/\"]",
+              "attr": "href",
+              "transform": [
+                ["regex_extract", "/product/(\\d+)/"]
+              ]
+            },
+            {
+              "const": "-"
+            },
+            {
+              "from": "css",
+              "selector": "td.labels label.small.light",
+              "text": true,
+              "transform": [
+                ["collapse_ws"],
+                ["replace", " ", ""],
+                ["replace", ",", ""],
+                ["replace", ":", ""]
+              ]
+            }
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "td.detail label.title",
+          "text": true,
+          "transform": [
+            ["collapse_ws"]
+          ]
+        },
+        {
+          "from": "attr",
+          "selector": "td.box a",
+          "attr": "title",
+          "transform": [
+            ["collapse_ws"]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a[href*=\"/product/\"]",
+          "attr": "href",
+          "transform": [
+            ["urljoin", "https://www.wingamestore.com"]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "css",
+          "selector": "div.labels label",
+          "text": true,
+          "transform": [
+            ["collapse_ws"]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "td.detail div.body",
+          "text": true,
+          "transform": [
+            ["collapse_ws"]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "content": [
+      {
+        "from": "css",
+        "selector": "main",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "h1",
+          "text": true,
+          "transform": [
+            ["collapse_ws"]
+          ]
+        }
+      ]
+    }
+  }
+}

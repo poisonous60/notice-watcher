@@ -24,6 +24,9 @@ from pathlib import Path
 # Resolution order: REPO_ROOT env (set by codex_agentic.run_codex_agentic) →
 # sibling `repo_path.txt` → direct import (when run from repo root).
 _HERE = Path(__file__).resolve().parent
+_REPO_ROOT = _HERE.parent
+if (_REPO_ROOT / "generate").is_dir():
+    sys.path.insert(0, str(_REPO_ROOT))
 try:
     from generate.validate import validate_built_config  # type: ignore
 except ImportError:

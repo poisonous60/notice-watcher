@@ -1,0 +1,78 @@
+{
+  "version": 1,
+  "site": "3dmgame.com",
+  "board": "root",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 notice-watcher"
+  },
+  "timeout": 15,
+  "list": {
+    "url_template": "https://www.3dmgame.com/",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "li > div.lis",
+    "row_required_selector": "a.tex[href*=\"/news/\"]",
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a.tex",
+          "attr": "href",
+          "transform": [
+            ["regex_extract", "/news/\\d+/(\\d+)\\.html"]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "a.tex",
+          "text": true,
+          "transform": [
+            ["collapse_ws"]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a.tex",
+          "attr": "href"
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "a.tex",
+          "text": true,
+          "transform": [
+            ["collapse_ws"]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "content": [
+      {
+        "from": "css",
+        "selector": "div.content",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "h1",
+          "text": true,
+          "transform": [
+            ["collapse_ws"]
+          ]
+        }
+      ]
+    }
+  }
+}

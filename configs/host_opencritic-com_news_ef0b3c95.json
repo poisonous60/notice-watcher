@@ -1,0 +1,92 @@
+{
+  "version": 1,
+  "site": "opencritic.com",
+  "board": "news",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 notice-watcher"
+  },
+  "timeout": 15,
+  "list": {
+    "url_template": "https://opencritic.com/news/",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "div.mt-4 > div",
+    "row_required_selector": "a[href^=\"/news/\"]",
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a[href^=\"/news/\"]",
+          "attr": "href",
+          "transform": [
+            ["regex_extract", "/news/(\\d+)/"]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "h3 a",
+          "text": true,
+          "transform": [
+            ["collapse_ws"]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a[href^=\"/news/\"]",
+          "attr": "href",
+          "transform": [
+            ["urljoin", "https://opencritic.com"]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": ":self",
+          "text": true,
+          "transform": [
+            ["regex_extract", "([A-Z][a-z]+ \\d{1,2}, \\d{4})"],
+            ["iso8601", ["%B %d, %Y"], "+00:00"]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "p",
+          "text": true,
+          "transform": [
+            ["collapse_ws"]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "content": [
+      {
+        "from": "css",
+        "selector": "div[itemprop=\"articleBody\"]",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "h1",
+          "text": true,
+          "transform": [
+            ["collapse_ws"]
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -523,6 +523,34 @@ sys.exit(vc.main(["validate_config.py", {str(candidate)!r}]))
             f"rc={proc.returncode} stdout={proc.stdout!r} stderr={proc.stderr!r}",
         ))
 
+    with tempfile.TemporaryDirectory(prefix="validate_cli_path_test_") as td:
+        candidate = Path(td) / "candidate.json"
+        candidate.write_text(json.dumps({
+            "version": 1,
+            "site": "example.com",
+            "board": "root",
+            "strategy": "httpx_html",
+        }), encoding="utf-8")
+        proc = subprocess.run(
+            [sys.executable, "scripts/validate_config.py", str(candidate)],
+            cwd=REPO,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=5,
+        )
+        try:
+            payload = json.loads(proc.stdout)
+        except json.JSONDecodeError:
+            payload = {}
+        cases.append(_check(
+            "validate_config_direct_script_imports_repo_root",
+            (proc.returncode == 0
+             and payload.get("ok") is False
+             and "ModuleNotFoundError" not in proc.stderr),
+            f"rc={proc.returncode} stdout={proc.stdout!r} stderr={proc.stderr!r}",
+        ))
+
     # POSIX hard alarm catches sync blocks that prevent asyncio.wait_for from ticking.
     if hasattr(signal, "SIGALRM") and hasattr(signal, "setitimer"):
         with tempfile.TemporaryDirectory(prefix="validate_hard_timeout_test_") as td:
