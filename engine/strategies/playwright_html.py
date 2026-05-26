@@ -37,32 +37,56 @@ _TURNSTILE_RE = re.compile(r"turnstile|cf-turnstile|challenges.cloudflare.com", 
 
 
 async def _is_cloudflare_interstitial_async(page) -> tuple[bool, bool]:
+    """cheap-first CF detect — title + page.url 매번 검사, 매칭 시만 page.content() 호출.
+
+    이전: 매 polling 마다 page.content() 호출 → 48/256 configs (playwright_html) × N fetches 누적
+    DOM copy 비용 (codex perf review P1, 2026-05-26). 정상 사이트는 title/url 검사 +가벼운 regex
+    miss → content() 안 함 → 매 fetch ~ms 비용.
+    """
     try:
         title = await page.title() or ""
     except Exception:  # noqa: BLE001
         title = ""
+    cheap_hay = f"{title}\n{page.url}"
+    if not _CF_INTERSTITIAL_RE.search(cheap_hay) and not _TURNSTILE_RE.search(cheap_hay):
+        return False, False
+    # cheap signal hit — body 까지 검사
     try:
         html = (await page.content())[:120_000]
     except Exception:  # noqa: BLE001
         html = ""
-    hay = f"{title}\n{page.url}\n{html}"
+    hay = f"{cheap_hay}\n{html}"
     return bool(_CF_INTERSTITIAL_RE.search(hay)), bool(_TURNSTILE_RE.search(hay))
 
 
-async def _wait_through_cloudflare_interstitial_async(page, *, timeout_ms: int = 30000) -> None:
-    """polling 시 CF JS interstitial 통과 대기 (Turnstile 은 통과 시도 X)."""
+async def _wait_through_cloudflare_interstitial_async(page, *, timeout_ms: int = 30000) -> str:
+    """polling 시 CF JS interstitial 통과 대기. 반환:
+        "none"      — CF challenge 자체 없음 (정상 사이트)
+        "cleared"   — challenge 검출 후 wait 안에 통과
+        "timeout"   — challenge 검출, wait 안에 통과 못 함 (caller 가 raise 추천)
+        "turnstile" — Turnstile interactive — 통과 시도 X (caller 가 cap_blocked 처리)
+    """
     challenge, turnstile = await _is_cloudflare_interstitial_async(page)
-    if not challenge or turnstile:
-        return
+    if not challenge:
+        return "none"
+    if turnstile:
+        return "turnstile"
     deadline = time.perf_counter() + (timeout_ms / 1000.0)
     while time.perf_counter() < deadline:
         try:
             await page.wait_for_timeout(500)
         except Exception:  # noqa: BLE001
-            break
+            return "timeout"
         challenge, turnstile = await _is_cloudflare_interstitial_async(page)
-        if turnstile or not challenge:
-            break
+        if turnstile:
+            return "turnstile"
+        if not challenge:
+            return "cleared"
+    return "timeout"
+
+
+class CloudflareUnsolvedError(RuntimeError):
+    """CF challenge 가 wait 시간 안에 통과 안 됨, 또는 Turnstile interactive 검출."""
 
 
 async def _wait_xhr_quiet(page, *, quiet_ms: int = 500, hard_timeout_ms: int = 2000) -> None:
@@ -149,6 +173,10 @@ async def open_session(adapter) -> None:
         await context.set_extra_http_headers(extra)
     page = await context.new_page()
     adapter._pw, adapter._browser, adapter._context, adapter._page = pw, browser, context, page
+    # CF cache — 같은 polling cycle 안 첫 _goto 가 CF challenge 통과(or none) 했으면 이후 _goto 는
+    # CF wait skip. context cookies 가 같은 cycle 안 cf_clearance 보관 → 재검사 불필요. 다음 cycle
+    # open_session 새로 호출되며 cache reset (codex perf review P1, 2026-05-26).
+    adapter._cf_state = "unchecked"   # unchecked → none|cleared (skip) or turnstile (raise) or timeout (raise)
 
 
 async def close_session(adapter) -> None:
@@ -174,8 +202,22 @@ async def _goto(adapter, url: str, *, wait_selector: Optional[str] = None) -> st
     nav_to = int(cfg.get("nav_timeout_ms", 15000))
     idle_to = int(cfg.get("idle_timeout_ms", 2000))
     quiet_to = int(cfg.get("quiet_ms", 500))
+    cf_wait_to = int(cfg.get("cf_wait_timeout_ms", 30000))
     await page.goto(url, wait_until="domcontentloaded", timeout=nav_to)
-    await _wait_through_cloudflare_interstitial_async(page)
+    # CF wait — adapter-level cache. unchecked 면 detect+wait, none|cleared 면 skip,
+    # turnstile|timeout 이면 raise (caller 가 적절히 처리).
+    cf_state = getattr(adapter, "_cf_state", "unchecked")
+    if cf_state == "unchecked":
+        verdict = await _wait_through_cloudflare_interstitial_async(page, timeout_ms=cf_wait_to)
+        adapter._cf_state = verdict
+        if verdict == "turnstile":
+            raise CloudflareUnsolvedError(f"Cloudflare Turnstile interactive on {url} — 자동 통과 X (cap_blocked).")
+        if verdict == "timeout":
+            raise CloudflareUnsolvedError(f"Cloudflare interstitial 통과 못 함 (>{cf_wait_to}ms) on {url} — cap_blocked 의심.")
+    elif cf_state in ("turnstile", "timeout"):
+        # 같은 cycle 안 이전 _goto 가 unsolvable CF — 후속 _goto 도 같은 host 이므로 즉시 raise.
+        raise CloudflareUnsolvedError(f"adapter cf_state={cf_state!r} (이전 _goto 에서 결정) on {url}")
+    # cf_state in ("none", "cleared") → wait skip (cookie 공유로 재검사 불필요)
     await _wait_xhr_quiet(page, quiet_ms=quiet_to, hard_timeout_ms=idle_to)
     if wait_selector:
         try:

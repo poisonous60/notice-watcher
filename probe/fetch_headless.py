@@ -143,6 +143,8 @@ def _has_spa_hydration_marker(html: str) -> bool:
 
 
 def _is_cloudflare_interstitial(page) -> tuple[bool, bool]:
+    """probe sync detect — 등록 1회만 거치므로 정확도 우선 (Turnstile widget 단독 body 마커 잡음).
+    polling cheap-first 변형은 engine/strategies/playwright_html._is_cloudflare_interstitial_async."""
     try:
         title = page.title() or ""
     except Exception:  # noqa: BLE001
@@ -489,8 +491,11 @@ def fetch_with_capture(
                     body, html_truncated = _capture_page_content(page)
                     # CMP 진단 — IAB TCF/CCPA/GPP API ping. 자동 consent 발생 X (factual probe only).
                     # 결과는 out_dir/consent.json 으로 저장 → 통계로 selector 우선순위 조정 (P-4, 2026-05-26).
+                    # opt-in only — _detect_cmp 가 TCF ping 800ms + USP fallback 500ms 까지 대기.
+                    # batch register (100 사이트) 누적 +1.3s × 100 = +2분. env `NW_PROBE_CMP=1` 시만 활성.
+                    # codex perf review P3 (2026-05-26). polling 무관 (probe 만).
                     try:
-                        _cmp = _detect_cmp(page)
+                        _cmp = _detect_cmp(page) if os.environ.get("NW_PROBE_CMP") == "1" else None
                         if _cmp:
                             # target 별 분리 — list/article 호출이 같은 out_dir 쓰는데 단일 파일이면 overwrite.
                             # codex P-6789 review finding 6 (2026-05-26).
