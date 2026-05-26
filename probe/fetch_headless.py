@@ -474,6 +474,18 @@ def fetch_with_capture(
                         pass
 
                     body, html_truncated = _capture_page_content(page)
+                    # CMP 진단 — IAB TCF/CCPA/GPP API ping. 자동 consent 발생 X (factual probe only).
+                    # 결과는 out_dir/consent.json 으로 저장 → 통계로 selector 우선순위 조정 (P-4, 2026-05-26).
+                    try:
+                        _cmp = _detect_cmp(page)
+                        if _cmp:
+                            (out_dir / "consent.json").write_text(
+                                json.dumps(_cmp, ensure_ascii=False, indent=2), encoding="utf-8")
+                            cmp_note = f"cmp: {_cmp.get('vendor') or _cmp.get('api')}"
+                        else:
+                            cmp_note = None
+                    except Exception:  # noqa: BLE001
+                        cmp_note = None
                     try:
                         page.screenshot(path=str(screenshot_path), full_page=False)
                     except Exception:
@@ -516,6 +528,8 @@ def fetch_with_capture(
         notable.append(wait_note)
     if "spa_extra_wait_note" in locals() and spa_extra_wait_note:
         notable.append(spa_extra_wait_note)
+    if "cmp_note" in locals() and cmp_note:
+        notable.append(cmp_note)
     if html_truncated:
         notable.append(f"html_truncated: {len(body or '')}/{_MAX_CAPTURED_HTML_CHARS} chars")
     if captured_nav_headers:
@@ -701,6 +715,59 @@ _CONSENT_DISMISS_JS = r"""() => {
     }
     return clicked;
 }"""
+
+
+# CMP API 검출 — IAB TCF v2.x · CCPA · GPP · TCF v1. ping 응답으로 vendor cmpId 추출 (factual probe only,
+# 자동 consent 발생 X). 결과는 out_dir/consent.json 에 저장 → 통계로 KNOWN_CMP_*_SELECTORS 우선순위 조정.
+# 근거: research_session1_cookie_banner.md §4.
+_CMP_DETECT_JS = r"""
+async () => {
+    const tcf = await new Promise((resolve) => {
+        if (typeof window.__tcfapi !== 'function') return resolve(null);
+        try {
+            window.__tcfapi('ping', 2, (pingReturn, success) => {
+                if (!success || !pingReturn) return resolve(null);
+                resolve({api: 'tcfv2', cmpId: pingReturn.cmpId, cmpLoaded: !!pingReturn.cmpLoaded,
+                        cmpStatus: pingReturn.cmpStatus, gdprApplies: pingReturn.gdprApplies});
+            });
+            setTimeout(() => resolve(null), 800);
+        } catch (e) { resolve(null); }
+    });
+    if (tcf) return tcf;
+    const usp = await new Promise((resolve) => {
+        if (typeof window.__uspapi !== 'function') return resolve(null);
+        try {
+            window.__uspapi('getUSPData', 1, (uspData, success) => {
+                resolve(success ? {api: 'ccpa', uspString: uspData && uspData.uspString} : null);
+            });
+            setTimeout(() => resolve(null), 500);
+        } catch (e) { resolve(null); }
+    });
+    if (usp) return usp;
+    if (typeof window.__gpp === 'function') return {api: 'gpp'};
+    if (typeof window.__cmp === 'function') return {api: 'tcfv1'};
+    return null;
+}
+""".strip()
+
+# IAB-registered CMP ID → vendor 이름 (자주 보이는 것). 전체 list: https://cmplist.consensu.org/
+_CMP_ID_NAMES = {
+    5: "Quantcast Choice", 7: "TrustArc", 10: "Cookiebot (Usercentrics)",
+    28: "Sourcepoint", 91: "Didomi", 300: "OneTrust", 412: "Osano",
+}
+
+
+def _detect_cmp(page) -> Optional[dict]:
+    """페이지의 IAB-등록 CMP 존재 검출 (TCF/CCPA/GPP). None = 없음 또는 timeout. 자동 consent 발생 X."""
+    try:
+        info = page.evaluate(_CMP_DETECT_JS)
+    except Exception:  # noqa: BLE001
+        return None
+    if not info:
+        return None
+    if info.get("api") == "tcfv2":
+        info["vendor"] = _CMP_ID_NAMES.get(info.get("cmpId"), f"unknown-id-{info.get('cmpId')}")
+    return info
 
 
 _CMP_FRAME_URL_HINTS = (
