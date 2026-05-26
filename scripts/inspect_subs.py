@@ -78,6 +78,43 @@ def _run(cmd: list[str], *, check: bool = False,
     return p.returncode, out
 
 
+def _tar_stream_pull(remote_dir: str, local_dst: Path, *, glob: str = "*.json",
+                     timeout: float = 60.0) -> tuple[bool, str]:
+    """`ssh ... 'cd <remote_dir> && tar c <glob>' | tar x -C <local_dst>`.
+
+    수천 개 작은 파일을 받을 때 per-file scp 핸드셰이크 (~10ms × N) 가 30s 를 넘기는 걸 1 ssh
+    스트림으로 압축. tar 가 mtime/perm 보존 → marker 기반 skip 게이트와 호환.
+
+    빈 매치는 tar 가 "Cannot stat" 으로 nonzero 반환할 수 있어 `--ignore-failed-read` 로 허용.
+    """
+    host = _require_deploy_host()
+    remote_cmd = f"cd {DEPLOY_PATH}/{remote_dir} 2>/dev/null && tar c --ignore-failed-read {glob}"
+    try:
+        ssh_proc = subprocess.Popen(
+            ["ssh", host, remote_cmd],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        tar_proc = subprocess.Popen(
+            ["tar", "x", "-C", str(local_dst)],
+            stdin=ssh_proc.stdout, stderr=subprocess.PIPE,
+        )
+        assert ssh_proc.stdout is not None
+        ssh_proc.stdout.close()
+        try:
+            tar_rc = tar_proc.wait(timeout=timeout)
+            ssh_proc.wait(timeout=5.0)
+        except subprocess.TimeoutExpired:
+            tar_proc.kill()
+            ssh_proc.kill()
+            return False, f"timeout after {timeout}s"
+        if tar_rc != 0:
+            err = (tar_proc.stderr.read() if tar_proc.stderr else b"") or b""
+            return False, f"tar rc={tar_rc}: {err.decode(errors='replace')[:400]}"
+        return True, ""
+    except OSError as e:
+        return False, f"OSError: {e}"
+
+
 def _snapshot_paths() -> inspector.InspectorPaths:
     return inspector.InspectorPaths(
         db_path=SNAPSHOT_DIR / "bot.sqlite3",
@@ -122,37 +159,40 @@ def pull_bot_db() -> bool:
 
 
 def pull_configs() -> bool:
-    """configs/ 통째 mirror — *.json 글로브 단일 scp (server-side expand). dev 의 git tracked
+    """configs/ 통째 mirror — *.json 단일 tar stream (1 ssh). dev 의 git tracked
     configs/ 는 *별도 폴더* (configs.snapshot/) 라 안 건드림. 운영 호스트에서 삭제된 파일 sync 위해
-    매번 비우고 받음."""
+    매번 비우고 받음.
+
+    이전 per-file scp glob (N100 의 ~1300 파일) 은 ssh 채널 fan-out 으로 30s 타임아웃 빈발 →
+    tar stream 으로 1 ssh handshake + 1 TCP stream 으로 묶음.
+    """
     _ensure_dirs()
-    host = _require_deploy_host()
     import shutil
     if CONFIGS_SNAPSHOT.exists():
         shutil.rmtree(CONFIGS_SNAPSHOT)
     CONFIGS_SNAPSHOT.mkdir(parents=True)
-    rc, out = _run(["scp", "-q", f"{host}:{DEPLOY_PATH}/configs/*.json",
-                    f"{CONFIGS_SNAPSHOT}{os.sep}"])
-    # 빈 결과는 정상 (등록된 사이트 없음). 진짜 에러면 stderr.
-    if rc != 0 and not any(s in out for s in ("No such file", "matches no files", "not match")):
-        sys.stderr.write(f"[inspect pull] configs scp 실패 (rc={rc}): {out}\n")
+    ok, err = _tar_stream_pull("configs", CONFIGS_SNAPSHOT, glob="*.json", timeout=60.0)
+    if not ok:
+        sys.stderr.write(f"[inspect pull] configs tar stream 실패: {err}\n")
         return False
     return True
 
 
 def pull_poll_state() -> bool:
-    """output/poll_state/*.json (255개 내외) — 같은 이유로 매번 비우고 받음."""
+    """output/poll_state/*.json (수천 개) — *.json 단일 tar stream (1 ssh). 같은 이유로 매번 비우고 받음.
+
+    이전 scp glob 은 2700+ 파일 fan-out 으로 30s 타임아웃 → tar stream 으로 묶음.
+    """
     _ensure_dirs()
-    host = _require_deploy_host()
-    for old in (SNAPSHOT_DIR / "poll_state").glob("*"):
+    state_dst = SNAPSHOT_DIR / "poll_state"
+    for old in state_dst.glob("*"):
         try:
             old.unlink()
         except OSError:
             pass
-    rc, out = _run(["scp", "-q", f"{host}:{DEPLOY_PATH}/output/poll_state/*.json",
-                    f"{SNAPSHOT_DIR}{os.sep}poll_state{os.sep}"])
-    if rc != 0 and not any(s in out for s in ("No such file", "matches no files", "not match")):
-        sys.stderr.write(f"[inspect pull] poll_state scp 실패 (rc={rc}): {out}\n")
+    ok, err = _tar_stream_pull("output/poll_state", state_dst, glob="*.json", timeout=60.0)
+    if not ok:
+        sys.stderr.write(f"[inspect pull] poll_state tar stream 실패: {err}\n")
         return False
     return True
 
