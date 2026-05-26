@@ -4,7 +4,7 @@ url: internal://validator-timeout
 status: "🛠️ validator timeout root-cause + surgical fix design"
 outcome: improved
 date: 2026-05-26
-fix_layer: F
+fix_layer: C+D
 failure_keys:
   - validate_internal_timeout
   - validator_timeout_misclassified
@@ -145,3 +145,39 @@ Additional surgical fixes:
 
 This keeps Q1's constraint: probe verdict does not hard-force strategy. It only
 removes a contradiction and lets the agent choose from consistent evidence.
+
+## 2026-05-27 v4 — GAMECITY stable path
+
+N100 job `#3611` confirmed the v3 probe contradiction fix worked: GAMECITY now
+reports `JS 실행 필요` with Playwright as the recommended entry. It still failed
+because both Playwright `goto_dom` attempts hit fast `ERR_NAME_NOT_RESOLVED`, and
+agentic left an invalid `candidate.json`.
+
+The actual stable path is not more Playwright waiting. HAR showed the page loads
+`/js/news.js`, which constructs monthly list JSON URLs:
+
+- `/cms-data/json/news_202605.json`
+- `/cms-data/json/news_202604.json`
+- `/cms-data/json/news_202603.json`
+
+Those responses were absent from `traffic_json_api_candidates` because
+`find_list_in_json` required an explicit id-like key. GAMECITY list rows use
+`name + link_url + date`; `link_url` is the post identity. The safe generic fix
+is to accept URL identity keys for JSON row-shape detection. A broader
+date-token/fallback URL engine surface is deferred until at least one more
+same-pattern site appears in the batch.
+
+Measured validation of the stable config path:
+
+| config path | result |
+|---|---|
+| `httpx_json` list `https://www.gamecity.ne.jp/cms-data/json/news_202605.json`, article `https://www.gamecity.ne.jp/cms-data/json/news/{post_id}.json` | PASS on dev box: 15 posts, first article body 10326 chars |
+
+This explains why “SPA handling already existed” was not enough: the existing
+SPA path could render rows, but the JSON-list recognizer did not understand rows
+whose identity is a URL field rather than an id field. When N100 Playwright DNS
+flaked, there was no non-browser fallback candidate for the agent to choose.
+The month rollover behavior is proven by `/js/news.js`, not HAR alone: the
+script computes the current `YYYYMM`, fetches `news_YYYYMM.json`, and falls back
+to older months on error. A hard-coded monthly URL is therefore a site-specific
+temporary config, not a robust generic engine solution.

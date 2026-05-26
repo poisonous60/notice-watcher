@@ -1,10 +1,10 @@
 ---
 slug: host_gamecity-ne-jp_news_ce778383
 url: https://www.gamecity.ne.jp/news/
-status: "🛠️ infra timeout fixed; probe/agentic selection fix pending deploy"
+status: "🛠️ JSON list signal identified; generic engine fallback deferred"
 outcome: improved
 date: 2026-05-26
-fix_layer: D
+fix_layer: C+D
 failure_keys:
   - validate_internal_timeout
   - posts_nonempty
@@ -12,7 +12,9 @@ failure_keys:
   - agentic_selection
   - probe_strategy_contradiction
   - transient_playwright_dns
-config_strategy: playwright_html
+  - json_list_url_identity
+  - monthly_json_api
+config_strategy: httpx_json
 tags:
   - batch-2026-05-24-games-jp
   - agentic
@@ -57,10 +59,24 @@ Third, after the retry-feedback fix, N100 job `#3610` still failed:
 - agentic then retried `httpx_html` with the rendered selector. Static HTML has no `#ajax_news` rows,
   so validation returned `posts_nonempty: 0건`.
 
-Root cause of the remaining GAMECITY failure: probe and prompt input still allowed an `S1.Hcap` OK
+Root cause after `#3610`: probe and prompt input still allowed an `S1.Hcap` OK
 shell to outweigh the stronger static-vs-headless evidence. The selector itself was not the problem;
 it matched rendered `list.html`. The execution layer also needed one retry for transient Chromium DNS
 failures so the correct Playwright candidate was not discarded after a 20ms browser navigation flake.
+
+Fourth, after deploying that fix, N100 job `#3611` proved the contradiction was gone:
+
+- Verdict changed to `JS 실행 필요 (Cloudflare 등)` and recommended strategy changed to Playwright.
+- The validator timing showed `goto_dom` attempt 1 and attempt 2 both failed quickly with
+  `ERR_NAME_NOT_RESOLVED`; this is a repeated Chromium DNS failure, not a selector wait or timeout.
+- The preserved agentic candidate then became invalid JSON (`candidate JSON parse failed`), so the
+  agent did not recover to a different strategy.
+
+The HAR contained the better path all along: `/js/news.js` builds monthly JSON URLs such as
+`/cms-data/json/news_202605.json`, and the HAR recorded those responses. They were missing from
+`traffic_json_api_candidates` because `find_list_in_json` only treated rows with `title/name` plus an
+explicit `id/no/slug` key as post rows. GAMECITY rows use `name + link_url + date`, so the real latest
+news JSON was filtered out while stale `access_ranking.json` survived.
 
 ## Fix
 
@@ -77,11 +93,17 @@ failures so the correct Playwright candidate was not discarded after a 20ms brow
 - `engine/strategies/playwright_html.py`: `Page.goto` retries once for transient DNS navigation
   failures (`ERR_NAME_NOT_RESOLVED`, `Temporary failure in name resolution`), without changing global
   navigation timeout or wait semantics.
+- `probe/hydration.py`: JSON list detection now accepts URL identity keys (`url`, `link`,
+  `href`, `permalink`, `link_url`, `path`) as well as explicit id keys. This promotes
+  `news_YYYYMM.json` style rows to `traffic_json_api_candidates`.
+- `scripts/register.py` now tells the agent to inspect verified JSON API candidates before
+  Playwright when static HTML is a shell but HAR shows a rendered-list JSON source.
 - `tests/llm/test_retry_feedback.py`: locks the infra-feedback path, including attempt history and
   alternate strategy candidate sections.
 - `tests/probe_heuristics/test_diagnose_static_hcap_contradiction.py` and
   `tests/probe_heuristics/test_playwright_transient_nav.py`: lock the GAMECITY-specific generic
   regressions without hard-coding the slug into production code.
+- `tests/probe_heuristics/test_json_list_url_identity.py`: locks the JSON row-shape signal.
 
 ## Regression Notes
 
@@ -96,6 +118,14 @@ Pre-deploy checks after the first retry-feedback patch:
 - `python tests/scripts/test_capability_blocked_validate_timeout.py`
 - `python scripts/probe_smoke.py --stage 3 --stage 5`
 
-N100 job `#3610` proved the first retry-feedback patch was incomplete. The next verification must
-deploy the probe/prompt/Playwright retry changes and rerun the actual batch URL, not a hand-written
-minimal config.
+Local verification of the possible stable path:
+
+- A `httpx_json` config using
+  `https://www.gamecity.ne.jp/cms-data/json/news_202605.json` validated successfully:
+  15 posts, first article body 10326 chars.
+
+Open question: this site JS computes `news_YYYYMM.json` from the current month and falls back to
+previous months on 404. A hard-coded `news_202605.json` would become stale eventually, but adding a
+generic date-token/fallback URL engine surface from this single site is too broad without another
+same-pattern batch case. Keep it as a documented follow-up unless more sites show the same monthly
+JSON pattern.

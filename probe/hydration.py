@@ -50,6 +50,7 @@ def extract_hydration(html: str) -> dict[str, Any]:
 _TITLE_KEYS = ("title", "name", "subject", "headline")
 _ID_KEYS = ("id", "articleId", "noticeId", "no", "slug", "uid", "uuid", "code",
             "feedId", "postId", "articleNo", "contentId", "seq")
+_URL_KEYS = ("url", "link", "href", "permalink", "link_url", "path")
 _DATE_KEYS = ("publishedAt", "createdAt", "date", "regDate", "pubDate", "datetime", "updatedAt", "displayAt")
 
 
@@ -58,10 +59,16 @@ def _looks_like_row(first: dict) -> Optional[str]:
     """dict 가 글 한 건처럼 보이면 그 '항목 dict' 까지의 하위 경로를 반환(없으면 None).
     "" = first 자체가 항목. "feed" = first["feed"] 가 항목(엔벨로프형: {feed:{title,feedId,...}, user:{...}, ...}).
     엔벨로프는 *딱 한 단계* 만 본다(과탐 방지)."""
-    if any(k in first for k in _TITLE_KEYS) and any(k in first for k in _ID_KEYS):
+    has_title = any(k in first for k in _TITLE_KEYS)
+    has_identity = any(k in first for k in _ID_KEYS) or any(k in first for k in _URL_KEYS)
+    if has_title and has_identity:
         return ""
     for k, v in first.items():
-        if isinstance(v, dict) and any(kk in v for kk in _TITLE_KEYS) and any(kk in v for kk in _ID_KEYS):
+        if not isinstance(v, dict):
+            continue
+        has_nested_title = any(kk in v for kk in _TITLE_KEYS)
+        has_nested_identity = any(kk in v for kk in _ID_KEYS) or any(kk in v for kk in _URL_KEYS)
+        if has_nested_title and has_nested_identity:
             return str(k)
     return None
 

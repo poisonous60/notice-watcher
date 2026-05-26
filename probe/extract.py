@@ -469,6 +469,58 @@ def _entry_resource_type(entry: dict) -> str:
     return str(entry.get("_resourceType") or entry.get("resourceType") or "").lower()
 
 
+def _json_url_source_script_hints(har: dict, har_path: Path, *, json_url: str, page_url: str = "") -> list[dict]:
+    """Best-effort: find which same-site JS response appears to construct a JSON URL.
+
+    HAR does not always expose request initiators. For JS-built monthly APIs, the
+    observed JSON URL may not appear literally in HTML, but the script often has
+    the stable prefix/suffix (`news_` + month + `.json`). This is diagnostic
+    evidence for the config writer, not an engine template.
+    """
+    from urllib.parse import urlsplit
+
+    path = urlsplit(json_url or "").path
+    name = path.rsplit("/", 1)[-1]
+    if not name:
+        return []
+    m = re.match(r"(?P<prefix>[^/?#]*?)(?P<num>\d{4,})(?P<suffix>\.[A-Za-z0-9]+)$", name)
+    prefix = m.group("prefix") if m else ""
+    suffix = m.group("suffix") if m else ""
+
+    out: list[dict] = []
+    for entry in (har.get("log", {}).get("entries", []) or []):
+        req = entry.get("request", {}) or {}
+        resp = entry.get("response", {}) or {}
+        script_url = req.get("url") or ""
+        if not script_url:
+            continue
+        if page_url and not _same_site(script_url, page_url):
+            continue
+        ct = ""
+        for h in resp.get("headers", []) or []:
+            if str(h.get("name", "")).lower() == "content-type":
+                ct = h.get("value", "") or ""
+                break
+        if "javascript" not in ct.lower() and not urlsplit(script_url).path.lower().endswith(".js"):
+            continue
+        text = _har_entry_response_text(entry, har_path)
+        if not text:
+            continue
+        evidence = None
+        idx = text.find(name)
+        if idx >= 0 and (len(name) >= 8 or "." in name):
+            evidence = name
+        elif prefix and suffix:
+            idx = text.find(prefix)
+            if idx >= 0 and suffix in text[idx: idx + 240]:
+                evidence = text[idx: idx + 240].replace("\n", " ")[:180]
+        if evidence:
+            out.append({"script_url": script_url, "evidence": evidence})
+            if len(out) >= 2:
+                break
+    return out
+
+
 @heuristic
 def traffic_api_candidates(har_path: Path, *, page_url: str = "") -> list[dict]:
     """HAR 에서 '글 목록' 일 만한 JSON 응답 후보를 *관련도(relevance_score) 순* 으로.
@@ -559,6 +611,7 @@ def traffic_api_candidates(har_path: Path, *, page_url: str = "") -> list[dict]:
             "resource_type": rtype or None,
             "relevance_score": score,
             "list_hits": list_hits,
+            "source_script_hints": _json_url_source_script_hints(har, har_path, json_url=url, page_url=page_url),
             "request_headers": {str(h.get("name", "")): str(h.get("value", "")) for h in (req.get("headers") or [])},
             "request_body_text": (req.get("postData") or {}).get("text"),
         }))

@@ -2305,6 +2305,15 @@ def _extra_signal_hints(digest: dict) -> list[str]:
     blank_shell = any(_BLANK_SHELL_NOTE_KW in n for n in notes)
     js_mosaic = any(_JS_MOSAIC_NOTE_KW in n for n in notes)
     if blank_shell:
+        if _has_json_api_candidates(digest):
+            out.append(
+                "⚠ probe: **정적 응답이 빈 shell 이지만 HAR 에 JSON API 후보가 있다**. "
+                "먼저 list_candidates.traffic_json_api_candidates 중 rendered 목록과 같은 최신 글 URL/제목/날짜를 주는 후보를 확인해 "
+                "맞으면 strategy=\"httpx_json\" 을 검토하라. 단 URL 문자열 모양만 템플릿화하지 말고, "
+                "그 URL 이 어디서 생성되는지(후보의 source_script_hints, script src, JS 안의 ajax/fetch 규칙)를 확인해야 한다. "
+                "생성 규칙이나 fallback 을 엔진이 표현 못 하면 억지로 일반 config 를 만들지 말고 한계를 적어라. "
+                "광고/랭킹/상품 API 는 rendered 최신 목록과 다르면 무시한다."
+            )
         out.append(
             "⚠ probe: **정적 응답이 빈 shell — Playwright DOM 에만 글 목록/카드가 그려진다** "
             "(static_ok_preset 가 200 OK 라도 빈 껍데기). strategy=httpx_html 은 글 0건 나옴 — "
