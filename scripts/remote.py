@@ -15,7 +15,9 @@
     python scripts/remote.py announce-scoped <base64-json>                  # 좁힌 공지 발송
     python scripts/remote.py batch-register --catalog <name> [...]          # catalog 1개+ 의 untried enqueue
     python scripts/remote.py batch-register --url URL [--url URL ...]       # 명시 URL 만 retry
-    python scripts/remote.py batch-register --catalog <name> --failed       # gen_fail+bug retry
+    python scripts/remote.py batch-register --catalog <name> --failed       # gen_fail+bug+blocked retry (=--failed=all)
+    python scripts/remote.py batch-register --catalog <name> --failed=gen   # gen_fail+bug 만 (blocked 제외)
+    python scripts/remote.py batch-register --catalog <name> --failed=blocked  # capability_blocked 만 (stealth 트랙)
     python scripts/remote.py batch-register --catalog <name> --rc 1,-99     # 특정 rc retry
     python scripts/remote.py batch-register --catalog <name> --force        # catalog 전체 retry
     python scripts/remote.py jobs [--kind register] [--since 60] [--min-id N]
@@ -388,7 +390,7 @@ def _sync_catalogs_to_n100(catalogs: list[str]) -> int:
 def cmd_batch_register(
     catalogs: list[str],
     urls: list[str],
-    failed: bool,
+    failed: Optional[str],
     rc: str,
     force: bool,
 ) -> int:
@@ -399,7 +401,10 @@ def cmd_batch_register(
     scp 실패 시 hard abort — stale yaml 로 register 진행 X.
 
     - scope: `--catalog` 이름 / `--url` 직접 URL 중 하나 이상.
-    - filter: default(untried) / `--failed` (rc∈{1,-1,-2,-3,-99}) / `--rc=<list>` / `--force` (모두 override).
+    - filter: default(untried) / `--failed[=all|gen|blocked]` / `--rc=<list>` / `--force` (모두 override).
+        failed=gen     → rc∈{1,-1,-2,-3,-99} (gen_fail+bug. capability_blocked 제외)
+        failed=blocked → rc∈{5} (capability_blocked 만 — stealth 트랙 등)
+        failed=all     → 둘 다 (bare `--failed` backward-compat)
     - 인자 검증: 모두 regex 통과해야 SSH command interpolation. metachar injection 차단.
     """
     if not catalogs and not urls:
@@ -426,7 +431,10 @@ def cmd_batch_register(
             return 4
         args += ["--url", u]
     if failed:
-        args.append("--failed")
+        if failed not in ("all", "gen", "blocked"):
+            print(f"[remote] invalid --failed group: {failed!r}", file=sys.stderr)
+            return 4
+        args.append(f"--failed={failed}")
     if rc:
         if not _RC_LIST_ARG_RE.match(rc):
             print(f"[remote] invalid rc list (정수,콤마 만): {rc!r}", file=sys.stderr)
@@ -594,7 +602,7 @@ def list_actions() -> int:
     print("  replay-deliveries <slug> <kind> <id> [post]    M2/M3 replay (lock+직렬)")
     print("  notify-target <slug> <kind> <id>               collected → 그 target 만 발송")
     print("  announce-scoped <base64-json>                  좁힌 공지 발송")
-    print("  batch-register --catalog <name>[...] [--url URL ...] [--failed|--rc 1,-99|--force]")
+    print("  batch-register --catalog <name>[...] [--url URL ...] [--failed[=all|gen|blocked]|--rc 1,-99|--force]")
     print("                                                 catalog/url scope × filter (rev5)")
     print("  jobs [--kind register] [--since 60] [--min-id N]")
     print("                                                 bot.sqlite3 jobs 상태 카운트 (drain 모니터링)")
@@ -633,8 +641,10 @@ def main(argv: Optional[list[str]] = None) -> int:
                     help="catalog 이름 (파일명 stem). 반복 가능. e.g. --catalog 2026-05-20")
     sp.add_argument("--url", action="append", default=[],
                     help="명시한 URL 만 retry (반복 가능)")
-    sp.add_argument("--failed", action="store_true",
-                    help="rc∈{1,-1,-2,-3,-99} URL retry (마커 자동 clear)")
+    sp.add_argument("--failed", nargs="?", const="all", default=None,
+                    choices=("all", "gen", "blocked"),
+                    help="rc 마커 가진 URL retry. GROUP={all|gen|blocked} (bare=all). "
+                         "gen=rc∈{1,-1,-2,-3,-99} (gen_fail+bug). blocked=rc=5 (capability_blocked).")
     sp.add_argument("--rc", default="",
                     help="rc filter (comma-list). e.g. --rc 1,-99")
     sp.add_argument("--force", action="store_true",

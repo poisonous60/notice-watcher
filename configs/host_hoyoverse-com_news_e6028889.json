@@ -1,0 +1,99 @@
+{
+  "version": 1,
+  "site": "hoyoverse.com",
+  "board": "news",
+  "strategy": "httpx_json",
+  "headers": {
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Origin": "https://www.hoyoverse.com",
+    "Referer": "https://www.hoyoverse.com/",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+    "sec-ch-ua": "\"Chromium\";v=\"148\", \"Google Chrome\";v=\"148\", \"Not/A)Brand\";v=\"99\"",
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": "\"Windows\""
+  },
+  "timeout": 15,
+  "list": {
+    "url_template": "https://sg-public-api-static.hoyoverse.com/content_v2_user/app/ea15ca8a7a654b5e/getContentList?isPreview=0&iChanId=206&sLangKey=ko-kr",
+    "pagination": {
+      "kind": "query_param",
+      "page_param": "iPage",
+      "size_param": "iPageSize"
+    },
+    "page_size_max": 7,
+    "list_path": [
+      "data",
+      "list"
+    ],
+    "fields": {
+      "post_id": [
+        {
+          "from": "json",
+          "path": [
+            "iInfoId"
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "json",
+          "path": [
+            "sTitle"
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "template",
+          "value": "https://www.hoyoverse.com/ko-kr/news/{post_id}"
+        }
+      ],
+      "published_at": [
+        {
+          "from": "json",
+          "path": [
+            "sDate"
+          ],
+          "transform": [
+            [
+              "date_only_to_iso",
+              "+09:00"
+            ]
+          ]
+        }
+      ],
+      "author": [
+        {
+          "from": "json",
+          "path": [
+            "sAuthor"
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "json",
+          "path": [
+            "sCategoryName"
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "url_template": "https://sg-public-api-static.hoyoverse.com/content_v2_user/app/ea15ca8a7a654b5e/getContent?isPreview=0&iChanId=206&sLangKey=ko-kr&iInfoId={post_id}",
+    "fetch_kind": "json",
+    "data_path": [
+      "data"
+    ],
+    "content": [
+      {
+        "from": "json",
+        "path": [
+          "sContent"
+        ]
+      }
+    ]
+  }
+}

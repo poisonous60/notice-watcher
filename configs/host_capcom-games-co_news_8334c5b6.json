@@ -1,0 +1,138 @@
+{
+  "version": 1,
+  "site": "capcom-games.com",
+  "board": "news",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ja-JP,ja;q=0.9,en;q=0.8",
+    "Referer": "https://www.capcom-games.com/news/"
+  },
+  "timeout": 15,
+  "polite_sleep": {
+    "min": 5,
+    "max": 6
+  },
+  "list": {
+    "url_template": "https://www.capcom-games.com/news/",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "ul.panel-list.News.list__inner > li.panel.is-init",
+    "fields": {
+      "post_id": [
+        {
+          "from": "css",
+          "selector": "a[href]",
+          "attr": "href",
+          "transform": [
+            [
+              "strip"
+            ],
+            [
+              "urljoin",
+              "https://www.capcom-games.com"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "a[href]",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "css",
+          "selector": "a[href]",
+          "attr": "href",
+          "transform": [
+            [
+              "strip"
+            ],
+            [
+              "urljoin",
+              "https://www.capcom-games.com"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "time",
+          "attr": "datetime",
+          "transform": [
+            [
+              "iso8601"
+            ]
+          ]
+        },
+        {
+          "from": "css",
+          "selector": "time",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "main",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "article",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "meta[property='og:title']",
+          "attr": "content"
+        },
+        {
+          "from": "css",
+          "selector": "h1",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "meta[property='article:published_time']",
+          "attr": "content",
+          "transform": [
+            [
+              "iso8601"
+            ]
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -20,7 +20,10 @@ scope axis (둘 중 하나 이상 필수):
 
 filter axis (택1):
     (default)            untried 만 — jobs row 없는 URL 만 enqueue.
-    --failed             rc ∈ {1, 5, -1, -2, -3, -99} 마커 가진 URL retry (마커 자동 clear).
+    --failed[=GROUP]     GROUP ∈ {all, gen, blocked}. 마커 가진 URL retry (마커 자동 clear).
+                           all     (= bare --failed) rc ∈ {1, 5, -1, -2, -3, -99} — 모든 재시도 대상
+                           gen     rc ∈ {1, -1, -2, -3, -99} — gen_fail + bug. capability_blocked 제외.
+                           blocked rc ∈ {5} — capability_blocked 만 (stealth 트랙 등 별도 처리용).
     --rc=<list>          comma-list (e.g. --rc=1,-99). 그 rc 가진 URL retry (마커 자동 clear).
     --force              jobs row / marker 다 무시. filter override.
 
@@ -62,9 +65,25 @@ MARKER_SUFFIXES = (".REJECTED.json", ".FAILED.json", ".BUG.json")
 
 CATALOG_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
-# `--failed` preset — retry-worthy rcs (gen_fail + bug variants + capability_blocked).
-# rc=5 (capability_blocked, 2026-05-21) = anti-bot/captcha 차단 = 능력 부족 → stealth 어댑터로 재도전 가능.
-FAILED_PRESET_RCS = (1, 5, -1, -2, -3, -99)
+# `--failed[=GROUP]` preset — retry-worthy rcs split by mechanism.
+#   gen     = gen_fail(1) + bug variants(-1/-2/-3/-99). 재실행으로 풀릴 여지가 가장 큰 부류.
+#   blocked = capability_blocked(rc=5, 2026-05-21) = anti-bot/captcha 차단 = 능력 부족.
+#             gen 과 분리해서 별도 트랙 (stealth/storage_state 어댑터)에서 따로 굴림.
+#   all     = gen ∪ blocked (bare `--failed` backward-compat).
+FAILED_PRESET_GROUPS: dict[str, tuple[int, ...]] = {
+    "gen": (1, -1, -2, -3, -99),
+    "blocked": (5,),
+}
+FAILED_PRESET_RCS: tuple[int, ...] = tuple(
+    rc for rcs in FAILED_PRESET_GROUPS.values() for rc in rcs
+)
+FAILED_GROUP_CHOICES: tuple[str, ...] = ("all",) + tuple(FAILED_PRESET_GROUPS.keys())
+
+
+def _rcs_for_failed_group(group: str) -> set[int]:
+    if group == "all":
+        return set(FAILED_PRESET_RCS)
+    return set(FAILED_PRESET_GROUPS[group])
 
 
 def _load_one_catalog(path: Path) -> list[dict]:
@@ -199,8 +218,11 @@ def main(argv: list[str]) -> int:
                    help="catalog 이름 (파일명 stem). 반복 가능. e.g. --catalog=2026-05-20")
     p.add_argument("--url", action="append", default=[],
                    help="직접 URL allowlist. 반복 가능. catalog 무관.")
-    p.add_argument("--failed", action="store_true",
-                   help=f"rc∈{FAILED_PRESET_RCS} 인 URL retry (마커 자동 clear)")
+    p.add_argument("--failed", nargs="?", const="all", default=None,
+                   choices=FAILED_GROUP_CHOICES,
+                   help="rc 마커 가진 URL retry (마커 자동 clear). "
+                        "GROUP={all|gen|blocked}. bare=all. "
+                        f"gen={FAILED_PRESET_GROUPS['gen']}, blocked={FAILED_PRESET_GROUPS['blocked']}.")
     p.add_argument("--rc", default="",
                    help="rc filter (comma-list). e.g. --rc=1,-99. 해당 rc URL retry (마커 자동 clear)")
     p.add_argument("--force", action="store_true",
@@ -219,7 +241,7 @@ def main(argv: list[str]) -> int:
     # rc filter set
     rc_filter: Optional[set[int]] = None
     if args.failed:
-        rc_filter = set(FAILED_PRESET_RCS)
+        rc_filter = _rcs_for_failed_group(args.failed)
     elif args.rc:
         try:
             rc_filter = _parse_rc_list(args.rc)
@@ -308,7 +330,7 @@ def main(argv: list[str]) -> int:
         conn.close()
 
     mode = ("force" if args.force
-            else "failed" if args.failed
+            else f"failed:{args.failed}" if args.failed
             else "rc" if args.rc
             else "untried")
     catalogs_label = ",".join(args.catalog) if args.catalog else "-"

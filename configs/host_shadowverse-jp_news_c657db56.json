@@ -1,0 +1,148 @@
+{
+  "version": 1,
+  "site": "shadowverse.jp",
+  "board": "news",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+    "Accept-Language": "ko-KR",
+    "Upgrade-Insecure-Requests": "1",
+    "Referer": "https://shadowverse.jp/news/"
+  },
+  "timeout": 15,
+  "list": {
+    "url_template": "https://shadowverse.jp/news/",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "ul.news-list > li",
+    "fields": {
+      "post_id": [
+        {
+          "from": "css",
+          "selector": "a.title-link",
+          "attr": "href",
+          "transform": [
+            [
+              "strip"
+            ],
+            [
+              "regex_extract",
+              "announce_id=(\\d+)"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "a.title-link h4",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "css",
+          "selector": "a.title-link",
+          "attr": "href",
+          "transform": [
+            [
+              "strip"
+            ],
+            [
+              "urljoin",
+              "https://shadowverse.jp/news/"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "time.time",
+          "text": true,
+          "transform": [
+            [
+              "strip"
+            ],
+            [
+              "iso8601",
+              [
+                "%Y.%m.%d"
+              ]
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "div.description p",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "div.contents-body > div.body",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "div.body",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "header.news-detail-head h3",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "div.meta-info time.time",
+          "text": true,
+          "transform": [
+            [
+              "strip"
+            ],
+            [
+              "iso8601",
+              [
+                "%Y.%m.%d"
+              ]
+            ],
+            [
+              "default",
+              null
+            ]
+          ]
+        }
+      ]
+    }
+  }
+}

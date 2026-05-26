@@ -758,15 +758,63 @@ def _heterogeneous_hub_check(digest: dict, url: str) -> Optional[str]:
     if _validated_feed_candidates(digest):
         return None
     lc = digest.get("list_candidates") or {}
-    # F-layer escape: URL path 에 명시적 announcement-tab segment (/news/·/notice/ 등)
-    # + 정적 pagination hint (≥1) = 사이트가 *공지 탭 분리 + 페이지네이션* 보유 = board 본질 신호.
-    # 2026-05-26 games-jp batch (atlus.co.jp/news/, fate-go.jp/news/) 박힘 — 정적 HTML
-    # 에 `/news/page/2`·`/news/page/3` 있어도 article 클러스터 슬러그 모양이 underscore/
-    # 외부 host 라 미검출 → false-reject. announcement-tab + pagination = explicit board 의도.
+    article_sample = digest.get("article_sample") or {}
+    # F-layer escape: URL path 에 명시적 announcement-tab segment (/news/·/notice/ 등) 일 때
+    # 다음 *board 본질 신호* 중 하나라도 있으면 통과 (pagination·API identity·dense-under-board·clicked-article).
+    # 2026-05-26 games-jp batch (atlus.co.jp/news/, fate-go.jp/news/) 박힘 — 정적 HTML 에
+    # `/news/page/2`·`/news/page/3` 있어도 article 클러스터 슬러그 모양이 underscore/외부 host 라
+    # 미검출 → false-reject. announcement-tab + (페이지네이션|article-API|밀집|click-resolved) = explicit board 의도.
+    # 2026-05-27 games-jp batch (granbluefantasy.jp/news/, www.nexon.co.jp/news/) 박힘:
+    #   - granblue: reprobe 의 article body JSON API 3건 (rcms-api/news/details/9704) 중 url_id_match=True
+    #     1건 = 서버가 글 ID 별 본문 endpoint 발급 = 실제 article inventory 확정.
+    #   - nexon: cc=755 cluster `/news/detail?id={n}-23a5e007` (placeholder 가 query 에). path
+    #     `/news/detail` 이 board path `/news/` 아래로 가는 dense cluster.
+    #   - 둘 다 clicked_resolved_url 이 진짜 article URL (`/9704/`, `/news/detail?id=155`).
     raw_path = (urlsplit(url).path or "").lower()
     board_path = raw_path.rstrip("/") or "/"
-    if _ANNOUNCEMENT_TAB_RE.search(raw_path) and (lc.get("pagination_hints") or []):
-        return None
+    if _ANNOUNCEMENT_TAB_RE.search(raw_path):
+        # (1) 정적 pagination hint.
+        if lc.get("pagination_hints") or []:
+            return None
+        # (2) 본문 JSON API 후보 중 url_id_match=True — 서버가 글 ID 별 본문 endpoint 발급.
+        for a in (article_sample.get("api_candidates") or []):
+            if a.get("url_id_match"):
+                return None
+        # (3) dense-under-board: 같은 호스트 + cc>=20 + cluster path 가 board_path 아래.
+        for p in (lc.get("html_repeating_patterns") or []):
+            hp = p.get("href_pattern_guess") or p.get("sample_url") or ""
+            if not hp:
+                continue
+            h = (urlsplit(hp).hostname or "").lower()
+            same_host_p = (not h and hp.startswith("/")) or (host and h == host.split(":")[0])
+            if not same_host_p:
+                continue
+            cc_p = int(p.get("child_count", 0) or 0)
+            if cc_p < 20:
+                continue
+            path_p = (urlsplit(hp).path or hp).lower().rstrip("/") or "/"
+            bp = board_path.rstrip("/").lower()
+            if bp and bp != "/" and (path_p == bp or path_p.startswith(bp + "/")) and path_p != bp:
+                return None
+        # (4) Phase 9b click 결과가 진짜 article URL (depth>=2 + 마지막 segment 가 ID/slug).
+        cru = (article_sample.get("clicked_resolved_url") or "").strip()
+        if cru:
+            cru_segs = [s for s in (urlsplit(cru).path or "").split("/") if s]
+            if len(cru_segs) >= 2:
+                last_seg = cru_segs[-1]
+                # 숫자 ID / mixed alnum / 긴 slug
+                click_is_article = (
+                    last_seg.isdigit()
+                    or (len(last_seg) >= 4 and last_seg.replace("-", "").replace("_", "").isalnum()
+                        and any(c.isdigit() for c in last_seg))
+                    or (len(last_seg) >= 8 and (last_seg.count("-") + last_seg.count("_")) >= 1)
+                )
+                if click_is_article:
+                    cru_query = urlsplit(cru).query or ""
+                    cru_host = (urlsplit(cru).hostname or "").lower()
+                    cru_same_host = (cru_host == host.split(":")[0])
+                    if cru_same_host or cru_query:
+                        return None
     article_clusters: list[tuple[int, str, str]] = []  # (cc, sample_path, prefix)
     nav_clusters: list[tuple[int, str]] = []           # (cc, sample_path)
     for p in (lc.get("html_repeating_patterns") or []):
@@ -781,13 +829,23 @@ def _heterogeneous_hub_check(digest: dict, url: str) -> Optional[str]:
         if cc < 5:
             continue
         path = urlsplit(hp).path or hp
+        # query/fragment 포함 raw (placeholder-in-query 인식용)
+        hp_query = urlsplit(hp).query or ""
         segs = [s for s in path.split("/") if s]
         # 현재 board path 의 filter/tab cluster (`/news` 페이지의 `/news` cluster) 는 competition 에서 제외
         cluster_path_norm = ("/" + "/".join(segs)).lower().rstrip("/") or "/"
         if cluster_path_norm == board_path:
             continue
         is_article_shape = False
-        if len(segs) >= 2:
+        # query string 에 placeholder ({n}/{id} 등) — `/news/detail?id={n}-...` 류
+        # cc>=20 dense AND path 가 board_path 아래로 가는 것만 (false-positive 방지: 페이지네이션
+        # `/list?page={n}` 류는 path 가 board_path 자체일 수 있어 위 cluster_path_norm filter 로 빠짐).
+        bp_norm = board_path.rstrip("/").lower()
+        path_low = cluster_path_norm
+        under_board = (bp_norm and bp_norm != "/" and path_low.startswith(bp_norm + "/"))
+        if cc >= 20 and under_board and ("{" in hp_query and "}" in hp_query):
+            is_article_shape = True
+        if not is_article_shape and len(segs) >= 2:
             last = segs[-1]
             has_pl = "{" in last and "}" in last
             # slug_shape: 8+ char + 2+ separator (- or _). JP/CMS 가 `2026_grand_caster_cp`
