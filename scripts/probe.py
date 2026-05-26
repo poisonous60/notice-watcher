@@ -17,6 +17,9 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from urllib.parse import urljoin, urlsplit
+
+from bs4 import BeautifulSoup, Tag
 
 # 프로젝트 루트를 sys.path에 추가 (scripts/에서 패키지 import 가능하게)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -27,6 +30,7 @@ from probe.diagnose import diagnose
 from probe.environment import capture as capture_environment, gdpi_advice
 from probe.discover import discover_feeds, fetch_sitemaps, read_robots
 from probe.extract import (
+    _registered_domain,
     all_same_host_patterns_in_nav,
     article_meta_signals,
     html_repeating_patterns,
@@ -71,6 +75,37 @@ from probe.report import write_summary
 from probe.types import Classification, Result
 
 HEADLESS_JOIN_CAP_S = float(os.environ.get("PROBE_HEADLESS_JOIN_CAP_S", "45"))
+STATIC_OK_HEADLESS_SKIP = os.environ.get("PROBE_STATIC_OK_SKIP_HEADLESS", "1").strip().lower() in {"1", "true", "yes", "on"}
+STATIC_OK_SKIP_MIN_ROWS = int(os.environ.get("PROBE_STATIC_OK_SKIP_MIN_ROWS", "5"))
+_STATIC_SPA_MARKERS_RE = re.compile(
+    r"(__NEXT_DATA__|__NUXT__|window\.__INITIAL_STATE__|<div\s+id=[\"']?__nuxt[\"']?|<div\s+id=[\"']?__next[\"']?)",
+    re.IGNORECASE,
+)
+_STATIC_SKIP_CHROME_RE = re.compile(
+    r"(^|[._#>\s-])(nav|navbar|navigation|gnb|lnb|menu|submenu|subnav|header|footer|"
+    r"breadcrumb|pagination|pager|category|categories|login|account|privacy|policy)([._#>\s-]|$)",
+    re.IGNORECASE,
+)
+_STATIC_SKIP_URL_RE = re.compile(
+    r"/(login|signin|signup|register|member|members|account|privacy|policy|terms|"
+    r"category|categories|tag|tags|search|about|contact)(?:[./?]|$)",
+    re.IGNORECASE,
+)
+_STATIC_SKIP_QUERY_RE = re.compile(
+    r"(^|[?&;])(category|categories|tag|tags|search|q|keyword|login|signin|signup|member|account)=",
+    re.IGNORECASE,
+)
+_STATIC_MULTI_LABEL_SUFFIXES = {
+    "ac.kr", "co.kr", "go.kr", "ne.kr", "or.kr", "re.kr",
+    "ac.jp", "co.jp", "go.jp", "ne.jp", "or.jp",
+    "ac.uk", "co.uk", "gov.uk", "ltd.uk", "me.uk", "net.uk", "org.uk", "plc.uk",
+    "asn.au", "com.au", "edu.au", "gov.au", "id.au", "net.au", "org.au",
+    "com.cn", "edu.cn", "gov.cn", "net.cn", "org.cn",
+    "com.hk", "edu.hk", "gov.hk", "net.hk", "org.hk",
+    "com.sg", "edu.sg", "gov.sg", "net.sg", "org.sg",
+    "com.tw", "edu.tw", "gov.tw", "net.tw", "org.tw",
+    "com.br", "edu.br", "gov.br", "net.br", "org.br",
+}
 
 
 def _headless_timeout_result(*, url: str, target: str, started: float, cap_s: float) -> Result:
@@ -289,6 +324,103 @@ def _static_results_are_hard_login(static_results: list[Result]) -> bool:
     )
 
 
+def _same_registrable_site(url_a: str, url_b: str) -> bool:
+    ha = urlsplit(url_a or "").netloc
+    hb = urlsplit(url_b or "").netloc
+    return bool(ha and hb and _static_registered_domain(ha) == _static_registered_domain(hb))
+
+
+def _static_registered_domain(host: str) -> str:
+    h = (host or "").lower().split("@")[-1].split(":", 1)[0].strip(".")
+    reg = _registered_domain(h)
+    if reg in _STATIC_MULTI_LABEL_SUFFIXES:
+        parts = h.split(".")
+        if len(parts) >= 3:
+            return ".".join(parts[-3:])
+    return reg
+
+
+def _static_html_has_skipworthy_list(html: str, *, url: str) -> bool:
+    html_lists = html_repeating_patterns(html, base_url=url)
+    for cand in html_lists:
+        if int(cand.get("child_count") or 0) < STATIC_OK_SKIP_MIN_ROWS:
+            continue
+        selector = str(cand.get("selector") or "")
+        if _STATIC_SKIP_CHROME_RE.search(selector):
+            continue
+        sample_url = str(cand.get("sample_url") or "")
+        if not sample_url.startswith(("http://", "https://")):
+            continue
+        if not _same_registrable_site(sample_url, url):
+            continue
+        sample_parts = urlsplit(sample_url)
+        path = sample_parts.path or ""
+        if _STATIC_SKIP_URL_RE.search(path):
+            continue
+        path_with_query = path + (("?" + sample_parts.query) if sample_parts.query else "")
+        if _STATIC_SKIP_QUERY_RE.search(path_with_query):
+            continue
+        if _static_sample_url_is_in_chrome(html, sample_url=sample_url, base_url=url):
+            continue
+        return True
+    return False
+
+
+def _static_sample_url_is_in_chrome(html: str, *, sample_url: str, base_url: str) -> bool:
+    try:
+        soup = BeautifulSoup(html, "html.parser")
+    except Exception:
+        return False
+
+    sample_cmp = urlsplit(sample_url)._replace(fragment="").geturl()
+    for a in soup.find_all("a", href=True):
+        href_cmp = urlsplit(urljoin(base_url, str(a.get("href") or "")))._replace(fragment="").geturl()
+        if href_cmp != sample_cmp:
+            continue
+        for parent in [a, *list(a.parents)]:
+            if not isinstance(parent, Tag):
+                continue
+            tag_name = (parent.name or "").lower()
+            if tag_name in {"nav", "header", "footer"}:
+                return True
+            attrs = " ".join(
+                str(v)
+                for k in ("id", "class", "role", "aria-label")
+                for v in ([parent.get(k)] if not isinstance(parent.get(k), list) else parent.get(k))
+                if v
+            )
+            if attrs and _STATIC_SKIP_CHROME_RE.search(attrs):
+                return True
+        return False
+    return False
+
+
+def _static_result_for_headless_skip(static_results: list[Result], *, url: str) -> Result | None:
+    """Return the static result that has enough list shape for config generation.
+
+    This intentionally stays conservative: SPA hydration markers still go
+    through Phase 2 because HAR/rendered DOM can reveal the real API or rows.
+    """
+    if not STATIC_OK_HEADLESS_SKIP:
+        return None
+    for r in static_results:
+        if r.classification != Classification.OK or r.status != 200 or not r.body_path:
+            continue
+        try:
+            html = Path(r.body_path).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if _STATIC_SPA_MARKERS_RE.search(html):
+            continue
+        if _static_html_has_skipworthy_list(html, url=url):
+            return r
+    return None
+
+
+def _static_result_allows_headless_skip(static_results: list[Result], *, url: str) -> bool:
+    return _static_result_for_headless_skip(static_results, url=url) is not None
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Site reconnaissance probe.")
     p.add_argument("url", help="목록 URL 하나")
@@ -472,8 +604,11 @@ def _run(args: argparse.Namespace, url: str, slug: str) -> int:
     # process exit 이 지연될 수 있어 fail-fast 한다.
     headless: Result | None = None
     static_hard_login = _static_results_are_hard_login(static_results)
+    static_headless_skip_result = _static_result_for_headless_skip(static_results, url=url)
     if static_hard_login:
         print("\n[Phase 2] skipped — Phase 1 hard LOGIN_REQUIRED redirect (headless would hit login SPA)")
+    elif static_headless_skip_result is not None:
+        print("\n[Phase 2] skipped — static HTML already has repeated article links")
     elif _do_headless:
         print(f"\n[Phase 2] Playwright headless w/ HAR capture ... (cap={HEADLESS_JOIN_CAP_S:g}s)")
         with tr.span("phase2_headless_har_capture", attrs={"target": "list", "cap_s": HEADLESS_JOIN_CAP_S}):
@@ -597,6 +732,8 @@ def _run(args: argparse.Namespace, url: str, slug: str) -> int:
     page_html = ""
     if headless is not None and headless.classification == Classification.OK and headless.body_path:
         page_html = Path(headless.body_path).read_text(encoding="utf-8", errors="replace")
+    elif static_headless_skip_result is not None and static_headless_skip_result.body_path:
+        page_html = Path(static_headless_skip_result.body_path).read_text(encoding="utf-8", errors="replace")
     elif static_results:
         for r in static_results:
             if r.classification == Classification.OK and r.body_path:
@@ -753,7 +890,7 @@ def _run(args: argparse.Namespace, url: str, slug: str) -> int:
         # ---- Phase 9b: article-by-click (직접 GET 으론 다른 데로 튕기는 클라이언트 라우트 / href=javascript: 목록 대응) ----
         click_meta: dict = {}
         do_click = (not args.no_article_click and not args.no_headless and headless_available()
-                    and headless is not None and bool(first_article_url or html_lists))
+                    and bool(first_article_url or html_lists))
         if do_click and args.lite:
             # lite 에선 직접 GET 으로 *진짜 글로 보이는* URL 의 본문 페이지를 이미 잘 받았으면 클릭 probe 생략(시간 절약).
             # 단, first_article_url 이 None 이거나(모든 행 href 가 javascript:) 글 ID 숫자가 없으면(메뉴/카테고리 링크였을 수 있음)

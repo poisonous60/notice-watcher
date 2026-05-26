@@ -293,6 +293,23 @@ def _capture_page_content(page) -> tuple[str, bool]:
 _DAEMON_ENDPOINT_FILE = Path(__file__).resolve().parent.parent / "output" / "playwright_daemon" / "endpoint"
 
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _should_use_daemon() -> bool:
+    """CDP daemon reuse is opt-in for probe HAR capture.
+
+    A stale long-lived daemon can fail after CDP attach and before HAR flush,
+    which makes the parent probe spend the full wall-clock cap with no traffic
+    artifact. Fresh launch costs a few seconds but isolates each probe.
+    """
+    return _env_flag("PROBE_HEADLESS_USE_DAEMON", False)
+
+
 def _launch_browser(p, *, headless: bool):
     channel_pref = os.environ.get("PROBE_BROWSER_CHANNEL", "chrome,msedge,bundled")
     channels = [x.strip().lower() for x in channel_pref.split(",") if x.strip()]
@@ -318,7 +335,7 @@ def _connect_or_launch(p, *, headless: bool):
     timeout 나는 케이스 있음 (microsoft/playwright#35115). 대신 /json/version 에서 webSocketDebuggerUrl
     추출해 ws URL 직접 패스하는 게 안정적.
     """
-    if _DAEMON_ENDPOINT_FILE.exists():
+    if _should_use_daemon() and _DAEMON_ENDPOINT_FILE.exists():
         try:
             endpoint = _DAEMON_ENDPOINT_FILE.read_text(encoding="utf-8").strip()
             if endpoint:

@@ -22,6 +22,7 @@ def run() -> list[tuple[str, bool, str]]:
     from probe.fetch_headless import (
         _body_preserving_truncated_html,
         _context_kwargs,
+        _should_use_daemon,
         _is_cloudflare_interstitial,
     )
 
@@ -39,6 +40,11 @@ def run() -> list[tuple[str, bool, str]]:
         and kwargs.get("screen", {}).get("width") == 1365
         and "Accept-Language" in kwargs.get("extra_http_headers", {}),
         repr(kwargs),
+    ))
+    cases.append((
+        "daemon_reuse_disabled_by_default_for_har_capture",
+        _should_use_daemon() is False,
+        "probe headless should prefer fresh chromium unless explicitly opted in",
     ))
 
     challenge, turnstile = _is_cloudflare_interstitial(_FakePage(
