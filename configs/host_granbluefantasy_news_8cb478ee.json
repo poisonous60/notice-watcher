@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "site": "granbluefantasy.jp",
+  "board": "news",
+  "_source_url": "https://granbluefantasy.jp/news/",
+  "_note": "list/article 둘 다 granbluefantasy.com (cross-host) rcms-api JSON. .jp 는 정적 shell + click 으로 .com 본문 라우팅.",
+  "strategy": "httpx_json",
+  "headers": {
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "ja-JP,ja;q=0.9,en;q=0.8",
+    "Referer": "https://granbluefantasy.jp/news/",
+    "Origin": "https://granbluefantasy.jp",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
+  },
+  "timeout": 15,
+  "list": {
+    "url_template": "https://granbluefantasy.com/rcms-api/1/news?cnt={size}&pageID={page}&_lang=ja",
+    "pagination": {
+      "kind": "query_param",
+      "page_param": "pageID",
+      "size_param": "cnt"
+    },
+    "page_size_max": 10,
+    "list_path": ["list"],
+    "fields": {
+      "post_id": [
+        { "from": "json", "path": ["topics_id"] }
+      ],
+      "title": [
+        { "from": "json", "path": ["subject"] }
+      ],
+      "url": [
+        { "from": "template", "value": "https://granbluefantasy.com/ja/news/{post_id}/" }
+      ],
+      "published_at": [
+        {
+          "from": "json",
+          "path": ["inst_ymdhi"],
+          "transform": [["replace", " ", "T"], ["append", "+09:00"], ["iso8601"]]
+        }
+      ]
+    }
+  },
+  "article": {
+    "url_template": "https://granbluefantasy.com/rcms-api/1/news/details/{post_id}?cnt=1&_lang=ja",
+    "fetch_kind": "json",
+    "data_path": ["details"],
+    "content": [
+      { "from": "json", "path": ["content"] }
+    ]
+  }
+}

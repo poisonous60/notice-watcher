@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "site": "www.nexon.co.jp",
+  "board": "news",
+  "_source_url": "https://www.nexon.co.jp/news/",
+  "_note": "SPA. 정적 HTML = 빈 shell. playwright 렌더 후 ul.js-news-list-container > li.js-news-list 에 article rows. wait_selector 로 hydration 완료 대기. N100 Chromium DNS 재시도 의존 (가끔 ERR_NAME_NOT_RESOLVED).",
+  "strategy": "playwright_html",
+  "headers": {
+    "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "accept-language": "ja-JP,ja;q=0.9,en;q=0.8",
+    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
+  },
+  "timeout": 30,
+  "list": {
+    "url_template": "https://www.nexon.co.jp/news/",
+    "pagination": {
+      "kind": "none"
+    },
+    "wait_selector": "ul.js-news-list-container > li.js-news-list a.js-news-link",
+    "row_selector": "ul.js-news-list-container > li.js-news-list",
+    "fields": {
+      "post_id": [
+        {
+          "from": "css",
+          "selector": "a.js-news-link",
+          "attr": "href",
+          "transform": [["regex_extract", "id=([^&]+)"]]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "a.js-news-link",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ],
+      "url": [
+        {
+          "from": "css",
+          "selector": "a.js-news-link",
+          "attr": "href",
+          "transform": [["urljoin", "https://www.nexon.co.jp/news/"]]
+        }
+      ]
+    }
+  },
+  "article": {
+    "url_template": "https://www.nexon.co.jp/news/detail?id={post_id}",
+    "fetch_kind": "html",
+    "wait_selector": "article, main",
+    "content": [
+      { "from": "css", "selector": "article", "html": true },
+      { "from": "css", "selector": "main", "html": true }
+    ]
+  }
+}
