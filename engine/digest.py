@@ -372,7 +372,7 @@ def _hydration_digest(raw_list_html: str) -> dict:
 # digest 의 clean_html 가 `<style>` 제거하기 *전* 의 raw HTML 에서 추출 — LLM prompt 한테 component
 # class 후보 전달용. 2026-05-25 Radiolab 회복 plan.
 _CSS_CLASS_TOKEN_RE = re.compile(r"\.([A-Za-z][\w-]*)")
-_CSS_RULE_SELECTOR_RE = re.compile(r"([^{}]+)\{[^{}]*\}", re.DOTALL)
+_CSS_MAX_STYLE_CHARS = 500_000
 
 # utility/chrome/generic class reject. Tailwind/Bootstrap/PrimeVue/Bulma 노이즈 큼.
 _CSS_CLASS_BLOCKLIST_PATTERNS = [
@@ -404,6 +404,28 @@ def _is_blocked_css_class(cls: str) -> bool:
         if pat.match(cls):
             return True
     return False
+
+
+def _iter_css_selectors(css_text: str):
+    """Yield selector text before each CSS rule body using a linear scan.
+
+    Some minified CSS triggers catastrophic backtracking with a broad
+    selector/body regex. This signal is measurement-only, so a simple scan is
+    preferable to letting digest construction stall on large stylesheets.
+    """
+    start = 0
+    n = len(css_text)
+    while start < n:
+        open_i = css_text.find("{", start)
+        if open_i < 0:
+            break
+        selector = css_text[start:open_i].strip()
+        if selector:
+            yield selector
+        close_i = css_text.find("}", open_i + 1)
+        if close_i < 0:
+            break
+        start = close_i + 1
 
 
 def _extract_css_component_classes(raw_html: Optional[str], *, top_n: int = 8,
@@ -439,9 +461,10 @@ def _extract_css_component_classes(raw_html: Optional[str], *, top_n: int = 8,
     rule_count: dict[str, int] = {}
     co_occurrence: dict[str, dict[str, int]] = {}
     for css_text in style_texts:
+        if len(css_text) > _CSS_MAX_STYLE_CHARS:
+            css_text = css_text[:_CSS_MAX_STYLE_CHARS]
         # selector 부분만 매칭 (rule body 무시) — selector 안의 .class 토큰만 봄
-        for m in _CSS_RULE_SELECTOR_RE.finditer(css_text):
-            selector_part = m.group(1)
+        for selector_part in _iter_css_selectors(css_text):
             classes_in_rule = []
             for cm in _CSS_CLASS_TOKEN_RE.finditer(selector_part):
                 cls = cm.group(1)

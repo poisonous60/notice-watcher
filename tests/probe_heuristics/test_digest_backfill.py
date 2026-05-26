@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import tempfile
+import time
 from pathlib import Path
 
 
@@ -133,5 +134,19 @@ def run() -> list[tuple[str, bool, str]]:
         rm = (digest.get("list_candidates") or {}).get("root_marketing_homepage")
         cases.append(("backfill_plain_board_returns_none",
                       rm is None, f"got {rm!r}"))
+
+    # 4. 큰 minified CSS 의 selector scan 이 digest 를 오래 붙잡지 않아야 한다.
+    from engine.digest import _extract_css_component_classes
+    css = "".join(
+        f".campaign-card-{i}.campaign-card--active{{background:url('data:image/svg+xml,<svg>{{}}</svg>');color:#111}}"
+        for i in range(3000)
+    )
+    html = f"<html><head><style>{css}</style></head><body></body></html>"
+    started = time.perf_counter()
+    classes = _extract_css_component_classes(html)
+    elapsed = time.perf_counter() - started
+    cases.append(("css_component_classes_large_minified_fast",
+                  elapsed < 1.0 and isinstance(classes, list),
+                  f"elapsed={elapsed:.3f}s classes={classes[:2]!r}"))
 
     return cases
