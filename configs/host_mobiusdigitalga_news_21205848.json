@@ -1,0 +1,174 @@
+{
+  "version": 1,
+  "site": "www.mobiusdigitalgames.com",
+  "board": "news",
+  "strategy": "httpx_html",
+  "_source_url": "https://www.mobiusdigitalgames.com/news/",
+  "_note": "Handcrafted via the Weebly RSS feed. The HTML news page has real div.blog-post rows, but probe ranks the archive sidebar first (/news/archives/06-2025).",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/rss+xml,application/xml,text/xml;q=0.9,text/html;q=0.8,*/*;q=0.7",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+    "Referer": "https://www.mobiusdigitalgames.com/news/"
+  },
+  "timeout": 20,
+  "polite_sleep": {
+    "min": 10,
+    "max": 10
+  },
+  "list": {
+    "url_template": "https://www.mobiusdigitalgames.com/1/feed",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "channel > item",
+    "fields": {
+      "post_id": [
+        {
+          "from": "css",
+          "selector": "guid",
+          "text": true,
+          "transform": [
+            [
+              "regex_extract",
+              "https?://www\\.mobiusdigitalgames\\.com/news/([^/?#]+)"
+            ]
+          ]
+        },
+        {
+          "from": "css",
+          "selector": "link",
+          "text": true,
+          "transform": [
+            [
+              "regex_extract",
+              "https?://www\\.mobiusdigitalgames\\.com/news/([^/?#]+)"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "css",
+          "selector": "link",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "strip"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "pubDate",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "iso8601",
+              [
+                "%a, %d %b %Y %H:%M:%S %z",
+                "%a, %d %b %Y %H:%M:%S %Z"
+              ],
+              "Z"
+            ]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "css",
+          "selector": "category",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "description",
+          "text": true,
+          "transform": [
+            [
+              "html_unescape"
+            ],
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "div.blog-content",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "#wsite-content div.blog-post",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "h2.blog-title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "p.blog-date span.date-text",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "iso8601",
+              [
+                "%m/%d/%Y"
+              ],
+              "-07:00"
+            ]
+          ]
+        }
+      ]
+    }
+  }
+}
