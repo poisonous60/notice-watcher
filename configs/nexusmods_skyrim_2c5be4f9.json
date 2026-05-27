@@ -1,0 +1,172 @@
+{
+  "version": 1,
+  "site": "nexusmods.com",
+  "board": "4",
+  "_slug_board": "skyrim",
+  "_source_url": "https://www.nexusmods.com/skyrim",
+  "_note": "Nexus Mods skyrim mods 탭 (BH=4 Recent Mods 정렬) — known-platform 자동 인식. playwright_html + stealth 로 CF JS challenge 우회. 입력 URL 이 게임 hub (`/skyrim`) 든 mods 탭이든 모두 Recent Mods 정렬 폴링 대상으로 정규화.",
+  "strategy": "playwright_html",
+  "disable_stealth": true,
+  "headers": {
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+    "Accept-Language": "ko-KR",
+    "Upgrade-Insecure-Requests": "1",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+    "Sec-CH-UA": "\"Chromium\";v=\"148\", \"Google Chrome\";v=\"148\", \"Not/A)Brand\";v=\"99\"",
+    "Sec-CH-UA-Mobile": "?0",
+    "Sec-CH-UA-Platform": "\"Windows\"",
+    "Referer": "https://www.nexusmods.com/",
+    "Origin": "https://www.nexusmods.com"
+  },
+  "timeout": 15,
+  "nav_timeout_ms": 20000,
+  "idle_timeout_ms": 12000,
+  "quiet_ms": 800,
+  "list": {
+    "url_template": "https://www.nexusmods.com/skyrim/mods/?BH={board}",
+    "pagination": {
+      "kind": "query_param",
+      "page_param": "page"
+    },
+    "wait_selector": "div.mods-grid > div[data-e2eid=\"mod-tile\"]",
+    "row_selector": "div.mods-grid > div[data-e2eid=\"mod-tile\"]",
+    "row_required_selector": "a[data-e2eid=\"mod-tile-title\"]",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a[data-e2eid=\"mod-tile-title\"]",
+          "attr": "href",
+          "transform": [
+            [
+              "regex_extract",
+              "/mods/(\\d+)"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "a[data-e2eid=\"mod-tile-title\"]",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a[data-e2eid=\"mod-tile-title\"]",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://www.nexusmods.com"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "attr",
+          "selector": "p[data-e2eid=\"mod-tile-uploaded\"] time",
+          "attr": "datetime",
+          "transform": [
+            [
+              "iso8601",
+              [
+                "%Y-%m-%dT%H:%M:%S.%fZ",
+                "%Y-%m-%dT%H:%M:%S%z"
+              ]
+            ]
+          ]
+        }
+      ],
+      "author": [
+        {
+          "from": "css",
+          "selector": "a[data-e2eid=\"user-link\"] span",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "css",
+          "selector": "a[data-e2eid=\"mod-tile-category\"]",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "div[data-e2eid=\"mod-tile-summary\"]",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "cover_image": [
+        {
+          "from": "attr",
+          "selector": "a[data-e2eid=\"mod-tile-title\"] img",
+          "attr": "src",
+          "transform": [
+            [
+              "urljoin",
+              "https://www.nexusmods.com"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "wait_selector": "div#mainContent",
+    "content": [
+      {
+        "from": "css",
+        "selector": "div#mainContent",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "body > div:nth-of-type(2)",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "h1",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "_recognized_platform": "nexusmods"
+}

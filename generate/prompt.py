@@ -24,6 +24,7 @@ _EXAMPLE_CONFIG_FILES = [
     "skku_cse_1582.json",                          # httpx_html, concat, pick:first_matching, 페이지네이션 offset
     "dcinside_endfield.json",                      # httpx_html, fallback chain, template, attr+match, notice 처리, polite_sleep 하한
     "host_web-news-gryphl_api_53675aad.json",      # httpx_json, list_path, success_when, unixtime_to_iso, article re_extract (구 endfield_official.json — commit 9de6977 slug schema rename)
+    "nexusmods_skyrim_2c5be4f9.json",              # playwright_html, mod hub catalog (반복 카드 grid + 각 카드 → 상세 페이지). published_at 없는 row 도 허용, post_id 는 detail URL 의 ID 추출
 ]
 
 

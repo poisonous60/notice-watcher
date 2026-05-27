@@ -288,6 +288,21 @@ def _recipe_2_applies(cfg: dict, digest: dict) -> bool:
     return sk.get("kind") == "spa_rendered" and sk.get("confidence") == "high"
 
 
+def _recipe_3_applies(cfg: dict, digest: dict) -> bool:
+    """Recipe 3 applies_to — 정적 catalog/grid row_selector miss 봉합.
+
+    조건: 정적 HTML 인데 row 0건 반복 (NOT SPA) + html_repeating_patterns 후보 다수.
+    catalog/mod hub/카드 grid 가 nested selector 필요해서 시도한 row_selector 가 너무
+    wide/narrow 인 경우.
+    """
+    sk = digest.get("site_kind") or {}
+    if sk.get("kind") == "spa_rendered" and sk.get("confidence") == "high":
+        return False  # Recipe 2 영역
+    lc = digest.get("list_candidates") or {}
+    n_patterns = len(lc.get("html_repeating_patterns") or [])
+    return n_patterns >= 2
+
+
 # Recipe 1 patch: fallback chain — guid 의 number prefix 우선, link 전체 URL fallback.
 #
 # 1순위 (guid number prefix): TAL 류 podcast 의 guid 가 `"46156 at https://..."` 형식 —
@@ -398,6 +413,9 @@ def _select_retry_recipes(cfg: dict, digest: dict, attempt_history: list[dict]) 
     n_spa = _count_fail_key(attempt_history, "posts_nonempty") + _count_fail_key(attempt_history, "title_nonempty")
     if n_spa >= 2 and _recipe_2_applies(cfg, digest):
         selected.append("spa_rendered_retry")
+    # Recipe 3: posts_nonempty 2회+ + 정적 (NOT SPA) — catalog/grid row_selector miss 봉합 (text hint only).
+    if n_spa >= 2 and _recipe_3_applies(cfg, digest) and "spa_rendered_retry" not in selected:
+        selected.append("static_catalog_row_retry")
     return selected
 
 
@@ -461,6 +479,15 @@ _RECIPE_TEXT_HINTS = {
         "wait_selector 가 비어있으면 list_html (정적) 의 진짜 row container selector "
         "(h2/h3/.card-title/.post 류 — *실제 title element*) 를 직접 박아라. "
         "`a[href]` 단순 wait 는 nav/menu 까지 잡혀 부족하다."
+    ),
+    "static_catalog_row_retry": (
+        "**Recipe static_catalog_row_retry** — `posts_nonempty` 반복 0건 + 정적 HTML (SPA 아님). "
+        "row_selector 가 wrong layer 잡았을 가능성: (a) 너무 wide — nav/header/footer 까지 매치, "
+        "(b) 너무 narrow — 실제 카드 컨테이너 못 잡음. digest 의 `list_candidates.html_repeating_patterns` "
+        "top 후보의 `selector` 그대로 시도하라 — 보통 nested grid (`div.<grid-class> > div.<card-class>`, "
+        "`ul.<list-class> > li.<item-class>`). catalog/mod hub 면 grid 형 nested selector 필수 "
+        "(`a[href]` 같은 generic 안 됨). `published_at` 추출 안 되면 fields 에서 *해당 필드 자체를 빼라* "
+        "— 억지 placeholder selector 박지 마라 (catalog row 는 timestamp 없을 수 있음)."
     ),
 }
 
