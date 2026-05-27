@@ -49,12 +49,12 @@ def main(argv: list[str]) -> int:
             sys.stderr.write(f"[dashboard] self-check FAIL: import dashboard.app: {type(e).__name__}: {e}\n")
             return 1
         paths = {getattr(r, "path", "") for r in app.routes}
-        needed = {"/jobs", "/usage"}
+        needed = {"/jobs", "/usage", "/probe-har"}
         missing = sorted(needed - paths)
         if missing:
             sys.stderr.write(f"[dashboard] self-check FAIL: missing routes {missing}\n")
             return 1
-        print("[dashboard] self-check OK: dashboard.app import + /jobs,/usage routes")
+        print("[dashboard] self-check OK: dashboard.app import + /jobs,/usage,/probe-har routes")
         return 0
 
     _require_deploy_host_env()

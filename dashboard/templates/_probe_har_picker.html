@@ -1,0 +1,68 @@
+<form method="get" action="/probe-har/list" class="har-search-form"
+      hx-get="/probe-har/list" hx-target="#har-picker-body" hx-swap="innerHTML">
+  <label>검색
+    <input type="search" name="q" value="{{ q or '' }}" placeholder="slug / URL / first article / verdict">
+  </label>
+  <button type="submit">검색</button>
+  <a href="/probe-har/list"
+     role="button" class="secondary"
+     hx-get="/probe-har/list" hx-target="#har-picker-body" hx-swap="innerHTML">초기화</a>
+</form>
+
+{% if runs %}
+<table class="compact har-results" style="margin-top:0.6rem">
+  <thead><tr><th>열기</th><th>HAR</th><th>slug</th><th>URL</th><th>first article</th><th>verdict</th><th>mtime</th></tr></thead>
+  <tbody>
+    {% for r in runs %}
+    <tr>
+      <td>
+        {% if r.has_har %}
+        <a class="nowrap" href="/probe-har?slug={{ r.slug }}{% if q %}&q={{ q|urlencode }}{% endif %}">열기</a>
+        {% else %}
+        <span class="muted">없음</span>
+        {% endif %}
+      </td>
+      <td>{{ r.har_count }}</td>
+      <td class="mono">{{ r.slug }}</td>
+      <td class="har-url-cell"><small title="{{ r.url }}">{{ r.url or '—' }}</small></td>
+      <td class="har-url-cell"><small title="{{ r.first_article_url }}">{{ r.first_article_url or '—' }}</small></td>
+      <td><small>{{ r.verdict or '—' }}</small></td>
+      <td><small class="muted">{{ r.mtime_str }}</small></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">{% if q %}검색 결과가 없습니다.{% else %}probe 산출물이 없습니다.{% endif %}</p>
+{% endif %}
+
+{% if page > 1 or has_next %}
+<nav class="pagination" style="display:flex;gap:0.6rem;align-items:center;margin:0.6rem 0;font-size:0.9rem;">
+  {% if page > 1 %}
+    <a href="/probe-har/list?q={{ q|urlencode }}&page=1"
+       hx-get="/probe-har/list?q={{ q|urlencode }}&page=1" hx-target="#har-picker-body" hx-swap="innerHTML"
+       title="첫 페이지">⏮</a>
+    <a href="/probe-har/list?q={{ q|urlencode }}&page={{ page - 1 }}"
+       hx-get="/probe-har/list?q={{ q|urlencode }}&page={{ page - 1 }}" hx-target="#har-picker-body" hx-swap="innerHTML">← 이전</a>
+  {% else %}
+    <span class="muted">⏮</span>
+    <span class="muted">← 이전</span>
+  {% endif %}
+  <span class="muted">page {{ page }}</span>
+  {% if has_next %}
+    <a href="/probe-har/list?q={{ q|urlencode }}&page={{ page + 1 }}"
+       hx-get="/probe-har/list?q={{ q|urlencode }}&page={{ page + 1 }}" hx-target="#har-picker-body" hx-swap="innerHTML">다음 →</a>
+  {% else %}
+    <span class="muted">다음 →</span>
+  {% endif %}
+  <form method="get" action="/probe-har/list"
+        hx-get="/probe-har/list" hx-target="#har-picker-body" hx-swap="innerHTML"
+        style="display:inline-flex;gap:0.3rem;align-items:center;margin-left:0.6rem;">
+    <input type="hidden" name="q" value="{{ q or '' }}">
+    <label class="muted" style="font-size:0.85rem;margin:0;">이동
+      <input type="number" name="page" value="{{ page }}" min="1" style="width:5em;">
+    </label>
+    <button type="submit" class="secondary outline" style="padding:0.2rem 0.6rem;margin:0;">go</button>
+  </form>
+</nav>
+{% endif %}

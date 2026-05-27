@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+{% block title %}Probe HAR · notice-watcher{% endblock %}
+{% block body %}
+
+<h2>🔎 Probe HAR</h2>
+<p class="muted" style="font-size:0.85rem">
+  dev box 로컬 <code>output/probe/&lt;slug&gt;/traffic*.har</code> 를 다시 읽어서
+  probe 의 HAR 기반 추출 함수가 어떤 후보를 뽑는지 보여줍니다.
+</p>
+
+<section class="har-run-panel">
+  <form method="post" action="/probe-har/run" style="display:grid;grid-template-columns:minmax(22rem,1fr) 11rem 9rem auto;gap:0.6rem;align-items:end">
+    <label>URL
+      <input type="url" name="url" value="{{ probe_url or '' }}" placeholder="https://example.com/news/" required>
+    </label>
+    <label>흐름
+      <select name="run_kind">
+        <option value="probe" {% if run_kind == 'probe' %}selected{% endif %}>probe만</option>
+        <option value="register_gate" {% if run_kind == 'register_gate' %}selected{% endif %}>register 게이트까지</option>
+        <option value="register" {% if run_kind == 'register' %}selected{% endif %}>실제 register</option>
+      </select>
+    </label>
+    <label>실행 모드
+      <select name="mode">
+        <option value="lite" {% if mode == 'lite' %}selected{% endif %}>실제 lite</option>
+        <option value="full" {% if mode == 'full' %}selected{% endif %}>실제 full</option>
+      </select>
+    </label>
+    <button type="submit">probe 실행</button>
+    <label style="grid-column:1 / -1;display:flex;gap:0.4rem;align-items:center;font-size:0.9rem">
+      <input type="checkbox" name="force_har" value="1" {% if force_har %}checked{% endif %}>
+      정적 HTML 이 충분해도 headless/HAR 캡처를 건너뛰지 않음
+      <small class="muted">(<code>PROBE_STATIC_OK_SKIP_HEADLESS=0</code>)</small>
+    </label>
+  </form>
+  <p class="muted" style="font-size:0.82rem;margin:0.4rem 0 0">
+    기본값은 register 가 실제로 부르는 probe 단계와 같은 <code>scripts/probe.py URL --lite --no-paid --no-crawl4ai</code> 입니다.
+    <code>register 게이트까지</code>는 probe 후 <code>register.py --reuse-probe --gate-only</code>로 digest/게이트 요약을 확인합니다.
+    <code>실제 register</code>는 config/state/FAILED/REJECTED 작성과 LLM 호출이 일어날 수 있습니다.
+  </p>
+</section>
+
+{% if run_result %}
+<article class="{{ 'pull-result ok' if run_result.ok else 'pull-result err' }}">
+  <strong>실행 {{ '성공' if run_result.ok else '실패' }}</strong>
+  {% if run_result.slug %} · slug=<code>{{ run_result.slug }}</code>{% endif %}
+  {% if run_result.rc is not none %} · rc=<code>{{ run_result.rc }}</code>{% endif %}
+  {% if run_result.cmd %}<div><small><code>{{ run_result.cmd }}</code></small></div>{% endif %}
+  {% if run_result.output %}
+  <details>
+    <summary>stdout/stderr</summary>
+    <pre>{{ run_result.output[-8000:] }}</pre>
+  </details>
+  {% endif %}
+  {% if run_result.ok and not choices %}
+  <p style="margin:0.5rem 0 0">이번 실행에서 <code>traffic*.har</code>가 생성되지 않았습니다. 실제 probe 가 정적 HTML 만으로 충분하다고 판단했을 수 있습니다.</p>
+  {% endif %}
+</article>
+{% endif %}
+
+<details class="har-picker" {% if not detail or q or page > 1 %}open{% endif %}>
+  <summary>
+    <strong>기존 probe 산출물 검색/선택</strong>
+    <small class="muted">{{ total_runs or 0 }}건{% if q %} · "{{ q }}"{% endif %}</small>
+  </summary>
+  <div id="har-picker-body">
+    {% include "_probe_har_picker.html" %}
+  </div>
+</details>
+
+{% if not runs and not detail %}
+  <article class="failed-box">
+    HAR 가 있는 probe 산출물이 없습니다. 먼저 probe/register 를 한 번 실행해야 합니다.
+  </article>
+{% endif %}
+
+{% if detail %}
+{% if choices|length > 1 %}
+<form method="get" action="/probe-har" class="har-file-form">
+  <input type="hidden" name="slug" value="{{ selected_slug }}">
+  <input type="hidden" name="q" value="{{ q or '' }}">
+  <input type="hidden" name="page" value="{{ page or 1 }}">
+  <label>HAR 파일
+    <select name="har">
+      {% for h in choices %}
+      <option value="{{ h }}" {% if h == selected_har %}selected{% endif %}>{{ h }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <button type="submit">바꾸기</button>
+</form>
+{% endif %}
+<section class="har-kpis">
+  <article class="kpi"><div class="kpi-label">entries</div><div class="kpi-value">{{ detail.summary.entry_count }}</div></article>
+  <article class="kpi"><div class="kpi-label">JSON-ish</div><div class="kpi-value">{{ detail.summary.json_count }}</div></article>
+  <article class="kpi"><div class="kpi-label">xhr/fetch</div><div class="kpi-value">{{ detail.summary.xhr_count }}</div></article>
+  <article class="kpi"><div class="kpi-label">HTTP 4xx/5xx</div><div class="kpi-value">{{ detail.summary.status_error_count }}</div></article>
+</section>
+
+<dl class="kv" style="margin:0.8rem 0">
+  <dt>slug</dt><dd><code>{{ detail.slug }}</code></dd>
+  <dt>HAR</dt><dd><code>{{ detail.har_name }}</code> <span class="muted">({{ detail.har_mtime }})</span></dd>
+  <dt>probe URL</dt><dd>{% if detail.base_url|is_http %}<a href="{{ detail.base_url }}" target="_blank" rel="noopener">{{ detail.base_url }}</a>{% else %}{{ detail.base_url or '—' }}{% endif %}</dd>
+  <dt>first article</dt><dd>{% if detail.first_article_url|is_http %}<a href="{{ detail.first_article_url }}" target="_blank" rel="noopener">{{ detail.first_article_url }}</a>{% else %}{{ detail.first_article_url or '—' }}{% endif %}</dd>
+  <dt>verdict</dt><dd>{{ detail.diagnosis_verdict or '—' }}</dd>
+</dl>
+
+<details>
+  <summary><strong>content-type 분포</strong></summary>
+  {% if detail.summary.content_types %}
+  <table class="compact">
+    <thead><tr><th>content-type</th><th>count</th></tr></thead>
+    <tbody>
+      {% for ct, n in detail.summary.content_types %}
+      <tr><td><code>{{ ct }}</code></td><td>{{ n }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">content-type 정보 없음.</p>
+  {% endif %}
+</details>
+
+{% for section in detail.sections %}
+<section class="har-section">
+  <div class="har-section-head">
+    <h3>{{ section.title }}</h3>
+    <code>{{ section.source }}</code>
+  </div>
+  {% if section["items"] %}
+  <table class="compact">
+    <thead><tr><th>signal</th><th>URL / template</th><th>meta</th><th>evidence</th></tr></thead>
+    <tbody>
+      {% for item in section["items"] %}
+      <tr>
+        <td><span class="badge">{{ item.badge }}</span></td>
+        <td class="mono har-url">{{ item.main or '—' }}</td>
+        <td><small>{{ item.meta }}</small></td>
+        <td><small class="muted">{{ item.evidence }}</small></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">검출된 후보 없음.</p>
+  {% endif %}
+  <details>
+    <summary>raw JSON 보기</summary>
+    <pre class="tail">{{ section["raw"] | tojson(indent=2) }}</pre>
+  </details>
+</section>
+{% endfor %}
+
+{% for artifact in detail.artifact_sections %}
+<section class="har-section">
+  <div class="har-section-head">
+    <h3>{{ artifact.title }}</h3>
+    <code>{{ artifact.source }}</code>
+  </div>
+  {% if artifact.rows %}
+  <table class="compact">
+    <thead><tr><th>key</th><th>type</th><th>count</th><th>preview</th></tr></thead>
+    <tbody>
+      {% for row in artifact.rows %}
+      <tr>
+        <td class="mono">{{ row.key }}</td>
+        <td><span class="badge">{{ row.kind }}</span></td>
+        <td>{{ row.count or '—' }}</td>
+        <td><small>{{ row.preview }}</small></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+  <details>
+    <summary>raw JSON 보기</summary>
+    <pre class="tail">{{ artifact.raw | tojson(indent=2) }}</pre>
+  </details>
+</section>
+{% endfor %}
+{% elif runs %}
+<p class="muted">선택한 HAR 를 열 수 없습니다.</p>
+{% endif %}
+
+{% endblock %}

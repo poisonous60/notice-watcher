@@ -35,6 +35,8 @@ from dashboard import control_actions as ctrl
 from dashboard import history_view
 from dashboard import tracing_view
 from dashboard import builder_view
+from dashboard import har_view
+from dashboard.shell import async_run
 
 HERE = Path(__file__).resolve().parent
 # autoescape 명시: Starlette/FastAPI 버전에 따라 default 가 바뀔 수 있어 직접 Environment 주입.
@@ -89,6 +91,7 @@ PAGE_SOURCES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("/settings",    ()),
     ("/history",     ()),
     ("/timings",     ()),
+    ("/probe-har",   ()),
     ("/cases",       ()),
     ("/vocab",       ()),
     # snapshot 의존 — 0-source 아님
@@ -218,6 +221,20 @@ def _render(name: str, request: Request, *, status_code: int = 200, **extra: Any
 def _partial(name: str, request: Request, **extra: Any) -> HTMLResponse:
     """HTMX 부분 응답 — base 컨텍스트(sidebar/snapshot_ts) 안 씀."""
     return templates.TemplateResponse(request, name, extra)
+
+
+def _probe_har_picker_context(q: str, page: int) -> dict[str, Any]:
+    search_q = (q or "").strip()
+    all_runs = har_view.list_probe_runs(q=search_q, limit=5000)
+    per_page = 20
+    offset = (page - 1) * per_page
+    return {
+        "runs": all_runs[offset:offset + per_page],
+        "q": search_q,
+        "page": page,
+        "has_next": offset + per_page < len(all_runs),
+        "total_runs": len(all_runs),
+    }
 
 
 def _no_snapshot(request: Request) -> HTMLResponse:
@@ -985,6 +1002,102 @@ async def timings_detail(request: Request, trace_id: str,
                    active="timings", trace=detail, gantt=gantt,
                    source=src, sources=tracing_view.TRACE_SOURCES,
                    start_str=_ts_str(detail.t_start_wall))
+
+
+@app.get("/probe-har", response_class=HTMLResponse)
+async def probe_har_page(request: Request,
+                         slug: Optional[str] = Query(None),
+                         har: Optional[str] = Query(None),
+                         q: Optional[str] = Query(""),
+                         page: int = Query(1, ge=1),
+                         mode: Optional[str] = Query("lite"),
+                         run_kind: Optional[str] = Query("probe"),
+                         force_har: Optional[str] = Query(None)):
+    picker = _probe_har_picker_context(q or "", page)
+    runs = picker["runs"]
+    all_runs = har_view.list_probe_runs(q=picker["q"], limit=5000)
+    first_with_har_on_page = next((r for r in runs if r.get("has_har")), None)
+    selected_slug = slug if slug and state.safe_slug(slug) else (first_with_har_on_page["slug"] if first_with_har_on_page else "")
+    choices = har_view.har_choices(selected_slug) if selected_slug else []
+    selected_har = har if har in choices else (choices[0] if choices else "")
+    detail = None
+    if selected_slug and selected_har:
+        detail = har_view.build_har_detail(selected_slug, selected_har)
+    return _render("probe_har.html", request,
+                   active="probe_har", runs=runs,
+                   selected_slug=selected_slug, selected_har=selected_har,
+                   choices=choices, detail=detail,
+                   q=picker["q"],
+                   page=page, has_next=picker["has_next"], total_runs=len(all_runs),
+                   mode=har_view.normalize_probe_mode(mode),
+                   run_kind=har_view.normalize_run_kind(run_kind),
+                   force_har=bool(force_har),
+                   run_result=None, probe_url="")
+
+
+@app.get("/probe-har/list", response_class=HTMLResponse)
+async def probe_har_list(request: Request,
+                         q: Optional[str] = Query(""),
+                         page: int = Query(1, ge=1)):
+    return _partial("_probe_har_picker.html", request, **_probe_har_picker_context(q or "", page))
+
+
+@app.post("/probe-har/run", response_class=HTMLResponse)
+async def probe_har_run(request: Request,
+                        url: str = Form(...),
+                        mode: str = Form("lite"),
+                        run_kind: str = Form("probe"),
+                        force_har: Optional[str] = Form(None)):
+    probe_url = (url or "").strip()
+    probe_mode = har_view.normalize_probe_mode(mode)
+    kind = har_view.normalize_run_kind(run_kind)
+    force = bool(force_har)
+    runs = har_view.list_probe_runs()
+    run_result: dict[str, Any]
+    detail = None
+    selected_slug = ""
+    choices: list[str] = []
+    selected_har = ""
+    if not har_view.is_probe_url(probe_url):
+        run_result = {"ok": False, "rc": None, "output": "http(s) URL 을 입력하세요.", "slug": ""}
+    else:
+        selected_slug = har_view.slug_for_url(probe_url)
+        if kind == "register_gate":
+            probe_cmd = har_view.probe_command(probe_url, mode=probe_mode)
+            probe_res = await async_run(probe_cmd, cwd=ROOT, env=har_view.probe_env(force_har=force))
+            gate_cmd = har_view.register_command(probe_url, mode=probe_mode, gate_only=True)
+            gate_res = await async_run(gate_cmd, cwd=ROOT, env=har_view.probe_env(force_har=force))
+            run_result = {
+                "ok": bool(probe_res.get("ok") and gate_res.get("ok")),
+                "rc": gate_res.get("rc") if probe_res.get("ok") else probe_res.get("rc"),
+                "output": (
+                    "=== probe stage ===\n" + str(probe_res.get("output") or "")
+                    + "\n=== register --reuse-probe --gate-only ===\n" + str(gate_res.get("output") or "")
+                ),
+                "cmd": " ".join(probe_cmd) + " && " + " ".join(gate_cmd),
+            }
+        else:
+            cmd = (
+                har_view.register_command(probe_url, mode=probe_mode, gate_only=False)
+                if kind == "register"
+                else har_view.probe_command(probe_url, mode=probe_mode)
+            )
+            run_result = await async_run(cmd, cwd=ROOT, env=har_view.probe_env(force_har=force))
+            run_result["cmd"] = " ".join(cmd)
+        run_result["slug"] = selected_slug
+        choices = har_view.har_choices(selected_slug)
+        selected_har = choices[0] if choices else ""
+        if selected_har:
+            detail = har_view.build_har_detail(selected_slug, selected_har)
+        runs = har_view.list_probe_runs(q=selected_slug)
+    return _render("probe_har.html", request,
+                   active="probe_har", runs=runs,
+                   selected_slug=selected_slug, selected_har=selected_har,
+                   choices=choices, detail=detail,
+                   q=selected_slug if selected_slug else "",
+                   page=1, has_next=False, total_runs=len(runs),
+                   mode=probe_mode, run_kind=kind, force_har=force,
+                   run_result=run_result, probe_url=probe_url)
 
 
 # --------------------------------------------------------------------------- #
