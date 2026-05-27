@@ -5,10 +5,10 @@
   "strategy": "playwright_html",
   "timeout": 30,
   "polite_sleep": {"min": 5, "max": 6},
-  "_source_url": "https://www.metacoregames.com/news/",
+  "_source_url": "https://metacoregames.com/news/",
   "_note": "handcrafted: Panda CSS (Chakra v3 style) atomic-class site. (1) probe verdict said `정적 HTTP로 충분` but raw httpx returns feed-block-items-grid shell with 0 anchors; only headless renders 12 rows = SPA hydration needed. (2) probe row_selector unusable (>600 chars, `[&_*]:` bracket-arbitrary). Use stable class `feed-block-items-grid` + anchor href prefix `/news/`.",
   "list": {
-    "url_template": "https://www.metacoregames.com/news/",
+    "url_template": "https://metacoregames.com/news/",
     "wait_selector": "div.feed-block-items-grid a[href^='/news/']",
     "pagination": {"kind": "none"},
     "row_selector": "div.feed-block-items-grid a[href^='/news/']",
