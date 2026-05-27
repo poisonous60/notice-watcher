@@ -1,14 +1,15 @@
 ---
 name: hand-config
 description: >-
-  notice-watcher 의 자동 등록 실패 사이트(triage 큐)를 진단·해결·N100 배포하는 워크플로우.
-  사용자가 "FAILED 큐 처리", "triage", "이 사이트 등록", "손 config 작성", "config 만들어줘" 라고 할 때.
-  진단 분기에서 **가능하면 추론 개선(probe 휴리스틱·schema·prompt)** 으로 미지 유형을 더 풀게 하는 게
-  1순위, 수동 config(단일/플랫폼)·손어댑터는 그게 불가능할 때만.
+  notice-watcher 의 자동 등록 실패 사이트(triage 큐)를 *분석해 시스템 일반화 후보를 찾는* 워크플로우.
+  사용자가 "FAILED 큐 처리", "triage", "사이트 분석", "이 사이트 등록", "손 config 작성" 이라고 할 때.
+  **목표 = 시스템 일반화** (probe 휴리스틱 · classifier prompt · recognizer · config_writer prompt · engine code).
+  사이트별 수동 config·손어댑터는 *Track B 일반화 후보가 0건* 이고 *동시에 사용자가 이 사이트 즉시 작동을 명시 요청* 한 잔여만의 optional path.
+  둘 다 아니면 `triage.py park-gate-fail` 로 큐에 두고 다음 분류기/probe 개선 후 sweep 으로 회수 — **사이트 단위 ship 강제 X**.
   이 프로젝트 (`poisonous60/notice-watcher` 의 dev박스 clone) 전용.
 ---
 
-선언적 config (JSON) 로 게시판 수집. `register.py` 가 probe + LLM 으로 config 자동 생성, 실패 시 `output/poll_state/<slug>.FAILED.json` + `output/triage_queue.jsonl` 두 곳 흔적. 이 스킬이 dev 박스에서 진단·해결·N100 배포. **추측 X — 각 단계 산출물 확인하며 순서대로.**
+선언적 config (JSON) 로 게시판 수집. `register.py` 가 probe + LLM 으로 config 자동 생성, 실패 시 `output/poll_state/<slug>.FAILED.json` + `output/triage_queue.jsonl` 두 곳 흔적. 이 스킬이 dev 박스에서 **사이트 분석 → 일반화 후보 도출 → (필요 시) 수동 config 또는 park**. **추측 X — 각 단계 산출물 확인하며 순서대로.** **사이트별 fix 가 본 목적 아님** — 시스템 일반화 자체가 본 목적.
 
 ## 먼저 펼쳐 볼 것 (해당 단계에서 필요한 만큼)
 - `engine/config_schema.py` 상단 docstring — config 스키마 (최우선 근거).
@@ -43,7 +44,7 @@ description: >-
 
 3. **capability_blocked (rc=5, `.FAILED.json`)** — captcha/anti-bot/cloudflare 차단 = **능력 부족(정책 아님)**. `register.py` 가 자동으로 rc=5+FAILED 박음 (2026-05-21 policy_reject 에서 split). stealth/anti-detection 어댑터로 재도전 (§2e + docs/크롤링 지침.md §6 stealth 허용). `policy_reject`(rc=2 LOGIN_REQUIRED)·`url_dead`(rc=4 죽은 URL)와 **구분** — 이 둘은 의도된 거부, 작업 X.
 
-4. **gen_fail (rc=1, `.FAILED.json`)** — **먼저 §0b-2 screen-out** (content-as-list 오탐·soft-404 미검출 골라내 영구 게이트로 봉합 + 거부 — 진짜 게시판 아님). 통과한 잔여만 기존 hand-config §1~§5 (진단 → 수동 config 또는 probe/prompt 개선). SPA(정적 HTML 에 목록 없음, struct 신호 "SPA"/"JS 실행 필요") 잔여 → **render(playwright_html) 트랙 자동 진행**.
+4. **gen_fail (rc=1, `.FAILED.json`)** — **먼저 §0b-2 screen-out** (content-as-list 오탐·soft-404 미검출 골라내 분류기 A-layer 보강으로 봉합 — 진짜 게시판 아님). 통과한 잔여는 §1 진단 → **Track B (E/D/C/B/A/F 6 자리, `docs/자가개선 인프라 계획.md` §0) 1순위**. 6 자리 모두 miss 이고 *사용자가 이 사이트 즉시 작동을 명시 요청* 한 잔여만 Track A (수동 config). 둘 다 아니면 `triage.py park-gate-fail <slug> --reason=…` 로 park (사이트 단위 ship 강제 X — 다음 분류기/probe 개선 후 `sweep-gate-fail --execute`). SPA(struct 신호 "SPA"/"JS 실행 필요") 잔여 → render(playwright_html) 트랙 자동 — 단 그조차 C-layer (SPA detect 휴리스틱) 자리부터 본 다음.
 
 > **자동 진행 (묻지 X) — 2026-05-21 사용자 결정.** batch 가 cap_blocked(rc=5)·SPA(render 필요) 잔여를 남겨도 **사용자에게 "stealth/render 투자할까?" 물어보지 말 것**. clean win(recognizer·RSS·수동 selector) 다 처리한 뒤 **stealth(cap_blocked)·render(SPA) 트랙을 알아서 이어서 시도**한다. 어휘는 [[feedback-batch-fail-priority]] 그대로 (bug>gate_reject>capability_blocked>gen_fail). stealth/render 도 실패하면 그제서야 그 사이트만 "root-cause = 능력 한계" 로 case 기록 + 종료. **gate_reject(content 판정)·url_dead·policy_reject 는 여전히 작업 X** (정상 거부). 묻는 건 *정책상 회색지대*(우회 금지선·LOGIN 등)일 때만.
 
@@ -225,13 +226,32 @@ triage 에서 *지금 작업 안 하고 치워두는* 항목은 **해소 경로�
 
 `show` 출력의 `last_feedback`(=`[FAIL] <체크>`), `last_config`(자동 생성된 마지막 시도 — selector/path 한두 개만 고치면 될 때도 많음), `output/probe/<slug>/` 의 `summary.txt`·`list_candidates.json`·`article_candidates.json`·`traffic.har`·`diagnosis.json` 을 본다. `docs/config 자동생성 실패 케이스.md` 의 §번호에 매칭해 원인 분류.
 
-**진단 직후 — 두 트랙 동시** (한쪽이 다른 쪽 막는 게이트 X):
-- **트랙 A** (사용자 향 — 사이트 즉시 작동): 2a~2d 중 매칭 있으면 그게 해결 수단, 없으면 2e (수동 config/손어댑터). 항상 결과물 있음 (작동 또는 거부 마커).
-- **트랙 B** (미래 향 — 같은 패턴 재발 차단): 수동 config 으로 끝낸 케이스도 의무 검토. 후보 — 2a (`engine/recognizers/` PATTERNS 한 줄 추가 = 플랫폼 config, handcrafted), 2b (`first_article_url` 잘못 잡힘 → `--article-url` 재시도, 추론 개선), 2c (probe artifact 에 신호 있는데 휴리스틱화 안 됨, 추론 개선), 2d (probe 자체 오작동, 추론 개선).
+**진단 직후 — Track B 우선**:
 
-각 후보 한 줄 점검 (`X — 이유` 또는 `O — 자리`). 매칭 시 같은 PR. 0건이면 case body 에 이유 1줄.
+- **Track B (1순위, 필수)** — 사이트 분석 → 시스템 일반화 후보. *비용 ascending 순* (싸고 hard 한 쪽부터 — `docs/자가개선 인프라 계획.md` §0 원칙) 6 자리 점검. 각 자리 `hit — <구체 자리>` 또는 `miss — <이유 1줄>`:
+  - **E** schema 거부 — `engine/config_schema.py` validator. 잘못된 config 가 생성 직후 막혀야 하는 자리. *운영 사용 sparse* (~9건, single-layer commit 2).
+  - **D** retry feedback — `generate/validate.py` 가 LLM 에게 주는 retry 피드백 메시지 보강 (`posts_nonempty 0`/`probe_grounding_*` 등 신호 명확화) 또는 retry recipe (`b311b0f` D-layer MVP). *운영 사용 sparse* (~11건 combos).
+  - **C** probe digest 신호 — `probe/extract.py`·`probe/hydration.py` heuristic. raw artifact 에 신호가 있는데 추출 안 됐을 때. **운영 second** (~54건). 한 case 가 여러 사이트 동시 해결 흔함 (예: `888cc5b` `[fix-layer: C]` 3 사이트).
+  - **B** few-shot example — `generate/prompt.py:_EXAMPLE_CONFIG_FILES`. 같은 패턴의 working config 추가 → LLM 재현 학습. **운영에서 보통 miss** — M1 초기 3개 박힌 후 추가 ~4건, 대부분 silent rot fix (rename 따라잡음). 토큰 비쌈. *진짜 B hit 조건*: A/F 보다 risk 낮은 compact exemplar 가 repeated config shape (예: 새 strategy 의 canonical 예시·rare transform chain) 을 일반화할 수 있을 때만. 그 외엔 A (system 규칙 추가) 또는 C (probe heuristic) 가 cheaper.
+  - **A** system 규칙 *추가* — `prompts/config_writer.system.txt`·**`prompts/classify.system.txt`** (gate_reject false-negative 봉합 자리, ADR 0007). **추가만 OK** — 기존 줄 수정/제거 = pipeline-rot-review SKILL 영역. **운영에서 standalone 0건** — 항상 E/F/C/D 와 combo (~7건). 의미: A 단독으론 LLM 가 그 룰 지키게 강제 못 함 — *F 의 post-LLM override* 또는 *D 의 retry feedback* 와 paired 가 안전.
+  - **F** 새 엔진 코드 — recognizer 신설 (`engine/recognizers/<plat>.py`), 새 strategy (`engine/strategies/`), `register.py` post-LLM override, preflight 거부 마커. **운영 dominant** (~170+ appearances). 가장 큰 hammer — A/D/C 로 LLM 신뢰 못 하는 신호를 F 로 enforce.
+  - hit 1+ 있으면 그 자리에 박는다 (같은 PR). 한 case 가 여러 layer 동시 hit 흔함 (예: `[fix-layer: C+F]`, `[fix-layer: E+F+A]`). miss 면 이유 1줄 — `cases_index` 0건은 miss 정당화 X.
+  - **운영 frequency note (cargo-cult 경고)**: order 는 *비용/evidence ascending prescription* — E (싸고 hard) → F (큼). **history 가 F-heavy 라고 F 부터 박지 X**. F=170+, C=54, E=9, D=11, B=4, A=combos-only 분포는 *과거 fix 들이 결과적으로 어디로 흘러갔나* 의 통계지 *next case 의 1순위 자리* 아님. 다음 case 가 E/D 로 해결 가능하면 E 부터 박는다 (싸고 hard). 분석 audit 은 E→F 순서로 훑되, 박는 자리는 case 의 *실 신호 위치* — F 가 결과적으로 많이 박히는 건 *probe/LLM 신뢰 못 하는 경우가 그만큼 흔하다* 는 의미일 뿐.
+- **Track A (optional, 진입 조건 strict)** — 다음 *AND* 만족 시만 §2 분기 §2e (수동 config/손어댑터) 진입:
+  - (a) Track B 6 자리 모두 miss + 각 이유 case body 적힘
+  - (b) 사용자가 이 사이트 봇 사용자 향 **즉시 작동을 명시 요청** (user prompt 어휘 verbatim 인용, 자기-해석 X)
+  - 둘 중 하나 미충족 → Track A skip.
+- **둘 다 안 풀리면 park — 사이트 단위 ship 강제 X**:
+  - `python scripts/triage.py park-gate-fail <slug> --reason="<왜>"` → 활성 list 숨김. 다음 분류기/probe 개선 후 `sweep-gate-fail --execute` 한 방에 회수.
+  - cap_blocked 류 (능력 한계) 면 자동 `triage_later.json` (rc=5 auto-defer).
 
-예시: `host_scholar-google-_scholar_706d9c49` (commit `0b130b2`) — 트랙 A 수동 config + 트랙 B (C) `probe/extract.py:list_row_external_host` + (D) `generate/validate.py:_external_host_hint`. 동시.
+예시 — Track B 박음 (commit `888cc5b`): `[fix-layer: C]` `probe/hydration.py` key matcher 일반화 + `probe/extract.py` cross-host structured guard. 한 case 가 3 사이트 (granbluefantasy/umamusume/hoyoverse) 동시 해결.
+
+예시 — 동시 진행 (`host_scholar-google-_scholar_706d9c49`, commit `0b130b2`): Track B (C) `probe/extract.py:list_row_external_host` + (D) `generate/validate.py:_external_host_hint` + Track A 수동 config (사용자 요청). 같은 PR.
+
+예시 — Track B match + Track A skip: 사용자 ship 요청 없으면 Track B 만 박고 batch 재시도로 회수.
+
+예시 — 둘 다 0건: `triage.py park-gate-fail <slug> --reason="idiosyncratic · 일반화 신호 0건 · ship 요청 0건"`.
 
 ### §2 진입 전 — 강제 인용 (skim 방지)
 
@@ -240,8 +260,8 @@ triage 에서 *지금 작업 안 하고 치워두는* 항목은 **해소 경로�
 1. **`last_feedback` 첫 `[FAIL]` 줄** (`triage.py show` 출력에서 verbatim)
 2. **`diagnosis.json` 의 `verdict`** (digest 에 표면화됨)
 3. **`docs/config 자동생성 실패 케이스.md` 매칭 §번호** + 1줄 근거
-4a. **Track A 분기** (2a~2e) + 선택 1줄 이유
-4b. **Track B gate** — Track A 선택과 별개로 2a/2b/2c/2d 를 각각 `hit|miss — 이유 1줄` 로 적는다. 2c miss 는 세 항목을 모두 판정한다: 페이지 박힌 fact 추출 누락 / LLM raw 반복 오판 / preflight 거부 가능성. `cases_index` 0건은 recurrence 근거 0일 뿐, Track B skip 근거가 아니다. 한 항목이라도 hit 면 같은 PR 에 휴리스틱·인식기·prompt 박거나 명시적으로 escalate (case body 의 _deferred_heuristics 섹션 + 이유).
+4a. **Track B 분기 (필수, 먼저)** — canonical 6 자리 (E/D/C/B/A/F) 각각 `hit — <구체 자리>` 또는 `miss — <이유 1줄>`. C miss 시 세 항목 모두 판정 의무: 페이지 박힌 fact 추출 누락 / LLM raw 반복 오판 / preflight 거부 가능성. A (system 규칙) 은 *추가만* — 기존 줄 수정/제거 면 pipeline-rot-review 영역으로 escalate. `cases_index` 0건은 recurrence 0 일 뿐, Track B skip 근거 X. 한 자리라도 hit 면 같은 PR 에 박거나 case body _deferred_heuristics 섹션으로 명시 escalate.
+4b. **Track A 결정 (optional, Track B 뒤)** — 다음 *AND* 만족 시만 §2e 진입: (a) Track B 6 자리 *all miss* + 각 이유 적힘 (b) 사용자가 이 사이트 즉시 작동을 *명시* 요청 (user prompt 어휘 verbatim 인용). 하나라도 미충족 = Track A skip + `triage.py park-gate-fail <slug> --reason="<…>"` 또는 cap_blocked 면 `triage_later.json` 자동 defer. **사이트 단위 ship 강제 X — park 가 valid terminal**.
 5. **누적 cross-check** — 진단한 failure_keys 각각에 대해 `python scripts/cases_index.py query --failure-key <key> [--failure-key <key2> ...] --json` 1회 호출 + JSON 결과 인용. 같은 진단의 root-cause 신호 (예: `static_vs_headless`, `diverging_first_article`) 가 case body 에 흔적 있으면 `--signal "<regex>"` 도 동시 호출. 그리고 `python scripts/cases_index.py query --deferred --json` 으로 deferred 후보 트리거 상태 확인. **한 label 의 `track_b_trigger=true` 면 트랙 B 진입 강제 — deferred 보류 불가, 같은 PR 에 휴리스틱·인식기·prompt 박음**. 0건이면 명시 ("누적 0건 — 첫 사례, deferred OK") — *단 4b 의 §2c 3항목 매핑은 그래도 의무*.
 6. **preflight 결과** (§0b) — `preflight: <a-hit|b-hit|miss> — <slug> [<commit-sha-if-b-hit>]`. a-hit 또는 b-hit 면 §2 진입 자체 X (이미 회복) — 인용 1줄 + 종료. miss 만 §2 진입. 본 인용 = §0b 강제 실행 증명. preflight 안 돌렸으면 *그 자체로 SKILL 위반*.
 
@@ -293,11 +313,17 @@ artifact 없는 §0 신규 진입 (link 만 받은 첫 시도) 케이스는 예�
 
 휴리스틱·산출물 수정 규칙: ↓ §4.
 
-### 2e. 자동 파이프라인이 진짜 안 닿는 한계 — 수동 config 또는 손어댑터
+### 2e. 사용자 즉시 작동 요청 + Track B 일반화 0 — 수동 config (optional)
 
-handwritten 만 가능: 클릭/스크롤로만 글이 뜨는 SPA, 강한 anti-bot, 비공개판이지만 *사용자가 storage_state 로그인 경로 제공 의사 있음*, 본문이 클라이언트 라우트라 server-render 본문 없음, 등. probe 가 어떤 신호도 휴리스틱화할 만하지 않은 진짜 코너 케이스.
+진입 조건 (둘 다 만족 필수):
+- (a) Track B 4분기 (2a~2d) 모두 miss, 각 이유 case body 적힘
+- (b) 사용자가 봇 사용자 향 *이 사이트 즉시 작동* 을 명시 요청 (user prompt 어휘 verbatim 인용 — 자기-해석 X)
 
-`last_config` 에서 selector/path 한두 개만 바꾸면 되는 경우도 많다. 수동 config 작성 절차 ↓ §3.
+handwritten 만 가능: 클릭/스크롤로만 글이 뜨는 SPA, 강한 anti-bot, 비공개판이지만 *사용자가 storage_state 로그인 경로 제공 의사 있음*, 본문이 클라이언트 라우트라 server-render 본문 없음 등 진짜 코너 케이스.
+
+`last_config` 에서 selector/path 한두 개만 바꾸면 끝나는 경우 多. 수동 config 작성 절차 ↓ §3.
+
+조건 (a) 미충족 → Track B 박음 (그쪽에서 잡힘). 조건 (b) 미충족 → `triage.py park-gate-fail <slug> --reason="<왜 일반화 X, ship 요청 0건>"` 로 park — *사이트 단위 ship 강제 X*. 다음 분류기/probe 개선 후 sweep 회수.
 
 ## 3. 수동 config / 손어댑터 작성 절차 (2e 진입 시)
 
@@ -400,7 +426,7 @@ dynamic family (`recognizer:*`, `[FAIL]:<check>`) 는 추가 필요 X — 자동
      --reason "<1-3줄>" [--fix-layer <C+D>] [--failure-keys <k1,k2>] [--case-md-slug <slug>]
    ```
    이 시점 HEAD = 본 case 의 commit → `commit_sha` 와 `files_changed` 정확. commit 전 실행하면 stderr 에 `⚠ staged/working tree 변경 있음 — commit 후 호출 권장` 경고만 박고 진행 (derive 부정확 가능). outcome 분류는 §6 step 5 표 참조. 잊어도 push 차단 X (~10% gap). dashboard `/cases` 에서 표시.
-   **일반 개선 X (auto/api_loop 실패) 면 §2e 검토 필수**: 새 layer(§2a~§2d) 를 못 찾았다는 이유로 case outcome `no_change escalate` 로 끝내지 않는다. generic improvement 부재는 site outcome 이 아니라 “추가 공통 개선 없음”일 뿐이다. §2a~§2d 가 전부 아니면 §2e(수동 config/handwritten) 로 진행하고, `case_log log --case-md-slug` 의 `--outcome` 은 case .md frontmatter outcome 과 맞춘다.
+   **outcome 결정 rule (Track B + Track A 두 축)**: Track B 6 자리 (E/D/C/B/A/F) all miss + 사용자 ship 명시 요청 0 = `no_change` + park (`triage.py park-gate-fail <slug>` 또는 `triage_later.json`) — **site 단위 ship 강제 X**. Track B miss + ship 요청 hit = §2e 진입 (수동 config). Track B hit 1+ = `improved` outcome (commit prefix `[fix-layer: X]`). Track A handcraft 만 = `handcrafted`. case outcome 은 *실제 한 조치* 기준이고, generic improvement 부재 자체는 outcome 아님 — 그 경우 park = valid terminal.
 
 8. **N100 배포** (운영 메모 §8 SoT) — `ssh <user>@<host> 'cd ~/notice-watcher && git pull --ff-only && .venv/bin/python scripts/register.py --config "configs/<slug>.json"'`.
    - **`adapters/`·`engine/`·`scripts/notify.py`·`bot/` 변경 시 뒤에 `&& systemctl --user restart notice-bot.service`** — 봇 import 캐시. 안 하면 `make_adapter() ValueError`.
