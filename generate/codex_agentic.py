@@ -75,6 +75,7 @@ SCHEMA_PATH = REPO_ROOT / "schemas" / "register_agentic_result.json"
 PROMPT_USER_PATH = REPO_ROOT / "prompts" / "register_agent_user.txt"
 PROMPT_AGENTS_PATH = REPO_ROOT / "prompts" / "register_agent_AGENTS.md"
 VALIDATE_WRAPPER_PATH = REPO_ROOT / "scripts" / "validate_config.py"
+_AUDIT_POPEN = subprocess.Popen
 
 
 VALIDATOR_ATTEMPT_LOGGER = r'''from __future__ import annotations
@@ -292,6 +293,34 @@ def _audit_snapshot_paths(repo: Path, slug: str) -> dict[str, _AuditEntry]:
     return out
 
 
+def _audit_git_command(repo: Path, args: list[str], *, capture: bool = True,
+                       text: bool = True) -> tuple[int, str, str]:
+    proc = _AUDIT_POPEN(
+        ["git", *args],
+        cwd=repo,
+        text=text,
+        encoding="utf-8" if text else None,
+        stdout=subprocess.PIPE if capture else subprocess.DEVNULL,
+        stderr=subprocess.PIPE if capture else subprocess.DEVNULL,
+    )
+    stdout, stderr = proc.communicate()
+    return proc.returncode, stdout or "", stderr or ""
+
+
+def _audit_git_head(repo: Path) -> Optional[str]:
+    rc, stdout, stderr = _audit_git_command(repo, ["rev-parse", "--verify", "HEAD"])
+    if rc != 0:
+        tail = (stderr or stdout or "").strip().splitlines()[-1:]
+        detail = tail[0] if tail else f"git rev-parse rc={rc}"
+        print(f"[audit] HEAD snapshot unavailable: {detail}", file=sys.stderr)
+        return None
+    return stdout.strip() or None
+
+
+def _audit_snapshot(repo: Path, slug: str) -> tuple[dict[str, _AuditEntry], Optional[str]]:
+    return _audit_snapshot_paths(repo, slug), _audit_git_head(repo)
+
+
 def _iter_audit_paths(repo: Path, slug: str) -> Iterable[Path]:
     """Files to guard. Shared code dirs (full scope) + per-slug paths.
 
@@ -331,8 +360,44 @@ def _iter_audit_paths(repo: Path, slug: str) -> Iterable[Path]:
             yield rp
 
 
+def _audit_relpath(repo: Path, path: Path) -> Optional[str]:
+    try:
+        return path.resolve().relative_to(repo.resolve()).as_posix()
+    except ValueError:
+        return None
+
+
+def _git_changed_between_heads(repo: Path, pre_head: str, post_head: str) -> set[str]:
+    rc, stdout, stderr = _audit_git_command(
+        repo, ["diff", "--name-only", f"{pre_head}..{post_head}"]
+    )
+    if rc != 0:
+        tail = (stderr or stdout or "").strip().splitlines()[-1:]
+        detail = tail[0] if tail else f"git diff rc={rc}"
+        print(f"[audit] HEAD diff unavailable: {detail}", file=sys.stderr)
+        return set()
+    return {line.strip() for line in stdout.splitlines() if line.strip()}
+
+
+def _git_worktree_matches_head(repo: Path, head: str, relpath: str) -> bool:
+    rc, _, _ = _audit_git_command(
+        repo, ["diff", "--quiet", head, "--", relpath], capture=False
+    )
+    return rc == 0
+
+
+def _audit_change_is_head_advance(repo: Path, path: Path, *,
+                                  post_head: str, head_changed_paths: set[str]) -> bool:
+    rel = _audit_relpath(repo, path)
+    if rel is None or rel not in head_changed_paths:
+        return False
+    return _git_worktree_matches_head(repo, post_head, rel)
+
+
 def _audit_diff(before: dict[str, _AuditEntry], after: dict[str, _AuditEntry],
-                *, self_slug: str, configs_root: Path) -> list[str]:
+                *, self_slug: str, configs_root: Path,
+                pre_head: Optional[str] = None,
+                post_head: Optional[str] = None) -> list[str]:
     """Returns paths that changed = violations.
 
     Per-slug policy for `configs/`:
@@ -348,6 +413,10 @@ def _audit_diff(before: dict[str, _AuditEntry], after: dict[str, _AuditEntry],
     keys = set(before) | set(after)
     self_cfg_name = f"{self_slug}.json"
     cfg_root_str = str(configs_root)
+    repo = configs_root.parent
+    head_changed_paths: set[str] = set()
+    if pre_head and post_head and pre_head != post_head:
+        head_changed_paths = _git_changed_between_heads(repo, pre_head, post_head)
     for k in keys:
         b, a = before.get(k), after.get(k)
         kp = Path(k)
@@ -360,12 +429,24 @@ def _audit_diff(before: dict[str, _AuditEntry], after: dict[str, _AuditEntry],
             # NEW
             if is_other_slug_cfg:
                 continue  # parallel publish allowed
+            if post_head and _audit_change_is_head_advance(
+                repo, kp, post_head=post_head, head_changed_paths=head_changed_paths
+            ):
+                continue
             out.append(f"{k} (NEW)")
             continue
         if a is None:
+            if post_head and _audit_change_is_head_advance(
+                repo, kp, post_head=post_head, head_changed_paths=head_changed_paths
+            ):
+                continue
             out.append(f"{k} (DELETED)")
             continue
         if b.sha256 != a.sha256 or b.size != a.size:
+            if post_head and _audit_change_is_head_advance(
+                repo, kp, post_head=post_head, head_changed_paths=head_changed_paths
+            ):
+                continue
             out.append(f"{k} (CONTENT CHANGED)")
     return out
 
@@ -894,7 +975,7 @@ async def _run_codex_agentic_once(
         digest=_read_json_optional(workdir / "digest.json"),
         failure_packet=_read_json_optional(workdir / "failure_packet.json"),
     )
-    pre = _audit_snapshot_paths(repo, slug)
+    pre, pre_head = _audit_snapshot(repo, slug)
     t0 = time.time()
     stdout_text = ""
     stderr_text = ""
@@ -1007,10 +1088,12 @@ async def _run_codex_agentic_once(
                         workdir_files=_workdir_file_listing(workdir),
                     )
             # post-audit — any change outside tmpdir = violation
-            post = _audit_snapshot_paths(repo, slug)
+            post, post_head = _audit_snapshot(repo, slug)
             violations = _audit_diff(pre, post,
                                      self_slug=slug,
-                                     configs_root=repo / "configs")
+                                     configs_root=repo / "configs",
+                                     pre_head=pre_head,
+                                     post_head=post_head)
             if violations:
                 raise AuditFailError(
                     f"agent wrote outside its workdir ({len(violations)} files): "
