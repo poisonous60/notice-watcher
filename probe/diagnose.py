@@ -26,7 +26,10 @@ _CERT_OR_DNS_ERROR_MARKERS = (
     "ConnectError",
     "Connection refused",
     "connection refused",
+    "ConnectTimeout",
+    "timed out",
     "WinError 10061",
+    "WinError 10060",                  # WSAETIMEDOUT — TCP connect timeout (Windows)
     "All connection attempts failed",
 )
 
