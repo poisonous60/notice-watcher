@@ -396,7 +396,7 @@ def build_admin_tree(client: discord.Client, conn, *, admin_guild: discord.Objec
                 await interaction.edit_original_response(
                     content=msg("rejected_site",
                                 reason=site_ops.public_reason(info.get('reason')),
-                                note=info.get('note') or '없음'))
+                                note=site_ops.public_rejected_note(info)))
             return
         if site_ops.is_registered(slug):
             await interaction.edit_original_response(content=msg("preview_analyzing"))

@@ -36,4 +36,4 @@ batch retry: probe 가 forum board catalog 의 게임 카드를 row 로 잡았�
 
 ## 후보 (deferred)
 
-`_deferred_heuristics.md` 의 `vanilla_forums_subcommunity_directory_detect` — `community.<name>.com/<locale>/api/v2/subcommunities` API + locale redirect (`/<path>` → `/<locale>/`) → forum/community directory 분류기 신호 (게시판 아님). cohort 1건이라 보류.
+`_deferred_heuristics.md` 의 `vanilla_forums_subcommunity_directory_detect` — `community.<name>.com/<locale>/api/v2/subcommunities` API + locale redirect (`/<path>` → `/<locale>/`) → forum/community directory 분류기 신호 (게시판 아님). catalog 1건이라 보류.

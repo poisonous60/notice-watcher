@@ -177,7 +177,7 @@ python scripts/remote.py jobs --since <분> --min-id <batch 시작 id> --wait --
 
 **절차**:
 1. `python scripts/triage.py pull --skip-later` — N100 → 로컬 (FAILED + probe).
-2. **청크 분할 = 분석 응집 단위** (자동 `codex_batch.py plan` 은 플랫폼/host 기준 분할 — 단서). 같은 플랫폼/host/cohort 신호를 한 청크로 묶어 codex 가 cross-site 패턴을 보게 한다. Claude 는 *편집 파일 집합* 을 미리 정하지 않는다:
+2. **청크 분할 = 분석 응집 단위** (자동 `codex_batch.py plan` 은 플랫폼/host 기준 분할 — 단서). 같은 플랫폼/host/catalog 신호를 한 청크로 묶어 codex 가 cross-site 패턴을 보게 한다. Claude 는 *편집 파일 집합* 을 미리 정하지 않는다:
    - 파일 목록 제한은 Track B 후보(`probe/`, `prompts/`, `generate/`, `scripts/register.py`, `engine/`)를 사전에 막는 사고 원인이다.
    - 한 청크 task 에는 동료 slug 목록, fail_reason 분포, positive example, probe artifact 경로를 넣는다.
    - task body 는 **분석-우선**이어야 한다. 사이트별 가설·처리 절차를 미리 확정해 쓰면 codex 가 수동 config 실행기로 전락한다.
@@ -204,7 +204,7 @@ Claude 직접 처리 예외 — *AND 조건 전부 만족* 일 때만:
 
 1. **probe artifact 없음 defer 위반** — task 에 N100 tar pull 명시되어 있는데 시도 없이 `outcome: no_change` defer. 또는 사용자가 요청한 URL 의 board 가 빈 shell 인데 *다른 board ID* 로 등록(scope 오염). (2026-05-24 krpublic 의 daegu·gg·ulsan 사례.)
 2. **일반화 신호 punt** — 청크 안에 2+ slug 가 같은 패턴(URL 누락 파라미터·JS detail 함수·TLS handshake 실패·platform CMS 동형) 보이는데 case body §일반화 후보 섹션이 비었거나 "사이트별 매핑이라 일반화 X" 1줄. (2026-05-24 krpublic: KR egov `menuid`/`menuCd` 누락 4건 동일 + `goView(seq)` JS detail 3건 동일 punt.)
-3. **처방-우선 task 추종** — task body 의 사이트별 가설/처리 절차를 그대로 실행하고, probe artifact·cohort 비교·Track B 6-layer audit 로 자기 판정을 다시 하지 않음. 특히 "site coverage 중심", "후속으로 일반화" 식으로 generic fix 를 미루면 FAIL.
+3. **처방-우선 task 추종** — task body 의 사이트별 가설/처리 절차를 그대로 실행하고, probe artifact·catalog 비교·Track B 6-layer audit 로 자기 판정을 다시 하지 않음. 특히 "site coverage 중심", "후속으로 일반화" 식으로 generic fix 를 미루면 FAIL.
 4. **`no_change` 정당화 불충분** — 시도/차단신호(verbatim)/진짜 해결 경로 3개 중 빠진 게 있음.
 5. **`no_change` 정당화 (refactor v3 기준)** — `no_change` outcome 은 valid terminal 이다 (Track B 6 자리 all miss + ship evidence 0 일 때). *invalid* 인 경우만: (a) ship evidence 가 있는데 (사용자 명시 요청 또는 `/watch`·`/preview` command origin) §2e 안 박았거나 (b) §2 강제 인용 4a/4b/4d evidence 가 빠짐. case body 가 6-layer miss 이유 + park 자리 분기 명시 안 했으면 `no_change` 정당화 불충분. site 단위 ship 강제 X — generic improvement 부재 자체는 invalid 아님.
 

@@ -39,7 +39,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 import httpx
 
@@ -1507,7 +1507,8 @@ def _clear_learned_by_id(pat_id: str) -> bool:
     return True
 
 
-def _save_rejected(slug: str, url: str, reason: str, note: Optional[str] = None, *, learn: bool = False) -> Path:
+def _save_rejected(slug: str, url: str, reason: str, note: Optional[str] = None, *,
+                   learn: bool = False, hint: Optional[str] = None) -> Path:
     """`.REJECTED.json` 마커. 봇 `is_rejected(slug)`=True 가 되어 `/preview`·`/watch` 가 자동경로
     안 타고 "이전에 거부됨" 메시지로 응답. `is_registered` 와 분리 — REJECTED 는 polling 대상도 아님.
     같은 slug 의 `.FAILED.json` 마커가 있었으면 함께 제거 (REJECTED 가 우선).
@@ -1532,6 +1533,7 @@ def _save_rejected(slug: str, url: str, reason: str, note: Optional[str] = None,
         "url": url,
         "reason": reason,
         "note": note,
+        "hint": hint,
         "rejected_at": _now_iso(),
         "learned": learn,
     }, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -2280,6 +2282,12 @@ def _reprobe_article_inprocess(slug: str, article_url: str) -> int:
         return 0
     r = fetch_with_capture(url=article_url, out_dir=out_dir, target="article", headless=True)
     print(f"[register]   article re-probe: status={r.status} {r.classification.value}  body={r.body_path}")
+    (out_dir / "article.reprobe.json").write_text(json.dumps({
+        "url": article_url,
+        "status": r.status,
+        "classification": r.classification.value,
+        "error": r.error,
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
     har = out_dir / "traffic.article.har"
     if not har.exists():
         har = out_dir / "traffic.har"
@@ -2350,6 +2358,129 @@ def _reprobe_article(slug: str, article_url: str, *, timeout_s: float = ARTICLE_
         return len(data) if isinstance(data, list) else 0
     except Exception:  # noqa: BLE001
         return 0
+
+
+def _read_json_file(path: Path) -> Optional[dict]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _norm_url_identity(u: str) -> tuple[str, str, str, str]:
+    sp = urlsplit(u)
+    path = (sp.path or "/").rstrip("/") or "/"
+    return ((sp.scheme or "https").lower(), (sp.netloc or "").lower(), path, sp.query or "")
+
+
+def _same_url_identity(a: str, b: str) -> bool:
+    try:
+        return _norm_url_identity(a) == _norm_url_identity(b)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _list_page_was_http_200(slug: str, digest: dict) -> bool:
+    if digest.get("static_ok_preset"):
+        return True
+    diag = _read_json_file(output_dir(slug) / "diagnosis.json") or {}
+    for r in diag.get("results") or []:
+        if not isinstance(r, dict):
+            continue
+        if r.get("target") == "list" and r.get("status") == 200 and r.get("classification") == "OK":
+            return True
+    return False
+
+
+def _article_reprobe_was_404(slug: str) -> bool:
+    meta = _read_json_file(output_dir(slug) / "article.reprobe.json") or {}
+    return meta.get("status") == 404
+
+
+def _url_from_tag_attrs(tag: str, base_url: str) -> Optional[str]:
+    attrs = {
+        k.lower(): html.unescape(v.strip())
+        for k, _q, v in re.findall(r"([A-Za-z_:.-]+)\s*=\s*(['\"])(.*?)\2", tag, flags=re.DOTALL)
+    }
+    lower_tag = tag.lower()
+    if lower_tag.startswith("<link"):
+        rel = {part.strip().lower() for part in re.split(r"\s+", attrs.get("rel", "")) if part.strip()}
+        href = attrs.get("href")
+        if "canonical" in rel and href:
+            return urljoin(base_url, href)
+    if lower_tag.startswith("<meta"):
+        prop = (attrs.get("property") or attrs.get("name") or "").strip().lower()
+        content = attrs.get("content")
+        if prop == "og:url" and content:
+            return urljoin(base_url, content)
+    return None
+
+
+def _declared_canonical_url(slug: str, base_url: str, digest: dict) -> Optional[str]:
+    out_dir = output_dir(slug)
+    html_text = ""
+    for p in (out_dir / "list.html", out_dir / "list.body.html"):
+        if p.exists():
+            try:
+                html_text = p.read_text(encoding="utf-8", errors="replace")
+                break
+            except OSError:
+                pass
+    if not html_text:
+        html_text = ((digest.get("list_html") or {}).get("html") or "")
+    for m in re.finditer(r"<(?:link|meta)\b[^>]*>", html_text[:200_000], flags=re.IGNORECASE | re.DOTALL):
+        u = _url_from_tag_attrs(m.group(0), base_url)
+        if u and u.startswith(("http://", "https://")):
+            return u
+    return None
+
+
+def _fetch_redirect_final_url(url: str) -> Optional[str]:
+    try:
+        r = httpx.get(
+            url,
+            follow_redirects=True,
+            timeout=10.0,
+            headers={"User-Agent": "Mozilla/5.0", "Accept": "text/html,application/xhtml+xml"},
+        )
+    except Exception:  # noqa: BLE001
+        return None
+    for hop in r.history:
+        loc = hop.headers.get("location")
+        if not loc:
+            continue
+        candidate = urljoin(str(hop.url), loc)
+        if candidate.startswith(("http://", "https://")) and not _same_url_identity(candidate, url):
+            return candidate
+    final = str(r.url)
+    if r.history and r.status_code < 400 and final.startswith(("http://", "https://")):
+        return final
+    return None
+
+
+def _canonical_hint_url(slug: str, url: str, digest: dict) -> Optional[str]:
+    for candidate in (_declared_canonical_url(slug, url, digest), _fetch_redirect_final_url(url)):
+        if candidate and not _same_url_identity(candidate, url):
+            return candidate
+    return None
+
+
+def _canonical_url_change_preflight_reject(slug: str, url: str, digest: dict) -> Optional[int]:
+    if not (_list_page_was_http_200(slug, digest) and _article_reprobe_was_404(slug)):
+        return None
+    hint = _canonical_hint_url(slug, url, digest)
+    if not hint:
+        return None
+    print(f"[register] 🔴 canonical URL 변경 의심 — list=200, article=404, canonical={hint}")
+    try:
+        _save_rejected(slug, url, "canonical_url_change",
+                       note="gate: canonical_url_change (preflight article 404 + list canonical/redirect)",
+                       hint=hint, learn=True)
+    except Exception as e:  # noqa: BLE001
+        print(f"[register] ⚠ REJECTED 마커 저장 실패 (rc=3): {e}", file=sys.stderr)
+    print(f"[register] ❌ 등록 거부 — canonical URL 변경. 새 URL 로 다시 시도하세요: {hint}")
+    return 3
 
 
 def _has_json_api_candidates(digest: dict) -> bool:
@@ -3192,6 +3323,10 @@ def _main_inner(argv) -> int:
                               last_config=None, last_feedback=f"[FAIL] register_timeout: {e}")
             print(f"[register] ❌ 자동 처리 불가 — preflight timeout. → {fp}")
             return 1
+
+    rc = _canonical_url_change_preflight_reject(slug, url, digest)
+    if rc is not None:
+        return rc
 
     # post-preflight NO_FIRST 게이트 — agentic 가 self-veto(non_board) 할 패턴을 미리 차단.
     # 2026-05-26 games-cn batch 53건 rc=3 중 22건이 이 패턴 (board_shape 가 feed 만으로 통과/veto-override

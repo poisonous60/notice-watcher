@@ -199,7 +199,7 @@ async def watch(interaction: discord.Interaction, url: str, filter: Optional[str
             await interaction.edit_original_response(
                 content=msg("rejected_site",
                             reason=site_ops.public_reason(info.get('reason')),
-                            note=info.get('note') or '없음'))
+                            note=site_ops.public_rejected_note(info)))
         return
     user_id = str(interaction.user.id)
     target_kind = "channel" if here else "dm"
