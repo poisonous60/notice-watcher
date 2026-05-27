@@ -100,6 +100,27 @@ def run() -> list[tuple[str, bool, str]]:
     sel_spa = _select_retry_recipes({"strategy": "httpx_html"}, digest_spa, hist_spa)
     cases.append(("select_r2_spa_mixed_2x", "spa_rendered_retry" in sel_spa, f"got {sel_spa!r}"))
 
+    hist_dns = [
+        {
+            "n": 1,
+            "strategy": "playwright_html",
+            "rows": ".post-card",
+            "fails": ["fetch_list"],
+            "fails_detail": ["Page.goto: net::ERR_NAME_NOT_RESOLVED at https://example.com/news"],
+        },
+        {
+            "n": 2,
+            "strategy": "playwright_html",
+            "rows": ".post-card",
+            "fails": ["fetch_list"],
+            "fails_detail": ["Temporary failure in name resolution"],
+        },
+    ]
+    sel_dns = _select_retry_recipes({"strategy": "playwright_html"}, {"url": "https://example.com/news"}, hist_dns)
+    cases.append(("select_stealth_dns_disable_on_repeated_nav_dns",
+                  "stealth_dns_disable" in sel_dns,
+                  f"got {sel_dns!r}"))
+
     # ── _apply_recipe_patch — Recipe 1 ─────────────────────────────────────
     prev_cfg = {
         "strategy": "httpx_html",
@@ -192,6 +213,15 @@ def run() -> list[tuple[str, bool, str]]:
                   (patched_2c or {}).get("strategy") == "playwright_html"
                   and "wait_selector" not in ((patched_2c or {}).get("list") or {}),
                   f"got {patched_2c!r}"))
+
+    prev_cfg_dns = {"strategy": "playwright_html", "list": {"row_selector": ".post-card"}, "article": {}}
+    patched_dns = _apply_recipe_patch(prev_cfg_dns, ["stealth_dns_disable"], {"url": "https://example.com/news"})
+    cases.append(("patch_stealth_dns_sets_disable_stealth",
+                  (patched_dns or {}).get("disable_stealth") is True,
+                  f"got {patched_dns!r}"))
+    cases.append(("patch_stealth_dns_prev_cfg_not_mutated",
+                  "disable_stealth" not in prev_cfg_dns,
+                  f"prev_cfg mutated: {prev_cfg_dns!r}"))
 
     # _pick_spa_wait_selector — 직접 검증
     sel_pick = _pick_spa_wait_selector(digest_spa_with_pat, "radiolab.org")
@@ -328,6 +358,11 @@ def run() -> list[tuple[str, bool, str]]:
     cases.append(("section_no_patch_uses_no_op_phrasing",
                   "patch 적용할 자리는 없" in sec_no_patch,
                   f"got {sec_no_patch[:200]!r}"))
+
+    sec_dns = _build_recipe_feedback_section(["stealth_dns_disable"], patched_dns)
+    cases.append(("section_stealth_dns_mentions_disable_stealth",
+                  "disable_stealth" in sec_dns and "ERR_NAME_NOT_RESOLVED" in sec_dns,
+                  f"got {sec_dns[:300]!r}"))
 
     # ── build_retry_prompt with starting_candidate ─────────────────────────
     # 최소 digest — build_user_prompt 가 안 깨질 정도

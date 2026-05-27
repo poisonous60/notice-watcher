@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import copy
 import contextlib
 import hashlib
 import html
@@ -2054,6 +2055,11 @@ _STOP_REASON_RC = {
     "login_required": 2,
 }
 
+_STEALTH_DNS_RACE_RE = re.compile(
+    r"ERR_NAME_NOT_RESOLVED|Temporary failure in name resolution|Name or service not known",
+    re.IGNORECASE,
+)
+
 
 def _generation_failure_reject_rc(digest: dict, url: str, slug: str, exc: GenerationError,
                                   *, gate_only: bool = False,
@@ -2085,9 +2091,57 @@ def _generation_failure_reject_rc(digest: dict, url: str, slug: str, exc: Genera
     return None
 
 
+def _agentic_disable_stealth_candidate(exc: GenerationError) -> Optional[dict]:
+    """Patch a failed agentic Playwright config for the known stealth DNS race."""
+    cfg = getattr(exc, "last_config", None)
+    if not isinstance(cfg, dict):
+        return None
+    if (cfg.get("strategy") or "") != "playwright_html":
+        return None
+    if cfg.get("disable_stealth") is True:
+        return None
+    sr = (getattr(exc, "stop_reason", "") or "").strip()
+    if sr not in {"max_cycles", "parent_revalidate_fail", "agent_gave_up"}:
+        return None
+    hay = "\n".join([
+        str(getattr(exc, "last_feedback", "") or ""),
+        str(exc),
+    ])
+    if not _STEALTH_DNS_RACE_RE.search(hay):
+        return None
+    patched = copy.deepcopy(cfg)
+    patched["disable_stealth"] = True
+    return patched
+
+
+def _try_agentic_disable_stealth_fallback(digest: dict, exc: GenerationError):
+    patched = _agentic_disable_stealth_candidate(exc)
+    if patched is None:
+        return None
+    print("[register] agentic DNS failure: retrying validation with disable_stealth=true", flush=True)
+    try:
+        from engine import validate_config as _validate_config
+        from generate.validate import validate_built_config as _validate_built_config
+        _validate_config(patched)
+        rep = asyncio.run(_validate_built_config(patched, digest=digest, fetch_articles=1))
+    except Exception as fallback_exc:  # noqa: BLE001
+        prev = getattr(exc, "last_feedback", "") or str(exc)
+        exc.last_feedback = (
+            f"{prev}\n\n[disable_stealth fallback failed] "
+            f"{type(fallback_exc).__name__}: {fallback_exc}"
+        )
+        return None
+    if rep.ok:
+        return patched, rep
+    prev = getattr(exc, "last_feedback", "") or str(exc)
+    exc.last_feedback = f"{prev}\n\n[disable_stealth fallback failed]\n{rep.feedback_text()}"
+    return None
+
+
 def _generate_by_mode(mode: str, digest: dict, slug: str, url: str, *,
                       max_attempts: int, model,
                       gen_func=_gen, agentic_func=_gen_agentic,
+                      stealth_fallback_func=_try_agentic_disable_stealth_fallback,
                       wall_deadline: Optional[float] = None):
     """Dispatch api_loop / agentic / auto generation.
 
@@ -2095,9 +2149,15 @@ def _generate_by_mode(mode: str, digest: dict, slug: str, url: str, *,
     _AutoRejected(rc); otherwise it escalates to agentic with a failure packet.
     """
     if mode == "agentic":
-        if wall_deadline is not None:
-            return agentic_func(digest, slug, url, wall_deadline=wall_deadline)
-        return agentic_func(digest, slug, url)
+        try:
+            if wall_deadline is not None:
+                return agentic_func(digest, slug, url, wall_deadline=wall_deadline)
+            return agentic_func(digest, slug, url)
+        except GenerationError as e:
+            recovered = stealth_fallback_func(digest, e) if stealth_fallback_func else None
+            if recovered is not None:
+                return recovered
+            raise
     if mode != "auto":
         return gen_func(digest, max_attempts=max_attempts, model=model)
     try:
@@ -2115,9 +2175,15 @@ def _generate_by_mode(mode: str, digest: dict, slug: str, url: str, *,
             raise _AutoRejected(rc) from e
         failure_packet = _build_failure_packet(e)
         print("[register] auto mode: api_loop_once failed; escalating to agentic with failure_packet", flush=True)
-        if wall_deadline is not None:
-            return agentic_func(digest, slug, url, failure_packet=failure_packet, wall_deadline=wall_deadline)
-        return agentic_func(digest, slug, url, failure_packet=failure_packet)
+        try:
+            if wall_deadline is not None:
+                return agentic_func(digest, slug, url, failure_packet=failure_packet, wall_deadline=wall_deadline)
+            return agentic_func(digest, slug, url, failure_packet=failure_packet)
+        except GenerationError as agentic_error:
+            recovered = stealth_fallback_func(digest, agentic_error) if stealth_fallback_func else None
+            if recovered is not None:
+                return recovered
+            raise
 
 
 def _has_structural_audio_share(digest: dict) -> bool:
