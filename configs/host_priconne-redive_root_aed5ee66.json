@@ -1,0 +1,142 @@
+{
+  "version": 1,
+  "site": "priconne-redive.jp",
+  "board": "news",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ja-JP,ja;q=0.9,en;q=0.8",
+    "Referer": "https://priconne-redive.jp/"
+  },
+  "timeout": 15,
+  "polite_sleep": {
+    "min": 5,
+    "max": 5
+  },
+  "list": {
+    "url_template": "https://priconne-redive.jp/",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "#cat-news ul.news-list > li",
+    "row_required_selector": "dd > a[href*='/news/']",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "dd > a[href*='/news/']",
+          "attr": "href",
+          "transform": [
+            [
+              "regex_extract",
+              "/news/[^/]+/(\\d+)/"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "dd > a[href*='/news/']",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "dd > a[href*='/news/']",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://priconne-redive.jp"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "dt",
+          "text": true,
+          "transform": [
+            [
+              "regex_extract",
+              "(\\d{4}\\.\\d{2}\\.\\d{2})"
+            ],
+            [
+              "replace",
+              ".",
+              "-"
+            ],
+            [
+              "date_only_to_iso",
+              "+09:00"
+            ]
+          ]
+        }
+      ],
+      "category": [
+        {
+          "from": "css",
+          "selector": "dt ul.post-categories li:last-child a",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "article, .contents-body, .news-detail, .news-article",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "article h1, article h2, .contents-body h1, .contents-body h2",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "time, .meta-info time",
+          "text": true,
+          "transform": [
+            [
+              "replace",
+              ".",
+              "-"
+            ],
+            [
+              "date_only_to_iso",
+              "+09:00"
+            ]
+          ]
+        }
+      ]
+    }
+  }
+}

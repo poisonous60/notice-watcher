@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "site": "umamusume.com",
+  "board": "news",
+  "strategy": "playwright_html",
+  "timeout": 30,
+  "nav_timeout_ms": 30000,
+  "idle_timeout_ms": 5000,
+  "polite_sleep": {"min": 5, "max": 6},
+  "_source_url": "https://umamusume.com/news/",
+  "_note": "Svelte SPA shell — list rendered after JS executes POST /api/ajax/pr_info_index (session-bound; raw POST returns response_code:102). playwright_html with wait_selector resolves it. Article body lives in a Svelte detail component populated by a separate session-gated POST /api/ajax/pr_info_detail; standalone fetch yields empty body so body_empty_acceptable=true gates the validation.",
+  "list": {
+    "url_template": "https://umamusume.com/news/",
+    "pagination": {"kind": "none"},
+    "wait_selector": "ul.news-list li.news-item",
+    "row_selector": "ul.news-list li.news-item",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a",
+          "attr": "href",
+          "transform": [["regex_extract", "/news/(\\d+)"]]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "dt",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a",
+          "attr": "href",
+          "transform": [["urljoin", "https://umamusume.com"]]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "time",
+          "text": true,
+          "transform": [
+            ["collapse_ws"],
+            ["regex_extract", "(\\d{4}/\\d{2}/\\d{2}\\s+\\d{2}:\\d{2})"],
+            ["replace", "  ", " "],
+            ["iso8601", ["%Y/%m/%d %H:%M"], "Z"]
+          ]
+        }
+      ]
+    }
+  },
+  "body_empty_acceptable": true,
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {"from": "css", "selector": "main", "html": true}
+    ]
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "site": "pokemongo.com",
+  "board": "news",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9"
+  },
+  "timeout": 15,
+  "polite_sleep": {"min": 5, "max": 6},
+  "_source_url": "https://pokemongo.com/news/",
+  "_note": "CSS-module hashed classes (Svelte build hash) change between deploys — use attr-contains substring matchers (e.g. div[class*=\"_newsCards_\"]) instead of literal hashed selectors. Title is duplicated in _newsCardContent_ and _size:heading_; attr-contains avoids selector-compile failure on unescaped colon.",
+  "list": {
+    "url_template": "https://pokemongo.com/news/",
+    "pagination": {"kind": "none"},
+    "row_selector": "div[class*=\"_newsCards_\"] a[class*=\"_newsCard_\"]",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": ":self",
+          "attr": "href",
+          "transform": [["regex_extract", "^/news/([^/?#]+)"]]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "div[class*=\"_newsCardContent_\"]",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": ":self",
+          "attr": "href",
+          "transform": [["urljoin", "https://pokemongo.com"]]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "attr",
+          "selector": "pg-date-format",
+          "attr": "timestamp",
+          "transform": [["unixtime_to_iso", "Z", "ms"]]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {"from": "css", "selector": "article", "html": true}
+    ]
+  }
+}

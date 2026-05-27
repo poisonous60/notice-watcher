@@ -2,11 +2,14 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 347 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 350 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
+| [`host_umamusume-com_news_074ee55a`](host_umamusume-com_news_074ee55a.md) | ✅ handcrafted | 2026-05-28 | none | svelte_spa_shell, session_gated_post_api, posts_nonempty_zero, schema_missing_root | https://umamusume.com/news/ |
 | [`host_store-epicgames_news_16cc8b8f`](host_store-epicgames_news_16cc8b8f.md) | ✅ handcrafted — Epic Store news list via Playwright, article via JSON API | 2026-05-28 | F | probe_grounding_list_row_selector, hashed_selector, article_json_api | https://store.epicgames.com/news/ |
+| [`host_priconne-redive_root_aed5ee66`](host_priconne-redive_root_aed5ee66.md) | ✅ improved | 2026-05-28 | none | wordpress_rest_404, llm_picked_wrong_row_selector, posts_nonempty_zero | https://priconne-redive.jp/ |
+| [`host_pokemongo-com_news_002609a9`](host_pokemongo-com_news_002609a9.md) | ✅ handcrafted | 2026-05-28 | none | css_module_hashed_class, unescaped_tailwind_colon, posts_nonempty_zero | https://pokemongo.com/news/ |
 | [`host_epicgames-com_news_4655a152`](host_epicgames-com_news_4655a152.md) | ✅ handcrafted — Epic news config registered without hashed selectors | 2026-05-28 | F | probe_grounding_list_row_selector, hashed_selector, article_json_api | https://www.epicgames.com/news/ |
 | [`host_deadbydaylight-_news_7eed0155`](host_deadbydaylight-_news_7eed0155.md) | ✅ handcrafted — Dead by Daylight rendered list plus Gatsby article JSON | 2026-05-28 | F | article_body_len, article_fetch_kind, json_api | https://deadbydaylight.com/news/ |
 | [`host_bethesda-net_news_c5aa2960`](host_bethesda-net_news_c5aa2960.md) | ✅ handcrafted — non-www Bethesda news config registered | 2026-05-28 | F | posts_nonempty, hashed_selector | https://bethesda.net/news/ |
@@ -379,7 +382,7 @@
 | F+C | 3 |
 | adapter | 1 |
 | config | 8 |
-| none | 154 |
+| none | 157 |
 
 ### config_strategy 분포
 
@@ -387,17 +390,17 @@
 |---|---|
 | (미기재) | 56 |
 | handwritten | 31 |
-| httpx_html | 123 |
+| httpx_html | 125 |
 | httpx_json | 27 |
 | httpx_json (미적용 — 콘텐츠 0) | 1 |
 | mixed | 1 |
 | n/a | 3 |
 | none | 43 |
-| playwright_html | 60 |
+| playwright_html | 61 |
 | rejected | 1 |
 | rss | 1 |
 
 ### 최근 90일 (≥ 2026-02-26)
 
-케이스 347 건.
+케이스 350 건.
 
