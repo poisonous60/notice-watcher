@@ -362,6 +362,9 @@ async def fetch_list(adapter, *, page: int = 1, page_size: int = 30) -> list[Not
 
 async def fetch_article(adapter, post: NoticePost) -> NoticePost:
     art = adapter.cfg.get("article") or {}
+    if art.get("fetch_kind") == "json":
+        from . import httpx_json as _j
+        return await _j.fetch_article(adapter, post)
     url = _h.article_url_for(adapter, post)
     html = await _goto(adapter, url, wait_selector=art.get("wait_selector"))
     return _h.parse_article_html(adapter, html, post=post, url=url)
