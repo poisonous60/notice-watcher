@@ -460,7 +460,7 @@ def run() -> list[tuple[str, bool, str]]:
                   translated is not None
                   and getattr(translated, "prompt_tokens", None) == 456
                   and fail_row.get("call_site") == "config_generate_agentic"
-                  and fail_row.get("status") == "other"
+                  and fail_row.get("status") == "gen_fail_max_cycles"
                   and fail_row.get("total_tokens") == 464
                   and fail_row.get("latency_ms") == 20000,
                   f"translated={translated} row={fail_row}"))

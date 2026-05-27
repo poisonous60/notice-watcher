@@ -1789,14 +1789,47 @@ async def _generate(digest: dict, *, max_attempts: int, model):
     )
 
 
+# `GenerationError` (codex_agentic) inherits `LLMError.status="other"` since the
+# agentic failure mode does not map onto network/quota/http/parse. We refine the
+# recorded label using `stop_reason` so the dashboard's `Usage` page can tell
+# `agent_gave_up` apart from `parent_revalidate_fail`, etc. — instead of every
+# agentic failure flattening to "other".
+_AGENTIC_STOP_STATUS = {
+    "agent_gave_up": "gen_fail_gave_up",
+    "max_cycles": "gen_fail_max_cycles",
+    "parent_revalidate_fail": "gen_fail_revalidate",
+    "headless_false_rejected": "gen_fail_headless",
+    "non_board": "gen_fail_non_board",
+    "non_existent": "gen_fail_non_existent",
+    "login_required": "gen_fail_login_required",
+    "error": "gen_fail_error",
+}
+
+
+def _refine_agentic_status(status: str, stop_reason: str) -> str:
+    """Map a generic 'other' agentic failure to a `gen_fail_*` label via stop_reason."""
+    if status != "other":
+        return status
+    sr = (stop_reason or "").strip().lower()
+    if not sr:
+        return "gen_fail"
+    if sr in _AGENTIC_STOP_STATUS:
+        return _AGENTIC_STOP_STATUS[sr]
+    if "timeout" in sr:
+        return "gen_fail_timeout"
+    return "gen_fail"
+
+
 def _record_agentic_usage(slug: str, *, status: str, prompt_tokens: int,
                           completion_tokens: int, wall_s: float,
+                          stop_reason: str = "",
                           model: Optional[str] = None,
                           raw_model: Optional[str] = None) -> None:
     """Agentic uses Codex CLI directly, so LLMClient's recorder is bypassed."""
     prompt_tokens = int(prompt_tokens or 0)
     completion_tokens = int(completion_tokens or 0)
     total_tokens = prompt_tokens + completion_tokens
+    status = _refine_agentic_status(status, stop_reason)
     model_name = model or _resolve_route("config_generate").model
     cost_usd = None
     try:
@@ -1896,6 +1929,7 @@ def _gen_agentic(digest: dict, slug: str, url: str, failure_packet: Optional[dic
             prompt_tokens=e.prompt_tokens,
             completion_tokens=e.completion_tokens,
             wall_s=e.wall_s,
+            stop_reason=getattr(e, "stop_reason", "") or "",
         )
         print(f"[register] agentic generate: {e.stop_reason or 'failed'} "
               f"(wall={e.wall_s:.1f}s tokens={e.prompt_tokens}+{e.completion_tokens} "
@@ -1939,6 +1973,7 @@ def _gen_agentic(digest: dict, slug: str, url: str, failure_packet: Optional[dic
             prompt_tokens=getattr(e, "prompt_tokens", 0),
             completion_tokens=getattr(e, "completion_tokens", 0),
             wall_s=getattr(e, "wall_s", 0.0),
+            stop_reason=getattr(e, "stop_reason", "") or "",
         )
         translated = GenerationError(str(e))
         translated.last_config = getattr(e, "last_config", None)

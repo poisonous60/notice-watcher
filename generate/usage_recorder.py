@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS llm_calls (
     provider        TEXT NOT NULL,          -- gemini / openrouter
     model           TEXT NOT NULL,
     raw_model       TEXT,                   -- provider 가 알려준 정확 모델명 (별칭 해석 결과)
-    status          TEXT NOT NULL,          -- ok / quota_429 / http_error / parse_error / network / other
+    status          TEXT NOT NULL,          -- ok / quota_429 / http_error / parse_error / network / audit_fail / gen_fail[_<stop_reason>] / other
     prompt_tokens   INTEGER DEFAULT 0,
     completion_tokens INTEGER DEFAULT 0,
     total_tokens    INTEGER DEFAULT 0,
