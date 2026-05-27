@@ -18,7 +18,16 @@ from bs4 import BeautifulSoup, Tag
 
 from ._contract import validate_payload
 from ._heuristic import heuristic
-from .hydration import find_list_in_json
+from .hydration import (
+    _DATE_KEY_RE,
+    _DATE_KEYS,
+    _ID_KEY_RE,
+    _ID_KEYS,
+    _TITLE_KEY_RE,
+    _TITLE_KEYS,
+    _URL_KEYS,
+    find_list_in_json,
+)
 
 try:
     import tldextract as _tldextract
@@ -522,6 +531,49 @@ def _json_url_source_script_hints(har: dict, har_path: Path, *, json_url: str, p
 
 
 @heuristic
+def _cross_host_list_api_allowed(api_url: str, page_url: str, list_hits: list[dict]) -> bool:
+    """cross-host API 응답이 *진짜 sister-brand list API* 인지 (FP 방지 strict).
+
+    2026-05-27 박힘 — granblue (.jp page → .com API rcms-api/1/news) 류 brand-host 분리 패턴
+    봉합. 광고/트래커는 _AD_TRACKER_RE 가 이미 위에서 hard filter — 여기 도달 = JSON 응답이긴 함.
+    cross-host 통과 *strict* 조건 (둘 다 만족):
+
+    1. **brand match**: page 의 첫 host label (e.g., 'granbluefantasy') 과 api 의 첫 host label 의
+       6자+ 공통 부분 (substring containment, 양방향). 'sg-public-api-static.hoyoverse.com' ↔
+       'www.hoyoverse.com' 처럼 registrable 같으면 자동 통과 (`_same_site` 가 이미 잡았어야 — 여기 안 옴).
+    2. **strong row semantic**: list_hits[0].sample_first 가 title + identity + (url|date) 셋 다 보유.
+       단순 `{clientId: "x", title: "y"}` 같은 UI list (url/date 없음) 차단.
+
+    code review (2026-05-27 codex): path 키워드 단독 escape 는 facebook /notifications, googleads /feed 같은
+    cross-host 트래커가 통과할 위험. structured guard 로 대체.
+    """
+    if not list_hits:
+        return False
+    h0 = list_hits[0]
+    sample = h0.get("sample_first") or {}
+    keys = set(sample.keys()) if isinstance(sample, dict) else set()
+    has_title = any(k in keys for k in _TITLE_KEYS) or any(_TITLE_KEY_RE.match(str(k)) for k in keys)
+    has_identity = any(k in keys for k in _ID_KEYS) or any(_ID_KEY_RE.match(str(k)) for k in keys)
+    has_url_or_date = (
+        any(k in keys for k in _URL_KEYS)
+        or any(k in keys for k in _DATE_KEYS)
+        or any(_DATE_KEY_RE.match(str(k)) for k in keys)
+    )
+    if not (has_title and has_identity and has_url_or_date):
+        return False
+    # brand label (registrable 의 첫 라벨) 비교 — sister brand 추정.
+    page_host = (urlsplit(page_url).netloc or "").lower()
+    api_host = (urlsplit(api_url).netloc or "").lower()
+    page_reg = _registrable(page_host)
+    api_reg = _registrable(api_host)
+    page_brand = page_reg.split(".")[0] if page_reg else ""
+    api_brand = api_reg.split(".")[0] if api_reg else ""
+    if len(page_brand) < 6 or len(api_brand) < 6:
+        return False
+    return page_brand in api_brand or api_brand in page_brand
+
+
+@heuristic
 def traffic_api_candidates(har_path: Path, *, page_url: str = "") -> list[dict]:
     """HAR 에서 '글 목록' 일 만한 JSON 응답 후보를 *관련도(relevance_score) 순* 으로.
 
@@ -552,8 +604,10 @@ def traffic_api_candidates(har_path: Path, *, page_url: str = "") -> list[dict]:
             continue
         if _AD_TRACKER_RE.search(url):
             continue                                  # 광고/트래커 — 글 목록 API 가 아님
-        if page_url and not _same_site(url, page_url):
-            continue                                  # 페이지와 다른 사이트 — 거의 글 목록이 아님
+        is_cross_host = bool(page_url) and not _same_site(url, page_url)
+        # cross-host 는 *원칙 거부* — 단 sister-brand 도메인 (page=granbluefantasy.jp, api=granbluefantasy.com)
+        # 류는 brand match + strong row semantic 시 escape. 광고/트래커 false-positive 차단 위해 다단 guard.
+        # (escape 판정은 list_hits 받은 후 _cross_host_allowed_for_list_api 로 한 번에 — 여기선 skip 안 함)
         ct = ""
         for h in resp.get("headers", []) or []:
             if str(h.get("name", "")).lower() == "content-type":
@@ -574,6 +628,12 @@ def traffic_api_candidates(har_path: Path, *, page_url: str = "") -> list[dict]:
             continue
         list_hits = find_list_in_json(data, min_items=5)
         if not list_hits:
+            continue
+
+        # cross-host = strict guard: brand match + strong row semantic 둘 다 필요.
+        # 광고/트래커는 _AD_TRACKER_RE 가 이미 위에서 차단. 여기 도달 = page 와 다른 host 라도 진짜
+        # 자매 brand API 후보일 수 있음 (granblue .jp ↔ .com 류).
+        if is_cross_host and not _cross_host_list_api_allowed(url, page_url, list_hits):
             continue
 
         rtype = _entry_resource_type(entry)
@@ -602,6 +662,8 @@ def traffic_api_candidates(har_path: Path, *, page_url: str = "") -> list[dict]:
             score += 1
         if _PAGING_PARAM_RE.search(url):
             score += 1                            # limit/offset/page… 쿼리 — 페이징 가능한 *목록* API 의 신호 (sticky pins API 와 구분됨)
+        if is_cross_host:
+            score -= 1                            # cross-host (sister brand) 는 same-host 보다 한 단 낮춰 정렬
 
         scored.append((score, {
             "method": req.get("method"),

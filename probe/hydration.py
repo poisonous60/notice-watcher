@@ -53,22 +53,91 @@ _ID_KEYS = ("id", "articleId", "noticeId", "no", "slug", "uid", "uuid", "code",
 _URL_KEYS = ("url", "link", "href", "permalink", "link_url", "path")
 _DATE_KEYS = ("publishedAt", "createdAt", "date", "regDate", "pubDate", "datetime", "updatedAt", "displayAt")
 
+# `*_id` (snake) / `*Id` (camel) — fixed `_ID_KEYS` 가 못 잡는 흔한 CMS identifier 패턴.
+# 2026-05-27 박힘: umamusume `announce_id`, hoyoverse `iInfoId`, granblue `topics_id` 등.
+# word-boundary 안전 — `grid`/`paid`/`void`/`splendid` 류는 `_id$`/`[a-z]Id$` 매치 X.
+_ID_KEY_RE = re.compile(r"^(?:[a-z][a-z0-9]*_id|[a-zA-Z][a-zA-Z0-9]*[a-z]Id)$")
+
+# title/name/subject/headline 의 prefix 변형 — `sTitle`/`strSubject`/`articleTitle` 류 봉합.
+# 2026-05-27 hoyoverse 박힘 (`sTitle`). word-boundary 안전 — `metadata`/`hostname` 미스.
+_TITLE_KEY_RE = re.compile(
+    r"^(?:[a-z][a-z0-9]*_(?:title|name|subject|headline)|"
+    r"[a-zA-Z][a-zA-Z0-9]*(?:Title|Name|Subject|Headline))$"
+)
+
+# date/time 변형 — `post_time`/`reg_date`/`inst_ymdhi`/`createdAt` 류. CMS 가 `ymd`/`ymdhi`
+# 같이 짧은 키도 자주 씀. 2026-05-27 granblue `inst_ymdhi`/`post_time` 박힘.
+_DATE_KEY_RE = re.compile(
+    r"^(?:[a-z][a-z0-9]*_(?:date|time|at|on|ymd|ymdhi|pubdate|regdate)|"
+    r"[a-zA-Z][a-zA-Z0-9]*(?:Date|Time|At))$|"
+    r"^(?:ymd|ymdhi|pubdate|regdate|created|updated|published|datetime|timestamp)$",
+    re.IGNORECASE,
+)
+
+
+@heuristic
+def _is_identity_value(v: Any, *, url_like: bool = False) -> bool:
+    """identity 값 = 비어있지 않은 int/uuid/numeric-or-slug string. value-shape guard.
+
+    빈 문자열·dict·list·None·bool 거부 → `{clientId: null, title: ""}` 같은 stub list false-positive 차단.
+    code review (2026-05-27 codex): key-only 매칭은 `{clientId: "abc", ...}` 류 UI list 도 row 로
+    승격 위험 — value-shape 도 식별자 후보 (int 또는 alphanumeric 2~128자) 인지 같이 검사.
+    url_like=True 면 `/` 와 `:`/`?` 같은 URL 문자도 허용 (path/full URL 의 식별자 검증용).
+    """
+    if isinstance(v, bool):
+        return False
+    if isinstance(v, int):
+        return True
+    if isinstance(v, str):
+        s = v.strip()
+        if len(s) < 2 or len(s) > 512:
+            return False
+        if url_like:
+            # URL/path — 흔한 URL 문자 허용 (slash/query/fragment/encoding)
+            return bool(re.match(r"^[A-Za-z0-9._\-/:%?&=+,~@#]{2,512}$", s))
+        return bool(re.match(r"^[A-Za-z0-9._\-]{2,128}$", s))
+    return False
+
+
+@heuristic
+def _has_row_identity(d: dict) -> bool:
+    """dict 에 식별자 키+값 쌍 있나 — fixed `_ID_KEYS` + `_ID_KEY_RE` (snake/camel) + `_URL_KEYS`.
+
+    `_looks_like_row` 와 `_looks_rowish` 가 공유 (codex 권고 2026-05-27).
+    각 후보 키마다 value-shape guard — id 키는 짧은 alphanumeric/slug, URL 키는 path/URL 문자 허용.
+    """
+    for k, v in d.items():
+        ks = str(k)
+        is_url_key = ks in _URL_KEYS
+        is_id_key = ks in _ID_KEYS or _ID_KEY_RE.match(ks) is not None
+        if is_url_key and _is_identity_value(v, url_like=True):
+            return True
+        if is_id_key and _is_identity_value(v):
+            return True
+    return False
+
+
+@heuristic
+def _has_title_key(d: dict) -> bool:
+    """fixed `_TITLE_KEYS` + `_TITLE_KEY_RE` (sTitle/articleTitle/post_subject 등) 합쳐 매칭."""
+    for k in d:
+        ks = str(k)
+        if ks in _TITLE_KEYS or _TITLE_KEY_RE.match(ks):
+            return True
+    return False
+
 
 @heuristic
 def _looks_like_row(first: dict) -> Optional[str]:
     """dict 가 글 한 건처럼 보이면 그 '항목 dict' 까지의 하위 경로를 반환(없으면 None).
     "" = first 자체가 항목. "feed" = first["feed"] 가 항목(엔벨로프형: {feed:{title,feedId,...}, user:{...}, ...}).
     엔벨로프는 *딱 한 단계* 만 본다(과탐 방지)."""
-    has_title = any(k in first for k in _TITLE_KEYS)
-    has_identity = any(k in first for k in _ID_KEYS) or any(k in first for k in _URL_KEYS)
-    if has_title and has_identity:
+    if _has_title_key(first) and _has_row_identity(first):
         return ""
     for k, v in first.items():
         if not isinstance(v, dict):
             continue
-        has_nested_title = any(kk in v for kk in _TITLE_KEYS)
-        has_nested_identity = any(kk in v for kk in _ID_KEYS) or any(kk in v for kk in _URL_KEYS)
-        if has_nested_title and has_nested_identity:
+        if _has_title_key(v) and _has_row_identity(v):
             return str(k)
     return None
 
@@ -170,7 +239,7 @@ def _balanced(s: str, start: int, open_ch: str, close_ch: str, *, limit: int = 4
 
 @heuristic
 def _looks_rowish(d: Any) -> bool:
-    return isinstance(d, dict) and any(k in d for k in _TITLE_KEYS) and any(k in d for k in _ID_KEYS)
+    return isinstance(d, dict) and _has_title_key(d) and _has_row_identity(d)
 
 
 @heuristic
