@@ -197,6 +197,8 @@ codex 위임 결과 검토 시 deferred / "out of scope" / "global risk" / "defe
 
 **How to apply**: codex 결과 chunk 검토 시 *deferred 항목 사용자 메시지 grep* — 사용자 message 안에 같은 표현·신호·가설 있으면 빨간 flag. merge 전 사용자에게 "codex 가 [정확한 deferred 항목 인용] 안 했음, 그래도 진행?" 묻기. 사용자 동의 받기 전 merge X. PASS 어휘 사용 시 deferred 항목까지 PASS 인지 명시.
 
+**user prompt 의도 grep 의무 (codex 위임 진입 전 + result review 양쪽)**: 작업 entry 시점 + codex result review 시점 양쪽에서 현재 user prompt 를 `codex|agentic|Track A|Track B|generic improvement|C/B/A/F-layer|failure_packet|curated examples|rules compact` 키워드로 grep. hit 가 있으면 *Claude 가 그 의도를 자기 plan/result 에 반영했는지* 한 줄로 명시 판정. deferred·미반영·자기-해석으로 다른 길 갔으면 **사용자 확인 받기 전 진행 X**. (2026-05-27 games-mobile batch — 사용자가 "codex 위임 모드"/"agent 입력 축소" 명시했는데 Claude 가 "residual 작음=직접" 으로 자기-해석. 직접 grep 했으면 잡혔음.) 단순 키워드 absence ≠ 면제 — *의도 표현* (예 prompt 3b 의 "agent 입력 축소/품질 개선") 도 같은 의미면 hit.
+
 ## 9. 동시 dev 세션 — 병렬 git etiquette
 
 여러 Claude/codex 세션이 *같은 dev box·같은 로컬 repo* 에서 동시 작업 가능. 흔함 — 한 세션이 batch A, 다른 세션이 batch B. 핵심: **git 상태가 내 것만이 아님**. 2026-05-21·2026-05-24 동시 batch 중 오진·혼란으로 박힘.

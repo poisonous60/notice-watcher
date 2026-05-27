@@ -172,7 +172,13 @@ python scripts/remote.py jobs --since <분> --min-id <batch 시작 id> --wait --
 6. **merge·인덱스·배포는 Claude 직렬**: worktree 모드 — 통과 청크 `git merge --no-ff codex-wt/<branch>` 직렬 → `git worktree remove <path>; git branch -D codex-wt/<branch>`. **merge 안전** — merge-base 3-way 라 disjoint 변경이면 main 의 병렬 세션 커밋도 보존(삭제 0). 충돌은 공유 파일(INDEX.md 양쪽 regen)뿐 → 다음 줄 `cases_index --backfill-db` 가 재생성 해결. 사전 확인: `git merge-tree $(git merge-base main <branch>) main <branch> | grep -i conflict`. 그 후 `probe_smoke --stage 3 --stage 5` exit 0 → `cases_index --backfill-db` → push(hook) → N100 배포 → `case_log log`(commit 후). (worktree 미사용이면 settled 트리서 **청크별 `git add <청크 파일만>`, `-A` 금지** 후 동일.)
 7. **batch 후 `python scripts/triage.py prune-orphans --execute`** — recognizer 추가가 url_to_slug 를 바꿔 옛 host_ FAILED/triage_queue 마커가 orphan 으로 남음 (hash 매칭으로 prune).
 
-단건이거나 codex 위임이 과한 경우 (단순 selector 한 줄)엔 Claude 가 직접 §1~§5 해도 됨 — 위임은 *큐가 크거나 quota 절약 필요할 때* 의 도구. **무제한 병렬**(공유 파일 직렬화 제거)이 필요하면 worktree 격리 또는 detect-dispatch auto-discovery refactor — ADR 0008 §병렬 위임(미구현, 직렬화 병목 시). 하네스 상세 = ADR 0008, AGENTS.md §6.
+Claude 직접 처리 예외 — *AND 조건 전부 만족* 일 때만:
+- (a) 변경 파일 = `configs/<slug>.json` *한 장*. 그 안에서 selector 한 줄·`post_id` transform 한 줄·`polite_sleep` 값 같은 single field 수정.
+- (b) probe/prompt/engine/recognizer 또는 C/B/A/F-layer 파일 0개 건드림.
+- (c) Track B 2a/2b/2c/2d *all miss* (each with one-line reason in §2 강제 인용 4b).
+- (d) user prompt 안 어휘 `codex|agentic|Track [AB]|generic improvement|failure_packet|curated examples|rules compact|agent 입력` grep hit 0건.
+
+위 4 중 하나라도 깨지면 codex 위임 대상. (특히 probe heuristic·prompt rule·engine code 변경 = size 무관 codex 위임 우선. Claude 는 diff·case·검증 review.) **무제한 병렬**(공유 파일 직렬화 제거)이 필요하면 worktree 격리 또는 detect-dispatch auto-discovery refactor — ADR 0008 §병렬 위임(미구현, 직렬화 병목 시). 하네스 상세 = ADR 0008, AGENTS.md §6.
 
 ### §0c-회피 게이트 4종 (2026-05-24 박음 — `codex_handoff.py:HARD_STOP` 의 dev 박스 측 mirror)
 
@@ -229,18 +235,19 @@ triage 에서 *지금 작업 안 하고 치워두는* 항목은 **해소 경로�
 
 ### §2 진입 전 — 강제 인용 (skim 방지)
 
-`triage.py show <slug>` 출력 받은 *바로 다음 assistant 메시지* 에서, **§2 분기에 해당하는 코드 변경 (Edit/Write — 인식기·probe·prompt·config 손대기 또는 수동 config 작성) 보내기 전에**, 같은 메시지 안에 다음 4개 명시 출력해야 함. 인용 없이 §2 진입 X — 가설 헛디딤(β) 의 직접 차단. (인용과 그 다음 Edit/Write 사이에 추가 Read/Bash 보강은 OK — 단, *4개 인용은 첫 메시지에서 끝* 내고 그 뒤에 보강.)
+`triage.py show <slug>` 출력 받은 *바로 다음 assistant 메시지* 에서, **§2 분기에 해당하는 코드 변경 (Edit/Write — 인식기·probe·prompt·config 손대기 또는 수동 config 작성) 보내기 전에**, 같은 메시지 안에 다음 항목 명시 출력해야 함. 인용 없이 §2 진입 X — 가설 헛디딤(β) 의 직접 차단. (인용과 그 다음 Edit/Write 사이에 추가 Read/Bash 보강은 OK — 단, *전 항목 인용은 첫 메시지에서 끝* 내고 그 뒤에 보강.)
 
 1. **`last_feedback` 첫 `[FAIL]` 줄** (`triage.py show` 출력에서 verbatim)
 2. **`diagnosis.json` 의 `verdict`** (digest 에 표면화됨)
 3. **`docs/config 자동생성 실패 케이스.md` 매칭 §번호** + 1줄 근거
-4. **분기 후보 (2a~2e)** + 그 선택 1줄 이유
-5. **누적 cross-check** — 진단한 failure_keys 각각에 대해 `python scripts/cases_index.py query --failure-key <key> [--failure-key <key2> ...] --json` 1회 호출 + JSON 결과 인용. 같은 진단의 root-cause 신호 (예: `static_vs_headless`, `diverging_first_article`) 가 case body 에 흔적 있으면 `--signal "<regex>"` 도 동시 호출. 그리고 `python scripts/cases_index.py query --deferred --json` 으로 deferred 후보 트리거 상태 확인. **한 label 의 `track_b_trigger=true` 면 트랙 B 진입 강제 — deferred 보류 불가, 같은 PR 에 휴리스틱·인식기·prompt 박음**. 0건이면 명시 ("누적 0건 — 첫 사례, deferred OK").
+4a. **Track A 분기** (2a~2e) + 선택 1줄 이유
+4b. **Track B gate** — Track A 선택과 별개로 2a/2b/2c/2d 를 각각 `hit|miss — 이유 1줄` 로 적는다. 2c miss 는 세 항목을 모두 판정한다: 페이지 박힌 fact 추출 누락 / LLM raw 반복 오판 / preflight 거부 가능성. `cases_index` 0건은 recurrence 근거 0일 뿐, Track B skip 근거가 아니다. 한 항목이라도 hit 면 같은 PR 에 휴리스틱·인식기·prompt 박거나 명시적으로 escalate (case body 의 _deferred_heuristics 섹션 + 이유).
+5. **누적 cross-check** — 진단한 failure_keys 각각에 대해 `python scripts/cases_index.py query --failure-key <key> [--failure-key <key2> ...] --json` 1회 호출 + JSON 결과 인용. 같은 진단의 root-cause 신호 (예: `static_vs_headless`, `diverging_first_article`) 가 case body 에 흔적 있으면 `--signal "<regex>"` 도 동시 호출. 그리고 `python scripts/cases_index.py query --deferred --json` 으로 deferred 후보 트리거 상태 확인. **한 label 의 `track_b_trigger=true` 면 트랙 B 진입 강제 — deferred 보류 불가, 같은 PR 에 휴리스틱·인식기·prompt 박음**. 0건이면 명시 ("누적 0건 — 첫 사례, deferred OK") — *단 4b 의 §2c 3항목 매핑은 그래도 의무*.
 6. **preflight 결과** (§0b) — `preflight: <a-hit|b-hit|miss> — <slug> [<commit-sha-if-b-hit>]`. a-hit 또는 b-hit 면 §2 진입 자체 X (이미 회복) — 인용 1줄 + 종료. miss 만 §2 진입. 본 인용 = §0b 강제 실행 증명. preflight 안 돌렸으면 *그 자체로 SKILL 위반*.
 
 artifact 없는 §0 신규 진입 (link 만 받은 첫 시도) 케이스는 예외 — `[§0 entry, no artifact yet]` 한 줄 명시 후 §0 절차로. 5번 (누적 cross-check) 도 skip (failure_keys 없음).
 
-`show` 가 자동으로 prepend 하는 digest (diagnosis / list_candidates / HAR) 가 1~4 인용 source. 5 는 `cases_index.py query` 출력 source. 그 외 정보 필요하면 `Read` 로 보강 가능하지만 위 5개는 *항상* 인용해야 함.
+`show` 가 자동으로 prepend 하는 digest (diagnosis / list_candidates / HAR) 가 1~4 인용 source. 5 는 `cases_index.py query` 출력 source. 그 외 정보 필요하면 `Read` 로 보강 가능하지만 위 항목은 *항상* 인용해야 함.
 
 ## 2. 분기 — 위에서부터 차례로 따져 첫 매칭 (2a~2d 가 2e 보다 우선)
 
