@@ -1,0 +1,135 @@
+{
+  "version": 1,
+  "site": "docs.cohere.com",
+  "board": "changelog",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR"
+  },
+  "timeout": 15,
+  "list": {
+    "url_template": "https://docs.cohere.com/changelog",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "article.fern-changelog-content[data-has-aside='true']",
+    "row_required_selector": "h2 a",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "h2 a",
+          "attr": "href",
+          "transform": [
+            [
+              "regex_extract",
+              "^/changelog/([^?#/]+)$"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "h2 a",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "h2 a",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://docs.cohere.com"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": ".fern-changelog-label a.fern-docs-badge",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "iso8601",
+              [
+                "%B %d, %Y"
+              ],
+              "+09:00"
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": ".fern-prose > div > p",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "article.fern-changelog-content[data-has-aside='true'] .fern-prose",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "article.fern-changelog-content[data-has-aside='true'] h2 a",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "article.fern-changelog-content[data-has-aside='true'] .fern-changelog-label a.fern-docs-badge",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "iso8601",
+              [
+                "%B %d, %Y"
+              ],
+              "+09:00"
+            ]
+          ]
+        }
+      ]
+    }
+  }
+}

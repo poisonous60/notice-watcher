@@ -1,0 +1,106 @@
+{
+  "version": 1,
+  "site": "popl26.sigplan.org",
+  "board": "home",
+  "strategy": "httpx_html",
+  "_slug_board": "root",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+    "Referer": "https://popl26.sigplan.org/"
+  },
+  "timeout": 15,
+  "polite_sleep": {
+    "min": 2,
+    "max": 4
+  },
+  "list": {
+    "url_template": "https://popl26.sigplan.org/",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "a.highlight-carousel-item.navigate[href*='/details/']",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": ":self",
+          "attr": "href",
+          "transform": [
+            [
+              "regex_extract",
+              "/details/[^/]+/(\\d+)/"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "h5",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": ":self",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://popl26.sigplan.org/"
+            ]
+          ]
+        }
+      ],
+      "author": [
+        {
+          "from": "css",
+          "selector": "h6 i",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        },
+        {
+          "from": "attr",
+          "selector": "img[alt]",
+          "attr": "alt",
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "#content",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "body",
+        "html": true
+      }
+    ]
+  },
+  "_source_url": "https://popl26.sigplan.org/",
+  "_note": "SIGPLAN/researchr Conf home page (popl26.sigplan.org) — featured papers are a.highlight-carousel-item.navigate rows. post_id is the numeric /details/.../<id>/ URL segment, avoiding duplicate IDs from wider carousel containers.",
+  "_recognized_platform": "sigplan_conf"
+}
