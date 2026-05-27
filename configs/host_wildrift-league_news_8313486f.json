@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "site": "wildrift.leagueoflegends.com",
+  "board": "news",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Referer": "https://wildrift.leagueoflegends.com/news/"
+  },
+  "timeout": 20,
+  "_source_url": "https://wildrift.leagueoflegends.com/news/",
+  "_note": "Riot Next.js news list uses stable data-testid card markup. Avoid styled-components generated class selectors; mirror the TFT news config shape with host-specific URL and urljoin base.",
+  "list": {
+    "url_template": "https://wildrift.leagueoflegends.com/ko-kr/news/",
+    "pagination": {"kind": "none"},
+    "row_selector": "section[data-testid=\"article-card-grid\"] a[data-testid=\"articlefeaturedcard-component\"][href^=\"/ko-kr/news/\"]",
+    "row_required_selector": "time",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": ":self",
+          "attr": "href",
+          "transform": [["regex_extract", "/ko-kr/news/(?:[^/]+/)*([^/?#]+)/?$"]]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "div[data-testid=\"card-title\"]",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": ":self",
+          "attr": "href",
+          "transform": [["urljoin", "https://wildrift.leagueoflegends.com"]]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "attr",
+          "selector": "time",
+          "attr": "datetime",
+          "transform": [["iso8601", ["%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ"], "Z"]]
+        }
+      ],
+      "author": [
+        {"from": "const", "value": "Riot Games"}
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "div[data-testid=\"card-description\"]",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ],
+      "cover_image": [
+        {
+          "from": "attr",
+          "selector": "img[data-testid=\"card-image\"]",
+          "attr": "src",
+          "transform": [["urljoin", "https://wildrift.leagueoflegends.com"]]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {"from": "css", "selector": "main", "html": true}
+    ]
+  }
+}
