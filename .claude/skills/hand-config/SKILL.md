@@ -105,7 +105,7 @@ git status --short -- prompts/ engine/ probe/ generate/ engine/recognizers/
 
 **generic `진행해` 는 terminal 실행 승인으로 세지 X.** 위 4줄 증거를 먼저 보여준 뒤, 사용자가 **slug별 terminal action** 을 이해할 수 있게 된 상태에서 받은 명시 승인만 실행 승인이다. 사용자가 "진행해" 라고 했더라도 그 직전 답변이 live/probe 증거 없는 추정이면 실행하지 말고, live 확인부터 한다.
 
-특히 **1회 503/DNS/timeout 관측만으로 REJECTED 금지**. capability 영구 거부는 N100 또는 현재 실전 경로에서 반복 재현됐고, 정책상/능력상 우회하지 않는다는 판단까지 서야 한다. 단발 503·Chromium DNS flake·ReadTimeout 은 우선 Later/재시도/구조 확인 후보지, 영구 거부가 아니다.
+특히 **raw 503/DNS/timeout 한 줄만으로 REJECTED 금지**. 첫 진단 pass 에서도 `live 확인` + `probe artifact` + 현재 실전 경로 증거가 서로 맞고, 정책상/능력상 우회·개선하지 않을 capability 한계라면 REJECTED 가능하다. 반복 재시도는 의무가 아니지만, stale snapshot 이나 단발 브라우저 관측만으로 닫지 않는다.
 
 이 게이트는 Track B 우선순위보다 앞선 안전장치다. Track B 후보가 있으면 terminal 실행 전에 먼저 후보를 제안하고, 수동 config·손거부로 닫지 않는다.
 
@@ -279,6 +279,7 @@ triage 에서 *지금 작업 안 하고 치워두는* 항목은 **해소 경로�
 
 `triage.py show <slug>` 출력 받은 *바로 다음 assistant 메시지* 에서, **§2 분기에 해당하는 코드 변경 (Edit/Write — 인식기·probe·prompt·config 손대기 또는 수동 config 작성) 보내기 전에**, 같은 메시지 안에 다음 항목 명시 출력해야 함. 인용 없이 §2 진입 X — 가설 헛디딤(β) 의 직접 차단. (인용과 그 다음 Edit/Write 사이에 추가 Read/Bash 보강은 OK — 단, *전 항목 인용은 첫 메시지에서 끝* 내고 그 뒤에 보강.)
 
+0. **live 확인** (digest 인용 1~6 *전* 의무 — entry-side mirror of §0b-1) — slug 별 1줄: `curl -sI <URL>` HTTP status + (필요 시) `curl -sk <URL> | head -<n>` 본문 구조 1줄 (게시판 / marketing landing / SPA shell / locale redirect / anti-bot 503 / WP REST 차단 등). **stale probe artifact (`output/probe/<slug>/`, `triage.py show` digest) 는 *보조 근거* 만 — entry path 아님**. *지금* 의 live evidence 가 1~6 보다 위. live 와 probe digest 모순이면 **live 우선** (probe 는 캡쳐 시점 snapshot — 사이트는 변함). live 안 본 채로 1~6 인용만 하고 §2 진입 X. 본 인용 = "stale snapshot → 잘못된 terminal 분류" 의 직접 차단 (2026-05-27 games-mobile zynga 503/yo-star DNS/king /en/ redirect 사건). **artifact 없는 §0 신규 진입** 도 0번 의무 (1~5 만 skip 가능, 0 은 항상). cross-site 패턴 (2+ slug 같은 live 신호) 보이면 §0c-0 agentic-first 위임 1순위.
 1. **`last_feedback` 첫 `[FAIL]` 줄** (`triage.py show` 출력에서 verbatim)
 2. **`diagnosis.json` 의 `verdict`** (digest 에 표면화됨)
 3. **`docs/config 자동생성 실패 케이스.md` 매칭 §번호** + 1줄 근거
@@ -294,9 +295,9 @@ triage 에서 *지금 작업 안 하고 치워두는* 항목은 **해소 경로�
 5. **누적 cross-check** — 진단한 failure_keys 각각에 대해 `python scripts/cases_index.py query --failure-key <key> [--failure-key <key2> ...] --json` 1회 호출 + JSON 결과 인용. 같은 진단의 root-cause 신호 (예: `static_vs_headless`, `diverging_first_article`) 가 case body 에 흔적 있으면 `--signal "<regex>"` 도 동시 호출. 그리고 `python scripts/cases_index.py query --deferred --json` 으로 deferred 후보 트리거 상태 확인. **한 label 의 `track_b_trigger=true` 면 Track B 진입 강제 — deferred 보류 불가, 같은 PR 에 휴리스틱·인식기·prompt 박음**. 0건이면 명시 ("누적 0건 — 첫 사례, deferred OK") — *단 4a 의 C miss 3항목 매핑은 그래도 의무*.
 6. **preflight 결과** (§0b) — `preflight: <a-hit|b-hit|miss> — <slug> [<commit-sha-if-b-hit>]`. a-hit 또는 b-hit 면 §2 진입 자체 X (이미 회복) — 인용 1줄 + 종료. miss 만 §2 진입. 본 인용 = §0b 강제 실행 증명. preflight 안 돌렸으면 *그 자체로 SKILL 위반*.
 
-artifact 없는 §0 신규 진입 (link 만 받은 첫 시도) 케이스는 예외 — `[§0 entry, no artifact yet]` 한 줄 명시 후 §0 절차로. 5번 (누적 cross-check) 도 skip (failure_keys 없음).
+artifact 없는 §0 신규 진입 (link 만 받은 첫 시도) 케이스는 예외 — `[§0 entry, no artifact yet]` 한 줄 명시 후 §0 절차로. 5번 (누적 cross-check) 도 skip (failure_keys 없음). **0번 (live 확인) 은 예외 X — 항상 의무**.
 
-`show` 가 자동으로 prepend 하는 digest (diagnosis / list_candidates / HAR) 가 1~4 인용 source. 5 는 `cases_index.py query` 출력 source. 그 외 정보 필요하면 `Read` 로 보강 가능하지만 위 항목은 *항상* 인용해야 함.
+`show` 가 자동으로 prepend 하는 digest (diagnosis / list_candidates / HAR) 가 1~4 인용 source. 5 는 `cases_index.py query` 출력 source. 0번 (live 확인) source 는 *지금* curl/browser 직접 — digest 인용으로 대체 X. 그 외 정보 필요하면 `Read` 로 보강 가능하지만 위 항목은 *항상* 인용해야 함.
 
 ## 2. 분기 — Track A 사이트 fix 절차 (§1 의 Track B 6-layer audit 와 별개)
 

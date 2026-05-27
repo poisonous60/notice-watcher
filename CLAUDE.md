@@ -185,7 +185,7 @@ bash scripts/setup-hooks.sh   # 또는 pwsh scripts/setup-hooks.ps1
 
 `REJECTED` 손-박기, `triage.py park-gate-fail`, true-board `triage_later.json`, `case_log no_change` 는 큐 정리가 아니라 **terminal decision** 이다. 실행 전에는 `.claude/skills/hand-config/SKILL.md` §0b-1 형식으로 먼저 제안만 한다: `live 확인` + `probe artifact` + `terminal bucket` + `rollback`.
 
-**generic `진행해` 는 terminal 실행 승인 X.** live/probe 근거 없는 추정 직후 받은 진행 허가는 무효다. 특히 **1회 503/DNS/timeout 으로 REJECTED 금지** — N100/실전 경로 반복 재현 전엔 Later/재시도/구조 확인 후보.
+**generic `진행해` 는 terminal 실행 승인 X.** live/probe 근거 없는 추정 직후 받은 진행 허가는 무효다. 특히 **raw 503/DNS/timeout 한 줄만으로 REJECTED 금지** — 첫 진단 pass 에서도 live 확인 + probe artifact + 현재 실전 경로 증거가 맞고 우회·개선하지 않을 capability 한계면 REJECTED 가능. 반복 재시도 의무가 아니라 stale snapshot/단발 관측 닫기 금지다.
 
 ### 8b. perf/timeout/속도 진단 = real artifact 측정 의무 (deploy 게이트)
 

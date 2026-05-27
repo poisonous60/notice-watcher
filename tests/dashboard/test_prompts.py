@@ -49,7 +49,8 @@ def run() -> list[tuple[str, bool, str]]:
             "terminal action freeze" in text
             and "live 확인" in text
             and "generic `진행해`" in text
-            and "1회 503/DNS/timeout" in text,
+            and "raw 503/DNS/timeout" in text
+            and "첫 진단 pass" in text,
             text,
         ))
 

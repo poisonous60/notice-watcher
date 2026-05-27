@@ -30,10 +30,12 @@ def hand_config_for_url(*, url: str, slug: Optional[str] = None,
     lines.append("Track A (optional): Track B 6 자리 all miss + `/preview` ship evidence hit 일 때만 수동 config/손어댑터 진입. "
                  "둘 다 아니면 park 가 valid terminal — 사이트 단위 ship 강제 X.")
     lines.append("")
-    lines.append("§2 분기 *전*: `triage.py show <slug>` 출력 받은 다음 메시지에서 6개 강제 인용 "
-                 "(1 last_feedback / 2 verdict / 3 근거 / 4a Track B 6-layer / 4b Track A 결정 / "
+    lines.append("§2 분기 *전*: `triage.py show <slug>` 출력 받은 다음 메시지에서 강제 인용 "
+                 "(**0 live 확인 — `curl -sI <URL>` 또는 browser 로 *지금* 사이트 직접 본 1줄 (stale probe artifact entry 금지)** / "
+                 "1 last_feedback / 2 verdict / 3 근거 / 4a Track B 6-layer / 4b Track A 결정 / "
                  "4c context ship evidence(`/preview`) / 4d park 분기 / 5 cases_index / 6 preflight). "
-                 "artifact 없는 §0 신규 case 만 예외. — SKILL.md \"§2 진입 전 강제 인용\" 박스.")
+                 "live 와 probe digest 모순이면 **live 우선**. 0번 = 항상 의무 (artifact 없는 §0 신규 case 도). "
+                 "artifact 없는 §0 신규 case 는 1~5 만 예외. — SKILL.md \"§2 진입 전 강제 인용\" 박스.")
     return "\n".join(lines)
 
 
@@ -48,10 +50,11 @@ def hand_config_redo_slug(*, slug: str, url: Optional[str] = None) -> str:
     lines.append("slug redo 요청 자체가 이 사이트 ship evidence 이므로 ship default=true. "
                  "단 Track A(수동 config/손어댑터)는 Track B 6 자리 all miss 일 때만 optional 진입.")
     lines.append("")
-    lines.append("§2 분기 *전*: `triage.py show <slug>` 출력 받은 다음 메시지에서 6개 강제 인용 "
-                 "(1 last_feedback / 2 verdict / 3 근거 / 4a Track B 6-layer / 4b Track A 결정 / "
+    lines.append("§2 분기 *전*: `triage.py show <slug>` 출력 받은 다음 메시지에서 강제 인용 "
+                 "(**0 live 확인 — `curl -sI <URL>` 또는 browser 로 *지금* 사이트 직접 본 1줄 (stale probe artifact entry 금지)** / "
+                 "1 last_feedback / 2 verdict / 3 근거 / 4a Track B 6-layer / 4b Track A 결정 / "
                  "4c context ship evidence(redo 요청) / 4d park 분기 / 5 cases_index / 6 preflight). "
-                 "— SKILL.md \"§2 진입 전 강제 인용\" 박스.")
+                 "live 와 probe digest 모순이면 **live 우선**. — SKILL.md \"§2 진입 전 강제 인용\" 박스.")
     return "\n".join(lines)
 
 
@@ -96,7 +99,7 @@ def hand_config_triage_queue(*, failed_slugs: list[str]) -> str:
         "6d. **terminal action freeze** — `REJECTED` 손-박기 / `park-gate-fail` / true-board Later / `no_change` 는 정리 작업이 아니라 terminal decision. "
         "실행 전 먼저 slug별 제안만 하라: `live 확인`(지금 직접 연 사이트·HTTP·렌더 구조), `probe artifact`(`triage.py show` + output/probe; stale snapshot 은 보조 근거), "
         "`terminal bucket`, `rollback` 4줄을 보여준다. **generic `진행해` 는 terminal 실행 승인 X** — 위 증거를 보인 뒤 받은 slug별 terminal action 승인만 실행. "
-        "**1회 503/DNS/timeout 관측만으로 REJECTED 금지**; N100/실전 경로 반복 재현 전에는 Later/재시도/구조 확인 후보로 둔다.",
+        "**raw 503/DNS/timeout 한 줄만으로 REJECTED 금지**; 첫 진단 pass 에서도 live 확인 + probe artifact + 현재 실전 경로 증거가 맞고 우회·개선하지 않을 capability 한계면 REJECTED 가능. 반복 재시도 의무가 아니라 stale snapshot/단발 관측 닫기 금지다.",
         "",
         "**gen_fail(rc=1) 은 §0b-2 screen-out 먼저** — '진짜 게시판 아님' 3종을 골라내 사이트별 작업 낭비 차단: "
         "(P1) content-as-list 오탐(단일 글이 index 로 통과 — `list_candidates` 반복 행 0~소수+단일 본문 → `prompts/classify.system.txt` content 측 보강), "
@@ -123,9 +126,12 @@ def hand_config_triage_queue(*, failed_slugs: list[str]) -> str:
     lines.append("Track A skip 시 park 가 valid terminal: classifier/gate fallthrough 는 `triage.py park-gate-fail`, "
                  "true board + ship 요청 0 은 `case_log no_change` + `triage_later.json` 손-park, cap_blocked 는 auto Later.")
     lines.append("REJECT 사이트라도 구조 분석해 Track B 개선이 1순위. 특수/tradeoff 명확할 때만 스킵 + case log 에 이유.")
-    lines.append("각 slug §2 분기 *전*: 6개 강제 인용 "
-                 "(1 last_feedback / 2 verdict / 3 근거 / 4a Track B 6-layer / 4b Track A 결정 / "
-                 "4c context ship evidence / 4d park 분기 / 5 cases_index / 6 preflight).")
+    lines.append("각 slug §2 분기 *전*: 강제 인용 "
+                 "(**0 live 확인 — `curl -sI <URL>` 또는 browser 로 *지금* 사이트 직접 본 1줄 (stale probe artifact entry 금지)** / "
+                 "1 last_feedback / 2 verdict / 3 근거 / 4a Track B 6-layer / 4b Track A 결정 / "
+                 "4c context ship evidence / 4d park 분기 / 5 cases_index / 6 preflight). "
+                 "live 와 probe digest 모순이면 **live 우선** (probe = 캡쳐 시점 snapshot — 사이트는 변함). "
+                 "— SKILL.md \"§2 진입 전 강제 인용\" 박스 (0번 = 2026-05-27 박힘).")
     return "\n".join(lines)
 
 
@@ -208,7 +214,7 @@ def catalog_run_and_fix(*, catalog_name: str,
     lines.append("6d. **terminal action freeze** — `REJECTED` 손-박기 / `park-gate-fail` / true-board Later / `no_change` 는 정리 작업이 아니라 terminal decision. "
                  "실행 전 먼저 slug별 제안만 하라: `live 확인`(지금 직접 연 사이트·HTTP·렌더 구조), `probe artifact`(`triage.py show` + output/probe; stale snapshot 은 보조 근거), "
                  "`terminal bucket`, `rollback` 4줄을 보여준다. **generic `진행해` 는 terminal 실행 승인 X** — 위 증거를 보인 뒤 받은 slug별 terminal action 승인만 실행. "
-                 "**1회 503/DNS/timeout 관측만으로 REJECTED 금지**; N100/실전 경로 반복 재현 전에는 Later/재시도/구조 확인 후보로 둔다.")
+                 "**raw 503/DNS/timeout 한 줄만으로 REJECTED 금지**; 첫 진단 pass 에서도 live 확인 + probe artifact + 현재 실전 경로 증거가 맞고 우회·개선하지 않을 capability 한계면 REJECTED 가능. 반복 재시도 의무가 아니라 stale snapshot/단발 관측 닫기 금지다.")
     lines.append("")
     lines.append("각 fail 기본 프레임: Track B 1순위 — canonical 6 자리 E/D/C/B/A/F "
                  "(schema 거부 / retry feedback / probe digest 신호 / few-shot / system 규칙 추가 / 새 엔진 코드) 를 먼저 audit. "
@@ -221,10 +227,12 @@ def catalog_run_and_fix(*, catalog_name: str,
     lines.append("")
     lines.append("REJECT 사이트도 구조 분석 → probe 개선 시도. 특수 케이스나 tradeoff 명확하면 case log 이유 기록.")
     lines.append("")
-    lines.append("각 slug §2 분기 *전*: `triage.py show <slug>` 출력 받은 다음 메시지에서 6개 강제 인용 "
-                 "(1 last_feedback / 2 verdict / 3 근거 / 4a Track B 6-layer / 4b Track A 결정 / "
+    lines.append("각 slug §2 분기 *전*: `triage.py show <slug>` 출력 받은 다음 메시지에서 강제 인용 "
+                 "(**0 live 확인 — `curl -sI <URL>` 또는 browser 로 *지금* 사이트 직접 본 1줄 (stale probe artifact entry 금지)** / "
+                 "1 last_feedback / 2 verdict / 3 근거 / 4a Track B 6-layer / 4b Track A 결정 / "
                  "4c context ship evidence / 4d park 분기 / 5 cases_index / 6 preflight). "
-                 "— SKILL.md \"§2 진입 전 강제 인용\" 박스.")
+                 "live 와 probe digest 모순이면 **live 우선**. cross-site 패턴 (2+ slug 같은 live 신호) 보이면 §0c-0 agentic-first. "
+                 "— SKILL.md \"§2 진입 전 강제 인용\" 박스 (0번 = 2026-05-27 박힘, stale snapshot terminal 분류 사고 차단).")
     return "\n".join(lines)
 
 

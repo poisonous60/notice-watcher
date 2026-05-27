@@ -31,14 +31,15 @@ def run() -> list[tuple[str, bool, str]]:
     ))
     cases.append((
         "skill_warns_one_observation_is_not_rejected",
-        "1회 503/DNS/timeout" in skill and "REJECTED 금지" in skill,
+        "raw 503/DNS/timeout" in skill and "첫 진단 pass" in skill and "REJECTED 가능" in skill,
         skill[:4800],
     ))
     cases.append((
         "claude_memory_has_terminal_action_freeze",
         "hand-config terminal action freeze" in claude
         and "generic `진행해`" in claude
-        and "1회 503/DNS/timeout" in claude,
+        and "raw 503/DNS/timeout" in claude
+        and "첫 진단 pass" in claude,
         claude[:4200],
     ))
     return cases
