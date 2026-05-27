@@ -102,6 +102,45 @@ def run() -> list[tuple[str, bool, str]]:
                       hasattr(settings.poll, "broken_threshold")
                       and int(settings.poll.broken_threshold) >= 1,
                       f"broken_threshold={getattr(settings.poll, 'broken_threshold', None)}"))
+
+        # 8. `_maybe_save_broken` 도 timeout fallback path 에서 호출됨 — 헬퍼 단위 검증.
+        # cb<threshold → 안 박음
+        st_low = {"slug": "host_lo_root_aaaa1234", "url": "https://lo.example/",
+                  "consecutive_breakage": 2, "last_status": "poll_timeout"}
+        poll._maybe_save_broken("host_lo_root_aaaa1234", st_low, note="x")
+        cases.append(("maybe_save_broken_skip_low_cb",
+                      not (sd / "host_lo_root_aaaa1234.BROKEN.json").exists(),
+                      "cb<threshold → no marker"))
+
+        # cb>=threshold + 차단 마커 없음 → 박음 (timeout path 시뮬)
+        st_to = {"slug": "host_to_root_bbbb1234", "url": "https://to.example/",
+                  "consecutive_breakage": 8, "last_status": "poll_timeout"}
+        poll._maybe_save_broken("host_to_root_bbbb1234", st_to, note="wall timeout > 60s")
+        cases.append(("maybe_save_broken_timeout_path",
+                      (sd / "host_to_root_bbbb1234.BROKEN.json").exists(),
+                      "timeout path BROKEN write OK"))
+
+        # cb>=threshold + FAILED 존재 → 안 박음 (가드)
+        st_blk = {"slug": "host_blk_root_cccc1234", "url": "https://blk.example/",
+                   "consecutive_breakage": 8, "last_status": "task_exception"}
+        (sd / "host_blk_root_cccc1234.FAILED.json").write_text("{}", encoding="utf-8")
+        poll._maybe_save_broken("host_blk_root_cccc1234", st_blk, note="x")
+        cases.append(("maybe_save_broken_guards_priority_marker",
+                      not (sd / "host_blk_root_cccc1234.BROKEN.json").exists(),
+                      "FAILED present → BROKEN skip"))
+
+        # chromium_lock_timeout last_status 도 BROKEN payload 에 반영
+        st_cl = {"slug": "host_cl_root_dddd1234", "url": "https://cl.example/",
+                  "consecutive_breakage": 9, "last_status": "chromium_lock_timeout"}
+        poll._maybe_save_broken("host_cl_root_dddd1234", st_cl, note="flock wait > 300s")
+        cl_path = sd / "host_cl_root_dddd1234.BROKEN.json"
+        ok_cl = False
+        if cl_path.exists():
+            d = json.loads(cl_path.read_text(encoding="utf-8"))
+            ok_cl = (d.get("last_status") == "chromium_lock_timeout"
+                      and d.get("consecutive_breakage") == 9)
+        cases.append(("maybe_save_broken_chromium_lock_path",
+                      ok_cl, "chromium_lock_timeout payload OK"))
     finally:
         site_ops.STATE_DIR = orig_so
         _reg.STATE_DIR = orig_rg

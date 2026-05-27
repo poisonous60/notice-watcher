@@ -334,6 +334,42 @@ def _enqueue_reprobe(state: dict) -> tuple[bool, str]:
     return True, f"reprobe 잡 이미 큐에 있음 (#{job_id}) — 새로 enqueue 안 함"
 
 
+def _maybe_save_broken(slug: str, st: dict, *, note: str = "",
+                        log_lines: list[str] | None = None) -> None:
+    """BROKEN health sidecar — `consecutive_breakage >= broken_threshold` + 차단 마커 없음 → `_save_broken`.
+
+    호출자: (1) _process_site 의 res['broken'] 분기, (2) _site_with_timeout 의 chromium_lock_timeout
+    fallback, (3) _run_inner 의 wall-timeout / task_exception fallback. 같은 가드 (우선순위 마커가
+    있으면 BROKEN 안 박음, _save_broken 자체는 가드 안 하므로 호출자 책임) 적용.
+
+    `is_blocked` 차단 X — polling/reprobe/delivery 그대로 살아있고, deliver_due 가 status notice
+    자리에 "❗ 깨졌어요" 표시. 자체 복구되면 다음 reprobe rc=0 또는 정상 poll 가 cb=0 + BROKEN unlink.
+    """
+    cb = int(st.get("consecutive_breakage", 0) or 0)
+    if cb < int(settings.poll.broken_threshold or 6):
+        return
+    has_blocking = any(
+        (STATE_DIR / f"{slug}.{k}.json").exists()
+        for k in ("FAILED", "REJECTED", "BUG")
+    )
+    if has_blocking:
+        return
+    try:
+        from scripts.register import _save_broken
+        _save_broken(slug, st.get("url", "") or "",
+                      cb=cb,
+                      last_status=str(st.get("last_status", "") or ""),
+                      last_note=str(note or ""))
+        if log_lines is not None:
+            log_lines.append(f"  ❗ BROKEN sidecar 박음 (cb={cb} ≥ {settings.poll.broken_threshold})")
+    except Exception as e:  # noqa: BLE001
+        msg = f"  ⚠ _save_broken 실패 — slug={slug} err={e!r}"
+        if log_lines is not None:
+            log_lines.append(msg)
+        else:
+            print(msg, file=sys.stderr, flush=True)
+
+
 def _load_states(only: set[str] | None) -> list[dict]:
     out = []
     if not STATE_DIR.exists():
@@ -426,25 +462,7 @@ async def _process_site(st: dict, *, page_size: int, max_new_articles: int,
         st["consecutive_breakage"] = int(st.get("consecutive_breakage", 0)) + 1
         st["last_status"] = res["status"]
         lines.append(f"  ⚠ 깨짐 신호 #{st['consecutive_breakage']}: {res['note']}")
-        # BROKEN health sidecar — `broken_threshold` 도달 시 박음. 우선순위 차단 마커 (FAILED/REJECTED/BUG)
-        # 있으면 그쪽이 final 결정이라 BROKEN 안 박음. `is_blocked` 차단 X — polling/reprobe/delivery
-        # 그대로 살아있고, deliver_due 가 status notice 자리에 "❗ 깨졌어요" 표시. 자체 복구되면
-        # 다음 reprobe rc=0 또는 정상 poll 가 cb=0 + BROKEN unlink.
-        if st["consecutive_breakage"] >= settings.poll.broken_threshold:
-            _has_blocking = any(
-                (STATE_DIR / f"{slug}.{k}.json").exists()
-                for k in ("FAILED", "REJECTED", "BUG")
-            )
-            if not _has_blocking:
-                try:
-                    from scripts.register import _save_broken
-                    _save_broken(slug, st.get("url", ""),
-                                  cb=st["consecutive_breakage"],
-                                  last_status=st["last_status"],
-                                  last_note=res.get("note", ""))
-                    lines.append(f"  ❗ BROKEN sidecar 박음 (cb={st['consecutive_breakage']} ≥ {settings.poll.broken_threshold})")
-                except Exception as e:  # noqa: BLE001
-                    lines.append(f"  ⚠ _save_broken 실패 — slug={slug} err={e!r}")
+        _maybe_save_broken(slug, st, note=res.get("note", ""), log_lines=lines)
         if st["consecutive_breakage"] >= settings.poll.breakage_threshold and not no_reprobe:
             # 마커 (`.BUG.json` / `.FAILED.json` / `.REJECTED.json`) 박힌 slug 은 reprobe enqueue
             # 안 함 — bug-fix / hand-config / 영구 거부 workflow 가 풀고 마커 clear 할 때까지
@@ -731,6 +749,8 @@ async def _site_with_timeout(st: dict, *, timeout: float,
                     st["last_poll_at"] = _now_iso()
                     st["last_status"] = "chromium_lock_timeout"
                     st["consecutive_breakage"] = int(st.get("consecutive_breakage", 0)) + 1
+                    _maybe_save_broken(slug, st,
+                                        note=f"flock wait > {budget}s ({exc})")
                     sp = st.get("_state_path")
                     if sp:
                         try:
@@ -917,6 +937,7 @@ async def _run_inner(args) -> int:
                 agg["n_timeout"] += 1
             else:
                 agg["n_error"] += 1
+            _maybe_save_broken(slug, st, note=note)
             sp = st.get("_state_path")
             if sp:
                 try:

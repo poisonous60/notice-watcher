@@ -17,8 +17,14 @@
       <input type="checkbox" onclick="for(const c of this.closest('form').querySelectorAll('input[name=slugs]')) c.checked=this.checked;">
       전체
     </label>
-    <button class="secondary" type="submit">✓ BROKEN clear (sidecar unlink — cb 는 그대로)</button>
+    <button class="secondary" type="submit" title="snapshot 한정 정리 — 운영(N100) 상태는 안 바뀜. 다음 pull 가 N100 원본을 다시 가져옴.">
+      ✓ snapshot BROKEN clear (운영 정리 X)
+    </button>
   </div>
+  <p class="muted" style="font-size:0.78rem;margin:.2em 0 .6em 0;">
+    ⚠ 위 버튼은 <b>dev box snapshot 한정</b>. 운영 정리 = N100 에서
+    <code>python scripts/migrate_broken_zombie.py --clear-all --yes</code> 또는 hand-fix 후 자가 복구.
+  </p>
 
   {% if not items %}
   <p class="muted">BROKEN 큐 비어 있음. ✨</p>

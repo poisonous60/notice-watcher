@@ -396,10 +396,12 @@ async def triage_broken_page(request: Request, conn=Depends(get_conn)):
 
 @app.post("/triage/broken/clear", response_class=HTMLResponse)
 async def triage_broken_clear(request: Request):
-    """`/triage/broken` 페이지에서 손-clear — slug 체크 후 `.BROKEN.json` unlink (state.json 는 안 건드림).
+    """`/triage/broken` 페이지에서 *snapshot 만* 손-clear — `.BROKEN.json` unlink (state.json 는 안 건드림).
 
-    다음 poll 가 또 깨지면 자연 재박힘. dev box 만 사용 — N100 snapshot 은 dashboard 가 직접 못
-    건드림 (snapshot 은 read-only).
+    ⚠ **운영(N100) 상태 안 바뀜**: dashboard 는 dev box 의 pulled snapshot 만 봄. 여기서 unlink 해도
+    다음 `inspect_subs.py pull` 가 N100 의 원본 `.BROKEN.json` 을 다시 가져옴. 운영 정리하려면 N100 에
+    `python scripts/migrate_broken_zombie.py --clear-all --yes` 또는 hand-fix 후 자가 복구 대기.
+    이 route 는 *snapshot 한정 미리보기* — dashboard UI 노이즈 줄임용.
     """
     form = await request.form()
     slugs = [s for s in form.getlist("slugs") if isinstance(s, str)]
@@ -415,7 +417,7 @@ async def triage_broken_clear(request: Request):
                 cleared += 1
             except OSError:
                 pass
-    return RedirectResponse(url=f"/triage/broken?cleared={cleared}", status_code=303)
+    return RedirectResponse(url=f"/triage/broken?cleared={cleared}&snapshot_only=1", status_code=303)
 
 
 @app.post("/triage/failed/gate-fail", response_class=HTMLResponse)
