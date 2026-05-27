@@ -50,6 +50,21 @@ description: >-
 
 `policy_reject`(rc=2)·`url_dead`(rc=4) = 작업 대상 아님 (정상 거부). 분포 확인은 `python scripts/triage.py list` + dashboard.
 
+### 0a-retry. batch retry 명령 매트릭스 (`--force` 함정 — 2026-05-27 박힘)
+
+`remote.py batch-register` 의 `--force` 는 **`--rc` filter 도 override** (catalog 전체 retry). `--rc 3,5 --force` 호출 시 의도 = "rc=3/5 만 retry" 인데 실제 = catalog 전체 100 enqueue (rc=0 done · rc=4 dead 도 다시 큐). 의도 아닌 항목 처리 + games/7 같은 사용자가 보존 명시한 슬롯도 덮어씀.
+
+| 의도 | 명령 | 비고 |
+|---|---|---|
+| catalog 전체 retry (마커 무관) | `--catalog X --force` | 모든 100 다 enqueue — done/dead 포함 |
+| rc=1/5/-N (gen+blocked) | `--catalog X --failed all` | rc=0/2/3/4 자동 skip |
+| rc=1/-N (gen_fail) | `--catalog X --failed gen` | |
+| rc=5 (cap_blocked) | `--catalog X --failed blocked` | stealth/render 트랙 |
+| 특정 rc (예: rc=3) — 마커 reset 필요 | **N100 `.REJECTED.json` 손-clear 후** `--catalog X --rc 3` (force X) | force 와 rc 동시 사용 X — force 가 이김 |
+| 특정 URL list | `--url <u1> --url <u2> --force` | 명시 URL 만, 명확 |
+
+**금지**: `--rc <list> --force` 동시 사용. force 가 rc filter 무시. cross-ref: [[feedback-batch-force-overrides-rc-filter]].
+
 ## 0b. preflight — 이미 고쳐졌나 / 옆 작업이 큐를 stale 화했나
 
 §1 진단 진입 *전*, 각 큐 slug 에 대해 두 검사 강제. 본 검사 = 자가개선 인프라 (CLAUDE.md §6 + `docs/자가개선 인프라 계획.md`) 의 부산물 — prompt / engine / probe / recognizer 옆 작업이 큐 진입 후에 일어났으면 큐가 *옛 상태* 일 가능성. SKILL 이 그 가능성 인지 안 하면 *이미 회복 가능한 사이트에 수동 config 작업 박는 낭비* 발생 (CLAUDE.md §8a 의 영구 게이트 정신).
