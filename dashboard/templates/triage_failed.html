@@ -6,7 +6,8 @@
 <h2>🛠 자동등록 실패 (FAILED) — 활성 {{ items | length }}건 · 나중에 {{ later_items | length }}건 · 게이트실패 {{ gate_failed_items | length }}건</h2>
 <p class="muted">
   봇·polling 이 자동 등록 시도 실패 → <code>output/poll_state/&lt;slug&gt;.FAILED.json</code> 으로 쌓인 큐.
-  처리: hand-config 스킬 모드 B (probe 진단 → 수동 config / 손 adapter → <code>register --config</code> → N100 배포).
+  처리: 사이트 분석 후 시스템 일반화(Track B: probe heuristic / classifier prompt / recognizer / config_writer prompt) 1순위.
+  수동 config(Track A)는 일반화 후보 0 + ship 명시 요청 때만, park 는 valid terminal 이라 기본 ship 강제 X.
   바로 못 할 항목은 체크 후 두 버킷 중 하나로 내려둠 (둘 다 hand-config 프롬프트서 빠짐, N100 polling 영향 X):
   <b>→ 나중에</b> = capability(anti-bot/SPA/timeout — 능력 생기면 재시도) ·
   <b>→ 게이트실패</b> = 분류 오판(비-게시판인데 분류기·게이트가 못 잡아 gen_fail — 분류기/게이트 개선 후 <code>triage.py sweep-gate-fail</code> 로 일괄 재판정).
