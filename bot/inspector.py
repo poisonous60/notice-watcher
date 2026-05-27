@@ -595,6 +595,11 @@ def triage_summary(conn: sqlite3.Connection, paths: "InspectorPaths") -> dict:
             if f.name.endswith(".FAILED.json"):
                 failed.append(f.name[: -len(".FAILED.json")])
                 continue
+            # REJECTED/BUG/BROKEN 마커는 정상 state 형식 아님 — read 하지 마라 (BROKEN 은 별도 health 채널).
+            if (f.name.endswith(".REJECTED.json")
+                    or f.name.endswith(".BUG.json")
+                    or f.name.endswith(".BROKEN.json")):
+                continue
             d = _read_json(f)
             if d and int(d.get("consecutive_breakage", 0) or 0) > 0:
                 broken.append(d.get("slug", f.stem))

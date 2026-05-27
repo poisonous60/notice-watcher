@@ -55,7 +55,8 @@ def load_members(configs_dir: Path, poll_state_dir: Path) -> list[dict]:
     """configs_dir/*.json → [{slug,url,host,strategy,adapter,recognized,src}]."""
     ps_url: dict[str, str] = {}
     for p in glob.glob(str(poll_state_dir / "*.json")):
-        if p.endswith(".FAILED.json"):
+        if (p.endswith(".FAILED.json") or p.endswith(".REJECTED.json")
+                or p.endswith(".BUG.json") or p.endswith(".BROKEN.json")):
             continue
         try:
             d = json.load(open(p, encoding="utf-8"))

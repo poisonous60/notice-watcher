@@ -43,6 +43,12 @@ class PollSection:
     # 1회 fail 로도 BUG 박음(worker.py rc=-1/-2/-3 분기). 이 streak 임계는 rc=1/5 같은 site-side
     # transient/capability 실패 누적용.
     reprobe_fail_streak_limit: int = 3
+    # `consecutive_breakage` 가 N 이상 누적되면 `.BROKEN.json` health sidecar 박음
+    # — `is_blocked` 차단 마커는 *아님*. 폴링/reprobe/deliver 는 계속 진행되고,
+    # deliver_due 가 *status notice* 자리에 "❗ 깨졌어요" 알림으로 표시. 자체 복구되면
+    # 다음 reprobe rc=0 / 정상 poll 가 cb=0 reset + 마커 unlink. `breakage_threshold` 의
+    # 3배 정도가 안전 (reprobe 가 몇 번 시도해도 안 풀리는 진짜 broken 만 잡음).
+    broken_threshold: int = 6
     seen_cap: int = 5000
     # posts 캐시 TTL GC 보존 일수 (ADR 0006). 발송 지연(~1d) ≫ 보다 충분히 커야 미수신 글 안 날림.
     posts_keep_days: int = 7

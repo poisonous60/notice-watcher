@@ -183,7 +183,8 @@ def _registered_alias_index() -> dict[str, str]:
     idx: dict[str, str] = {}
     for f in state_dir.glob("*.json"):
         nm = f.name
-        if nm.endswith(".FAILED.json") or nm.endswith(".REJECTED.json"):
+        if (nm.endswith(".FAILED.json") or nm.endswith(".REJECTED.json")
+                or nm.endswith(".BUG.json") or nm.endswith(".BROKEN.json")):
             continue
         try:
             d = json.loads(f.read_text(encoding="utf-8")) or {}

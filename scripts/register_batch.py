@@ -61,7 +61,7 @@ from probe.paths import url_to_slug  # noqa: E402
 CATALOG_DIR = ROOT / "output" / "candidates"  # rev6: git-ignored 데이터. dev box dashboard 직접 편집.
                                                 # N100 은 `scripts/remote.py batch-register` 의 atomic scp 로 동기 (CLAUDE.md §5 예외).
 STATE_DIR = ROOT / "output" / "poll_state"
-MARKER_SUFFIXES = (".REJECTED.json", ".FAILED.json", ".BUG.json")
+MARKER_SUFFIXES = (".REJECTED.json", ".FAILED.json", ".BUG.json", ".BROKEN.json")
 
 CATALOG_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 

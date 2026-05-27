@@ -334,16 +334,53 @@ def _enqueue_reprobe(state: dict) -> tuple[bool, str]:
     return True, f"reprobe 잡 이미 큐에 있음 (#{job_id}) — 새로 enqueue 안 함"
 
 
+def _maybe_save_broken(slug: str, st: dict, *, note: str = "",
+                        log_lines: list[str] | None = None) -> None:
+    """BROKEN health sidecar — `consecutive_breakage >= broken_threshold` + 차단 마커 없음 → `_save_broken`.
+
+    호출자: (1) _process_site 의 res['broken'] 분기, (2) _site_with_timeout 의 chromium_lock_timeout
+    fallback, (3) _run_inner 의 wall-timeout / task_exception fallback. 같은 가드 (우선순위 마커가
+    있으면 BROKEN 안 박음, _save_broken 자체는 가드 안 하므로 호출자 책임) 적용.
+
+    `is_blocked` 차단 X — polling/reprobe/delivery 그대로 살아있고, deliver_due 가 status notice
+    자리에 "❗ 깨졌어요" 표시. 자체 복구되면 다음 reprobe rc=0 또는 정상 poll 가 cb=0 + BROKEN unlink.
+    """
+    cb = int(st.get("consecutive_breakage", 0) or 0)
+    if cb < int(settings.poll.broken_threshold or 6):
+        return
+    has_blocking = any(
+        (STATE_DIR / f"{slug}.{k}.json").exists()
+        for k in ("FAILED", "REJECTED", "BUG")
+    )
+    if has_blocking:
+        return
+    try:
+        from scripts.register import _save_broken
+        _save_broken(slug, st.get("url", "") or "",
+                      cb=cb,
+                      last_status=str(st.get("last_status", "") or ""),
+                      last_note=str(note or ""))
+        if log_lines is not None:
+            log_lines.append(f"  ❗ BROKEN sidecar 박음 (cb={cb} ≥ {settings.poll.broken_threshold})")
+    except Exception as e:  # noqa: BLE001
+        msg = f"  ⚠ _save_broken 실패 — slug={slug} err={e!r}"
+        if log_lines is not None:
+            log_lines.append(msg)
+        else:
+            print(msg, file=sys.stderr, flush=True)
+
+
 def _load_states(only: set[str] | None) -> list[dict]:
     out = []
     if not STATE_DIR.exists():
         return out
     for p in sorted(STATE_DIR.glob("*.json")):
-        # .FAILED.json (자동 등록 실패) / .REJECTED.json (영구 거부 marker) / .BUG.json (코드 버그 마커)
-        # 셋 다 정상 state 형식 아님 — config_path 등 없음. 폴링 대상 X.
+        # .FAILED.json (자동 등록 실패) / .REJECTED.json (영구 거부 marker) / .BUG.json (코드 버그 마커) /
+        # .BROKEN.json (health sidecar — polling 자체는 살아있음). 모두 정상 state 형식 아님 (config_path 없음) — 폴링 대상 X.
         if (p.name.endswith(".FAILED.json")
                 or p.name.endswith(".REJECTED.json")
-                or p.name.endswith(".BUG.json")):
+                or p.name.endswith(".BUG.json")
+                or p.name.endswith(".BROKEN.json")):
             continue
         try:
             st = json.loads(p.read_text(encoding="utf-8"))
@@ -425,6 +462,7 @@ async def _process_site(st: dict, *, page_size: int, max_new_articles: int,
         st["consecutive_breakage"] = int(st.get("consecutive_breakage", 0)) + 1
         st["last_status"] = res["status"]
         lines.append(f"  ⚠ 깨짐 신호 #{st['consecutive_breakage']}: {res['note']}")
+        _maybe_save_broken(slug, st, note=res.get("note", ""), log_lines=lines)
         if st["consecutive_breakage"] >= settings.poll.breakage_threshold and not no_reprobe:
             # 마커 (`.BUG.json` / `.FAILED.json` / `.REJECTED.json`) 박힌 slug 은 reprobe enqueue
             # 안 함 — bug-fix / hand-config / 영구 거부 workflow 가 풀고 마커 clear 할 때까지
@@ -463,8 +501,18 @@ async def _process_site(st: dict, *, page_size: int, max_new_articles: int,
         elif no_reprobe and st["consecutive_breakage"] >= settings.poll.breakage_threshold:
             lines.append("  (--no-reprobe — reprobe 큐 enqueue 생략, 리포트만)")
     else:
+        # 정상 fetch — cb 와 BROKEN sidecar 둘 다 정리 (자가 복구 path).
+        if int(st.get("consecutive_breakage", 0) or 0) > 0:
+            lines.append(f"  ✓ 정상 복구 — cb {st['consecutive_breakage']} → 0 reset")
         st["consecutive_breakage"] = 0
         st["last_status"] = res["status"]  # "ok" 또는 "lurking"
+        _bp = STATE_DIR / f"{slug}.BROKEN.json"
+        if _bp.exists():
+            try:
+                _bp.unlink()
+                lines.append(f"  ✓ BROKEN sidecar unlink (자가 복구)")
+            except OSError as _e:
+                lines.append(f"  ⚠ BROKEN unlink 실패: {_e}")
         # ADR 0016 ordering — seen 갱신은 sqlite upsert 끝난 *뒤* 에 한다. 여기선 후보값만 보관.
         new_seen_candidate = res.get("_new_seen")
         if res.get("lurking"):
@@ -701,6 +749,8 @@ async def _site_with_timeout(st: dict, *, timeout: float,
                     st["last_poll_at"] = _now_iso()
                     st["last_status"] = "chromium_lock_timeout"
                     st["consecutive_breakage"] = int(st.get("consecutive_breakage", 0)) + 1
+                    _maybe_save_broken(slug, st,
+                                        note=f"flock wait > {budget}s ({exc})")
                     sp = st.get("_state_path")
                     if sp:
                         try:
@@ -887,6 +937,7 @@ async def _run_inner(args) -> int:
                 agg["n_timeout"] += 1
             else:
                 agg["n_error"] += 1
+            _maybe_save_broken(slug, st, note=note)
             sp = st.get("_state_path")
             if sp:
                 try:

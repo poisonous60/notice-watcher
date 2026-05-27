@@ -26,6 +26,8 @@ QUEUE = ROOT / "output" / "triage_queue.jsonl"
 
 _FAILED = ".FAILED.json"
 _REJECTED = ".REJECTED.json"
+_BUG = ".BUG.json"
+_BROKEN = ".BROKEN.json"
 _HASH_RE = re.compile(r"_([0-9a-f]{8})$")
 
 
@@ -42,7 +44,8 @@ def find_orphans(state_dir: Path | None = None) -> list[tuple[str, str, str]]:
     reg: dict[str, str] = {}  # hash -> registered slug (마커 아닌 state.json)
     for p in STATE_DIR.glob("*.json"):
         name = p.name
-        if name.endswith(_FAILED) or name.endswith(_REJECTED):
+        if (name.endswith(_FAILED) or name.endswith(_REJECTED)
+                or name.endswith(_BUG) or name.endswith(_BROKEN)):
             continue
         slug = name[:-5]
         h = _hash(slug)
@@ -55,6 +58,10 @@ def find_orphans(state_dir: Path | None = None) -> list[tuple[str, str, str]]:
             slug, kind = name[: -len(_FAILED)], "FAILED"
         elif name.endswith(_REJECTED):
             slug, kind = name[: -len(_REJECTED)], "REJECTED"
+        elif name.endswith(_BUG):
+            slug, kind = name[: -len(_BUG)], "BUG"
+        elif name.endswith(_BROKEN):
+            slug, kind = name[: -len(_BROKEN)], "BROKEN"
         else:
             continue
         h = _hash(slug)
@@ -106,8 +113,9 @@ def main(argv: list[str]) -> int:
 
     orphan_slugs = {slug for _, slug, _ in orphans}
     n_files = 0
+    _SUFFIX_BY_KIND = {"FAILED": _FAILED, "REJECTED": _REJECTED, "BUG": _BUG, "BROKEN": _BROKEN}
     for kind, slug, _ in orphans:
-        suffix = _FAILED if kind == "FAILED" else _REJECTED
+        suffix = _SUFFIX_BY_KIND[kind]
         f = STATE_DIR / f"{slug}{suffix}"
         try:
             f.unlink()

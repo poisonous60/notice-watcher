@@ -41,6 +41,7 @@ POLL_SUFFIXES = {
     ".FAILED.json": "failed",
     ".REJECTED.json": "rejected",
     ".BUG.json": "bug",
+    ".BROKEN.json": "broken",
 }
 
 RC_LABELS = {

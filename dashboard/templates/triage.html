@@ -24,6 +24,12 @@
     {% if summary.broken_slugs %}<a href="/subs?include_lurking=1&amp;broken_only=1">view →</a>{% endif %}
   </div>
   <div class="card">
+    <p class="lbl">BROKEN 큐 (수동 정리)</p>
+    <p class="n">{{ broken_marker_count }}</p>
+    <p class="muted">cb ≥ broken_threshold 자동 박힘</p>
+    {% if broken_marker_count %}<a href="/triage/broken">view →</a>{% endif %}
+  </div>
+  <div class="card">
     <p class="lbl">잡 큐</p>
     <p class="n">{{ summary.pending_jobs }} / {{ summary.running_jobs }}</p>
     <p class="muted">pending / running</p>

@@ -152,6 +152,28 @@ def bug_payload(slug: str) -> Optional[dict]:
         return None
 
 
+def broken_slugs() -> list[str]:
+    """state_dir 의 `*.BROKEN.json` → slug 목록 (health sidecar). polling 살아있음 — blocking 아님."""
+    paths = snapshot_paths()
+    if not paths.state_dir.exists():
+        return []
+    out = []
+    for f in paths.state_dir.glob("*.BROKEN.json"):
+        out.append(f.name[: -len(".BROKEN.json")])
+    return sorted(out)
+
+
+def broken_payload(slug: str) -> Optional[dict]:
+    paths = snapshot_paths()
+    p = paths.state_dir / f"{slug}.BROKEN.json"
+    if not p.exists():
+        return None
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
 def unique_slugs(conn) -> list[str]:
     """현재 누군가 구독중인 distinct slug."""
     rows = conn.execute("SELECT DISTINCT slug FROM subscriptions ORDER BY slug").fetchall()
@@ -159,7 +181,7 @@ def unique_slugs(conn) -> list[str]:
 
 
 def state_file_slugs() -> list[str]:
-    """state_dir 의 *.json 중 FAILED/BUG marker 가 아닌 slug.
+    """state_dir 의 *.json 중 FAILED/BUG/REJECTED/BROKEN marker 가 아닌 slug.
     lurking (구독자 0) 포함해 polling 흔적 있는 모든 slug."""
     paths = snapshot_paths()
     if not paths.state_dir.exists():
@@ -167,7 +189,8 @@ def state_file_slugs() -> list[str]:
     out = []
     for f in paths.state_dir.glob("*.json"):
         n = f.name
-        if n.endswith(".FAILED.json") or n.endswith(".BUG.json") or n.endswith(".REJECTED.json"):
+        if (n.endswith(".FAILED.json") or n.endswith(".BUG.json")
+                or n.endswith(".REJECTED.json") or n.endswith(".BROKEN.json")):
             continue
         out.append(n[:-len(".json")])
     return sorted(out)

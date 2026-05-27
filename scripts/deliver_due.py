@@ -48,6 +48,7 @@ from bot import db  # noqa: E402
 from bot.config import bot_token, owner_user_id  # noqa: E402
 from bot.runtime_config import settings  # noqa: E402
 from bot.discord_rest import deliver, CannotDeliver, DiscordRestError  # noqa: E402
+from bot.site_ops import is_broken, broken_info  # noqa: E402
 from engine.tracing import start_trace, current_trace  # noqa: E402
 from generate import client_for  # noqa: E402
 
@@ -74,6 +75,39 @@ def _empty_notice_content(*, today_kst: str, slugs: list[str]) -> str:
     lines = [f"📭 오늘({today_kst}) 새로 올라온 공지가 없는 구독이에요."]
     lines.extend(f"- `{slug}`" for slug in slugs)
     return "\n".join(lines)
+
+
+def _status_notice_content(*, today_kst: str,
+                            empty_slugs: list[str],
+                            broken_items: list[dict]) -> Optional[str]:
+    """digest 뒤 *target 당 trailing status notice 1개* — empty + broken 합쳐서.
+
+    broken_items = [{"slug": str, "cb": int}, ...] (cb 가 큰 순서 권장).
+    둘 다 비어 있으면 None 반환 (호출자가 발송 skip).
+    HIGH E 가드 — 같은 target 에 trailing message 가 2개 이상 가지 않도록 한 함수에서 조립.
+    """
+    if not empty_slugs and not broken_items:
+        return None
+    parts: list[str] = []
+    if broken_items:
+        if len(broken_items) == 1:
+            it = broken_items[0]
+            parts.append(
+                f"❗ `{it['slug']}` 사이트가 며칠째 깨져 있어요 (연속 실패 {it['cb']}회). "
+                f"봇이 자동 복구 시도 중이에요 — 풀리면 다시 알림 가요."
+            )
+        else:
+            parts.append("❗ 깨져 있는 구독이 있어요 (봇이 자동 복구 시도 중):")
+            for it in broken_items:
+                parts.append(f"- `{it['slug']}` (연속 실패 {it['cb']}회)")
+    if empty_slugs:
+        if len(empty_slugs) == 1:
+            parts.append(f"📭 `{empty_slugs[0]}` — 오늘({today_kst}) 새로 올라온 공지가 없어요.")
+        else:
+            parts.append(f"📭 오늘({today_kst}) 새로 올라온 공지가 없는 구독이에요.")
+            for s in empty_slugs:
+                parts.append(f"- `{s}`")
+    return "\n".join(parts)
 
 
 def flush_target(conn, tok: Optional[str], target: dict, *, today_kst: str, dry_run: bool,
@@ -138,6 +172,7 @@ def _flush_target_inner(conn, tok: Optional[str], target: dict, *, today_kst: st
 
     owed: list = []  # 발송 확정 글 (sqlite3.Row)
     empty_slugs: list[str] = []
+    broken_items: list[dict] = []  # [{"slug": str, "cb": int}] — owed=0 + notify_empty=1 + BROKEN sidecar 존재
     for slug, slug_subs in subs_by_slug.items():
         # 그 slug 구독 중 가장 이른 created_at 하한 — 그 전 글은 어느 구독도 안 받음 (백로그 차단).
         since = min(s["created_at"] for s in slug_subs)
@@ -165,30 +200,54 @@ def _flush_target_inner(conn, tok: Optional[str], target: dict, *, today_kst: st
                 post_d["summary"] = summary
                 owed.append(post_d)
                 n_slug_owed += 1
+        # owed=0 + notify_empty=1 인 slug 만 status notice 후보. owed>0 면 digest 가 곧 정상 알림이므로 status 제외.
         if n_slug_owed == 0 and any(int(s["notify_empty"]) for s in slug_subs):
-            empty_slugs.append(slug)
+            if is_broken(slug):
+                info = broken_info(slug) or {}
+                broken_items.append({
+                    "slug": slug,
+                    "cb": int(info.get("consecutive_breakage", 0) or 0),
+                })
+            else:
+                empty_slugs.append(slug)
 
     when = datetime.now(KST).strftime("%Y-%m-%d %H:%M")
-    empty_notice = _empty_notice_content(today_kst=today_kst, slugs=empty_slugs) if empty_slugs else None
+    # cb 큰 순서 (운영자가 더 심각한 slug 먼저 보게).
+    broken_items.sort(key=lambda it: -int(it.get("cb", 0)))
+
+    # HIGH D 가드 — status 보내기 직전 다시 `is_broken` 체크. owed=0 path 와 digest+trailing path
+    # 둘 다에서 한 번 더 필터링 (그 사이 reprobe 성공 → BROKEN unlink 됐을 수 있음).
+    def _recheck_broken(items: list[dict]) -> list[dict]:
+        return [it for it in items if is_broken(it["slug"])]
+
     if not owed:
-        if empty_notice:
+        broken_items = _recheck_broken(broken_items)
+        status_notice = _status_notice_content(today_kst=today_kst,
+                                                empty_slugs=empty_slugs,
+                                                broken_items=broken_items)
+        if status_notice:
             if dry_run:
-                print(f"\n--- [{target_kind}:{target_id} EMPTY] ---\n{empty_notice}\n")
+                print(f"\n--- [{target_kind}:{target_id} STATUS] ---\n{status_notice}\n")
             elif tok:
                 try:
-                    deliver(tok, target_kind=target_kind, target_id=target_id, content=empty_notice)
+                    deliver(tok, target_kind=target_kind, target_id=target_id, content=status_notice)
                 except (CannotDeliver, DiscordRestError) as e:
-                    print(f"  ✗ {target_kind}:{target_id} empty 발송 실패: {e}", file=sys.stderr)
+                    print(f"  ✗ {target_kind}:{target_id} status 발송 실패: {e}", file=sys.stderr)
         if not dry_run:
             db.mark_setting_delivered(conn, target_kind=target_kind, target_id=target_id, today_kst=today_kst)
+        # status enum 호환 — owed=0 이면 기존 'empty' 코드 그대로 (notify_runs aggregator 호환).
         return 0, "empty", 0
 
     chunks = digest_chunks(owed)
     if dry_run:
         for ch in chunks:
             print(f"\n--- [{target_kind}:{target_id} DIGEST] ---\n{ch}\n")
-        if empty_notice:
-            print(f"\n--- [{target_kind}:{target_id} EMPTY] ---\n{empty_notice}\n")
+        broken_items = _recheck_broken(broken_items)
+        status_notice = _status_notice_content(today_kst=today_kst,
+                                                empty_slugs=empty_slugs,
+                                                broken_items=broken_items)
+        if status_notice:
+            print(f"\n--- [{target_kind}:{target_id} STATUS] ---\n{status_notice}\n")
         return len(owed), "ok", len(chunks)
 
     if not tok:
@@ -210,11 +269,17 @@ def _flush_target_inner(conn, tok: Optional[str], target: dict, *, today_kst: st
                 print(f"  ✗ {target_kind}:{target_id} digest chunk 발송 실패: {e}", file=sys.stderr)
                 break
     if ok_all:
-        if empty_notice:
+        # HIGH E 가드 — chunk 발송 *직전* 이 아니라 *직후* (digest 완전 land 한 다음) status 보냄.
+        # chunk 실패 시 status 도 안 보냄 (window 도 안 닫음).
+        broken_items = _recheck_broken(broken_items)
+        status_notice = _status_notice_content(today_kst=today_kst,
+                                                empty_slugs=empty_slugs,
+                                                broken_items=broken_items)
+        if status_notice:
             try:
-                deliver(tok, target_kind=target_kind, target_id=target_id, content=empty_notice)
+                deliver(tok, target_kind=target_kind, target_id=target_id, content=status_notice)
             except (CannotDeliver, DiscordRestError) as e:
-                print(f"  ✗ {target_kind}:{target_id} empty 발송 실패: {e}", file=sys.stderr)
+                print(f"  ✗ {target_kind}:{target_id} status 발송 실패: {e}", file=sys.stderr)
         for post in owed:
             db.mark_delivered(conn, post["slug"], str(post["post_id"]), target_id)
         db.mark_setting_delivered(conn, target_kind=target_kind, target_id=target_id, today_kst=today_kst)

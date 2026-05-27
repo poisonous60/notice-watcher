@@ -57,8 +57,9 @@
         {% if r.bug %}<span class="badge failed" title="BUG 마커 — 운영자 review 대기, 자동 reprobe 차단">BUG</span>{% endif %}
         {% if r.failed %}<span class="badge failed">FAILED</span>{% endif %}
         {% if r.rejected %}<span class="badge muted" title="영구 거부 마커">REJECTED</span>{% endif %}
-        {% if r.broken > 0 %}<span class="badge warn">broken {{ r.broken }}</span>{% endif %}
-        {% if not (r.failed or r.bug or r.rejected) and r.broken == 0 %}<span class="badge ok">ok</span>{% endif %}
+        {% if r.broken_marker %}<a href="/triage/broken" class="badge warn" title="BROKEN sidecar — polling 살아있음, /triage/broken 큐 항목" style="text-decoration:none;">BROKEN</a>{% endif %}
+        {% if r.broken > 0 %}<span class="badge warn" title="consecutive_breakage (cb={{ r.broken }})">broken {{ r.broken }}</span>{% endif %}
+        {% if not (r.failed or r.bug or r.rejected or r.broken_marker) and r.broken == 0 %}<span class="badge ok">ok</span>{% endif %}
       </td>
       <td style="white-space:nowrap;font-size:0.85rem;">
         {% if r.reprobe_streak > 0 or r.last_reprobe_rc is not none %}

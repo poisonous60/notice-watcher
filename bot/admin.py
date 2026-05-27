@@ -101,6 +101,11 @@ def build_admin_tree(client: discord.Client, conn, *, admin_guild: discord.Objec
                 if f.name.endswith(".FAILED.json"):
                     failed.append(f.name[: -len(".FAILED.json")])
                     continue
+                # REJECTED/BUG/BROKEN 마커 파일은 정상 state 형식 아님 — read 시도하지 마라.
+                if (f.name.endswith(".REJECTED.json")
+                        or f.name.endswith(".BUG.json")
+                        or f.name.endswith(".BROKEN.json")):
+                    continue
                 try:
                     d = json.loads(f.read_text(encoding="utf-8"))
                 except Exception:  # noqa: BLE001

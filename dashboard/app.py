@@ -103,6 +103,7 @@ PAGE_SOURCES: tuple[tuple[str, tuple[str, ...]], ...] = (
     # 단일 source
     ("/usage",        ("usage_db",)),
     ("/triage/failed", ("poll_state",)),  # *.FAILED.json 만 봄
+    ("/triage/broken", ("bot_db", "poll_state")),  # *.BROKEN.json + subscriptions for subscriber count
     ("/clusters",    ("configs", "poll_state")),  # recognizer 승급 후보 — config 묶음 × url(poll_state)
     # bot_db 위주 + 일부 부수
     ("/runs",        ("bot_db",)),   # ADR 0017 poll/notify 추적
@@ -265,10 +266,12 @@ async def triage_page(request: Request, conn=Depends(get_conn)):
             failed_slugs=active_failed
         ) if active_failed else None,
     }
+    broken_marker_slugs = state.broken_slugs()
     return _render("triage.html", request,
                    summary=summary, recent=rows, quick=quick_prompts,
                    active_failed_count=len(active_failed),
                    later_failed_count=len(later_failed),
+                   broken_marker_count=len(broken_marker_slugs),
                    active="triage")
 
 
@@ -355,6 +358,66 @@ async def triage_failed_memo(request: Request):
         raise HTTPException(status_code=400, detail="invalid slug")
     triage_memo.set_memo(slug, reason)
     return RedirectResponse(url="/triage/failed", status_code=303)
+
+
+@app.get("/triage/broken", response_class=HTMLResponse)
+async def triage_broken_page(request: Request, conn=Depends(get_conn)):
+    """BROKEN health sidecar 큐 — 등록은 됐지만 cb 가 broken_threshold 도달 → `_save_broken`.
+
+    polling/reprobe/delivery 는 계속 진행 (`is_blocked` 무관). 운영자가 hand-fix 후
+    `_clear_broken` 으로 마커 정리. 다음 reprobe rc=0 도 자동 정리.
+    """
+    items: list[dict] = []
+    paths = state.snapshot_paths()
+    for slug in state.broken_slugs():
+        d = state.broken_payload(slug) or {}
+        sub_count = 0
+        if conn is not None:
+            try:
+                sub_count = len(db.subscriptions_for_slug(conn, slug))
+            except sqlite3.Error:
+                sub_count = 0
+        items.append({
+            "slug": slug,
+            "url": d.get("url") or "",
+            "first_at": (d.get("first_at") or "")[:19],
+            "last_at": (d.get("last_at") or "")[:19],
+            "count": int(d.get("count", 0) or 0),
+            "cb": int(d.get("consecutive_breakage", 0) or 0),
+            "last_status": d.get("last_status") or "",
+            "last_note": (d.get("last_note") or "")[:200],
+            "subscriber_count": sub_count,
+        })
+    # cb 큰 순서 (자가복구 한계 가까운 후보 위로). 같은 cb 면 last_at 최신 우선.
+    items.sort(key=lambda r: (-r["cb"], r["last_at"], r["slug"]), reverse=False)
+    items.sort(key=lambda r: -r["cb"])
+    return _render("triage_broken.html", request, items=items, active="triage")
+
+
+@app.post("/triage/broken/clear", response_class=HTMLResponse)
+async def triage_broken_clear(request: Request):
+    """`/triage/broken` 페이지에서 *snapshot 만* 손-clear — `.BROKEN.json` unlink (state.json 는 안 건드림).
+
+    ⚠ **운영(N100) 상태 안 바뀜**: dashboard 는 dev box 의 pulled snapshot 만 봄. 여기서 unlink 해도
+    다음 `inspect_subs.py pull` 가 N100 의 원본 `.BROKEN.json` 을 다시 가져옴. 운영 정리하려면 N100 에
+    `python scripts/migrate_broken_zombie.py --clear-all --yes` 또는 hand-fix 후 자가 복구 대기.
+    이 route 는 *snapshot 한정 미리보기* — dashboard UI 노이즈 줄임용.
+    """
+    form = await request.form()
+    slugs = [s for s in form.getlist("slugs") if isinstance(s, str)]
+    if not all(state.safe_slug(s) for s in slugs):
+        raise HTTPException(status_code=400, detail="invalid slug")
+    cleared = 0
+    paths = state.snapshot_paths()
+    for slug in slugs:
+        p = paths.state_dir / f"{slug}.BROKEN.json"
+        if p.exists():
+            try:
+                p.unlink()
+                cleared += 1
+            except OSError:
+                pass
+    return RedirectResponse(url=f"/triage/broken?cleared={cleared}&snapshot_only=1", status_code=303)
 
 
 @app.post("/triage/failed/gate-fail", response_class=HTMLResponse)
@@ -591,9 +654,9 @@ async def subs_list(request: Request, q: Optional[str] = None,
         return _no_snapshot(request)
     paths = state.snapshot_paths()
     # 자동등록 *실패* 만 한 slug 는 subscriptions 테이블에 행이 없다 — DB-only 목록이면 누락 →
-    # /subs 가 활성+FAILED 둘 다 보이도록 합집합. (FAILED 큐 상세는 /triage/failed)
+    # /subs 가 활성+FAILED+BROKEN 다 보이도록 합집합. (FAILED 상세 /triage/failed, BROKEN 상세 /triage/broken)
     # include_lurking=1 이면 구독자 0 + state 파일만 있는 slug (lurking) 도 포함.
-    base = set(state.unique_slugs(conn)) | set(state.failed_slugs())
+    base = set(state.unique_slugs(conn)) | set(state.failed_slugs()) | set(state.broken_slugs())
     if include_lurking:
         base |= set(state.state_file_slugs())
     slugs = sorted(base)
@@ -605,6 +668,7 @@ async def subs_list(request: Request, q: Optional[str] = None,
         failed_marker = paths.state_dir / f"{s}.FAILED.json"
         bug_marker = paths.state_dir / f"{s}.BUG.json"
         rejected_marker = paths.state_dir / f"{s}.REJECTED.json"
+        broken_marker = paths.state_dir / f"{s}.BROKEN.json"
         broken = 0
         last_status = ""
         if st_path.exists():
@@ -656,6 +720,7 @@ async def subs_list(request: Request, q: Optional[str] = None,
             "failed": failed_marker.exists(),
             "bug": bug_marker.exists(),
             "rejected": rejected_marker.exists(),
+            "broken_marker": broken_marker.exists(),  # `.BROKEN.json` sidecar 존재 — `/triage/broken` 큐 항목
             "broken": broken,
             "last_status": last_status,
             "reprobe_streak": reprobe_streak,
@@ -703,6 +768,7 @@ async def sub_detail(request: Request, slug: str = Depends(require_slug),
     if result is None:
         return HTMLResponse(f"<p>slug <code>{_html.escape(slug)}</code> 없음.</p>", status_code=404)
     failed_payload = state.failed_payload(slug)
+    broken_payload = state.broken_payload(slug)
     sample_url = None
     if result.subscriptions:
         sample_url = result.subscriptions[0].get("url")
@@ -711,9 +777,13 @@ async def sub_detail(request: Request, slug: str = Depends(require_slug),
     p_redo = prompts.hand_config_redo_slug(slug=slug, url=sample_url)
     p_diag = prompts.diagnose_slug(slug=slug)
     # 뒤로가기 — 어디서 왔는지에 따라. 기본은 /subs.
-    back = {"triage": ("/triage/failed", "FAILED 큐")}.get(from_ or "", ("/subs", "Subs"))
+    back = {
+        "triage": ("/triage/failed", "FAILED 큐"),
+        "broken": ("/triage/broken", "BROKEN 큐"),
+    }.get(from_ or "", ("/subs", "Subs"))
     return _render("sub_detail.html", request,
                    result=result, slug=slug, failed=failed_payload,
+                   broken=broken_payload,
                    p_redo=p_redo, p_diag=p_diag,
                    back_href=back[0], back_label=back[1], active="subs")
 
