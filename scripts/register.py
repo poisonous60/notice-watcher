@@ -387,8 +387,8 @@ def _policy_check(digest: dict, url: str) -> tuple[bool, list[str]]:
             return True, [f"HTML 목록 진입은 막힘(verdict={digest.get('verdict')!r})이나 fetch-검증된 "
                           "공개 RSS/Atom 피드 존재 — 피드로 등록 진행 (차단 우회 X, 공개 피드 수집)."]
         if "cert_or_dns_broken" in verdict:
-            return False, [f"목록 페이지 접근 단계 이전에 SSL 인증서/DNS 가 깨짐 (verdict={digest.get('verdict')!r}). "
-                           "사이트가 사라졌거나 운영 오설정 — 등록 거부."]
+            return False, [f"목록 페이지 접근 단계 이전에 SSL 인증서/DNS/connect 가 깨짐 "
+                           f"(verdict={digest.get('verdict')!r}). 사이트가 사라졌거나 운영 오설정 — 등록 거부."]
         if "target_not_found" in verdict:
             return False, [f"입력 URL 의 글이 존재하지 않음 — 모든 진입 시도가 HTTP 404 "
                            f"(verdict={digest.get('verdict')!r}). 도메인 자체는 정상이므로 사이트 차단이 아니라 "
@@ -1054,10 +1054,9 @@ def _veto_override(res: Optional[dict]) -> bool:
                 and res.get("confidence", 0.0) >= _CLASSIFY_OVERRIDE_MIN_CONF)
 
 
-# page-type class → 거부 rc (ADR 0007 §확장 multi-class). index/catalog/?/저신뢰 → None.
+# page-type class → 거부 rc (ADR 0007 §확장 multi-class / ADR 0011 catalog). index/?/저신뢰 → None.
 # content→gate_reject(3) / not_found→url_dead(4) / login→policy_reject(2). 모두 거부 임계 0.7 (비대칭).
-# catalog 제외: 게이트는 *shape* (config 만들 수 있나 = 반복 row 추출 가능) 판정, semantic (catalog vs index) 아님.
-# mod/asset hub 같이 분류기가 catalog 라 판정해도 반복 카드 있으면 config_writer 에게 넘김 (게이트 후속 board_shape 가 shape 검사 끝냄).
+# catalog 제거 (ADR 0011 rev 2026-05-27 — semantic 게이트 폐기, shape 만 평가).
 _CLASS_REJECT_RC = {"content": 3, "not_found": 4, "login": 2}
 
 

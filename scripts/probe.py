@@ -324,6 +324,29 @@ def _static_results_are_hard_login(static_results: list[Result]) -> bool:
     )
 
 
+def _static_results_are_uniformly_dead(static_results: list[Result]) -> bool:
+    """Return True when every static attempt is a terminal HTTP/network failure.
+
+    This only gates Phase 2 escalation. The later digest/register policy still
+    decides whether the site is url_dead or capability_blocked.
+    """
+    if not static_results:
+        return False
+    for r in static_results:
+        if r.classification in {Classification.OK, Classification.LOGIN_REQUIRED}:
+            return False
+        status = r.status
+        is_4xx = status is not None and 400 <= status < 500
+        is_5xx = status is not None and 500 <= status < 600
+        is_connection_error = (
+            (status is None or status == 0)
+            and r.classification == Classification.UNKNOWN_ERROR
+        )
+        if not (is_4xx or is_5xx or is_connection_error):
+            return False
+    return True
+
+
 def _same_registrable_site(url_a: str, url_b: str) -> bool:
     ha = urlsplit(url_a or "").netloc
     hb = urlsplit(url_b or "").netloc
@@ -603,9 +626,16 @@ def _run(args: argparse.Namespace, url: str, slug: str) -> int:
     # 단, 정적 진입이 전부 hard login redirect 면 headless 로 얻을 추가 신호가 없고 heavy login SPA 에서
     # process exit 이 지연될 수 있어 fail-fast 한다.
     headless: Result | None = None
+    static_uniformly_dead = _static_results_are_uniformly_dead(static_results)
     static_hard_login = _static_results_are_hard_login(static_results)
     static_headless_skip_result = _static_result_for_headless_skip(static_results, url=url)
-    if static_hard_login:
+    if static_uniformly_dead:
+        statuses = sorted({("None" if r.status is None else str(r.status)) for r in static_results})
+        print(
+            "\n[Phase 2] skipped — static all dead/error "
+            f"(statuses={statuses}); headless escalation would risk OOM on heavy SPA landing"
+        )
+    elif static_hard_login:
         print("\n[Phase 2] skipped — Phase 1 hard LOGIN_REQUIRED redirect (headless would hit login SPA)")
     elif static_headless_skip_result is not None:
         print("\n[Phase 2] skipped — static HTML already has repeated article links")

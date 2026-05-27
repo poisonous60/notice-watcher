@@ -1,0 +1,115 @@
+{
+  "version": 1,
+  "site": "www.travian.com",
+  "board": "international_news",
+  "strategy": "playwright_html",
+  "_source_url": "https://www.travian.com/international/news/",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9"
+  },
+  "timeout": 30,
+  "nav_timeout_ms": 30000,
+  "idle_timeout_ms": 5000,
+  "quiet_ms": 800,
+  "disable_stealth": true,
+  "polite_sleep": {
+    "min": 5,
+    "max": 6
+  },
+  "list": {
+    "url_template": "https://www.travian.com/sitemap.xml",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "url",
+    "row_required_selector": "loc",
+    "fields": {
+      "post_id": [
+        {
+          "from": "css",
+          "selector": "loc",
+          "transform": [
+            [
+              "regex_extract",
+              "/international/news/([^/]+/[^/]+/[^/]+/[^/]+)/?$"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "loc",
+          "transform": [
+            [
+              "regex_extract",
+              "/international/news/\\d{4}/\\d{2}/\\d{2}/([^/]+)/?$"
+            ],
+            [
+              "replace",
+              "-",
+              " "
+            ],
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "css",
+          "selector": "loc"
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "loc",
+          "transform": [
+            [
+              "regex_extract",
+              "/international/news/(\\d{4}/\\d{2}/\\d{2})/"
+            ],
+            [
+              "replace",
+              "/",
+              "-"
+            ],
+            [
+              "date_only_to_iso",
+              "+00:00"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "wait_selector": "div.contentWrapper.newsArticle",
+    "content": [
+      {
+        "from": "css",
+        "selector": "div.contentWrapper.newsArticle",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "div.contentWrapper.newsArticle h3.title",
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "_note": "Travian /international/news/ is a hydrated SPA shell with no static article rows. The public sitemap exposes stable international news article URLs; Playwright is used for both sitemap XML parsing and hydrated article body extraction. No headless=false setting: N100 must run headless."
+}

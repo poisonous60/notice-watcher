@@ -12,6 +12,9 @@ adapters/arca.py 를 일반화. 파싱(HTML→NoticePost)은 httpx_html 의 pars
                                          challenge/redirect 로 매달린 것 → fail-fast (register 검증·폴링
                                          양쪽의 hung-render 비용 차단). 더 느린 사이트는 config 로 상향.
     quiet_ms                          : XHR/fetch/document 무응답 임계 (기본 500ms; 이 시간 새 데이터 응답 0이면 즉시 종료)
+    route_rewrite_response_headers    : [{url_pattern, headers, fallback_body_when_html?}]
+                                        Playwright glob route 의 응답 헤더 덮어쓰기.
+                                        CDN 이 잘못된 Content-Type 으로 JS 를 보내 Chrome ORB 에 막힐 때 사용.
 프록시(proxy_url)는 미지원(브라우저라). 이 strategy 는 playwright 패키지가 설치돼 있어야 동작.
 """
 from __future__ import annotations
@@ -147,6 +150,70 @@ def _ua_from_headers(headers: dict) -> Optional[str]:
     return None
 
 
+def _rewrite_response_headers(existing: dict, overrides: dict) -> dict:
+    merged = {str(k).lower(): str(v) for k, v in (existing or {}).items()}
+    for k, v in (overrides or {}).items():
+        merged[str(k).lower()] = str(v)
+    return merged
+
+
+def _header_value(headers: dict, name: str) -> str:
+    wanted = name.lower()
+    for k, v in (headers or {}).items():
+        if str(k).lower() == wanted:
+            return str(v)
+    return ""
+
+
+def _fallback_body_for_html_js_response(
+    url: str,
+    existing_headers: dict,
+    rewritten_headers: dict,
+    fallback_body: object,
+    response_text: str,
+) -> Optional[str]:
+    if not isinstance(fallback_body, str):
+        return None
+    if not re.search(r"\.m?js(?:[?#]|$)", url):
+        return None
+    existing_type = _header_value(existing_headers, "content-type").lower()
+    rewritten_type = _header_value(rewritten_headers, "content-type").lower()
+    if "html" not in existing_type:
+        return None
+    if "javascript" not in rewritten_type and "ecmascript" not in rewritten_type:
+        return None
+    if not response_text.lstrip().startswith("<"):
+        return None
+    return fallback_body
+
+
+async def _install_route_header_rewrites(context, specs: list) -> None:
+    for spec in specs or []:
+        if not isinstance(spec, dict):
+            continue
+        pattern = spec.get("url_pattern")
+        overrides = spec.get("headers")
+        if not isinstance(pattern, str) or not isinstance(overrides, dict):
+            continue
+
+        fallback_body = spec.get("fallback_body_when_html")
+
+        async def _handler(route, *_, _overrides=overrides, _fallback_body=fallback_body):
+            resp = await route.fetch()
+            headers = _rewrite_response_headers(resp.headers, _overrides)
+            if _fallback_body is not None:
+                body = await resp.text()
+                fallback = _fallback_body_for_html_js_response(
+                    route.request.url, resp.headers, headers, _fallback_body, body
+                )
+                if fallback is not None:
+                    await route.fulfill(status=resp.status, headers=headers, body=fallback)
+                    return
+            await route.fulfill(response=resp, headers=headers)
+
+        await context.route(pattern, _handler)
+
+
 async def open_session(adapter) -> None:
     # Patchright = Playwright 의 stealth-patched drop-in. 미설치 시 playwright fallback.
     # adapter._engine_label 에 기록 → polling trace 가 어느 엔진 썼는지 분리 측정 가능.
@@ -188,6 +255,7 @@ async def open_session(adapter) -> None:
         extra = {k: v for k, v in (cfg.get("headers") or {}).items() if k.lower() != "user-agent"}
         if extra:
             await context.set_extra_http_headers(extra)
+        await _install_route_header_rewrites(context, cfg.get("route_rewrite_response_headers") or [])
         page = await context.new_page()
     adapter._pw, adapter._browser, adapter._context, adapter._page = pw, browser, context, page
     # CF state — 같은 polling cycle (adapter 생명주기) 안 캐시 + 영구 cache 둘 다.

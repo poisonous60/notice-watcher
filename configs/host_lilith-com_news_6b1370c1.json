@@ -1,0 +1,145 @@
+{
+  "version": 1,
+  "site": "lilith.com",
+  "board": "news",
+  "strategy": "playwright_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+    "Referer": "https://www.lilith.com/news/?locale=zh_CN"
+  },
+  "timeout": 15,
+  "list": {
+    "url_template": "https://www.lilith.com/news/?locale=zh_CN",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "div.news_list.news_pc > a",
+    "wait_selector": "div.news_list.news_pc > a",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": ":self",
+          "attr": "href",
+          "transform": [
+            [
+              "regex_extract",
+              "/news/([0-9a-f]{32})/"
+            ],
+            [
+              "strip"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "div.title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        },
+        {
+          "from": "css",
+          "selector": ":self",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": ":self",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://www.lilith.com"
+            ]
+          ]
+        }
+      ],
+      "author": [
+        {
+          "from": "css",
+          "selector": "div.author",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "div.des",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "div.content_left",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "div.content_left > p:first-of-type span",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "div.content_left > p:nth-of-type(2)",
+          "text": true,
+          "transform": [
+            [
+              "regex_extract",
+              "(\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2})"
+            ],
+            [
+              "replace",
+              " ",
+              "T"
+            ],
+            [
+              "append",
+              "+08:00"
+            ]
+          ]
+        }
+      ]
+    }
+  }
+}

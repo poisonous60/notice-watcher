@@ -23,6 +23,11 @@ _CERT_OR_DNS_ERROR_MARKERS = (
     "Name or service not known",
     "nodename nor servname provided",
     "Temporary failure in name resolution",
+    "ConnectError",
+    "Connection refused",
+    "connection refused",
+    "WinError 10061",
+    "All connection attempts failed",
 )
 
 
@@ -106,7 +111,7 @@ def diagnose(
         bool(baseline_classes)
         and all(c == Classification.BLOCKED_BOT for c in baseline_classes)
     )
-    # SSL cert mismatch / DNS resolution 실패 — 사이트 자체가 죽었거나 운영 오설정.
+    # SSL cert mismatch / DNS resolution / connect 실패 — 사이트 자체가 죽었거나 운영 오설정.
     # 차단(BLOCKED)이 아니므로 별도 verdict 로 분리해서 register 메시지가 정확하게 나오게 한다.
     baseline_cert_broken = bool(baseline_classes) and all(
         c == Classification.UNKNOWN_ERROR for c in baseline_classes
@@ -118,7 +123,7 @@ def diagnose(
     elif baseline_cert_broken:
         sample = next((r.error for r in baseline.values() if _is_cert_or_dns_error(r.error)), "")
         notes.append(
-            "baseline ping 이 SSL 인증서/DNS 단계에서 실패 — 사이트 운영 오설정 또는 사이트가 사라졌을 가능성. "
+            "baseline ping 이 SSL 인증서/DNS/connect 단계에서 실패 — 사이트 운영 오설정 또는 사이트가 사라졌을 가능성. "
             f"샘플 에러: {sample}"
         )
     elif not baseline_ok:
