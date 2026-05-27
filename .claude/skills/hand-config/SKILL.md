@@ -176,7 +176,7 @@ python scripts/remote.py jobs --since <분> --min-id <batch 시작 id> --wait --
 Claude 직접 처리 예외 — *AND 조건 전부 만족* 일 때만:
 - (a) 변경 파일 = `configs/<slug>.json` *한 장*. 그 안에서 selector 한 줄·`post_id` transform 한 줄·`polite_sleep` 값 같은 single field 수정.
 - (b) probe/prompt/engine/recognizer 또는 C/B/A/F-layer 파일 0개 건드림.
-- (c) Track B 2a/2b/2c/2d *all miss* (each with one-line reason in §2 강제 인용 4b).
+- (c) Track B canonical 6-layer (E/D/C/B/A/F) *all miss* (each with one-line reason in §2 강제 인용 4a).
 - (d) user prompt 안 어휘 `codex|agentic|Track [AB]|generic improvement|failure_packet|curated examples|rules compact|agent 입력` grep hit 0건.
 
 위 4 중 하나라도 깨지면 codex 위임 대상. (특히 probe heuristic·prompt rule·engine code 변경 = size 무관 codex 위임 우선. Claude 는 diff·case·검증 review.) **무제한 병렬**(공유 파일 직렬화 제거)이 필요하면 worktree 격리 또는 detect-dispatch auto-discovery refactor — ADR 0008 §병렬 위임(미구현, 직렬화 병목 시). 하네스 상세 = ADR 0008, AGENTS.md §6.
@@ -229,29 +229,34 @@ triage 에서 *지금 작업 안 하고 치워두는* 항목은 **해소 경로�
 **진단 직후 — Track B 우선**:
 
 - **Track B (1순위, 필수)** — 사이트 분석 → 시스템 일반화 후보. *비용 ascending 순* (싸고 hard 한 쪽부터 — `docs/자가개선 인프라 계획.md` §0 원칙) 6 자리 점검. 각 자리 `hit — <구체 자리>` 또는 `miss — <이유 1줄>`:
-  - **E** schema 거부 — `engine/config_schema.py` validator. 잘못된 config 가 생성 직후 막혀야 하는 자리. *운영 사용 sparse* (~9건, single-layer commit 2).
-  - **D** retry feedback — `generate/validate.py` 가 LLM 에게 주는 retry 피드백 메시지 보강 (`posts_nonempty 0`/`probe_grounding_*` 등 신호 명확화) 또는 retry recipe (`b311b0f` D-layer MVP). *운영 사용 sparse* (~11건 combos).
-  - **C** probe digest 신호 — `probe/extract.py`·`probe/hydration.py` heuristic. raw artifact 에 신호가 있는데 추출 안 됐을 때. **운영 second** (~54건). 한 case 가 여러 사이트 동시 해결 흔함 (예: `888cc5b` `[fix-layer: C]` 3 사이트).
-  - **B** few-shot example — `generate/prompt.py:_EXAMPLE_CONFIG_FILES`. 같은 패턴의 working config 추가 → LLM 재현 학습. **운영에서 보통 miss** — M1 초기 3개 박힌 후 추가 ~4건, 대부분 silent rot fix (rename 따라잡음). 토큰 비쌈. *진짜 B hit 조건*: A/F 보다 risk 낮은 compact exemplar 가 repeated config shape (예: 새 strategy 의 canonical 예시·rare transform chain) 을 일반화할 수 있을 때만. 그 외엔 A (system 규칙 추가) 또는 C (probe heuristic) 가 cheaper.
-  - **A** system 규칙 *추가* — `prompts/config_writer.system.txt`·**`prompts/classify.system.txt`** (gate_reject false-negative 봉합 자리, ADR 0007). **추가만 OK** — 기존 줄 수정/제거 = pipeline-rot-review SKILL 영역. **운영에서 standalone 0건** — 항상 E/F/C/D 와 combo (~7건). 의미: A 단독으론 LLM 가 그 룰 지키게 강제 못 함 — *F 의 post-LLM override* 또는 *D 의 retry feedback* 와 paired 가 안전.
-  - **F** 새 엔진 코드 — recognizer 신설 (`engine/recognizers/<plat>.py`), 새 strategy (`engine/strategies/`), `register.py` post-LLM override, preflight 거부 마커. **운영 dominant** (~170+ appearances). 가장 큰 hammer — A/D/C 로 LLM 신뢰 못 하는 신호를 F 로 enforce.
+  - **E** schema 거부 — `engine/config_schema.py` validator. 잘못된 config 가 생성 직후 막혀야 하는 자리. *운영 사용 sparse*.
+  - **D** retry feedback — `generate/validate.py` 가 LLM 에게 주는 retry 피드백 메시지 보강 (`posts_nonempty 0`/`probe_grounding_*` 등 신호 명확화) 또는 retry recipe (`b311b0f` D-layer MVP). *운영 사용 sparse*.
+  - **C** probe digest 신호 — `probe/extract.py`·`probe/hydration.py` heuristic. raw artifact 에 신호가 있는데 추출 안 됐을 때. **운영 second-most** — 한 case 가 여러 사이트 동시 해결 흔함 (예: `888cc5b` `[fix-layer: C]` 3 사이트).
+  - **B** few-shot example — `generate/prompt.py:_EXAMPLE_CONFIG_FILES`. 같은 패턴의 working config 추가 → LLM 재현 학습. **운영에서 보통 miss** — M1 초기 3개 박힌 후 추가 거의 X, 대부분 silent rot fix (rename 따라잡음). 토큰 비쌈. *진짜 B hit 조건*: A/F 보다 risk 낮은 compact exemplar 가 repeated config shape (예: 새 strategy 의 canonical 예시·rare transform chain) 을 일반화할 수 있을 때만. 그 외엔 A (system 규칙 추가) 또는 C (probe heuristic) 가 cheaper.
+  - **A** system 규칙 *추가* — `prompts/config_writer.system.txt`·**`prompts/classify.system.txt`** (gate_reject false-negative 봉합 자리, ADR 0007). **추가만 OK** — 기존 줄 수정/제거 = pipeline-rot-review SKILL 영역. **운영에서 standalone 0건** — 항상 E/F/C/D 와 combo. 의미: A 단독으론 LLM 가 그 룰 지키게 강제 못 함 — *F 의 post-LLM override* 또는 *D 의 retry feedback* 와 paired 가 안전.
+  - **F** 새 엔진 코드 — recognizer 신설 (`engine/recognizers/<plat>.py`), 새 strategy (`engine/strategies/`), `register.py` post-LLM override, preflight 거부 마커. **운영 dominant** — 가장 큰 hammer. A/D/C 로 LLM 신뢰 못 하는 신호를 F 로 enforce.
   - hit 1+ 있으면 그 자리에 박는다 (같은 PR). 한 case 가 여러 layer 동시 hit 흔함 (예: `[fix-layer: C+F]`, `[fix-layer: E+F+A]`). miss 면 이유 1줄 — `cases_index` 0건은 miss 정당화 X.
-  - **운영 frequency note (cargo-cult 경고)**: order 는 *비용/evidence ascending prescription* — E (싸고 hard) → F (큼). **history 가 F-heavy 라고 F 부터 박지 X**. F=170+, C=54, E=9, D=11, B=4, A=combos-only 분포는 *과거 fix 들이 결과적으로 어디로 흘러갔나* 의 통계지 *next case 의 1순위 자리* 아님. 다음 case 가 E/D 로 해결 가능하면 E 부터 박는다 (싸고 hard). 분석 audit 은 E→F 순서로 훑되, 박는 자리는 case 의 *실 신호 위치* — F 가 결과적으로 많이 박히는 건 *probe/LLM 신뢰 못 하는 경우가 그만큼 흔하다* 는 의미일 뿐.
+  - **운영 frequency note (cargo-cult 경고)**: order 는 *비용/evidence ascending prescription* — E (싸고 hard) → F (큼). history 분포 (rough: F dominant, C second, E/D/B/A sparse — `git log --grep='[fix-layer:'` + case frontmatter rough survey) 는 *과거 fix 들이 결과적으로 어디 흘러갔나* 의 통계지 *next case 의 1순위 자리* 아님. 다음 case 가 E/D 로 해결 가능하면 E 부터 박는다 (싸고 hard). 분석 audit 은 E→F 순서로 훑되, 박는 자리는 case 의 *실 신호 위치* — F 가 결과적으로 많이 박히는 건 *probe/LLM 신뢰 못 하는 경우가 그만큼 흔하다* 는 의미일 뿐.
 - **Track A (optional, 진입 조건 strict)** — 다음 *AND* 만족 시만 §2 분기 §2e (수동 config/손어댑터) 진입:
   - (a) Track B 6 자리 모두 miss + 각 이유 case body 적힘
-  - (b) 사용자가 이 사이트 봇 사용자 향 **즉시 작동을 명시 요청** (user prompt 어휘 verbatim 인용, 자기-해석 X)
+  - (b) 사용자가 이 사이트 봇 사용자 향 **즉시 작동을 명시 요청** — context 분기 (§2 강제 인용 4c):
+    - **`/watch`/`/preview` 직접 흐름**: ship 신호 default true (사용자가 직접 입력했으니까)
+    - **batch FAILED audit / triage cleanup operator 흐름**: ship 신호 default false (operator prompt 어휘 hit verbatim 인용 필요)
   - 둘 중 하나 미충족 → Track A skip.
-- **둘 다 안 풀리면 park — 사이트 단위 ship 강제 X**:
-  - `python scripts/triage.py park-gate-fail <slug> --reason="<왜>"` → 활성 list 숨김. 다음 분류기/probe 개선 후 `sweep-gate-fail --execute` 한 방에 회수.
-  - cap_blocked 류 (능력 한계) 면 자동 `triage_later.json` (rc=5 auto-defer).
+- **둘 다 안 풀리면 park — 사이트 단위 ship 강제 X** (§2 강제 인용 4d):
+  - **classifier/gate fallthrough** (사실 비-게시판): `python scripts/triage.py park-gate-fail <slug> --reason="<왜 비-게시판>"` → 분류기 개선 후 sweep 회수.
+  - **true board + 일반화 0 + ship 요청 0**: `case_log` outcome `no_change` + dev `triage_later.json` 손-park. **park-gate-fail 에 넣지 X** — sweep semantic 어긋남 (분류기 옳음).
+  - **cap_blocked (rc=5)**: 자동 `triage_later.json` (`triage.py pull` auto-defer).
 
 예시 — Track B 박음 (commit `888cc5b`): `[fix-layer: C]` `probe/hydration.py` key matcher 일반화 + `probe/extract.py` cross-host structured guard. 한 case 가 3 사이트 (granbluefantasy/umamusume/hoyoverse) 동시 해결.
 
 예시 — 동시 진행 (`host_scholar-google-_scholar_706d9c49`, commit `0b130b2`): Track B (C) `probe/extract.py:list_row_external_host` + (D) `generate/validate.py:_external_host_hint` + Track A 수동 config (사용자 요청). 같은 PR.
 
-예시 — Track B match + Track A skip: 사용자 ship 요청 없으면 Track B 만 박고 batch 재시도로 회수.
+예시 — Track B match + Track A skip: batch operator 흐름이고 ship 요청 명시 없음 → Track B 만 박고 batch 재시도로 회수.
 
-예시 — 둘 다 0건: `triage.py park-gate-fail <slug> --reason="idiosyncratic · 일반화 신호 0건 · ship 요청 0건"`.
+예시 — true board + 일반화 0 + ship 요청 0: `case_log` outcome `no_change`, `triage_later.json` 손-park, 사용자 재요청 또는 인프라 개선 후 unpark.
+
+예시 — 분류기 fallthrough: `triage.py park-gate-fail <slug> --reason="non-board, classifier `?` 신뢰 낮음"` → 분류기 보강 후 sweep.
 
 ### §2 진입 전 — 강제 인용 (skim 방지)
 
@@ -261,15 +266,24 @@ triage 에서 *지금 작업 안 하고 치워두는* 항목은 **해소 경로�
 2. **`diagnosis.json` 의 `verdict`** (digest 에 표면화됨)
 3. **`docs/config 자동생성 실패 케이스.md` 매칭 §번호** + 1줄 근거
 4a. **Track B 분기 (필수, 먼저)** — canonical 6 자리 (E/D/C/B/A/F) 각각 `hit — <구체 자리>` 또는 `miss — <이유 1줄>`. C miss 시 세 항목 모두 판정 의무: 페이지 박힌 fact 추출 누락 / LLM raw 반복 오판 / preflight 거부 가능성. A (system 규칙) 은 *추가만* — 기존 줄 수정/제거 면 pipeline-rot-review 영역으로 escalate. `cases_index` 0건은 recurrence 0 일 뿐, Track B skip 근거 X. 한 자리라도 hit 면 같은 PR 에 박거나 case body _deferred_heuristics 섹션으로 명시 escalate.
-4b. **Track A 결정 (optional, Track B 뒤)** — 다음 *AND* 만족 시만 §2e 진입: (a) Track B 6 자리 *all miss* + 각 이유 적힘 (b) 사용자가 이 사이트 즉시 작동을 *명시* 요청 (user prompt 어휘 verbatim 인용). 하나라도 미충족 = Track A skip + `triage.py park-gate-fail <slug> --reason="<…>"` 또는 cap_blocked 면 `triage_later.json` 자동 defer. **사이트 단위 ship 강제 X — park 가 valid terminal**.
-5. **누적 cross-check** — 진단한 failure_keys 각각에 대해 `python scripts/cases_index.py query --failure-key <key> [--failure-key <key2> ...] --json` 1회 호출 + JSON 결과 인용. 같은 진단의 root-cause 신호 (예: `static_vs_headless`, `diverging_first_article`) 가 case body 에 흔적 있으면 `--signal "<regex>"` 도 동시 호출. 그리고 `python scripts/cases_index.py query --deferred --json` 으로 deferred 후보 트리거 상태 확인. **한 label 의 `track_b_trigger=true` 면 트랙 B 진입 강제 — deferred 보류 불가, 같은 PR 에 휴리스틱·인식기·prompt 박음**. 0건이면 명시 ("누적 0건 — 첫 사례, deferred OK") — *단 4b 의 §2c 3항목 매핑은 그래도 의무*.
+4b. **Track A 결정 (optional, Track B 뒤)** — 다음 *AND* 만족 시만 §2e 진입: (a) Track B 6 자리 *all miss* + 각 이유 적힘 (b) 사용자가 이 사이트 즉시 작동을 *명시* 요청 (user prompt 어휘 verbatim 인용 — §4c 참조). 하나라도 미충족 = Track A skip + park (자리별 분기 ↓).
+4c. **context 분기 — ship 명시 요청 default** (refactor v2 반영):
+- **`/watch`/`/preview` 직접 사용자 요청 흐름 (봇 사용자)**: ship 신호 *default true* — 사용자가 그 사이트 작동을 원해서 직접 입력. 4b (b) hit 자동. Track A 진입 OK (단 Track B 4a 동시 검토 의무).
+- **batch FAILED audit / triage 큐 cleanup (operator 흐름)**: ship 신호 *default false* — operator 가 batch prompt 안에 *명시적으로* "이 site ship 필요" 의도 표시 안 하면 skip. 4b (b) miss → park. operator 가 명시 의도 = `codex|agentic|Track A|generic improvement|ship 필요|즉시 작동` 어휘 hit + 그 site 와 묶임 (CLAUDE.md §8c 어휘 grep 의무).
+4d. **park bucket 분기** (4b skip 시 자리):
+- **classifier/gate fallthrough** (사실 비-게시판인데 분류기가 못 잡아 gen_fail 로 샘): `python scripts/triage.py park-gate-fail <slug> --reason="<왜 비-게시판>"` — 다음 분류기 개선 후 `sweep-gate-fail --execute` 일괄 회수.
+- **true board + 일반화 0 + ship 요청 0** (분류기 옳음, 그냥 우리가 안 풀음): `case_log` outcome `no_change` + dev `triage_later.json` 손-park (dashboard '나중에' 토글). park-gate-fail 에 *넣지 X* — semantic drift (sweep 이 분류기 개선 기준이라 회수 안 됨). 진짜 일반화 시 사용자 재요청 또는 인프라 개선 후 직접 unpark.
+- **cap_blocked (rc=5)**: 자동 `triage_later.json` (`triage.py pull` auto-defer).
+5. **누적 cross-check** — 진단한 failure_keys 각각에 대해 `python scripts/cases_index.py query --failure-key <key> [--failure-key <key2> ...] --json` 1회 호출 + JSON 결과 인용. 같은 진단의 root-cause 신호 (예: `static_vs_headless`, `diverging_first_article`) 가 case body 에 흔적 있으면 `--signal "<regex>"` 도 동시 호출. 그리고 `python scripts/cases_index.py query --deferred --json` 으로 deferred 후보 트리거 상태 확인. **한 label 의 `track_b_trigger=true` 면 Track B 진입 강제 — deferred 보류 불가, 같은 PR 에 휴리스틱·인식기·prompt 박음**. 0건이면 명시 ("누적 0건 — 첫 사례, deferred OK") — *단 4a 의 C miss 3항목 매핑은 그래도 의무*.
 6. **preflight 결과** (§0b) — `preflight: <a-hit|b-hit|miss> — <slug> [<commit-sha-if-b-hit>]`. a-hit 또는 b-hit 면 §2 진입 자체 X (이미 회복) — 인용 1줄 + 종료. miss 만 §2 진입. 본 인용 = §0b 강제 실행 증명. preflight 안 돌렸으면 *그 자체로 SKILL 위반*.
 
 artifact 없는 §0 신규 진입 (link 만 받은 첫 시도) 케이스는 예외 — `[§0 entry, no artifact yet]` 한 줄 명시 후 §0 절차로. 5번 (누적 cross-check) 도 skip (failure_keys 없음).
 
 `show` 가 자동으로 prepend 하는 digest (diagnosis / list_candidates / HAR) 가 1~4 인용 source. 5 는 `cases_index.py query` 출력 source. 그 외 정보 필요하면 `Read` 로 보강 가능하지만 위 항목은 *항상* 인용해야 함.
 
-## 2. 분기 — 위에서부터 차례로 따져 첫 매칭 (2a~2d 가 2e 보다 우선)
+## 2. 분기 — Track A 사이트 fix 절차 (§1 의 Track B 6-layer audit 와 별개)
+
+> 본 §2 의 2a~2e 는 **Track A 흐름** 의 사이트별 fix 분기 — *Track B canonical 6-layer (E/D/C/B/A/F) audit 는 §1 + §2 강제 인용 4a 에서 끝남*. §2 진입은 §2 강제 인용 4b 의 (a)+(b) 조건 통과 후 (Track A 진입 결정 후) 만. 2a~2d 는 *site retry 수단*, 2e 는 *수동 config*. 위에서부터 차례로 따져 첫 매칭 (2a~2d 가 2e 보다 우선).
 
 ### 2a. 이미 알려진 플랫폼 / 또는 플랫폼 config 만 넓히면 됨
 
@@ -316,7 +330,7 @@ artifact 없는 §0 신규 진입 (link 만 받은 첫 시도) 케이스는 예�
 ### 2e. 사용자 즉시 작동 요청 + Track B 일반화 0 — 수동 config (optional)
 
 진입 조건 (둘 다 만족 필수):
-- (a) Track B 4분기 (2a~2d) 모두 miss, 각 이유 case body 적힘
+- (a) Track B canonical 6-layer (E/D/C/B/A/F) 모두 miss, 각 이유 case body 적힘
 - (b) 사용자가 봇 사용자 향 *이 사이트 즉시 작동* 을 명시 요청 (user prompt 어휘 verbatim 인용 — 자기-해석 X)
 
 handwritten 만 가능: 클릭/스크롤로만 글이 뜨는 SPA, 강한 anti-bot, 비공개판이지만 *사용자가 storage_state 로그인 경로 제공 의사 있음*, 본문이 클라이언트 라우트라 server-render 본문 없음 등 진짜 코너 케이스.
@@ -511,7 +525,7 @@ probe/prompt/schema/코드 손대기 전 다음 여섯 질문에 답해보면 �
 
 6. **새 패턴이면 smoke_test fixture 추가했나?** — 새 strategy (F) 면 `probe_smoke.py:REPS` + slug-specific `_stage2_check_digest` 분기. 새 휴리스틱 (C) 면 `tests/probe_heuristics/test_<name>.py`. 기존 수정만은 skip. fixture URL = *진짜로 그 패턴 보여주는* URL 인지 probe 결과로 직접 검증.
 
-7. **트랙 B 매칭 0이면 이유 메모** — §1 의 트랙 B 검토 후보 (2a~2d) 매칭 X 면 case body 에 "일반화 안 되는 이유: <한 줄>" 명시. 미래 2번째 케이스 들어왔을 때 즉시 알아채는 비용 절감. — *휴리스틱 후보가 떠올랐지만 보류했나*: 한 줄 `docs/cases/_deferred_heuristics.md` 에 append (format 그 파일 상단). 트리거 도달해 박을 때 그 줄 삭제 + commit msg "deferred_heuristics 제거: <후보명>".
+7. **Track B 매칭 0이면 이유 메모** — §1 의 canonical 6-layer (E/D/C/B/A/F) 모두 miss 면 case body 에 각 자리별 "<자리>: <miss 이유 한 줄>" 명시. 미래 2번째 케이스 들어왔을 때 즉시 알아채는 비용 절감. — *후보가 떠올랐지만 보류했나*: 한 줄 `docs/cases/_deferred_heuristics.md` 에 append (format 그 파일 상단). 트리거 도달해 박을 때 그 줄 삭제 + commit msg "deferred_heuristics 제거: <후보명>".
 
 8. **어휘 (engine strategy / source / transform) 후보가 떠올랐나?** — handwritten 분기 (§2.2e) 진입 시 또는 어휘 한계 명백할 때: 이 case .md frontmatter 에 `vocab_candidates: [{candidate, confidence, evidence, reasoning, analysis_date, deferred: true}]` 항목 추가. ADR 0003 의 평가는 *vocabulary-extension SKILL* 의 책임 — 여기서는 *분해 + append 만*. 캐시 entry 형식:
    ```yaml
