@@ -43,6 +43,7 @@ def _build(m: "re.Match", url: str) -> Optional[dict]:
                   "playwright_html + stealth 로 CF JS challenge 우회. 입력 URL 이 게임 hub "
                   f"(`/{game}`) 든 mods 탭이든 모두 Recent Mods 정렬 폴링 대상으로 정규화."),
         "strategy": "playwright_html",
+        "disable_stealth": True,
         "headers": {
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
             "Accept-Language": "ko-KR",
