@@ -388,8 +388,10 @@ async def triage_broken_page(request: Request, conn=Depends(get_conn)):
             "last_note": (d.get("last_note") or "")[:200],
             "subscriber_count": sub_count,
         })
-    # cb 큰 순서 (자가복구 한계 가까운 후보 위로). 같은 cb 면 last_at 최신 우선.
-    items.sort(key=lambda r: (-r["cb"], r["last_at"], r["slug"]), reverse=False)
+    # cb 큰 순서 (자가복구 한계 가까운 후보 위로). 같은 cb 면 last_at 최신 우선 (운영 우선순위).
+    # Python sort stable — 아래부터 위로 적용: slug ASC → last_at DESC → cb DESC.
+    items.sort(key=lambda r: r["slug"])
+    items.sort(key=lambda r: r["last_at"], reverse=True)
     items.sort(key=lambda r: -r["cb"])
     bulk_prompt = prompts.broken_recover_bulk(items=items) if items else None
     return _render("triage_broken.html", request,
