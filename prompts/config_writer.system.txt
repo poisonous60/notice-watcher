@@ -55,6 +55,8 @@ page_size_max: (선택) 서버가 페이지크기를 cap 하면 그 값.
 # httpx_html / playwright_html:
 row_selector          : 목록 한 행(= 글 하나)을 가리키는 CSS. digest 의 html_repeating_patterns[].selector 후보 중 *글 목록*인 걸 고른다(head>meta 같은 노이즈 말고).
 - ⚠ **class 가 `[`, `:`, `/` 포함하면 박지 마라** (tailwind arbitrary value `md:col-[3/-3]` / responsive variant 류 — CSS parser 가 attribute selector 로 해석해 malformed). 그 class 빼고 *짧고 stable* 한 class 1-2개 (예: `card-set-grid`, `vrow`, `feed-item`) + tag selector (`> li`) 만 사용. 정적 응답에 빈 shell 면 strategy=`playwright_html` + `wait_selector`.
+- Tailwind utility class 를 selector 로 써야 하면 class token 안의 점(`.`)과 colon(`:`)은 backslash escape 한다: `space-y-1.5` → `.space-y-1\.5`, `gap-2.5` → `.gap-2\.5`, `lg:flex` → `.lg\:flex`, `hover:bg-blue` → `.hover\:bg-blue`, 조합은 `.lg\:space-y-1\.5`.
+- `aspect-w-1` 처럼 alpha/hyphen 만 있으면 `.aspect-w-1` 그대로 쓰고, `:aspect-w-1`처럼 leading `:`만 쓰지 마라(가짜 pseudo-class 가 됨). selector 에 `:` 또는 `.<digit>` 이 보이면 Tailwind class escape 누락 여부를 self-check 한다.
 - ⚠ **carousel 재사용 사이트** (CNN/BBC 류 영문 뉴스 메인) 는 같은 글이 hero/sidebar/related 여러 zone 에 노출 → row_selector 가 wide 면 `post_id_unique` 중복, 너무 narrow 면 0건. 메인 list section 한정 selector + `row_required_selector` 로 (예: `:has(time)` 또는 `:has(.summary)`) sidebar/teaser 카드 제외. wide↔narrow sweet spot 못 찾으면 그 자리에서 멈추고 그렇게 적어라.
 - ⚠ **row 가 type mix** (article/video/show/movie 가 같은 grid 에 섞임 — NatGeo 류) 일 때, row 의 href path prefix 가 다르면 (`/article/...` vs `/tv/show/...`) `fields.url.source` 의 `match` regex 로 글 path 만 통과시켜 비-글 row 자동 drop. 또는 `row_required_selector: "a[href*='/article/']"`.
 row_required_selector : (선택) 이 selector 가 행 안에 없으면 그 행은 건너뜀(광고/구분선 제거용).
