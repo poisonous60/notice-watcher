@@ -5,7 +5,7 @@ description: >-
   사용자가 "FAILED 큐 처리", "triage", "사이트 분석", "이 사이트 등록", "손 config 작성" 이라고 할 때.
   **목표 = 시스템 일반화** (probe 휴리스틱 · classifier prompt · recognizer · config_writer prompt · engine code).
   사이트별 수동 config·손어댑터는 *Track B 일반화 후보가 0건* 이고 *동시에 사용자가 이 사이트 즉시 작동을 명시 요청* 한 잔여만의 optional path.
-  둘 다 아니면 `triage.py park-gate-fail` 로 큐에 두고 다음 분류기/probe 개선 후 sweep 으로 회수 — **사이트 단위 ship 강제 X**.
+  둘 다 아니면 park (자리 분기: classifier fallthrough = `triage.py park-gate-fail`, true board no-ship = `case_log no_change` + `triage_later.json` 손-park, cap_blocked = auto Later) — **사이트 단위 ship 강제 X**.
   이 프로젝트 (`poisonous60/notice-watcher` 의 dev박스 clone) 전용.
 ---
 
@@ -44,7 +44,7 @@ description: >-
 
 3. **capability_blocked (rc=5, `.FAILED.json`)** — captcha/anti-bot/cloudflare 차단 = **능력 부족(정책 아님)**. `register.py` 가 자동으로 rc=5+FAILED 박음 (2026-05-21 policy_reject 에서 split). stealth/anti-detection 어댑터로 재도전 (§2e + docs/크롤링 지침.md §6 stealth 허용). `policy_reject`(rc=2 LOGIN_REQUIRED)·`url_dead`(rc=4 죽은 URL)와 **구분** — 이 둘은 의도된 거부, 작업 X.
 
-4. **gen_fail (rc=1, `.FAILED.json`)** — **먼저 §0b-2 screen-out** (content-as-list 오탐·soft-404 미검출 골라내 분류기 A-layer 보강으로 봉합 — 진짜 게시판 아님). 통과한 잔여는 §1 진단 → **Track B (E/D/C/B/A/F 6 자리, `docs/자가개선 인프라 계획.md` §0) 1순위**. 6 자리 모두 miss 이고 *사용자가 이 사이트 즉시 작동을 명시 요청* 한 잔여만 Track A (수동 config). 둘 다 아니면 `triage.py park-gate-fail <slug> --reason=…` 로 park (사이트 단위 ship 강제 X — 다음 분류기/probe 개선 후 `sweep-gate-fail --execute`). SPA(struct 신호 "SPA"/"JS 실행 필요") 잔여 → render(playwright_html) 트랙 자동 — 단 그조차 C-layer (SPA detect 휴리스틱) 자리부터 본 다음.
+4. **gen_fail (rc=1, `.FAILED.json`)** — **먼저 §0b-2 screen-out** (content-as-list 오탐·soft-404 미검출 골라내 분류기 A-layer 보강으로 봉합 — 진짜 게시판 아님). 통과한 잔여는 §1 진단 → **Track B (E/D/C/B/A/F 6 자리, `docs/자가개선 인프라 계획.md` §0) 1순위**. 6 자리 모두 miss 이고 *사용자가 이 사이트 즉시 작동을 명시 요청* 한 잔여만 Track A (수동 config). 둘 다 아니면 park (자리 분기는 §1 + §2 강제 인용 4d — classifier/gate fallthrough 만 `park-gate-fail`, true-board no-ship 은 `no_change` outcome + `triage_later.json` 손-park; 사이트 단위 ship 강제 X). SPA(struct 신호 "SPA"/"JS 실행 필요") 잔여 → render(playwright_html) 트랙 자동 — 단 그조차 C-layer (SPA detect 휴리스틱) 자리부터 본 다음.
 
 > **자동 진행 (묻지 X) — 2026-05-21 사용자 결정.** batch 가 cap_blocked(rc=5)·SPA(render 필요) 잔여를 남겨도 **사용자에게 "stealth/render 투자할까?" 물어보지 말 것**. clean win(recognizer·RSS·수동 selector) 다 처리한 뒤 **stealth(cap_blocked)·render(SPA) 트랙을 알아서 이어서 시도**한다. 어휘는 [[feedback-batch-fail-priority]] 그대로 (bug>gate_reject>capability_blocked>gen_fail). stealth/render 도 실패하면 그제서야 그 사이트만 "root-cause = 능력 한계" 로 case 기록 + 종료. **gate_reject(content 판정)·url_dead·policy_reject 는 여전히 작업 X** (정상 거부). 묻는 건 *정책상 회색지대*(우회 금지선·LOGIN 등)일 때만.
 
@@ -52,7 +52,7 @@ description: >-
 
 ## 0b. preflight — 이미 고쳐졌나 / 옆 작업이 큐를 stale 화했나
 
-§1 진단 진입 *전*, 각 큐 slug 에 대해 두 검사 강제. 본 검사 = 자가개선 인프라 (CLAUDE.md §6 + ADR 0003) 의 부산물 — prompt / engine / probe / recognizer 옆 작업이 큐 진입 후에 일어났으면 큐가 *옛 상태* 일 가능성. SKILL 이 그 가능성 인지 안 하면 *이미 회복 가능한 사이트에 수동 config 작업 박는 낭비* 발생 (CLAUDE.md §8a 의 영구 게이트 정신).
+§1 진단 진입 *전*, 각 큐 slug 에 대해 두 검사 강제. 본 검사 = 자가개선 인프라 (CLAUDE.md §6 + `docs/자가개선 인프라 계획.md`) 의 부산물 — prompt / engine / probe / recognizer 옆 작업이 큐 진입 후에 일어났으면 큐가 *옛 상태* 일 가능성. SKILL 이 그 가능성 인지 안 하면 *이미 회복 가능한 사이트에 수동 config 작업 박는 낭비* 발생 (CLAUDE.md §8a 의 영구 게이트 정신).
 
 ### (a) stale 큐 검사 — configs/<slug>.json 또는 손-adapter 이미 존재?
 
@@ -94,7 +94,7 @@ git status --short -- prompts/ engine/ probe/ generate/ engine/recognizers/
 
 ## 0b-2. gen_fail screen-out — "진짜 게시판 아님" 3종 먼저 (content-as-list 오탐 · soft-404 미검출 · empty/fake feed)
 
-gen_fail(rc=1) 큐로 *새는* false-negative 2종. 둘 다 진짜 게시판이 아니라 **수동 config 작성 X** — 영구 게이트로 봉합(CLAUDE.md §8a) + 그 slug 거부. §1 진단 진입 *전* 각 gen_fail slug 에 먼저 분류. (gate_reject(rc=3 분류기 content)·soft-404 *검출됨*(rc=4)은 이미 자동 거부 → 큐에 없음. 여기 대상은 게이트를 *빠져나가* gen_fail 로 떨어진 것.)
+gen_fail(rc=1) 큐로 *새는* false-negative 3종 (§0b-2 헤더의 P1·P2·P3). 셋 다 진짜 게시판이 아니라 **수동 config 작성 X** — 영구 게이트로 봉합(CLAUDE.md §8a) + 그 slug 거부. §1 진단 진입 *전* 각 gen_fail slug 에 먼저 분류. (gate_reject(rc=3 분류기 content)·soft-404 *검출됨*(rc=4)은 이미 자동 거부 → 큐에 없음. 여기 대상은 게이트를 *빠져나가* gen_fail 로 떨어진 것.)
 
 ### (P1) content-as-list 오탐 — 단일 글인데 index(목록)로 통과
 - **왜 샘**: classify(ADR 0007)는 false-reject(게시판→content 오거부)를 가장 싫어해 index 편향 (`prompts/classify.system.txt` 11줄; accept-path content-reject 는 conf≥0.7 만 = `register.py:_CLASSIFY_REJECT_MIN_CONF`). 단일 글이 content conf<0.7 또는 index 판정으로 통과 → fetch_list 0~1행 → `[FAIL] posts_nonempty`/`article_body_len` → gen_fail.
@@ -268,8 +268,8 @@ triage 에서 *지금 작업 안 하고 치워두는* 항목은 **해소 경로�
 4a. **Track B 분기 (필수, 먼저)** — canonical 6 자리 (E/D/C/B/A/F) 각각 `hit — <구체 자리>` 또는 `miss — <이유 1줄>`. C miss 시 세 항목 모두 판정 의무: 페이지 박힌 fact 추출 누락 / LLM raw 반복 오판 / preflight 거부 가능성. A (system 규칙) 은 *추가만* — 기존 줄 수정/제거 면 pipeline-rot-review 영역으로 escalate. `cases_index` 0건은 recurrence 0 일 뿐, Track B skip 근거 X. 한 자리라도 hit 면 같은 PR 에 박거나 case body _deferred_heuristics 섹션으로 명시 escalate.
 4b. **Track A 결정 (optional, Track B 뒤)** — 다음 *AND* 만족 시만 §2e 진입: (a) Track B 6 자리 *all miss* + 각 이유 적힘 (b) 사용자가 이 사이트 즉시 작동을 *명시* 요청 (user prompt 어휘 verbatim 인용 — §4c 참조). 하나라도 미충족 = Track A skip + park (자리별 분기 ↓).
 4c. **context 분기 — ship 명시 요청 default** (refactor v2 반영):
-- **`/watch`/`/preview` 직접 사용자 요청 흐름 (봇 사용자)**: ship 신호 *default true* — 사용자가 그 사이트 작동을 원해서 직접 입력. 4b (b) hit 자동. Track A 진입 OK (단 Track B 4a 동시 검토 의무).
-- **batch FAILED audit / triage 큐 cleanup (operator 흐름)**: ship 신호 *default false* — operator 가 batch prompt 안에 *명시적으로* "이 site ship 필요" 의도 표시 안 하면 skip. 4b (b) miss → park. operator 가 명시 의도 = `codex|agentic|Track A|generic improvement|ship 필요|즉시 작동` 어휘 hit + 그 site 와 묶임 (CLAUDE.md §8c 어휘 grep 의무).
+- **`/watch`/`/preview` 직접 사용자 요청 흐름 (봇 사용자)**: ship 신호 *default true* — command origin (`/watch <url>` 또는 `/preview <url>`) 자체가 verbatim ship evidence. 별도 어휘 grep 불요. 4b (b) hit 자동. Track A 진입 OK (단 Track B 4a 동시 검토 의무).
+- **batch FAILED audit / triage 큐 cleanup (operator 흐름)**: ship 신호 *default false* — operator 가 batch prompt 안에 *명시적으로* ship 의도 표시 안 하면 skip. 4b (b) miss → park. **ship evidence 어휘** (좁은 set, Track B 어휘와 구분): `Track A`·`수동 config`·`이 사이트 즉시 작동`·`ship 필요` + 특정 slug/URL 과 직접 묶인 user 문장. **ship 아닌 어휘** (false-positive 차단): `codex`·`agentic`·`generic improvement` 는 Track B 의도 — ship evidence 로 *세지 X* (batch audit prompt 가 자기 자신을 ship 요청으로 오인 방지). batch 안 사용자 직접 요청 slug 가 섞인 경우 = `requested_by` / command origin metadata 가 ship evidence.
 4d. **park bucket 분기** (4b skip 시 자리):
 - **classifier/gate fallthrough** (사실 비-게시판인데 분류기가 못 잡아 gen_fail 로 샘): `python scripts/triage.py park-gate-fail <slug> --reason="<왜 비-게시판>"` — 다음 분류기 개선 후 `sweep-gate-fail --execute` 일괄 회수.
 - **true board + 일반화 0 + ship 요청 0** (분류기 옳음, 그냥 우리가 안 풀음): `case_log` outcome `no_change` + dev `triage_later.json` 손-park (dashboard '나중에' 토글). park-gate-fail 에 *넣지 X* — semantic drift (sweep 이 분류기 개선 기준이라 회수 안 됨). 진짜 일반화 시 사용자 재요청 또는 인프라 개선 후 직접 unpark.
@@ -337,7 +337,7 @@ handwritten 만 가능: 클릭/스크롤로만 글이 뜨는 SPA, 강한 anti-bo
 
 `last_config` 에서 selector/path 한두 개만 바꾸면 끝나는 경우 多. 수동 config 작성 절차 ↓ §3.
 
-조건 (a) 미충족 → Track B 박음 (그쪽에서 잡힘). 조건 (b) 미충족 → `triage.py park-gate-fail <slug> --reason="<왜 일반화 X, ship 요청 0건>"` 로 park — *사이트 단위 ship 강제 X*. 다음 분류기/probe 개선 후 sweep 회수.
+조건 (a) 미충족 → Track B 박음 (그쪽에서 잡힘). 조건 (b) 미충족 → park (자리는 §1 분기 4d — *현재 slug 가 진짜 게시판인가*: 비-게시판/분류기 fallthrough 면 `park-gate-fail`, true board 면 `no_change` outcome + `triage_later.json` 손-park). park-gate-fail 에 *true board 넣지 X* — sweep semantic 어긋남 (sweep 은 분류기 개선 후 재판정이라 true board 는 영영 안 빠짐). 사이트 단위 ship 강제 X.
 
 ## 3. 수동 config / 손어댑터 작성 절차 (2e 진입 시)
 
@@ -440,7 +440,7 @@ dynamic family (`recognizer:*`, `[FAIL]:<check>`) 는 추가 필요 X — 자동
      --reason "<1-3줄>" [--fix-layer <C+D>] [--failure-keys <k1,k2>] [--case-md-slug <slug>]
    ```
    이 시점 HEAD = 본 case 의 commit → `commit_sha` 와 `files_changed` 정확. commit 전 실행하면 stderr 에 `⚠ staged/working tree 변경 있음 — commit 후 호출 권장` 경고만 박고 진행 (derive 부정확 가능). outcome 분류는 §6 step 5 표 참조. 잊어도 push 차단 X (~10% gap). dashboard `/cases` 에서 표시.
-   **outcome 결정 rule (Track B + Track A 두 축)**: Track B 6 자리 (E/D/C/B/A/F) all miss + 사용자 ship 명시 요청 0 = `no_change` + park (`triage.py park-gate-fail <slug>` 또는 `triage_later.json`) — **site 단위 ship 강제 X**. Track B miss + ship 요청 hit = §2e 진입 (수동 config). Track B hit 1+ = `improved` outcome (commit prefix `[fix-layer: X]`). Track A handcraft 만 = `handcrafted`. case outcome 은 *실제 한 조치* 기준이고, generic improvement 부재 자체는 outcome 아님 — 그 경우 park = valid terminal.
+   **outcome 결정 rule (Track B + Track A 두 축)**: Track B 6 자리 (E/D/C/B/A/F) all miss + 사용자 ship 명시 요청 0 = `no_change` outcome + park (자리는 §1 분기 4d — classifier fallthrough 면 `park-gate-fail`, true board 면 `triage_later.json` 손-park). Track B miss + ship 요청 hit = §2e 진입 (수동 config). Track B hit 1+ = `improved` outcome (commit prefix `[fix-layer: X]`). Track A handcraft 만 = `handcrafted`. case outcome 은 *실제 한 조치* 기준이고, generic improvement 부재 자체는 outcome 아님 — 그 경우 park = valid terminal. **site 단위 ship 강제 X**.
 
 8. **N100 배포** (운영 메모 §8 SoT) — `ssh <user>@<host> 'cd ~/notice-watcher && git pull --ff-only && .venv/bin/python scripts/register.py --config "configs/<slug>.json"'`.
    - **`adapters/`·`engine/`·`scripts/notify.py`·`bot/` 변경 시 뒤에 `&& systemctl --user restart notice-bot.service`** — 봇 import 캐시. 안 하면 `make_adapter() ValueError`.
@@ -545,7 +545,9 @@ probe/prompt/schema/코드 손대기 전 다음 여섯 질문에 답해보면 �
 
 ## 7. 자가 review (commit 직전 — 권장)
 
-**현재 reviewer backend: `codex`** — 전환은 §7b.
+> **Codex CLI override (AGENTS.md §6)**: codex CLI 환경에서 작동 중이면 *native `hand-config-reviewer` subagent 가 1순위* — 아래 §7a/§7b 무시. Claude Code 또는 codex 외 환경에서만 아래 backend 분기 적용.
+
+**Claude Code 환경 reviewer backend: `codex`** — 전환은 §7b.
 
 코드 변경 또는 수동 config 변경 1+ 파일 **commit 직전** reviewer 호출. main thread 가 `probe_smoke`·`case_log query` 실행 결과 prompt 에 박음.
 
