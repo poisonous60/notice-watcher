@@ -33,10 +33,52 @@ STATIC_INSUFFICIENT_SIZE_PREFIX = "정적 응답이 빈 shell"        # rule 1 =
 STATIC_INSUFFICIENT_REPEAT_PREFIX = "정적 응답 vs Playwright DOM"  # rule 2 = 약한 신호 (selector-level repeat diff)
 
 
+def _read_list_candidates(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def _is_cert_or_dns_error(err: Optional[str]) -> bool:
     if not err:
         return False
     return any(m in err for m in _CERT_OR_DNS_ERROR_MARKERS)
+
+
+def _static_row_evidence(static_like_ok: list[Result], list_payload: dict) -> Optional[dict]:
+    if not static_like_ok:
+        return None
+    patterns = list_payload.get("html_repeating_patterns") or []
+    if not isinstance(patterns, list):
+        return None
+
+    best: Optional[dict] = None
+    for item in patterns:
+        if not isinstance(item, dict):
+            continue
+        try:
+            child_count = int(item.get("child_count") or item.get("count") or 0)
+        except (TypeError, ValueError):
+            child_count = 0
+        sample_url = item.get("sample_url") or list_payload.get("first_article_url")
+        if child_count < 10 or not sample_url:
+            continue
+        if best is None or child_count > int(best.get("child_count") or 0):
+            best = {**item, "child_count": child_count, "sample_url": sample_url}
+
+    if not best:
+        return None
+
+    return {
+        "strategy": static_like_ok[0].strategy,
+        "selector": best.get("selector") or "?",
+        "child_count": best.get("child_count"),
+        "sample_url": best.get("sample_url"),
+    }
 
 
 def diagnose(
@@ -94,6 +136,16 @@ def diagnose(
     static_like_ok = list(static_ok)
     if captured_ok and captured_retry is not None:
         static_like_ok.append(captured_retry)
+    list_payload = _read_list_candidates(list_candidates_path)
+    static_row_evidence = _static_row_evidence(static_like_ok, list_payload)
+    if static_row_evidence:
+        notes.append(
+            "정적 HTML row 후보가 충분함 — "
+            f"{static_row_evidence.get('strategy')} OK + selector "
+            f"{static_row_evidence.get('selector')} cc={static_row_evidence.get('child_count')} "
+            f"sample={static_row_evidence.get('sample_url')} 확인. "
+            "Playwright DOM 이 더 크더라도 static rows 우선."
+        )
     if static_like_ok and headless_ok and headless is not None:
         biggest_static = max(
             (r for r in static_like_ok if r.body_path),
@@ -112,17 +164,18 @@ def diagnose(
                 if static_vs_headless.get("static_insufficient"):
                     trigger = static_vs_headless.get("trigger_rule") or "?"
                     if trigger == "size":
-                        # 강한 신호 — 정적 계열 응답이 진짜 빈 shell. 일반 정적뿐 아니라
-                        # S1.Hcap 도 같은 빈 shell 이면 httpx 권장으로 되살리지 않는다.
-                        static_ok = []
-                        captured_ok = False
-                        notes.append(
-                            f"{STATIC_INSUFFICIENT_SIZE_PREFIX} — Playwright 응답이 정적보다 "
-                            f"{static_vs_headless.get('ratio'):.1f}배 크고 row-like 요소 "
-                            f"({static_vs_headless.get('row_signal_headless')} vs "
-                            f"{static_vs_headless.get('row_signal_static')}) 만 잡힘. "
-                            "JS 가 카드/목록 그리는 사이트 — strategy=playwright_html 필수."
-                        )
+                        if not static_row_evidence:
+                            # 강한 신호 — 정적 계열 응답이 진짜 빈 shell. 일반 정적뿐 아니라
+                            # S1.Hcap 도 같은 빈 shell 이면 httpx 권장으로 되살리지 않는다.
+                            static_ok = []
+                            captured_ok = False
+                            notes.append(
+                                f"{STATIC_INSUFFICIENT_SIZE_PREFIX} — Playwright 응답이 정적보다 "
+                                f"{static_vs_headless.get('ratio'):.1f}배 크고 row-like 요소 "
+                                f"({static_vs_headless.get('row_signal_headless')} vs "
+                                f"{static_vs_headless.get('row_signal_static')}) 만 잡힘. "
+                                "JS 가 카드/목록 그리는 사이트 — strategy=playwright_html 필수."
+                            )
                     elif trigger == "repeat":
                         # 약한 신호 — 정적 응답에도 콘텐츠 있지만 headless 에만 mosaic tile 다수 (humblebundle 류).
                         # static_ok 무효화 X (정적 httpx 로도 작동할 수 있음 — JSON island 직접 파싱 등).
@@ -168,7 +221,7 @@ def diagnose(
     html_n = api_n = hyd_n = 0
     if list_candidates_path.exists():
         try:
-            payload = json.loads(list_candidates_path.read_text(encoding="utf-8"))
+            payload = list_payload
             html_n = len(payload.get("html_repeating_patterns") or [])
             api_n = len(payload.get("traffic_json_api_candidates") or [])
             hyd_n = len(payload.get("hydration_list_candidates") or [])

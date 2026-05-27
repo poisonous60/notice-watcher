@@ -65,6 +65,11 @@ _BOT_CHALLENGE_MARKERS_RAW = (
     "making sure you're not a bot",  # Anubis 기본 타이틀
 )
 
+_S3_SOFT_404_CODE_RE = re.compile(
+    r"<Code>\s*AccessDenied\s*</Code>", re.IGNORECASE
+)
+_HTML_404_RE = re.compile(r"\b404\b", re.IGNORECASE)
+
 _GEO_BODY_MARKERS = (
     "Unavailable For Legal Reasons",
     "이 채널은 한국",
@@ -83,6 +88,41 @@ _SCRIPT_STYLE_RE = re.compile(
 
 def _strip_scripts(s: str) -> str:
     return _SCRIPT_STYLE_RE.sub("", s)
+
+
+def _looks_like_403_soft_not_found(
+    *,
+    status: Optional[int],
+    body_text: str,
+    visible_text: str,
+    headers_lower: dict[str, str],
+) -> Optional[str]:
+    if status != 403:
+        return None
+    if "cf-mitigated" in headers_lower or "retry-after" in headers_lower:
+        return None
+
+    content_type = headers_lower.get("content-type", "").lower()
+    server = headers_lower.get("server", "").lower()
+    body_lc = body_text[:50000].lower()
+    visible_lc = visible_text[:8000].lower()
+
+    if (
+        "xml" in content_type
+        and "amazons3" in server
+        and _S3_SOFT_404_CODE_RE.search(body_text[:50000])
+    ):
+        return "S3 AccessDenied XML"
+
+    if len(visible_text.strip()) < 80 and len(body_text.strip()) < 200:
+        return "empty 403 body"
+
+    if "html" in content_type or "<html" in body_lc:
+        count_404 = len(_HTML_404_RE.findall(visible_lc))
+        if count_404 >= 2 or (count_404 >= 1 and "not found" in visible_lc):
+            return "HTML 404 marker"
+
+    return None
 
 
 def classify(
@@ -153,6 +193,16 @@ def classify(
                 notable.append("baseline also blocked → IP-level")
                 return Classification.BLOCKED_IP, notable
             return Classification.BLOCKED_BOT, notable
+
+    soft_not_found = _looks_like_403_soft_not_found(
+        status=status,
+        body_text=body_text,
+        visible_text=visible_text,
+        headers_lower=headers_lower,
+    )
+    if soft_not_found:
+        notable.append(f"soft not-found marker: {soft_not_found}")
+        return Classification.NOT_FOUND, notable
 
     bot_signal = False
     bad_status = status in (403, 429, 503)
