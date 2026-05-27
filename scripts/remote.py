@@ -66,7 +66,7 @@ def _require_deploy_host() -> str:
 # 자유 입력 인자 validation — interpolation 전 거름.
 _SLUG_RE = re.compile(r"^[A-Za-z0-9._%\-]{1,200}$")           # engine.slug 형식 — `%` 포함(URL-encoded UTF-8 seg)
 _TARGET_ID_RE = re.compile(r"^[0-9]{1,32}$")                    # Discord snowflake (현재 19자리, 미래 여유)
-_POST_ID_RE = re.compile(r"^[\w\-./:%]{1,128}$")               # poll.py 의 _STABLE_ID_RE 와 동일
+_POST_ID_RE = re.compile(r"^[\w\-./:%,]{1,128}$")               # poll.py 의 _STABLE_ID_RE 와 동일 (Atom RFC 4151 tag URI 의 `,` 포함)
 _BASE64_RE = re.compile(r"^[A-Za-z0-9+/=]{1,200000}$")         # base64 문자셋만; ≤200KB 페이로드
 _TRACE_ID_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")          # tracing.valid_trace_id 와 동일 — path-traversal 차단
 _TRACE_KIND_RE = re.compile(r"^[a-z0-9_]{1,32}$")

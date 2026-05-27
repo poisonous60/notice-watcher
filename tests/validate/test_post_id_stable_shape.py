@@ -32,6 +32,17 @@ _FIXTURES: list[tuple[str, str, bool]] = [
         "a" * 200,
         True,
     ),
+    # accept — Atom RFC 4151 tag URI (`tag:authority,YYYY:specific`)
+    (
+        "atom_tag_uri_statuspage",
+        "tag:denostatus.com,2005:Incident/cmovrz1s7065icessbsqvfgl3",
+        True,
+    ),
+    (
+        "atom_tag_uri_github_style",
+        "tag:github.com,2008:Repository/12345/abcdef0123456789",
+        True,
+    ),
     # reject — 공백 (title 실수)
     ("title_with_spaces", "Title with spaces", False),
     ("title_short_with_space", "ab cd", False),

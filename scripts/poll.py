@@ -72,7 +72,7 @@ COLLECTED_DIR = ROOT / "output" / "collected"
 SITEMAP_LASTMOD_LOG = ROOT / "output" / "sitemap_lastmod_log.jsonl"
 PROBE_DIR = ROOT / "output" / "probe"
 
-_STABLE_ID_RE = re.compile(r"^[\w\-./:%]{1,200}$")  # generate/validate.py:_STABLE_ID_RE 와 동기 — URL-slug-as-id 수용.
+_STABLE_ID_RE = re.compile(r"^[\w\-./:%,]{1,200}$")  # generate/validate.py:_STABLE_ID_RE 와 동기 — URL-slug-as-id 수용 + Atom RFC 4151 tag URI (`,` 날짜 구분자).
 # strategy == "handwritten" 이면 adapter 이름을 보고 결정. 여기 들어있는 어댑터만 chromium sem.
 _CHROMIUM_HANDWRITTEN = {"ArcaLiveAdapter", "IdxPressReleaseAdapter"}
 

@@ -21,8 +21,9 @@ from engine.extract_helpers import parse_html
 from engine.tracing import current_trace
 
 
-_STABLE_ID_RE = re.compile(r"^[\w\-./:%]{1,200}$")  # 공백 없는 정수/문자열 ID. 'title with spaces' 같은 실수 차단.
+_STABLE_ID_RE = re.compile(r"^[\w\-./:%,]{1,200}$")  # 공백 없는 정수/문자열 ID. 'title with spaces' 같은 실수 차단.
 # 200 cap = 메이저 뉴스미디어의 date+title-slug URL path 패턴 수용 (CNN/NYT/WaPo/Reuters 류, ≤130자 관측). 64 cap 은 URL-slug-as-id 정상 케이스를 차단했다.
+# `,` 허용 = Atom RFC 4151 tag URI 의 date 구분자 (`tag:authority,YYYY:specific`). statuspage.io / GitHub atom feed 등 표준.
 
 # row_selector 가 네비게이션/메뉴 chrome 을 지목 — 글 목록 아님(nav junk) 신호 (ADR 0011 fix A).
 # 정밀 토큰만: <nav> 단독 태그, menubar/navbar/p-menubar/breadcrumb, [role=navigation].

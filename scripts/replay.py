@@ -167,7 +167,7 @@ def main(argv: list[str] | None = None) -> int:
         return _err(f"invalid slug: {a.slug!r}")
     if not _ID_RE.match(a.target_id):
         return _err(f"invalid target-id: {a.target_id!r}")
-    if a.post_id is not None and not re.match(r"^[\w\-./:%]{1,128}$", a.post_id):
+    if a.post_id is not None and not re.match(r"^[\w\-./:%,]{1,128}$", a.post_id):
         return _err(f"invalid post-id: {a.post_id!r}")
 
     # pre-check: poll 활성 시 fail-fast
