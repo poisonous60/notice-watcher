@@ -390,7 +390,27 @@ def diagnose(
         all_not_found = bool(target_results) and all(
             r.classification == Classification.NOT_FOUND for r in target_results
         )
-        if all_not_found or primary_all_not_found:
+        # majority NOT_FOUND + 잔여는 *empty-shell* BLOCKED_BOT (suspiciously empty body 154B 류, parked
+        # 도메인의 일부 strategy 가 다른 header 로 빈 응답을 받은 경우) — JS-redirect-to-parked 클래스가
+        # 다수일 땐 빈 shell 1건이 분류를 막지 X. OK 응답 0건 이어야 함 (board 가 일부 strategy 에 통하면
+        # 그건 정상 board).
+        not_found_count = sum(
+            1 for r in primary_target_results if r.classification == Classification.NOT_FOUND
+        )
+        ok_count = sum(
+            1 for r in primary_target_results if r.classification == Classification.OK
+        )
+        ambiguous_empty = [
+            r for r in primary_target_results
+            if r.classification == Classification.BLOCKED_BOT
+            and any("suspiciously empty body" in (n or "") for n in (r.notable or []))
+        ]
+        primary_majority_not_found = (
+            not_found_count >= 2
+            and ok_count == 0
+            and not_found_count + len(ambiguous_empty) == len(primary_target_results)
+        )
+        if all_not_found or primary_all_not_found or primary_majority_not_found:
             verdict_parts.append("TARGET_NOT_FOUND")
             notes.append(
                 "baseline(도메인 루트) 은 OK 인데 입력 URL 의 모든 진입 시도가 404 — "
