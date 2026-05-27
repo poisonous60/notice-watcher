@@ -1,14 +1,15 @@
 """batch hand-config 위임 파티셔너 (#2 batch).
 
-FAILED 큐의 slug 들을 *겹침 없는* 세션-크기 청크로 나눠 codex 에 병렬 위임한다.
+FAILED 큐의 slug 들을 응집 키별 세션-크기 청크로 나눠 codex 에 병렬 위임한다.
 slug별 분할 X (같은 플랫폼끼리 recognizer/engine fix 가 겹쳐 병렬 충돌) →
 **응집 키(플랫폼 또는 host)로 그룹** = 한 청크 = 한 codex 세션 (공유 fix 1회).
 공유 인덱스(INDEX.md·cases.sqlite3·git)는 Claude 가 청크 수집 후 직렬 처리.
+각 codex 세션은 worktree 에서 실행하므로 Track B 에 필요한 repo 파일은 사전 제한하지 않는다.
 
 응집 키 우선순위:
   1. recognize(url) 매칭 → 그 플랫폼 NAME (같은 플랫폼 = 한 세션)
   2. 미매칭 → host (같은 사이트 = 한 세션)
-  단일 host/플랫폼이면 그 자체로 1-slug 청크 (다른 청크와 파일 안 겹침 → 병렬 안전).
+  단일 host/플랫폼이면 그 자체로 1-slug 청크. 파일 충돌은 worktree 격리 후 Claude merge-review 에서 처리.
 
 Usage:
   python scripts/codex_batch.py plan                       # FAILED 큐 → 청크 분할 표 (dry-run)
@@ -92,7 +93,7 @@ def cmd_plan(slugs: list[str]) -> int:
         return 0
     print(f"[codex_batch] {len(slugs)} slug → {len(groups)} 청크 (= codex 세션):\n")
     for i, (key, members) in enumerate(groups.items(), 1):
-        tag = "병렬 안전(파일 격리)" if len(members) == 1 else f"{len(members)} slug 한 세션(공유 fix)"
+        tag = "worktree 격리" if len(members) == 1 else f"{len(members)} slug 한 세션(공유 fix, worktree 격리)"
         print(f"  청크 {i}: {key}  [{tag}]")
         for m in members:
             print(f"      - {m['slug']}  board={m.get('board') or '?'}  {m['url'][:70]}")
@@ -150,7 +151,9 @@ def cmd_launch(slugs: list[str], max_parallel: int) -> int:
     launched: list[tuple[str, Path]] = []
     for key, members in wave:
         path = _chunk_prompt(key, members)
-        result = codex_handoff.launch(path, f"batch: {key}")
+        result = codex_handoff.launch(path, f"batch: {key}",
+                                      worktree=True,
+                                      worktree_tag=f"batch-{codex_handoff._slugify(key.replace(':', '-'))}")
         launched.append((key, result))
         print(f"  launched {key} ({len(members)} slug): result={result}")
     print("\n완료 감지 (각각):")

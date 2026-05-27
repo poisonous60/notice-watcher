@@ -431,7 +431,9 @@ EXTRA_UNIT_TEST_DIRS = [ROOT / "tests" / "validate",
                         ROOT / "tests" / "state_lifecycle",
                         ROOT / "tests" / "recognizers",  # 비-휴리스틱 engine 회귀 테스트
                         ROOT / "tests" / "bot",          # 봇 헬퍼(db/site_ops) 단위 테스트
-                        ROOT / "tests" / "classify"]     # LLM index/content 분류기 veto 단위 테스트
+                        ROOT / "tests" / "classify",     # LLM index/content 분류기 veto 단위 테스트
+                        ROOT / "tests" / "dashboard",    # dashboard prompt/view 회귀 테스트
+                        ROOT / "tests" / "scripts"]      # scripts/* workflow 회귀 테스트
 
 
 def _load_test_module(test_py: Path):
@@ -578,7 +580,7 @@ _STAGE_TITLES = {
     2: "digest integrity",
     3: "configs validate + make_adapter",
     4: "register --reuse-probe (Gemini)",
-    5: "heuristic units (tests/probe_heuristics/)",
+    5: "heuristic + repo unit tests",
 }
 
 

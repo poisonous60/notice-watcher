@@ -34,6 +34,16 @@ def run() -> list[tuple[str, bool, str]]:
             "agent 입력" in text and "failure_packet" in text,
             text,
         ))
+        cases.append((
+            f"{name}_does_not_use_allow_list_model",
+            "ALLOW-LIST" not in text and "이 파일만 편집" not in text and "파일셋이 ALLOW-LIST" not in text,
+            text,
+        ))
+        cases.append((
+            f"{name}_uses_worktree_free_edit_review_model",
+            "--worktree" in text and "필요한 repo 파일을 자유롭게 수정" in text and "git diff" in text,
+            text,
+        ))
 
     return cases
 

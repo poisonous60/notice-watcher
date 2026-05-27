@@ -138,7 +138,7 @@ dashboard `/triage` 의 "FAILED 큐 codex 위임 처리" 프롬프트를 붙여�
 - Claude: 큐 pull → 청크 분할 → codex 위임(보이는 창) → **각 청크 diff 검토** → 공유 인덱스·commit·push·N100 배포.
 - codex: 청크 안의 진단·fix·case 작성. **commit 전 STOP** (HARD-STOP 프롬프트). codex 결과 *맹신 X* — Claude 가 git diff 로 검토 (codex 는 명시 제약도 위반·over-edit 한 전례).
 
-**병렬이 기본** (2026-05-21-fedi 검증, ADR 0008 §병렬 위임). 여러 codex 세션을 동시에 띄워 throughput 을 올린다. **단 codex 세션은 같은 working tree 공유**(codex_run.ps1 격리 X) → 두 세션이 *같은 파일* 동시 편집 = 디스크 레이스. 이걸 막는 게 핵심 규율.
+**병렬이 기본** (2026-05-21-fedi 검증, ADR 0008 §병렬 위임). 여러 codex 세션을 동시에 띄워 throughput 을 올린다. **기본 안전장치 = `--worktree` 격리** — 각 codex 가 분리 worktree+branch 에서 필요한 repo 파일을 자유롭게 수정하고, Claude 가 나중에 diff review + merge 로 수습한다. 파일 목록을 사전에 좁히면 Track B 후보를 봉쇄하므로 금지.
 
 **drain 모니터링** (batch enqueue 후 worker 큐 비기 기다릴 때): `python scripts/remote.py jobs --since <분> --min-id <batch 시작 id>` — `bot.sqlite3` jobs 상태 카운트 (status × n 표, total 포함). ⚠ **ad-hoc `ssh ... 'sqlite3 ... "SELECT ... WHERE kind=\"register\""'` 형태로 직접 쓰지 X** — SSH/PowerShell/Bash/SQL 4중 인용이 꼬여 SQL 이 `"register"` 를 *identifier(컬럼명)* 로 해석 → `Error: in prepare, no such column: "register"`. SQL 표준: `"..."`=식별자, `'...'`=문자열. helper 가 SQL/shell 인용을 다 박음.
 
@@ -154,23 +154,21 @@ python scripts/remote.py jobs --since <분> --min-id <batch 시작 id> --wait --
 
 **task 품질 게이트 — list hardcode 금지 / F-layer enforcement**:
 - **list hardcode 금지**: codex 에게 *list of known X*(host suffix list, keyword list, regex list) 를 주는 task 는 금지. 먼저 구조 신호(host mismatch, MIME type, body length, URL path pattern, response shape) 로 판별한다. known list 는 bootstrap fallback(4~6 entry, confidence 낮음) 으로만 허용. 예: `_AUDIO_SHARE_HOST_SUFFIXES` 9-host hardcode 는 나쁜 예 — C 후속은 host list 를 5개 이하 bootstrap 으로 줄이고 structural signal 을 우선해야 한다.
-- **A-layer 신호만 주입 금지**: prompt/system_writer 지시만 추가하면 LLM 이 retry feedback 을 무시하고 같은 실패를 반복할 수 있다. 신호가 확정적이면 `register.py` post-LLM override 같은 **F-layer enforcement** 를 함께 설계한다. allow-list 때문에 F-layer 를 못 건드리면 case/result 의 escalate 섹션에 “F-layer 필요 이유” 를 남긴다.
+- **A-layer 신호만 주입 금지**: prompt/system_writer 지시만 추가하면 LLM 이 retry feedback 을 무시하고 같은 실패를 반복할 수 있다. 신호가 확정적이면 `register.py` post-LLM override 같은 **F-layer enforcement** 를 함께 설계한다. 위임 codex 는 worktree 안에서 필요한 repo 파일을 자유롭게 수정한다.
 
 **절차**:
 1. `python scripts/triage.py pull --skip-later` — N100 → 로컬 (FAILED + probe).
-2. **청크 분할 = disjoint 파일 소유** (자동 `codex_batch.py plan` 은 플랫폼/host 기준 분할 — 단서). Claude 가 각 청크의 *편집 파일 집합* 을 정한다:
-   - **공유 충돌 파일 = `scripts/register.py`(detect dispatch) + `probe/extract.py`(detect_*)**. 새 플랫폼 detect-build 는 둘 다 건드림.
-   - **path-match recognizer**(StackExchange `/questions`, reddit `/r/` 등 = PATTERNS 만, root-detect 불요) → 공유 파일 0 → **병렬 안전**.
-   - **probe-detect 플랫폼**(lemmy/peertube/mbin 등 root-URL) → 두 공유 파일 편집 → **한 청크만 소유, 나머지 직렬**.
-   - **수동 config / RSS recognizer**(configs/*.json, 새 recognizer 파일) → 격리 → 병렬 안전.
-   - 파일 소유 기록: `output/codex_file_claims.json`(추적·감사).
-3. **codex 위임 — `--worktree` 로 격리 병렬 launch** (권장, same-tree race 구조적 차단): `codex_handoff.py generic --task-file <f> --launch --worktree`. 각 codex 가 HEAD 에서 분리된 git worktree+branch(`codex-wt/<tag>-<stamp>`)에서 실행 → edit 가 main + 다른 codex/세션과 **물리 격리** → 파일 유실·race 0. rc=0 시 변경이 그 branch 에 transport-commit. **다중 세션(다른 창에서 codex/Claude 동시)일 때 특히 필수** — 2026-05-21 같은-트리 충돌로 case 파일 유실 관측. (worktree 미사용 시: ALLOW-LIST 프롬프트 제약 = soft, file-isolated 청크만 다발·공유파일 청크 직렬 — diff-review 가 유일 enforcement.)
+2. **청크 분할 = 분석 응집 단위** (자동 `codex_batch.py plan` 은 플랫폼/host 기준 분할 — 단서). 같은 플랫폼/host/cohort 신호를 한 청크로 묶어 codex 가 cross-site 패턴을 보게 한다. Claude 는 *편집 파일 집합* 을 미리 정하지 않는다:
+   - 파일 목록 제한은 Track B 후보(`probe/`, `prompts/`, `generate/`, `scripts/register.py`, `engine/`)를 사전에 막는 사고 원인이다.
+   - 한 청크 task 에는 동료 slug 목록, fail_reason 분포, positive example, probe artifact 경로를 넣는다.
+   - task body 는 **분석-우선**이어야 한다. 사이트별 가설·처리 절차를 미리 확정해 쓰면 codex 가 수동 config 실행기로 전락한다.
+3. **codex 위임 — `--worktree` 로 격리 병렬 launch** (기본, same-tree race 구조적 차단): `codex_handoff.py generic --task-file <f> --launch --worktree`. 각 codex 가 HEAD 에서 분리된 git worktree+branch(`codex-wt/<tag>-<stamp>`)에서 실행 → edit 가 main + 다른 codex/세션과 **물리 격리** → 파일 유실·race 0. rc=0 시 변경이 그 branch 에 transport-commit. **다중 세션(다른 창에서 codex/Claude 동시)일 때 특히 필수** — 2026-05-21 같은-트리 충돌로 case 파일 유실 관측.
    - 첫 batch / codex 품질 미관측이면 *관측-우선*(1-2 청크 먼저 검토) 후 다발로 확대.
    - **모델 = gpt-5.5 medium(default) 유지** — `--profile`/`--reasoning` 속도노브는 *순수 기계적 청크*에만 opt-in (hand-config/batch 는 그대로).
-   - codex 가 ALLOW-LIST 밖 파일이 필요하면 → **STOP + 보고**(escape hatch). Claude 가 중재(직접 wiring / 재배정).
+   - codex 는 필요한 repo 파일을 자유롭게 수정한다. 단 commit/push/N100 배포/공유 인덱스 갱신은 HARD-STOP.
 4. **wave 의 모든 result 를 한 watcher 로 묶어** 완료/타임아웃 감지: `python scripts/codex_watch.py <r1> <r2> ... --loop` (창은 사용자 view, result 파일은 Claude 완료신호). result 파일마다 watcher 따로 띄우지 X — 멀티파일 인자로 한 번에. ⚠ **반드시 harness 백그라운드(run_in_background)로 실행** — shell `&` 로 띄우면 그 Bash 호출 종료 시 watcher 프로세스가 죽어 *완료 알림이 안 온다* (2026-05-22 batch 유실 관측, codex_watch.py docstring 에도 박음).
-5. **각 청크 검토 게이트**: worktree 모드면 `git diff main...codex-wt/<branch>` (**three-dot** — merge-base 기준 = codex 실제 변경만) + result. ⚠ **two-dot `main..branch` 금지** — 병렬 세션이 worktree 생성 *후* main 을 advance 시키면 그 새 커밋들이 branch 입장에서 "삭제"로 잘못 표시됨(2026-05-21 오진, `docs/codex 위임 가이드.md` §7). 미사용이면 `git diff <청크 파일>` (ALLOW-LIST 는 soft → 파일셋 직접 확인). 검토: (a) HARD-STOP/진단 §2 타당, (b) **auto-discovery semantic 충돌**(새 recognizer PATTERNS 가 타 플랫폼 URL 가로채 기존 테스트 깸 — `probe_smoke --stage 5`), (c) over-edit, (d) **§0c-회피 게이트 4종** (아래) — codex 가 ALLOW-LIST 핑계로 분석 punt 했는지 audit. (a)~(c) 문제면 worktree 버림(merge X)/revert/재위임. (d) 문제면: clean wins 만 cherry-pick + 일반화 후보는 별도 후속 chunk 로.
-6. **merge·인덱스·배포는 Claude 직렬**: worktree 모드 — 통과 청크 `git merge --no-ff codex-wt/<branch>` 직렬 → `git worktree remove <path>; git branch -D codex-wt/<branch>`. **merge 안전** — merge-base 3-way 라 disjoint 변경이면 main 의 병렬 세션 커밋도 보존(삭제 0). 충돌은 공유 파일(INDEX.md 양쪽 regen)뿐 → 다음 줄 `cases_index --backfill-db` 가 재생성 해결. 사전 확인: `git merge-tree $(git merge-base main <branch>) main <branch> | grep -i conflict`. 그 후 `probe_smoke --stage 3 --stage 5` exit 0 → `cases_index --backfill-db` → push(hook) → N100 배포 → `case_log log`(commit 후). (worktree 미사용이면 settled 트리서 **청크별 `git add <청크 파일만>`, `-A` 금지** 후 동일.)
+5. **각 청크 검토 게이트**: `git diff main...codex-wt/<branch>` (**three-dot** — merge-base 기준 = codex 실제 변경만) + result. ⚠ **two-dot `main..branch` 금지** — 병렬 세션이 worktree 생성 *후* main 을 advance 시키면 그 새 커밋들이 branch 입장에서 "삭제"로 잘못 표시됨(2026-05-21 오진, `docs/codex 위임 가이드.md` §7). 검토: (a) HARD-STOP/진단 §2 타당, (b) **auto-discovery semantic 충돌**(새 recognizer PATTERNS 가 타 플랫폼 URL 가로채 기존 테스트 깸 — `probe_smoke --stage 5`), (c) over-edit, (d) **§0c-회피 게이트 4종** (아래) — codex 가 처방-우선 task 를 그대로 따라 Track B 를 회피했는지 audit. 문제면 worktree 버림(merge X)/재위임 또는 clean wins 만 cherry-pick.
+6. **merge·인덱스·배포는 Claude 직렬**: worktree 모드 — 통과 청크 `git merge --no-ff codex-wt/<branch>` 직렬 → `git worktree remove <path>; git branch -D codex-wt/<branch>`. **merge 안전** — merge-base 3-way 라 disjoint 변경이면 main 의 병렬 세션 커밋도 보존(삭제 0). 충돌은 공유 파일(INDEX.md 양쪽 regen)뿐 → 다음 줄 `cases_index --backfill-db` 가 재생성 해결. 사전 확인: `git merge-tree $(git merge-base main <branch>) main <branch> | grep -i conflict`. 그 후 `probe_smoke --stage 3 --stage 5` exit 0 → `cases_index --backfill-db` → push(hook) → N100 배포 → `case_log log`(commit 후). stage 는 검토 통과 파일만 명시하고 `git add -A` 는 금지.
 7. **batch 후 `python scripts/triage.py prune-orphans --execute`** — recognizer 추가가 url_to_slug 를 바꿔 옛 host_ FAILED/triage_queue 마커가 orphan 으로 남음 (hash 매칭으로 prune).
 
 Claude 직접 처리 예외 — *AND 조건 전부 만족* 일 때만:
@@ -181,18 +179,18 @@ Claude 직접 처리 예외 — *AND 조건 전부 만족* 일 때만:
 
 위 4 중 하나라도 깨지면 codex 위임 대상. (특히 probe heuristic·prompt rule·engine code 변경 = size 무관 codex 위임 우선. Claude 는 diff·case·검증 review.) **무제한 병렬**(공유 파일 직렬화 제거)이 필요하면 worktree 격리 또는 detect-dispatch auto-discovery refactor — ADR 0008 §병렬 위임(미구현, 직렬화 병목 시). 하네스 상세 = ADR 0008, AGENTS.md §6.
 
-### §0c-회피 게이트 4종 (2026-05-24 박음 — `codex_handoff.py:HARD_STOP` 의 dev 박스 측 mirror)
+### §0c-회피 게이트 4종 (2026-05-24 박음, 2026-05-27 worktree-free-edit 로 갱신 — `codex_handoff.py:HARD_STOP` 의 dev 박스 측 mirror)
 
 `codex_handoff.py` 가 빌드하는 모든 위임 프롬프트에 박힌 "회피 게이트" 4종. Claude 가 review 단계(§0c step 5d)에서 **case body + result 의 다음 패턴 audit** — 발견 시 그 chunk 는 cherry-pick + 후속 chunk:
 
 1. **probe artifact 없음 defer 위반** — task 에 N100 tar pull 명시되어 있는데 시도 없이 `outcome: no_change` defer. 또는 사용자가 요청한 URL 의 board 가 빈 shell 인데 *다른 board ID* 로 등록(scope 오염). (2026-05-24 krpublic 의 daegu·gg·ulsan 사례.)
 2. **일반화 신호 punt** — 청크 안에 2+ slug 가 같은 패턴(URL 누락 파라미터·JS detail 함수·TLS handshake 실패·platform CMS 동형) 보이는데 case body §일반화 후보 섹션이 비었거나 "사이트별 매핑이라 일반화 X" 1줄. (2026-05-24 krpublic: KR egov `menuid`/`menuCd` 누락 4건 동일 + `goView(seq)` JS detail 3건 동일 punt.)
-3. **ALLOW-LIST 밖 punt** — fix layer 가 engine/probe/prompts 인데 "allow-list 밖이라 안 함" 1줄로 끝남 (후속 chunk 에 정보 전달 X). 정상은: 단일 site config 는 ALLOW-LIST 안에서 진행 + escalate 섹션에 분석 완전 적기.
+3. **처방-우선 task 추종** — task body 의 사이트별 가설/처리 절차를 그대로 실행하고, probe artifact·cohort 비교·Track B 6-layer audit 로 자기 판정을 다시 하지 않음. 특히 "site coverage 중심", "후속으로 일반화" 식으로 generic fix 를 미루면 FAIL.
 4. **`no_change` 정당화 불충분** — 시도/차단신호(verbatim)/진짜 해결 경로 3개 중 빠진 게 있음.
 5. **`no_change` 정당화 (refactor v3 기준)** — `no_change` outcome 은 valid terminal 이다 (Track B 6 자리 all miss + ship evidence 0 일 때). *invalid* 인 경우만: (a) ship evidence 가 있는데 (사용자 명시 요청 또는 `/watch`·`/preview` command origin) §2e 안 박았거나 (b) §2 강제 인용 4a/4b/4d evidence 가 빠짐. case body 가 6-layer miss 이유 + park 자리 분기 명시 안 했으면 `no_change` 정당화 불충분. site 단위 ship 강제 X — generic improvement 부재 자체는 invalid 아님.
 
 **Claude 의 audit 절차** (각 chunk merge 전):
-- 모든 case body 를 grep: `일반화 안 되는 이유` + `allow-list` + `보류` 라인 등장 빈도. 청크 멤버 수 대비 절반 이상이면 §0c-회피 2/3 의심.
+- 모든 case body/result 를 grep: `일반화 안 되는 이유` + `보류` + `후속` + `site coverage` 라인 등장 빈도. 청크 멤버 수 대비 절반 이상이면 §0c-회피 2/3 의심.
 - 같은 청크 안에서 failure_keys 또는 fix surface 가 겹치는 slug 쌍 검색 — 일반화 후보 섹션 있는지 확인.
 - `no_change` case .md 의 audit: 6-layer (E/D/C/B/A/F) miss 이유 각각 1줄 적혔는지, park bucket 분기 (4d) 명시 됐는지, ship evidence 가 *있다면* §2e 진입 흔적 있는지. 없으면 `no_change` 정당화 불충분 (위 5번).
 - 위반 잡으면 발견 사실을 다음 chunk 의 task 입력 머리에 명시 (codex 가 두 번째에도 같은 punt 안 하게).

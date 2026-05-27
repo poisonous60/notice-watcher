@@ -77,14 +77,14 @@ def hand_config_triage_queue(*, failed_slugs: list[str]) -> str:
         "**agentic 입력/휴리스틱/프롬프트**(C/B/A/F-layer) 자리에 박는다 — 한 PR 봉합 → batch 재시도 시 agentic 자동 처리. "
         "per-site codex 는 *cross-site 일반화 0인 잔여만*. 위임 시에도 **각 task 에 같은 batch 동료 slug 의 (URL, fail_reason) 목록 박기 의무** — "
         "isolated brief 만 주면 codex 가 'site 전용' punt 하여 §0c-회피 게이트 2 무력화 (2026-05-26 games-indie 박힘).",
-        "2. **disjoint 파일소유 청크 분할** (`codex_batch.py plan` 은 단서). 공유 충돌파일=`scripts/register.py`(detect dispatch)+`probe/extract.py`(detect_*): "
-        "path-match recognizer·수동 config=공유파일 0=병렬안전, probe-detect 플랫폼(root-URL)=한 청크만 소유·나머지 직렬. 소유 기록 output/codex_file_claims.json.",
-        "3. **병렬 launch (ALLOW-LIST 박아서)** — 각 codex 프롬프트(`codex_handoff.py generic --task-file`)에 '이 파일만 편집, 나머지 금지' 제약. "
-        "file-isolated 청크는 **다발 동시 launch**, 공유파일 청크는 소유자 1개+나머지 직렬. 첫 batch/품질 미관측이면 관측-우선(1-2청크) 후 확대. 모델=gpt-5.5 medium 유지(속도노브 opt-in).",
+        "2. **청크 분할 = 분석 응집 단위** (`codex_batch.py plan` 은 단서). 같은 플랫폼/host/cohort 신호를 한 청크로 묶어 cross-site 패턴을 보게 한다. "
+        "파일 소유 목록은 만들지 않는다 — Track B 후보를 사전에 막지 않기 위해서다.",
+        "3. **병렬 launch (`--worktree`)** — 각 codex 프롬프트(`codex_handoff.py generic --task-file --launch --worktree`)는 격리 worktree 에서 실행. "
+        "codex 는 필요한 repo 파일을 자유롭게 수정한다. 첫 batch/품질 미관측이면 관측-우선(1-2청크) 후 확대. 모델=gpt-5.5 medium 유지(속도노브 opt-in).",
         "4. 청크별 `python scripts/codex_watch.py <result_file> --loop` (백그라운드)  (완료 대기)",
-        "5. **각 청크 git diff + result 검토 게이트 = 진짜 enforcement** (ALLOW-LIST 는 soft) — codex HARD-STOP 지켰나/진단 타당한가/"
-        "파일셋이 ALLOW-LIST 내인가(over-edit·타청크 침범)/auto-discovery semantic 충돌(probe_smoke --stage 5). 문제면 revert·재위임.",
-        "6. settled 트리 probe_smoke(--stage 3 --stage 5) → `cases_index --backfill-db` 직렬 → **청크별 commit(`git add <청크 파일만>`, -A 금지)** → push → N100 배포 → batch 후 `triage.py prune-orphans --execute`.",
+        "5. **각 청크 git diff + result 검토 게이트 = 진짜 enforcement** — `git diff main...<codex-branch>` 로 codex 실제 변경만 보고, HARD-STOP 지켰나/진단 타당한가/"
+        "Track B 를 처방-우선 task 때문에 미루지 않았나/auto-discovery semantic 충돌(probe_smoke --stage 5) 있나 확인. 문제면 worktree 버림·재위임.",
+        "6. settled 트리 probe_smoke(--stage 3 --stage 5) → `cases_index --backfill-db` 직렬 → **검토 통과 파일만 명시 stage(`git add -A` 금지)** → push → N100 배포 → batch 후 `triage.py prune-orphans --execute`.",
         "6b. **모든 fail 의 종료 상태 박기 의무** (2026-05-26 박힘) — 보고 전 *각 미등록 slug* 가 4종 종료 중 하나에: "
         "① `registered` (config 박힘), "
         "② `Later` (capability_blocked auto-defer 또는 dev box `triage_later.json` 손-park, rc=5 류만), "
@@ -189,9 +189,9 @@ def catalog_run_and_fix(*, catalog_name: str,
     lines.append("   4) **gen_fail** (rc=1, `.FAILED.json`): **§0b-2 screen-out 먼저** — (P1) content-as-list 오탐(단일 글이 index 로 통과 → `prompts/classify.system.txt` content 측 보강) · (P2) not-found shell 미분류(title/h1 not-found 인데 등록 진행 → 분류기 not_found 보강 `prompts/classify.system.txt`; 옛 _SOFT_404_PATTERNS regex 제거 ADR 0007 §확장) · (P3) empty/fake feed(RSS 후보지만 item 0 또는 HTML shell): 진짜 게시판 아님. 통과한 잔여만 Track B 1순위 진단(heuristic/classifier/config_writer prompt/recognizer/engine); Track A 수동 config 는 ship 명시 요청 있을 때만 optional.")
     lines.append("   - **policy_reject** (rc=2, LOGIN_REQUIRED) · **url_dead** (rc=4, 404/cert·dns 깨짐) = 작업 X (정상 거부, `docs/크롤링 지침.md`). 우회 X.")
     lines.append("   - **실행 = codex 위임** (SKILL §0c): bug·gen_fail·capability_blocked 의 진단·fix 는 codex 보이는 창에 위임 "
-                 "(`codex_handoff.py generic --task-file --launch`, ALLOW-LIST 박음). **disjoint 파일소유로 병렬** — "
-                 "path-match recognizer·수동 config=병렬안전, probe-detect 플랫폼(register.py+extract.py 공유)=직렬. 첫 batch 관측-우선(1-2청크) 후 확대. 모델=gpt-5.5 medium. "
-                 "청크별 `codex_watch.py <result> --loop` 완료 → **git diff+result 검토 게이트(파일셋 ALLOW-LIST 내·HARD-STOP·semantic 충돌)** → 직렬 commit(청크별 git add) → 배포.")
+                 "(`codex_handoff.py generic --task-file --launch --worktree`). worktree 격리 안에서 codex 는 필요한 repo 파일을 자유롭게 수정한다. "
+                 "같은 플랫폼/host/cohort 신호를 한 청크로 묶어 분석하고, 첫 batch 는 관측-우선(1-2청크) 후 확대. 모델=gpt-5.5 medium. "
+                 "청크별 `codex_watch.py <result> --loop` 완료 → **git diff main...branch + result 검토 게이트(HARD-STOP·Track B 회피·semantic 충돌)** → 검토 통과 파일만 직렬 stage/commit → 배포.")
     lines.append(f"5. 재시도: `python scripts/remote.py batch-register --catalog={catalog_name} --failed` (rc∈{{1,5,-1,-2,-3,-99}} — capability_blocked 포함).")
     lines.append("6. registered 100% 또는 root-cause 못 잡는 사이트만 남을 때까지 반복.")
     lines.append("6b. **모든 fail 의 종료 상태 박기 의무** (2026-05-26 박힘) — batch 끝났다 보고 전에 *각 미등록 slug* 가 다음 4종 종료 상태 중 하나에 들어가야 한다. `.FAILED.json` 그대로 놔두지 X (다음 batch/세션이 작업큐서 또 보임 + 응답 'failed=재시도 가능' 분류; *dashboard KPI 정리 목적 아님* — dashboard fail-kind 는 jobs row 기반 history):"

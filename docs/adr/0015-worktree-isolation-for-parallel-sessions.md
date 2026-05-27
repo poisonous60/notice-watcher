@@ -23,7 +23,7 @@ CLAUDE.md §9b 가 "내가 만든·고친 파일만 명시 stage" 룰을 박았�
 2. **1인 모드 예외 = 사용자 명시 선언**. "혼자다, main 직접 편집" 사용자가 명시한 경우만 main 직접. 묵시적/추정 X.
 3. **표준 진입 = `scripts/session_start.{sh,ps1} <tag>`** wrapper. `git worktree add ../nw-session-<tag> -b session-<tag>` + 출력 = 다음 cd 경로. 일관 디렉토리 (`../nw-session-*`) + branch 네이밍 (`session-<tag>`).
 4. **종료 = merge 또는 drop**. 작업 끝나면 main 에 `git merge --no-ff session-<tag>` (CLAUDE.md §9a 3-way 안전) 또는 미커밋 변경은 `git worktree remove + branch -D` 폐기.
-5. **scope decomposition 동반 필수**. worktree 가 *파일* 충돌은 막아도 *task* 충돌은 못 막음 — 같은 task 2 agent 에게 주면 둘 다 worktree 안에서 같은 파일 수정 → merge 충돌. SKILL.md §0c "disjoint 파일 소유" 룰을 worktree 사용 여부와 무관하게 유지.
+5. **scope decomposition 동반 필수**. worktree 가 *파일* 충돌은 막아도 *task* 충돌은 못 막음 — 같은 task 2 agent 에게 주면 둘 다 worktree 안에서 같은 파일 수정 → merge 충돌. SKILL.md §0c 는 2026-05-27 부터 파일 소유 사전 배정 대신 "분석 응집 단위로 청크를 나누고, 필요한 repo 파일은 자유 편집, 충돌은 Claude merge-review 로 처리" 로 갱신됐다.
 
 ## 결과
 

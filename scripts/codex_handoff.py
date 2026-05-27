@@ -8,9 +8,9 @@ ADR 0008: hand-config 등 *중간 orchestration* 을 codex CLI 로 위임 (Claud
 scripts/codex_run.ps1 로 보이는 창에서 실행.
 
 Usage:
-  python scripts/codex_handoff.py handconfig --slug <slug> --url <url> [--board <b>] [--note <n>] [--launch]
-  python scripts/codex_handoff.py bugfix --title <t> --repro <cmd> [--location <file:line>] [--launch]
-  python scripts/codex_handoff.py generic --task-file <f> [--launch]
+  python scripts/codex_handoff.py handconfig --slug <slug> --url <url> [--board <b>] [--note <n>] [--launch] [--no-worktree]
+  python scripts/codex_handoff.py bugfix --title <t> --repro <cmd> [--location <file:line>] [--launch] [--no-worktree]
+  python scripts/codex_handoff.py generic --task-file <f> [--launch] [--no-worktree]
 
 생성물: output/codex_<kind>_<tag>_prompt.txt (+ --launch 시 보이는 창 + output/..._prompt.result.md)
 완료 감지: python scripts/codex_watch.py <result_file> --loop
@@ -35,9 +35,16 @@ HARD_STOP = """\
 - triage 큐(output/triage_queue.*)·이미 등록된 configs/·poll_state/ 는 작업 대상 외엔 건드리지 마라.
 - `scripts/cases_index.py` 실행 / `--backfill-db output/cases.sqlite3` / `docs/cases/INDEX.md` 갱신 **금지** — 공유 인덱스·DB 는 Claude 가 청크 수집 후 *직렬* backfill 한다. 병렬 codex 가 동시에 backfill 하면 SQLite lock race 로 case_runs row 가 유실된다. 너는 `docs/cases/<slug>.md` 파일만 만든다 (INDEX·DB 는 Claude 몫).
 
-## 회피 게이트 (ALLOW-LIST 가 일반화 회피 핑계 X — 2026-05-24 박음)
+## 편집 범위 (Track B 우선 — 파일 목록 제한 금지)
 
-ALLOW-LIST 는 *편집 권한 제한*이지 *분석 권한 제한*이 아니다. 다음 4종 punt 패턴은 task 위반 — 위반 시 Claude 가 review 단계에서 reject (worktree merge X).
+- 이 위임은 worktree 격리 + Claude diff 검토를 안전장치로 쓴다. **필요한 repo 파일을 자유롭게 수정**해라.
+- task 본문에 옛 파일 ownership 제한이 있으면 이전 프로세스 잔재로 보고 Track B 수정 파일을 막는 근거로 삼지 마라. 단 위 절대 금지(commit/push/N100/공유 인덱스)와 사용자·정책·보안상 명시된 안전 제약은 계속 우선한다.
+- gen_fail/capability_blocked/batch 처리는 사이트별 config 작성보다 Track B 일반화가 먼저다. 필요한 경우 `probe/`, `prompts/`, `generate/`, `scripts/register.py`, `engine/recognizers/`, `engine/strategies/` 를 같은 worktree 안에서 함께 고쳐라.
+- 안전 enforcement 는 Claude 의 `git diff main...<codex-branch>` 검토 + `probe_smoke` + case/reviewer 게이트다. 파일 범위를 사전에 좁혀 일반화 후보를 막지 마라.
+
+## 회피 게이트 (Track B 회피 금지)
+
+다음 4종 punt 패턴은 task 위반 — 위반 시 Claude 가 review 단계에서 reject (worktree merge X).
 
 ## register auto-mode 원칙 (2026-05-25)
 
@@ -55,15 +62,14 @@ ALLOW-LIST 는 *편집 권한 제한*이지 *분석 권한 제한*이 아니다.
   - **패턴**: 1줄 (예: "KR egov: 제출 URL 에 `menuid`/`menuCd`/`mId` 누락 시 auth_redirect/empty shell")
   - **신호**: 같은 청크 내 같은 패턴 slug 목록
   - **fix layer 후보**: C (probe heuristic) / B (few-shot) / A (system prompt) / F (engine) 중
-  - **이번 chunk 박을까**: yes (같은 PR 에 박음) / no (ALLOW-LIST 밖, escalate 필요)
+  - **이번 worktree 박을까**: yes (기본 — 같은 PR 에 박음) / no (정책·위험·검증 한계로 보류, 이유 필수)
 - "사이트별 메뉴 매핑이라 일반화 X" 같은 1줄 punt 는 **2+ slug 동일 패턴인 경우 부적합** — 그건 *정의상* 일반화 가능. 진짜 site-specific 인 사유 (예: "이 사이트 전용 ID 체계 + 다른 사이트 0건") 면 그 1줄 정당화.
 
-**게이트 3 — ALLOW-LIST 밖 필요하면 STOP + escalate (defer 아님)**
-- 게이트 2 의 fix 가 ALLOW-LIST 밖 (engine/probe/prompts/recognizer 등) 이면 *그 패턴은 별도 chunk 로* Claude 가 처리. 너는:
-  - 분석은 case body §일반화 후보 에 완전히 적기 (다음 chunk 가 그걸로 시작하게)
-  - 단일 site config 는 ALLOW-LIST 안에서 작업 진행 (둘 다 하는 게 정상)
-  - 결과 보고에 `## escalate (allow-list 밖 일반화 후보)` 섹션으로 모아 명시
-- 단순히 "allow-list 밖이라 안 함" 1줄 = 위반. 후속 chunk 에 정보 전달 안 됨.
+**게이트 3 — 처방-우선 task 로 Track B 봉쇄 금지**
+- task 가 사이트별 가설/처리 절차를 미리 적어도 그것은 출발 가설일 뿐이다. probe artifact 를 직접 읽고, 같은 batch/cohort 신호를 비교한 뒤 root-cause 를 다시 판정해라.
+- 수동 config/손어댑터는 Track B 6 자리(E/D/C/B/A/F)가 모두 miss 이고, 특정 slug/URL 에 묶인 ship evidence 가 있을 때만 작성한다.
+- 일반화 후보를 "후속"으로 미루는 경우는 정책·검증·blast radius 때문에 같은 worktree 에 박으면 위험한 때뿐이다. 그때도 `## 일반화 후보 보류` 에 패턴/신호/fix layer/보류 이유를 남겨라.
+- "파일 범위 밖", "이번 chunk 범위 아님", "site coverage 중심" 같은 이유로 Track B 를 미루면 위반이다.
 
 **게이트 4 — `no_change`/`deferred` outcome 정당화 의무**
 - `outcome: no_change` 박을 때 case body 에 다음 3개 명시:
@@ -140,19 +146,19 @@ def build_handconfig_batch(members: list[dict], group_key: str) -> str:
 ## 이 세션의 청크 ({len(members)} slug — 응집 근거: {group_key})
 이 slug 들은 *같은 플랫폼/host* 라 fix surface 가 겹친다. **한 세션에서 함께** 처리해라 —
 공유 수정(recognizer/engine/probe)은 *한 번만* 하고 모든 멤버에 적용 (track B 일관).
-다른 청크와 파일 충돌 없게, 이 청크 멤버의 slug 파일 + 이 플랫폼 recognizer 만 건드려라.
+worktree 격리 안에서 필요한 repo 파일을 자유롭게 수정하되, 공유 인덱스·DB·git·배포는 Claude 직렬 단계에 남겨라.
 
 {rows}
 
 ## 절차 (각 slug 에 SKILL.md §0b→§1→§2→§5, 단 공유 fix 는 1회)
 1. 첫 멤버로 §0b preflight + §1~§2 진단 → 공유 root-cause 파악.
-2. 공유 수정(추론 개선 1순위: probe/schema/prompt/recognizer)을 *한 번* 박고, 나머지 멤버는 그 수정으로 재검증.
+2. 공유 수정(추론 개선 1순위: probe/schema/prompt/recognizer)을 *한 번* 박고, 나머지 멤버는 그 수정으로 재검증. 필요한 repo 파일을 자유롭게 수정해도 된다.
 3. 멤버별 `configs/<slug>.json` (필요 시) + `docs/cases/<slug>.md`.
 4. 검증: `python scripts/probe_smoke.py --stage 3 --stage 5` PASS + 각 멤버 make_adapter 스모크 posts_nonempty.
 5. 거기까지만 — `cases_index.py`/`--backfill-db`/INDEX.md 는 돌리지 마라 (병렬 backfill = SQLite lock race, row 유실). Claude 가 청크 수집 후 직렬 backfill 한다.
 
 {HARD_STOP}
-- **공유 인덱스(INDEX.md·cases.sqlite3·사이트별 기록.md)·git commit 은 Claude 가 직렬 처리** — 너는 청크 멤버 파일만 만들고 STOP. (병렬 세션 레이스 방지)"""
+- **공유 인덱스(INDEX.md·cases.sqlite3·사이트별 기록.md)·git commit 은 Claude 가 직렬 처리** — 너는 필요한 repo 파일 변경을 worktree 에 남기고 STOP. (병렬 세션 레이스 방지)"""
 
 
 def build_bugfix(title: str, repro: str, location: str | None) -> str:
@@ -196,14 +202,14 @@ def write_prompt(kind: str, tag: str, body: str) -> Path:
 
 def launch(prompt_path: Path, title: str,
            profile: str = "", reasoning: str = "",
-           worktree: bool = False, worktree_tag: str = "") -> Path:
+           worktree: bool = True, worktree_tag: str = "") -> Path:
     """codex_run.ps1 로 보이는 창에서 실행. 결과 파일 경로 반환.
 
     profile/reasoning = 속도 노브 (codex_run.ps1 로 전달). profile='light' = gpt-5.4-mini
     + low reasoning (기계적 청크 권장). reasoning='low'|'minimal' = default 모델 사고만 축소.
-    worktree=True → codex 가 HEAD 에서 분리된 git worktree+branch(codex-wt/<tag>) 에서 실행 →
+    worktree=True(default) → codex 가 HEAD 에서 분리된 git worktree+branch(codex-wt/<tag>) 에서 실행 →
     edit 격리(병렬 codex/다중 세션 same-tree race 0). rc=0 시 변경이 그 branch 에 커밋됨 →
-    Claude 가 `git diff main..codex-wt/<tag>` review + `git merge` 후 `git worktree remove`.
+    Claude 가 `git diff main...codex-wt/<tag>` review + `git merge` 후 `git worktree remove`.
     """
     result = prompt_path.with_suffix(".result.md")
     ps1 = ROOT / "scripts" / "codex_run.ps1"
@@ -245,9 +251,11 @@ def main(argv: list[str] | None = None) -> int:
                        help="codex 속도 노브: 'light' = gpt-5.4-mini+low (기계적 청크 권장)")
         p.add_argument("--reasoning", default="",
                        help="codex reasoning_effort: low|minimal (default 모델 사고 축소)")
-        p.add_argument("--worktree", action="store_true",
-                       help="격리 git worktree+branch(codex-wt/<tag>) 에서 실행 — 병렬/다중세션 same-tree race 0. "
+        p.add_argument("--worktree", dest="worktree", action="store_true", default=True,
+                       help="격리 git worktree+branch(codex-wt/<tag>) 에서 실행 (기본값). "
                             "rc=0 시 변경이 branch 에 커밋 → Claude 가 review+merge")
+        p.add_argument("--no-worktree", dest="worktree", action="store_false",
+                       help="예외적으로 현재 working tree 에서 실행 (단일 기계 작업처럼 사용자가 명시한 경우만)")
         p.add_argument("--worktree-tag", default="",
                        help="worktree branch/dir 태그 (기본: title)")
 
@@ -272,7 +280,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[codex_handoff] launched. result file: {result}")
         print(f"  완료 감지: python scripts/codex_watch.py {result} --loop")
     else:
-        print(f"  실행: pwsh scripts/codex_run.ps1 -PromptFile {path} -Title \"{title}\"")
+        worktree_flag = "" if not getattr(args, "worktree", True) else f" -Worktree -WorktreeTag \"{getattr(args, 'worktree_tag', '') or tag}\""
+        print(f"  실행: pwsh scripts/codex_run.ps1 -PromptFile {path} -Title \"{title}\"{worktree_flag}")
     return 0
 
 

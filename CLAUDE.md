@@ -193,7 +193,7 @@ bash scripts/setup-hooks.sh   # 또는 pwsh scripts/setup-hooks.ps1
 
 codex 위임 결과 검토 시 deferred / "out of scope" / "global risk" / "defer to next PR" 항목이 *사용자가 직접 제기한 가설·의심·root-cause 후보* 와 일치하면 **audit PASS 선언 + merge 진행 금지**. §0c-회피 게이트 2 (일반화 punt) 발동 가정 — codex 가 safe-low-risk 만 박고 사용자 가설 punt 한 경우 효과 0. merge 전 사용자에게 명시 확인 ("codex 가 [사용자 가설] deferred 했는데 진행 OK?").
 
-**Why**: 2026-05-26 validator timeout codex chunk — 사용자 가설 (wait_until="commit", chromium reuse, probe-static→httpx bias) 3개 모두 deferred ("global 변경 risk 더 큼" 핑계). 내가 "§0c-5d audit PASS" 선언하고 merge. 결과 = 1차 patch 효과 거의 없음 — deferred 된 게 진짜 root fix 였음. [[feedback-codex-review-mandatory]] (blind accept 금지) 의 trigger 강화 — 표면 audit (ALLOW-LIST/HARD-STOP/surgical) PASS 가 곧 deferred 정당화 X.
+**Why**: 2026-05-26 validator timeout codex chunk — 사용자 가설 (wait_until="commit", chromium reuse, probe-static→httpx bias) 3개 모두 deferred ("global 변경 risk 더 큼" 핑계). 내가 "§0c-5d audit PASS" 선언하고 merge. 결과 = 1차 patch 효과 거의 없음 — deferred 된 게 진짜 root fix 였음. [[feedback-codex-review-mandatory]] (blind accept 금지) 의 trigger 강화 — 표면 audit (HARD-STOP/surgical) PASS 가 곧 deferred 정당화 X. 2026-05-27 이후 codex 위임은 파일 제한이 아니라 worktree free-edit + diff review 가 기본이므로, "범위 밖" 핑계는 더 이상 정당화 근거가 아니다.
 
 **How to apply**: codex 결과 chunk 검토 시 *deferred 항목 사용자 메시지 grep* — 사용자 message 안에 같은 표현·신호·가설 있으면 빨간 flag. merge 전 사용자에게 "codex 가 [정확한 deferred 항목 인용] 안 했음, 그래도 진행?" 묻기. 사용자 동의 받기 전 merge X. PASS 어휘 사용 시 deferred 항목까지 PASS 인지 명시.
 
@@ -250,7 +250,7 @@ codex 위임은 이미 `scripts/codex_handoff.py --worktree` 로 자동 격리 (
 - `docs/대시보드 가이드.md` — dev 박스 로컬 대시보드
 - `docs/picker (dashboard).md` — dashboard `/builder` click 기반 사이트 등록 UI (자동등록 30% gap 대안). SSRF/sanitize/CSP, 1-click row + heuristic 매핑, smoke + baseline write, codex review v1~v3 history. 2026-05-24 1차 구현 — UI 손-검증 미완.
 - `docs/디스코드 메시지 톤 가이드.md` — 봇 사용자 향 메시지 톤·문체·포맷 룰 (해요체·이모지 어휘·체크리스트)
-- `docs/codex 위임 가이드.md` — 일반 작업을 Codex CLI 로 위임하는 기준·절차 (언제 YES/NO·entry/middle/exit·diff 게이트). batch/hand-config 외 작업용. ADR 0008 의 운영 가이드. ⚠ **codex 위임 = `scripts/codex_handoff.py {generic|bugfix} --launch` + `codex_watch.py --loop` 만**. `Agent(subagent_type=codex:codex-rescue)` **금지** — 가이드 §7 함정(Claude in-loop = quota 목표 위배 + Windows IPC deadlock #330). 2026-05-25 4회 같은 실수 후 박음.
+- `docs/codex 위임 가이드.md` — 일반 작업을 Codex CLI 로 위임하는 기준·절차 (언제 YES/NO·entry/middle/exit·diff 게이트). batch/hand-config 외 작업용. ADR 0008 의 운영 가이드. ⚠ **codex 위임 = `scripts/codex_handoff.py {generic|bugfix} --launch` (worktree 기본) + `codex_watch.py --loop` 만**. `Agent(subagent_type=codex:codex-rescue)` **금지** — 가이드 §7 함정(Claude in-loop = quota 목표 위배 + Windows IPC deadlock #330). 2026-05-25 4회 같은 실수 후 박음.
 - `docs/adr/0015-worktree-isolation-for-parallel-sessions.md` — 동시 세션 = worktree 의무 (§9.0). 1인 모드 명시 시 main 직접 편집 예외. wrapper = `scripts/session_start.{sh,ps1}`.
 - `docs/adr/0017-poll-notify-runs-tracking.md` — poll/notify run + 사이트별 결과 영속 추적 + persist 검증. dashboard `/runs`. 2026-05-25 incident silent fail 재발 방지 게이트.
 - `docs/adr/0018-cron-commit-race-guard.md` — N100 deploy = `scripts/n100_deploy.sh` (timer atomic stop/start). `poll_runs.git_sha` 영속화. raw `git pull` 직접 호출 금지.

@@ -114,7 +114,7 @@ Start-Process powershell -ArgumentList '-NoExit', '-Command', $inner
 Write-Host "[codex_run] launched visible window. title='$Title' result=$ResultFile"
 if ($wtBranch) {
     Write-Host "[codex_run] worktree-isolated. rc=0 시 변경은 branch '$wtBranch' (worktree $wtPath) 에 커밋됨."
-    Write-Host "[codex_run]   review:  git diff main..$wtBranch"
+    Write-Host "[codex_run]   review:  git diff main...$wtBranch"
     Write-Host "[codex_run]   merge :  git merge --no-ff $wtBranch   (또는 파일 cherry-pick)"
     Write-Host "[codex_run]   정리  :  git worktree remove `"$wtPath`"; git branch -D $wtBranch"
 }
