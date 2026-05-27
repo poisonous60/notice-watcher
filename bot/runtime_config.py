@@ -37,6 +37,12 @@ class PollSection:
     page_size: int = 30
     max_new_articles: int = 10
     breakage_threshold: int = 2
+    # reprobe 잡이 N회 연속 실패하면 `.BUG.json` 마커 자동 박아 같은 slug 의 reprobe 자동 재시도
+    # 차단 (ADR 0001 "재시도 안 함" 계약을 reprobe 경로에도 적용). 마커 박힌 뒤엔 poll.py 가 enqueue
+    # skip → 운영자가 root cause 풀고 마커 clear 할 때까지 대기. rc∈{-1,-2,-3} 시스템 결함은 이미
+    # 1회 fail 로도 BUG 박음(worker.py rc=-1/-2/-3 분기). 이 streak 임계는 rc=1/5 같은 site-side
+    # transient/capability 실패 누적용.
+    reprobe_fail_streak_limit: int = 3
     seen_cap: int = 5000
     # posts 캐시 TTL GC 보존 일수 (ADR 0006). 발송 지연(~1d) ≫ 보다 충분히 커야 미수신 글 안 날림.
     posts_keep_days: int = 7

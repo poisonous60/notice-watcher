@@ -6,6 +6,7 @@ Owner 1인용·localhost 한정·인증 0. 페이지 네비게이션은 일반 �
 from __future__ import annotations
 
 import json
+import sqlite3
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Optional
@@ -602,12 +603,44 @@ async def subs_list(request: Request, q: Optional[str] = None,
         cfg_path = paths.configs_dir / f"{s}.json"
         st_path = paths.state_dir / f"{s}.json"
         failed_marker = paths.state_dir / f"{s}.FAILED.json"
+        bug_marker = paths.state_dir / f"{s}.BUG.json"
+        rejected_marker = paths.state_dir / f"{s}.REJECTED.json"
         broken = 0
+        last_status = ""
         if st_path.exists():
             try:
                 d = json.loads(st_path.read_text(encoding="utf-8"))
                 broken = int(d.get("consecutive_breakage", 0) or 0)
+                last_status = str(d.get("last_status", "") or "")
             except (OSError, json.JSONDecodeError):
+                pass
+        # broken slug 의 reprobe 흐름 가시화 — Gate 3 (worker.py 의 reprobe_streak BUG 게이트 + poll.py
+        # marker enqueue-skip 게이트 와 짝). cb>0 또는 BUG/FAILED 마커 박힌 slug 만 jobs 테이블 조회.
+        # 정상 slug 까지 N 쿼리 돌리면 N 큰 인스턴스에서 page 늦어짐 — broken/marker 인 거만.
+        reprobe_streak = 0
+        last_reprobe_rc: Optional[int] = None
+        last_reprobe_at = ""
+        if broken > 0 or bug_marker.exists() or failed_marker.exists() or rejected_marker.exists():
+            try:
+                # worker.py 의 _reprobe_fail_streak 와 같은 status 집합 (rejected 포함). rc∈{2,3,4}
+                # 가 streak 에 카운트 — 디버그 시 dashboard 표시도 같은 view.
+                cur = conn.execute(
+                    "SELECT result_rc, finished_at FROM jobs "
+                    " WHERE kind='reprobe' AND slug=? AND status IN ('done','failed','rejected') "
+                    " ORDER BY id DESC LIMIT 20",
+                    (s,),
+                )
+                seen_first = False
+                for r in cur:
+                    rc = int(r["result_rc"] or 0)
+                    if not seen_first:
+                        last_reprobe_rc = rc
+                        last_reprobe_at = (r["finished_at"] or "")[:16]
+                        seen_first = True
+                    if rc == 0:
+                        break
+                    reprobe_streak += 1
+            except sqlite3.Error:
                 pass
         # 검색 노출용 user_id 목록 (중복 제거)
         user_ids = sorted({str(s_row["user_id"]) for s_row in subs})
@@ -621,11 +654,18 @@ async def subs_list(request: Request, q: Optional[str] = None,
             "has_config": cfg_path.exists(),
             "has_state": st_path.exists(),
             "failed": failed_marker.exists(),
+            "bug": bug_marker.exists(),
+            "rejected": rejected_marker.exists(),
             "broken": broken,
+            "last_status": last_status,
+            "reprobe_streak": reprobe_streak,
+            "last_reprobe_rc": last_reprobe_rc,
+            "last_reprobe_at": last_reprobe_at,
             "sample_url": sample_url,
             "user_ids": user_ids,
         })
-    rows.sort(key=lambda r: (-r["broken"], not r["failed"], r["slug"]))
+    # broken_only 뷰에선 reprobe_streak 큰 거 우선 (자가복구 한계 가까운 후보 위로).
+    rows.sort(key=lambda r: (-r["broken"], -r["reprobe_streak"], not r["failed"], r["slug"]))
     if broken_only:
         rows = [r for r in rows if r["broken"] > 0]
     if q:
@@ -639,9 +679,16 @@ async def subs_list(request: Request, q: Optional[str] = None,
                 return True
             return False
         rows = [r for r in rows if _match(r)]
+    try:
+        from bot.runtime_config import settings as _rc
+        _v = getattr(_rc.poll, "reprobe_fail_streak_limit", 3)
+        reprobe_streak_limit = int(_v) if _v is not None else 3
+    except Exception:  # noqa: BLE001
+        reprobe_streak_limit = 3
     return _render("subs.html", request, rows=rows, q=q,
                    include_lurking=bool(include_lurking),
                    broken_only=bool(broken_only),
+                   reprobe_streak_limit=reprobe_streak_limit,
                    active="subs")
 
 

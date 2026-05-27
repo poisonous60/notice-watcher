@@ -56,6 +56,36 @@ def _should_append_triage_queue_for_register_failure(rc: int) -> bool:
     return rc not in {-4, -3, -2, -1, 2, 3, 4, 5}
 
 
+def _reprobe_fail_streak(conn, slug: str) -> int:
+    """현재 slug 의 reprobe 잡 중 *최신부터* 연속 실패 개수. 직전 잡이 done(rc=0) 이면 0.
+
+    `_save_bug` 자동 트리거 임계 판정용. ADR 0001 의 "재시도 안 함" 계약을 reprobe 경로에도
+    강제하기 위해, register 가 transient 실패(rc=1/5)를 계속 받는 깨진 사이트가 자동
+    reprobe 큐를 영원히 점유하는 걸 차단.
+
+    *현재* fail 잡이 mark_job_finished 직후라 SELECT 가 그 row 도 포함 → 임계 N 이면 N번째
+    잡이 시점에 BUG 박힌다. 마커 박힌 다음 poll cycle 부터 poll.py 가 enqueue skip
+    (gate 2). 옛 done 잡 만나면 streak break.
+    """
+    # status='rejected' (rc∈{2,3,4} — register 가 영구 거부 분류 + `.REJECTED.json` 박음) 도 streak 에
+    # 포함. 옛 site 가 갑자기 login wall (rc=2) / shape 변형 (rc=3) / url_dead (rc=4) 로 바뀌어도
+    # 누적 streak 이 BUG 트리거를 박는다. rejected 박힌 슬러그는 Gate 2 가 다음 cycle 부터 enqueue
+    # 자체 차단하므로 streak 무한 증가 X — 일관성용 포함.
+    cur = conn.execute(
+        "SELECT result_rc FROM jobs "
+        " WHERE kind='reprobe' AND slug=? AND status IN ('done','failed','rejected') "
+        " ORDER BY id DESC LIMIT 20",
+        (slug,),
+    )
+    streak = 0
+    for row in cur:
+        rc = int(row["result_rc"] or 0)
+        if rc == 0:
+            break
+        streak += 1
+    return streak
+
+
 def _display_title_from_state(slug: str) -> Optional[str]:
     try:
         title = json.loads((STATE_DIR / f"{slug}.json").read_text(encoding="utf-8")).get("display_title")
@@ -715,6 +745,28 @@ async def _process_job_inner(client, conn, job, dm_owner) -> None:
                                   tail=tail or "")
                     except Exception as _e:  # noqa: BLE001
                         log.warning("re-probe rc=%d _save_bug 실패 — slug=%s err=%r", rc, slug, _e)
+                else:
+                    # rc=1 (gen_fail) / rc=5 (capability_blocked) 등 site-side transient — N회
+                    # 연속이면 `.BUG.json` 박아 자동 reprobe 차단. 마커 박힌 뒤 poll.py 가 다음
+                    # cycle 부터 enqueue skip (gate 2). 운영자가 root cause 풀고 마커 clear 까지 대기.
+                    # `or 3` 안 함 — 사용자가 config.toml 에 0 박아 게이트 끄려는 의도 존중.
+                    _v = getattr(settings.poll, "reprobe_fail_streak_limit", 3)
+                    limit = int(_v) if _v is not None else 3
+                    streak = _reprobe_fail_streak(conn, slug)
+                    if limit > 0 and streak >= limit:
+                        try:
+                            from scripts.register import _save_bug
+                            _save_bug(
+                                slug, url, rc=rc,
+                                reason=f"reprobe {streak}회 연속 실패 — 자가복구 한계 (마지막 rc={rc})",
+                                tail=tail or "",
+                            )
+                            log.warning(
+                                "reprobe streak %d ≥ %d — slug=%s BUG 마커 박음 (auto-stop)",
+                                streak, limit, slug,
+                            )
+                        except Exception as _e:  # noqa: BLE001
+                            log.warning("reprobe streak _save_bug 실패 — slug=%s err=%r", slug, _e)
                 log.warning("re-probe 실패 — slug=%s rc=%d", slug, rc)
     except Exception as e:  # noqa: BLE001
         # 잡 처리 중 예상 못한 예외 — 코드 자체 결함 = BUG 카테고리. `.BUG.json` 박고 ack BUG 문구.

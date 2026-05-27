@@ -426,13 +426,30 @@ async def _process_site(st: dict, *, page_size: int, max_new_articles: int,
         st["last_status"] = res["status"]
         lines.append(f"  ⚠ 깨짐 신호 #{st['consecutive_breakage']}: {res['note']}")
         if st["consecutive_breakage"] >= settings.poll.breakage_threshold and not no_reprobe:
-            # `.BUG.json` 마커 박힌 slug 은 reprobe enqueue 안 함 — bug-fix workflow 가 root cause
-            # 풀고 마커 clear 할 때까지 자동 재시도 차단 (ADR 0001 의 "재시도 안 함" 계약).
-            bug_marker = STATE_DIR / f"{slug}.BUG.json"
-            if bug_marker.exists():
-                lines.append(f"  ⏸ 연속 {st['consecutive_breakage']}회지만 BUG 마커 존재 — reprobe 스킵 (운영자 점검 대기)")
-                st["last_status"] = "reprobe_skipped_bug"
-                res["note"] += " | reprobe skipped (BUG marker)"
+            # 마커 (`.BUG.json` / `.FAILED.json` / `.REJECTED.json`) 박힌 slug 은 reprobe enqueue
+            # 안 함 — bug-fix / hand-config / 영구 거부 workflow 가 풀고 마커 clear 할 때까지
+            # 자동 재시도 차단 (ADR 0001 "재시도 안 함" 계약). 마커 종류 별 의미:
+            #   - BUG: 시스템·코드 결함 또는 reprobe N회 연속 실패 자동 stop (운영자 review).
+            #   - FAILED: 자동 config 생성 실패 — hand-config 손-처리 대기.
+            #   - REJECTED: 영구 거부 (게시판 아님 / policy violation 등). 사실상 polling 자체
+            #     가 끊겨야 하는데 잔재 cb 가 남아 reprobe enqueue 매 cycle 발생하던 문제 봉합.
+            # worker.py 의 is_blocked 가드 (L504) 가 enqueue 후 진입 시점에도 잡아주지만,
+            # 매 cycle 의미 없는 rc=-7 잡 생성을 여기서 미리 차단 (52건/87 fail = 절반 이상 wasted).
+            marker_path = None
+            marker_kind_name = None
+            for _kind in ("BUG", "FAILED", "REJECTED"):
+                _p = STATE_DIR / f"{slug}.{_kind}.json"
+                if _p.exists():
+                    marker_path = _p
+                    marker_kind_name = _kind
+                    break
+            if marker_path is not None:
+                lines.append(
+                    f"  ⏸ 연속 {st['consecutive_breakage']}회지만 {marker_kind_name} 마커 존재 — "
+                    f"reprobe 스킵 (운영자 점검 대기)"
+                )
+                st["last_status"] = f"reprobe_skipped_{marker_kind_name.lower()}"
+                res["note"] += f" | reprobe skipped ({marker_kind_name} marker)"
             else:
                 lines.append(f"  → 연속 {st['consecutive_breakage']}회 → reprobe 잡 enqueue (봇 worker 가 폴링 후 처리)")
                 ok, msg = _enqueue_reprobe(st)

@@ -28,10 +28,20 @@
 <div id="subs-result">
 <p class="muted" style="font-size:0.85rem;margin:0 0 0.5rem 0;">{{ rows | length }}건 표시</p>
 
+{% if broken_only %}
+<p class="muted" style="font-size:0.8rem;margin:0 0 0.5rem 0;">
+  reprobe streak ≥ {{ reprobe_streak_limit }} 도달 시 자동 BUG 마커가 박혀 reprobe 가 멈춰요.
+  BUG 마커가 박혔거나 streak 이 임계에 근접한 slug 부터 hand-config 워크플로(<code>/hand-config</code>)로 살펴보세요.
+  마커 정리 = <code>output/snapshot/poll_state/&lt;slug&gt;.BUG.json</code> 삭제 후 N100 동기화.
+</p>
+{% endif %}
+
 <table class="compact striped">
   <thead>
     <tr>
-      <th>slug</th><th>구독자</th><th>config</th><th>state</th><th>상태</th><th>URL 예시</th>
+      <th>slug</th><th>구독자</th><th>config</th><th>state</th><th>상태</th>
+      <th title="consecutive_breakage / reprobe 연속 실패 / 최근 reprobe rc·시각">reprobe</th>
+      <th>URL 예시</th>
     </tr>
   </thead>
   <tbody id="subs-rows">
@@ -44,16 +54,32 @@
       <td>{{ '✓' if r.has_config else '—' }}</td>
       <td>{{ '✓' if r.has_state else '—' }}</td>
       <td>
+        {% if r.bug %}<span class="badge failed" title="BUG 마커 — 운영자 review 대기, 자동 reprobe 차단">BUG</span>{% endif %}
         {% if r.failed %}<span class="badge failed">FAILED</span>{% endif %}
+        {% if r.rejected %}<span class="badge muted" title="영구 거부 마커">REJECTED</span>{% endif %}
         {% if r.broken > 0 %}<span class="badge warn">broken {{ r.broken }}</span>{% endif %}
-        {% if not r.failed and r.broken == 0 %}<span class="badge ok">ok</span>{% endif %}
+        {% if not (r.failed or r.bug or r.rejected) and r.broken == 0 %}<span class="badge ok">ok</span>{% endif %}
+      </td>
+      <td style="white-space:nowrap;font-size:0.85rem;">
+        {% if r.reprobe_streak > 0 or r.last_reprobe_rc is not none %}
+          {% if r.reprobe_streak >= reprobe_streak_limit %}
+            <span class="badge failed" title="자동 stop 임계 도달 — BUG 마커 박힘 (또는 박힐 예정)">streak {{ r.reprobe_streak }}</span>
+          {% elif r.reprobe_streak > 0 %}
+            <span class="badge warn" title="reprobe 연속 실패 (임계 {{ reprobe_streak_limit }} 도달 시 자동 BUG)">streak {{ r.reprobe_streak }}</span>
+          {% endif %}
+          {% if r.last_reprobe_rc is not none %}
+            <span class="mono muted" style="font-size:0.75rem;" title="최근 reprobe 결과: {{ r.last_reprobe_at }}">rc={{ r.last_reprobe_rc }}</span>
+          {% endif %}
+        {% else %}
+          <span class="muted">—</span>
+        {% endif %}
       </td>
       <td class="mono" style="max-width:35em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
         <span title="{{ r.sample_url or '' }}">{{ r.sample_url or '' }}</span>
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="6" class="muted">검색 결과 없음.</td></tr>
+    <tr><td colspan="7" class="muted">검색 결과 없음.</td></tr>
     {% endfor %}
   </tbody>
 </table>
