@@ -7,7 +7,11 @@ is_robots_txt=True 일 때 size 임계 안 적용해야 함.
 from __future__ import annotations
 
 
-covers = ["signals_classify_robots_size", "signals_classify_js_challenge"]
+covers = [
+    "signals_classify_robots_size",
+    "signals_classify_js_challenge",
+    "signals_classify_403_soft_not_found",
+]
 
 
 def run() -> list[tuple[str, bool, str]]:
@@ -75,6 +79,50 @@ def run() -> list[tuple[str, bool, str]]:
         cls, notable = classify(status=200, body=body, headers={})
         cases.append((f"js_challenge_{nm}_blocked", cls == Classification.BLOCKED_BOT,
                       f"got {cls!r} notable={notable[:1]}"))
+
+    # 5b. 403 can be URL-dead soft 404 when the body is an S3 AccessDenied XML
+    #     shell, not an anti-bot challenge.
+    s3_access_denied = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        "<Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>"
+    )
+    cls_s3, notable_s3 = classify(
+        status=403,
+        body=s3_access_denied,
+        headers={"content-type": "application/xml", "server": "AmazonS3"},
+    )
+    cases.append(("s3_access_denied_403_is_not_found",
+                  cls_s3 == Classification.NOT_FOUND,
+                  f"got {cls_s3!r} notable={notable_s3}"))
+
+    # 5c. Some static site buckets return themed HTML with explicit 404 text and
+    #     status 403. Without challenge markers this is URL-dead, not bot block.
+    html_404_marker = (
+        "<html><head><title>Shadowverse: Worlds Beyond</title></head>"
+        "<body><main><h1>404</h1><p>404 404 404 page not found</p></main></body></html>"
+    )
+    cls_html_404, notable_html_404 = classify(
+        status=403,
+        body=html_404_marker,
+        headers={"content-type": "text/html"},
+    )
+    cases.append(("html_404_marker_403_is_not_found",
+                  cls_html_404 == Classification.NOT_FOUND,
+                  f"got {cls_html_404!r} notable={notable_html_404}"))
+
+    cls_empty_403, notable_empty_403 = classify(status=403, body="", headers={})
+    cases.append(("empty_403_is_not_found",
+                  cls_empty_403 == Classification.NOT_FOUND,
+                  f"got {cls_empty_403!r} notable={notable_empty_403}"))
+
+    cf_403 = (
+        '<html><body><script src="/cdn-cgi/challenge-platform/h/g/orchestrate/__cf_chl/v1">'
+        "</script>404 404 404</body></html>"
+    )
+    cls_cf, notable_cf = classify(status=403, body=cf_403, headers={})
+    cases.append(("challenge_marker_403_stays_blocked",
+                  cls_cf == Classification.BLOCKED_BOT,
+                  f"got {cls_cf!r} notable={notable_cf}"))
 
     # 6. 정상 포럼 (챌린지 마커 없음, 본문 충분) → OK (false-positive 회귀 차단).
     normal = ('<html><head><title>Debian User Forums</title></head><body>'
