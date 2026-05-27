@@ -181,6 +181,12 @@ bash scripts/setup-hooks.sh   # 또는 pwsh scripts/setup-hooks.ps1
 
 **범위 = 사이트 등록 gap 뿐 아니라 *오케스트레이션·하네스·process 실수*도 포함** (2026-05-22 사용자 feedback). 자가개선 인프라(§6/ADR 0003)는 등록 품질(probe/prompt/recognizer) 대상이지만, *Claude 가 batch 를 모는 방식*의 실수 — watcher 를 shell `&` 로 띄워 알림 유실, two-dot diff 오진, URL 과도 remap, 남의 파일 stage 등 — 도 같은 룰을 받는다. **그런 실수를 잡으면 "재시도하고 넘어감"으로 끝내지 말고, 그 자리에서 durable layer 에 게이트를 박아라**: SKILL.md(§0c 등)·CLAUDE.md(§9 등)·해당 스크립트 docstring·`feedback-*` memory 중 맞는 곳. 게이트 박기가 한 줄이면 *이번 turn 에 같이* 박는다 (별도 follow-up 으로 미루기 X). "내가 알아챘으면 즉시 영구화" 가 기본 반사. (예: 2026-05-22 shell `&` watcher 유실 → `codex_watch.py` 멀티파일+docstring 경고 + SKILL §0c step 4 + 이 줄.)
 
+### 8a-1. hand-config terminal action freeze
+
+`REJECTED` 손-박기, `triage.py park-gate-fail`, true-board `triage_later.json`, `case_log no_change` 는 큐 정리가 아니라 **terminal decision** 이다. 실행 전에는 `.claude/skills/hand-config/SKILL.md` §0b-1 형식으로 먼저 제안만 한다: `live 확인` + `probe artifact` + `terminal bucket` + `rollback`.
+
+**generic `진행해` 는 terminal 실행 승인 X.** live/probe 근거 없는 추정 직후 받은 진행 허가는 무효다. 특히 **1회 503/DNS/timeout 으로 REJECTED 금지** — N100/실전 경로 반복 재현 전엔 Later/재시도/구조 확인 후보.
+
 ### 8b. perf/timeout/속도 진단 = real artifact 측정 의무 (deploy 게이트)
 
 성능·timeout·속도·렌더 시간 류 작업에서 **real artifact 측정 (사이트 1개 timing trace / API call ms / batch entry 1건 outcome) 없이 merge / push / N100 deploy / batch 재시도 금지**. unit fixture (mock/fake adapter) PASS + `probe_smoke` PASS = deploy 게이트 충족 X — code path 검증일 뿐 효과 검증 아님. NEW vs OLD ms 또는 outcome 비교 표가 진짜 게이트.

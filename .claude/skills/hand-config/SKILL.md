@@ -92,6 +92,25 @@ git status --short -- prompts/ engine/ probe/ generate/ engine/recognizers/
 
 ---
 
+## 0b-1. terminal action freeze — 종료 상태 실행 전 증거 게이트
+
+`REJECTED` 손-박기, `triage.py park-gate-fail`, true-board `triage_later.json` 손-park, `case_log no_change` 는 **정리 작업이 아니라 terminal decision** 이다. 다음 세션에서 큐를 안 보이게 만드는 효과가 있으므로, 분석 메모만으로 바로 실행하지 않는다.
+
+실행 전 반드시 먼저 **제안만** 한다. 제안에는 slug별로 아래 4줄이 있어야 한다.
+
+1. `live 확인`: 지금 직접 연 사이트/HTTP 상태/렌더 결과/목록 구조. 브라우저·curl·remote 중 무엇을 봤는지 명시.
+2. `probe artifact`: `triage.py show` + `output/probe/<slug>/...` 에서 본 신호. **stale snapshot** 은 live 확인을 대체하지 못하고, 오직 보조 근거다.
+3. `terminal bucket`: `gate-fail park` / `Later` / `REJECTED` / `no_change` 중 하나와 이유. capability 와 classifier fallthrough 를 섞지 X.
+4. `rollback`: 잘못 판단했을 때 되돌릴 marker/store (`triage_gate_failed.json`, N100 `.REJECTED.json`, dev `triage_later.json`)를 명시.
+
+**generic `진행해` 는 terminal 실행 승인으로 세지 X.** 위 4줄 증거를 먼저 보여준 뒤, 사용자가 **slug별 terminal action** 을 이해할 수 있게 된 상태에서 받은 명시 승인만 실행 승인이다. 사용자가 "진행해" 라고 했더라도 그 직전 답변이 live/probe 증거 없는 추정이면 실행하지 말고, live 확인부터 한다.
+
+특히 **1회 503/DNS/timeout 관측만으로 REJECTED 금지**. capability 영구 거부는 N100 또는 현재 실전 경로에서 반복 재현됐고, 정책상/능력상 우회하지 않는다는 판단까지 서야 한다. 단발 503·Chromium DNS flake·ReadTimeout 은 우선 Later/재시도/구조 확인 후보지, 영구 거부가 아니다.
+
+이 게이트는 Track B 우선순위보다 앞선 안전장치다. Track B 후보가 있으면 terminal 실행 전에 먼저 후보를 제안하고, 수동 config·손거부로 닫지 않는다.
+
+---
+
 ## 0b-2. gen_fail screen-out — "진짜 게시판 아님" 3종 먼저 (content-as-list 오탐 · soft-404 미검출 · empty/fake feed)
 
 gen_fail(rc=1) 큐로 *새는* false-negative 3종 (§0b-2 헤더의 P1·P2·P3). 셋 다 진짜 게시판이 아니라 **수동 config 작성 X** — 영구 게이트로 봉합(CLAUDE.md §8a) + 그 slug 거부. §1 진단 진입 *전* 각 gen_fail slug 에 먼저 분류. (gate_reject(rc=3 분류기 content)·soft-404 *검출됨*(rc=4)은 이미 자동 거부 → 큐에 없음. 여기 대상은 게이트를 *빠져나가* gen_fail 로 떨어진 것.)

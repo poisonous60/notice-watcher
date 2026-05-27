@@ -93,6 +93,10 @@ def hand_config_triage_queue(*, failed_slugs: list[str]) -> str:
         "**`.FAILED.json` 잔존 금지** (다음 batch/세션이 작업큐서 또 보임 + 응답 'failed=재시도 가능' 분류). dev box config 작동 하지만 N100 환경 한계(TLS reset / Chromium DNS / 정책상 우회 X) = `_save_rejected(slug, url, 'capability_blocked: <원인>', learn=False)` ssh remote 호출 (register.py 가 sibling cleanup·triage_queue prune 다 함, 응답 'rejected=영구'). "
         "dev box `triage_later.json` *만* 박는 건 X — 그건 dev box dashboard view 만, N100 봇·register 거동 영향 0. "
         "보고 시 종료 분포 명시 (`registered N / Later N / gate-fail-park N / REJECTED N / 정상거부 N = total`).",
+        "6d. **terminal action freeze** — `REJECTED` 손-박기 / `park-gate-fail` / true-board Later / `no_change` 는 정리 작업이 아니라 terminal decision. "
+        "실행 전 먼저 slug별 제안만 하라: `live 확인`(지금 직접 연 사이트·HTTP·렌더 구조), `probe artifact`(`triage.py show` + output/probe; stale snapshot 은 보조 근거), "
+        "`terminal bucket`, `rollback` 4줄을 보여준다. **generic `진행해` 는 terminal 실행 승인 X** — 위 증거를 보인 뒤 받은 slug별 terminal action 승인만 실행. "
+        "**1회 503/DNS/timeout 관측만으로 REJECTED 금지**; N100/실전 경로 반복 재현 전에는 Later/재시도/구조 확인 후보로 둔다.",
         "",
         "**gen_fail(rc=1) 은 §0b-2 screen-out 먼저** — '진짜 게시판 아님' 3종을 골라내 사이트별 작업 낭비 차단: "
         "(P1) content-as-list 오탐(단일 글이 index 로 통과 — `list_candidates` 반복 행 0~소수+단일 본문 → `prompts/classify.system.txt` content 측 보강), "
@@ -201,6 +205,10 @@ def catalog_run_and_fix(*, catalog_name: str,
                  " ④ **`REJECTED`** (영구 거부, N100 `.FAILED.json`→`.REJECTED.json`. dev box config 작동 하지만 N100 환경 한계(TLS reset/DNS 환경/Chromium issue)·정책상 우회 X 인 경우 = capability_blocked 영구. ssh remote 로 `_save_rejected(slug, url, 'capability_blocked: <원인>', learn=False)` 호출 — register.py 가 sibling cleanup 다 함)."
                  " 보고 시 종료 분포 명시 (예: `registered 19 / Later 7 / gate-fail-park 0 / REJECTED 2 / 정상거부 72 = 100`).")
     lines.append("6c. **dev box `triage_later.json` 만 박는 건 X** — 그건 dev box `triage.py list --skip-later` filter 뿐, N100 봇·register 거동에 영향 0 (`is_blocked(slug)` 는 N100 marker REJECTED/FAILED/BUG 봄, `triage_later.json` 은 dev box gitignored). FAILED 만 있어도 봇 진입은 차단되지만 응답 'failed=재시도 가능' 이라 영구 거부 의미 아님. 영구면 N100 `.REJECTED.json` 까지 박아야 응답 'rejected=영구' + sibling cleanup.")
+    lines.append("6d. **terminal action freeze** — `REJECTED` 손-박기 / `park-gate-fail` / true-board Later / `no_change` 는 정리 작업이 아니라 terminal decision. "
+                 "실행 전 먼저 slug별 제안만 하라: `live 확인`(지금 직접 연 사이트·HTTP·렌더 구조), `probe artifact`(`triage.py show` + output/probe; stale snapshot 은 보조 근거), "
+                 "`terminal bucket`, `rollback` 4줄을 보여준다. **generic `진행해` 는 terminal 실행 승인 X** — 위 증거를 보인 뒤 받은 slug별 terminal action 승인만 실행. "
+                 "**1회 503/DNS/timeout 관측만으로 REJECTED 금지**; N100/실전 경로 반복 재현 전에는 Later/재시도/구조 확인 후보로 둔다.")
     lines.append("")
     lines.append("각 fail 기본 프레임: Track B 1순위 — canonical 6 자리 E/D/C/B/A/F "
                  "(schema 거부 / retry feedback / probe digest 신호 / few-shot / system 규칙 추가 / 새 엔진 코드) 를 먼저 audit. "

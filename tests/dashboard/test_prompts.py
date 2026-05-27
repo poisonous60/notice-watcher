@@ -44,6 +44,14 @@ def run() -> list[tuple[str, bool, str]]:
             "--worktree" in text and "필요한 repo 파일을 자유롭게 수정" in text and "git diff" in text,
             text,
         ))
+        cases.append((
+            f"{name}_has_terminal_decision_freeze",
+            "terminal action freeze" in text
+            and "live 확인" in text
+            and "generic `진행해`" in text
+            and "1회 503/DNS/timeout" in text,
+            text,
+        ))
 
     return cases
 
