@@ -27,6 +27,7 @@ from bot.messages import render as msg
 from bot.runtime_config import settings
 from bot.site_ops import (
     STATE_DIR,
+    _clear_broken_after_reprobe,
     append_triage_queue,
     baseline_count,
     blocked_info,
@@ -639,6 +640,10 @@ async def _process_job_inner(client, conn, job, dm_owner) -> None:
                 await _post_register_success(client, conn, job)
             else:
                 log.info("re-probe 성공 — slug=%s", slug)
+                # zombie loop 봉합 — reprobe rc=0 인데 cb reset 안 되면 다음 poll 또 깨짐 → cb++ →
+                # reprobe 또 enqueue → … 영원 반복 (status-deno 2026-05-25 9회 관찰). cb=0 reset +
+                # `.BROKEN.json` sidecar unlink. 다음 poll 가 또 깨지면 자연 복귀 (cb 재누적, BROKEN 재박힘).
+                _clear_broken_after_reprobe(slug)
         else:
             if kind == "register":
                 req_by = json.loads(job["requested_by"]) if job["requested_by"] else None

@@ -85,7 +85,7 @@ def is_registered(slug: str) -> bool:
             and not (STATE_DIR / f"{slug}.BUG.json").exists())
 
 
-_ALIAS_MARKER_SUFFIX = (".FAILED.json", ".REJECTED.json", ".BUG.json")
+_ALIAS_MARKER_SUFFIX = (".FAILED.json", ".REJECTED.json", ".BUG.json", ".BROKEN.json")
 
 
 def find_registered_alias(url: str, *, exclude_slug: Optional[str] = None) -> Optional[str]:
@@ -171,6 +171,66 @@ def is_rejected(slug: str) -> bool:
 def rejected_info(slug: str) -> Optional[dict]:
     """Deprecated alias — `blocked_info` 로 쓰는 게 의미 정확."""
     return blocked_info(slug)
+
+
+# --------------------------------------------------------------------------- #
+# BROKEN health sidecar — `marker_kind` / `is_blocked` 와 *분리* 된 채널.
+# polling/reprobe/delivery 는 계속 진행. deliver_due 가 status notice 자리에 표시.
+# 자체 복구 path: reprobe rc=0 / 정상 poll cb=0 → `_clear_broken_after_reprobe` / `_clear_broken`.
+# --------------------------------------------------------------------------- #
+def is_broken(slug: str) -> bool:
+    """`.BROKEN.json` sidecar 존재 여부. `is_blocked` 와 *독립* — broken slug 은 여전히 폴링/배달됨."""
+    return (STATE_DIR / f"{slug}.BROKEN.json").exists()
+
+
+def broken_info(slug: str) -> Optional[dict]:
+    """현재 박힌 BROKEN sidecar payload dump.
+    필드: {slug, url, first_at, last_at, count, consecutive_breakage, last_status, last_note}.
+    """
+    p = STATE_DIR / f"{slug}.BROKEN.json"
+    if not p.exists():
+        return None
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def broken_slugs() -> list[str]:
+    """현 STATE_DIR 의 `.BROKEN.json` slug 목록 (sorted). dashboard `/triage/broken` 가 호출."""
+    if not STATE_DIR.exists():
+        return []
+    out: list[str] = []
+    for p in STATE_DIR.glob("*.BROKEN.json"):
+        out.append(p.name[: -len(".BROKEN.json")])
+    return sorted(out)
+
+
+def _clear_broken_after_reprobe(slug: str) -> None:
+    """reprobe rc=0 (등록 재성공) 직후 호출. zombie loop 봉합 = `consecutive_breakage=0` + `.BROKEN.json` unlink.
+
+    `state.json` 의 `consecutive_breakage` 가 reset 안 되면 zombie loop (다음 poll 또 깨짐 → cb++ →
+    reprobe 또 enqueue → reprobe rc=0 …) 영원히 반복. reprobe 성공 = 등록 path 가 살아있다는
+    증거니까 cb=0 reset 안전. `.BROKEN.json` 도 같이 unlink — 다음 poll 가 또 깨지면 임계 재도달
+    시 다시 박힘.
+
+    idempotent — state.json 없거나 .BROKEN.json 없어도 안전. write 실패 swallow (log only).
+    """
+    sp = STATE_DIR / f"{slug}.json"
+    if sp.exists():
+        try:
+            d = json.loads(sp.read_text(encoding="utf-8"))
+            d["consecutive_breakage"] = 0
+            d["last_status"] = "reprobe_recovered"
+            sp.write_text(json.dumps(d, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception as e:  # noqa: BLE001
+            log.warning("_clear_broken_after_reprobe state write 실패 — slug=%s err=%r", slug, e)
+    bp = STATE_DIR / f"{slug}.BROKEN.json"
+    if bp.exists():
+        try:
+            bp.unlink()
+        except OSError as e:
+            log.warning("_clear_broken_after_reprobe .BROKEN.json unlink 실패 — slug=%s err=%r", slug, e)
 
 
 # reason 끝 ` (...)` triage/디버그 hint — 사용자에 안 보이고 owner 운영용. 사용자 향 메시지에 쓸 때만 strip.

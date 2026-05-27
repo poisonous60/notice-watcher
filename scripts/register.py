@@ -1297,10 +1297,11 @@ def _save_state(slug: str, url: str, config_path: Path, post_ids: list[str],
     if body_empty_at_baseline is not None:
         state["body_empty_at_baseline"] = bool(body_empty_at_baseline)
     p.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
-    # 등록과 동시에 FAILED·REJECTED 마커 / triage 큐 항목이 남아있으면 제거.
+    # 등록과 동시에 FAILED·REJECTED·BUG·BROKEN 마커 / triage 큐 항목이 남아있으면 제거.
     # REJECTED 제거는 의도된 등록 (예: admin 이 풀고 register.py --config --force 로 재등록) 만 해당 —
     # 자동 경로는 어차피 봇 _is_registered 가 False 라서 워커가 register.py 를 안 부른다.
-    for marker_suffix in (".FAILED.json", ".REJECTED.json", ".BUG.json"):
+    # BROKEN 은 health sidecar — 등록 자체가 성공이면 stale 마커 청소 (다음 poll 결과 따라 다시 박힘 가능).
+    for marker_suffix in (".FAILED.json", ".REJECTED.json", ".BUG.json", ".BROKEN.json"):
         mp = STATE_DIR / f"{slug}{marker_suffix}"
         if mp.exists():
             mp.unlink()
@@ -1540,8 +1541,9 @@ def _save_rejected(slug: str, url: str, reason: str, note: Optional[str] = None,
     }, ensure_ascii=False, indent=2), encoding="utf-8")
     # 형제 marker / state 일괄 정리 — REJECTED 가 우선순위 최고 (marker_kind: rejected > bug > failed) 라
     # 이전 카테고리 마커는 stale. <slug>.json (정상 state) 도 — REJECTED 는 영구 거부 = 폴링 의미 X.
+    # BROKEN sidecar 도 같이 unlink — 영구 거부 결정이 났으면 health 신호 의미 없음.
     # _load_states 가 marker 형제 sibling 체크 안 해 stale state 가 폴링되는 사고 방지 (codex 발견).
-    for sibling_suffix in (".FAILED.json", ".BUG.json", ".json"):
+    for sibling_suffix in (".FAILED.json", ".BUG.json", ".BROKEN.json", ".json"):
         sp = STATE_DIR / f"{slug}{sibling_suffix}"
         if sp.exists():
             try:
@@ -1602,15 +1604,17 @@ def _save_bug(slug: str, url: str, rc: int, reason: str, tail: str = "") -> Path
         "reason": reason,
         "tail": (tail or "")[-4000:],
     }, ensure_ascii=False, indent=2), encoding="utf-8")
-    # 형제 FAILED.json 정리 — BUG 가 hand-config triage 대상 *아니므로* (bug-fix workflow 영역), FAILED 잔재 +
-    # triage_queue.jsonl entry 가 dashboard `/triage/failed` 에 stale 표시 + 사용자 안내 어긋남 (codex 발견).
+    # 형제 FAILED.json / BROKEN.json 정리 — BUG 가 hand-config triage 대상 *아니므로* (bug-fix workflow
+    # 영역), FAILED 잔재 + triage_queue.jsonl entry 가 dashboard `/triage/failed` 에 stale 표시 + 사용자
+    # 안내 어긋남 (codex 발견). BROKEN sidecar 도 같이 — 시스템 결함 판정이 났으면 health 신호 의미 없음.
     # REJECTED.json 은 *건드리지 X* — marker_kind 우선순위 (rejected > bug) 라 REJECTED 가 final 결정.
-    fp = STATE_DIR / f"{slug}.FAILED.json"
-    if fp.exists():
-        try:
-            fp.unlink()
-        except OSError as e:
-            sys.stderr.write(f"[register] _save_bug: {fp.name} 삭제 실패 — BUG 마커는 박힘: {e}\n")
+    for sibling_suffix in (".FAILED.json", ".BROKEN.json"):
+        sp = STATE_DIR / f"{slug}{sibling_suffix}"
+        if sp.exists():
+            try:
+                sp.unlink()
+            except OSError as e:
+                sys.stderr.write(f"[register] _save_bug: {sp.name} 삭제 실패 — BUG 마커는 박힘: {e}\n")
     _prune_triage_queue(slug)
     return p
 
@@ -1717,6 +1721,76 @@ def _save_failed(slug: str, url: str, reason: str, last_config, last_feedback: s
     return p
 
 
+def _save_broken(slug: str, url: str, *, cb: int, last_status: str,
+                  last_note: str = "") -> Path:
+    """`.BROKEN.json` health sidecar. `consecutive_breakage` 가 `broken_threshold` 이상 도달
+    하면 poll.py 가 박음.
+
+    BUG/FAILED/REJECTED 마커와 달리 **blocking 아님** — `is_blocked` 는 BROKEN 모름.
+    폴링·reprobe·delivery 파이프라인 그대로 살아있고, deliver_due 가 *status notice* 자리에서
+    "❗ 깨졌어요" 안내로 표시. 자체 복구되면 다음 reprobe rc=0 / 정상 poll 가 cb=0 reset
+    + `_clear_broken(slug)` 호출.
+
+    같은 slug 의 `.BROKEN.json` 이 이미 있으면 `count` 증가 + `last_*` 필드 갱신 — 임계 재도달
+    이력 누적. `first_at` 는 처음 박힌 시각 유지.
+
+    우선순위 마커 (FAILED/REJECTED/BUG) 가 *동시* 존재하면 호출자가 책임지고 BROKEN 안 박아야 함
+    (poll.py 가 가드). 이 함수 자체는 skip 하지 않음 (호출자가 contract 지키도록 강제)."""
+    if not re.fullmatch(r"[A-Za-z0-9._%-]+", slug):
+        raise ValueError(f"잘못된 slug 형식: {slug!r}")
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    p = STATE_DIR / f"{slug}.BROKEN.json"
+    prev: dict = {}
+    if p.exists():
+        try:
+            prev = json.loads(p.read_text(encoding="utf-8")) or {}
+        except Exception:  # noqa: BLE001
+            prev = {}
+    count = int(prev.get("count", 0)) + 1
+    first_at = prev.get("first_at") or _now_iso()
+    p.write_text(json.dumps({
+        "slug": slug,
+        "url": url,
+        "first_at": first_at,
+        "last_at": _now_iso(),
+        "count": count,
+        "consecutive_breakage": cb,
+        "last_status": last_status,
+        "last_note": (last_note or "")[-2000:],
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
+    return p
+
+
+def _clear_broken(slug: str) -> bool:
+    """`.BROKEN.json` 제거. 자체 복구 path (reprobe rc=0 / 정상 poll cb=0) + register 성공 path
+    + dashboard 손-clear 가 호출. idempotent — 없으면 False 반환."""
+    if not re.fullmatch(r"[A-Za-z0-9._%-]+", slug):
+        raise ValueError(f"잘못된 slug 형식: {slug!r}")
+    p = STATE_DIR / f"{slug}.BROKEN.json"
+    if p.exists():
+        try:
+            p.unlink()
+            return True
+        except OSError:
+            return False
+    return False
+
+
+def _list_broken() -> list[dict]:
+    """모든 `.BROKEN.json` 마커 dump — dashboard `/triage/broken` 가 호출. last_at 내림차순."""
+    out: list[dict] = []
+    if not STATE_DIR.exists():
+        return out
+    for p in STATE_DIR.glob("*.BROKEN.json"):
+        try:
+            d = json.loads(p.read_text(encoding="utf-8"))
+            out.append(d)
+        except Exception:  # noqa: BLE001
+            continue
+    out.sort(key=lambda d: d.get("last_at") or "", reverse=True)
+    return out
+
+
 def _attempt_logger(i, cfg, rep, ok, msg):
     print(f"  시도 {i}: {'PASS' if ok else 'FAIL'} — {msg}")
 
@@ -1737,6 +1811,11 @@ def _list_sites(csv_path: Optional[str]) -> int:
     if STATE_DIR.exists():
         for p in sorted(STATE_DIR.glob("*.json")):
             failed = p.name.endswith(".FAILED.json")
+            # REJECTED/BUG/BROKEN 마커는 *list* 출력 대상 아님 (FAILED 만 별도 표시).
+            if (p.name.endswith(".REJECTED.json")
+                    or p.name.endswith(".BUG.json")
+                    or p.name.endswith(".BROKEN.json")):
+                continue
             try:
                 st = json.loads(p.read_text(encoding="utf-8"))
             except Exception:  # noqa: BLE001

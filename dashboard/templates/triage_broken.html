@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}BROKEN 큐 — notice-watcher{% endblock %}
+{% block body %}
+
+<p><a href="/">← Triage</a></p>
+<h2>❗ 깨진 사이트 (BROKEN) — {{ items | length }}건</h2>
+<p class="muted">
+  등록은 됐지만 <code>consecutive_breakage ≥ broken_threshold</code> 도달 → <code>output/poll_state/&lt;slug&gt;.BROKEN.json</code> health sidecar 박힘.
+  <b>차단 marker 아님</b> — polling/reprobe/delivery 그대로 진행. 다음 reprobe rc=0 또는 정상 poll 가 자동으로 <code>cb=0</code> reset + sidecar unlink.
+  사용자에게는 <code>deliver_due</code> 의 status notice 자리에서 "❗ 깨졌어요" 안내가 표시됨 (notify_empty=1 구독만).
+  자가 복구 안 풀리면 운영자가 root-cause 봉합 후 "BROKEN clear" 로 손-정리.
+</p>
+
+<form method="post" action="/triage/broken/clear">
+  <div class="row" style="margin:.4em 0;gap:.6em;align-items:center;">
+    <label class="muted">
+      <input type="checkbox" onclick="for(const c of this.closest('form').querySelectorAll('input[name=slugs]')) c.checked=this.checked;">
+      전체
+    </label>
+    <button class="secondary" type="submit">✓ BROKEN clear (sidecar unlink — cb 는 그대로)</button>
+  </div>
+
+  {% if not items %}
+  <p class="muted">BROKEN 큐 비어 있음. ✨</p>
+  {% else %}
+  <table class="compact striped">
+    <thead>
+      <tr>
+        <th style="width:1.5em;"></th>
+        <th>slug</th>
+        <th>cb</th>
+        <th>count</th>
+        <th>last_status</th>
+        <th>구독자</th>
+        <th>first_broken</th>
+        <th>last_broken</th>
+        <th>url</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for it in items %}
+      <tr>
+        <td><input type="checkbox" name="slugs" value="{{ it.slug }}"></td>
+        <td class="mono" style="white-space:nowrap;">
+          <a href="/subs/{{ it.slug | urlencode }}?from=broken">{{ it.slug }}</a>
+          {% if it.url and is_http_url(it.url) %} <a href="{{ it.url }}" target="_blank" rel="noopener noreferrer" title="원본 URL 새 탭 열기">↗</a>{% endif %}
+        </td>
+        <td class="mono" title="consecutive_breakage">{{ it.cb }}</td>
+        <td class="mono" title="BROKEN 마커 갱신 횟수 (임계 재도달 누적)">{{ it.count }}</td>
+        <td style="white-space:nowrap;">{{ it.last_status or '—' }}</td>
+        <td>{{ it.subscriber_count }}</td>
+        <td style="white-space:nowrap;">{{ it.first_at or '—' }}</td>
+        <td style="white-space:nowrap;">{{ it.last_at or '—' }}</td>
+        <td class="mono" style="max-width:22em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+          <span title="{{ it.url }}">{{ it.url or '—' }}</span>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</form>
+
+{% endblock %}

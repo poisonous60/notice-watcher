@@ -50,11 +50,12 @@ LOCK_FILE = ROOT / "output" / ".migrate-slug.lock"
 
 _DB_TABLES = ["subscriptions", "jobs", "deliveries", "pending", "reports"]
 
-# poll_state/ 안의 marker suffix — `.json` (등록 성공 state) + 세 가지 marker.
+# poll_state/ 안의 marker suffix — `.json` (등록 성공 state) + 네 가지 marker.
 # build_mapping 이 stem 추출 시 모두 strip 해야 mapping key 가 *slug 그 자체* 가 됨.
 # rename_state 가 rename 시에도 모든 suffix 형태 처리해야 marker 손실 방지.
-_MARKER_SUFFIXES = (".FAILED", ".REJECTED", ".BUG")
-_STATE_FILE_SUFFIXES = (".json", ".FAILED.json", ".REJECTED.json", ".BUG.json")
+# BROKEN 은 health sidecar — slug rename 시 같이 따라가야 stale 안 남음.
+_MARKER_SUFFIXES = (".FAILED", ".REJECTED", ".BUG", ".BROKEN")
+_STATE_FILE_SUFFIXES = (".json", ".FAILED.json", ".REJECTED.json", ".BUG.json", ".BROKEN.json")
 
 
 # --------------------------------------------------------------------------- #
