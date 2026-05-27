@@ -2,12 +2,13 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 332 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 333 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
 | [`host_zynga-com_news_3aca3b50`](host_zynga-com_news_3aca3b50.md) | 🚫 REJECTED — capability_blocked (WP API + browser anti-bot) | 2026-05-27 | none | gen_fail, capability_blocked, wordpress_api_502, anti_bot | https://www.zynga.com/news/ |
 | [`host_yo-star-com_news_8f81136f`](host_yo-star-com_news_8f81136f.md) | 🚫 REJECTED — agent self-veto(non_board) | 2026-05-27 | none | gen_fail, non_board_self_veto, spa_shell, host_mismatch | https://www.yo-star.com/news/ |
+| [`host_metacoregames-c_news_450fe577`](host_metacoregames-c_news_450fe577.md) | ✅ handcrafted | 2026-05-27 | F | panda_css_atomic_class_huge_selector, spa_hydration_misdetected_as_static, register_audit_violation | https://www.metacoregames.com/news/ |
 | [`host_community-king-_news_f9079edd`](host_community-king-_news_f9079edd.md) | 🚫 REJECTED + park-gate-fail (Vanilla Forums community directory) | 2026-05-27 | none | gen_fail, gate_fail_park, vanilla_forums, locale_redirect, forum_directory | https://community.king.com/news/ |
 | [`host_yachtclubgames-_root_67bf3b65`](host_yachtclubgames-_root_67bf3b65.md) | ✅ 수동 config 등록 (httpx_html, baseline 25건) | 2026-05-26 |  | llm_api | https://www.yachtclubgames.com/ |
 | [`host_wingamestore-co_news_902407e9`](host_wingamestore-co_news_902407e9.md) | ✅ registered by hand config after batch retry gen_fail | 2026-05-26 | config | gen_fail, validator_timeout, repeated_product_events | https://www.wingamestore.com/news/ |
@@ -359,7 +360,7 @@
 | D | 2 |
 | E | 6 |
 | E+A+C+D | 1 |
-| F | 90 |
+| F | 91 |
 | F+A | 1 |
 | F+C | 3 |
 | adapter | 1 |
@@ -378,11 +379,11 @@
 | mixed | 1 |
 | n/a | 3 |
 | none | 42 |
-| playwright_html | 47 |
+| playwright_html | 48 |
 | rejected | 1 |
 | rss | 1 |
 
 ### 최근 90일 (≥ 2026-02-26)
 
-케이스 332 건.
+케이스 333 건.
 

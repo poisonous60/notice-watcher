@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "site": "www.metacoregames.com",
+  "board": "news",
+  "strategy": "playwright_html",
+  "timeout": 30,
+  "polite_sleep": {"min": 5, "max": 6},
+  "_source_url": "https://www.metacoregames.com/news/",
+  "_note": "handcrafted: Panda CSS (Chakra v3 style) atomic-class site. (1) probe verdict said `정적 HTTP로 충분` but raw httpx returns feed-block-items-grid shell with 0 anchors; only headless renders 12 rows = SPA hydration needed. (2) probe row_selector unusable (>600 chars, `[&_*]:` bracket-arbitrary). Use stable class `feed-block-items-grid` + anchor href prefix `/news/`.",
+  "list": {
+    "url_template": "https://www.metacoregames.com/news/",
+    "wait_selector": "div.feed-block-items-grid a[href^='/news/']",
+    "pagination": {"kind": "none"},
+    "row_selector": "div.feed-block-items-grid a[href^='/news/']",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": ":self",
+          "attr": "href",
+          "transform": [["regex_extract", "^/news/([^/?#]+)/?"]]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "h3",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": ":self",
+          "attr": "href",
+          "transform": [
+            ["urljoin", "https://www.metacoregames.com"],
+            ["strip_query_fragment"]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {"from": "css", "selector": "main", "html": true}
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "h1",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "attr",
+          "selector": "time[datetime]",
+          "attr": "datetime",
+          "transform": [["iso8601", ["%Y-%m-%d"], "+00:00"]]
+        }
+      ]
+    }
+  }
+}
