@@ -3,6 +3,7 @@
   "site": "afkjourney.farlightgames.com",
   "board": "news",
   "strategy": "playwright_html",
+  "disable_stealth": true,
   "timeout": 30,
   "nav_timeout_ms": 30000,
   "idle_timeout_ms": 5000,
