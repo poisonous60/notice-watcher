@@ -94,16 +94,18 @@ def run() -> list[tuple[str, bool, str]]:
     cases.append(("baseline_ok_target_partial_ok_no_target_not_found",
                   "TARGET_NOT_FOUND" not in d3.verdict, d3.verdict))
 
-    # 4. baseline 도 NOT_FOUND 면 BASELINE_BLOCKED 가 먼저 박힘 → TARGET_NOT_FOUND X
-    #    (baseline OK 조건이 핵심)
+    # 4. baseline 이 NOT_FOUND × 다수 = 사이트 자체 404 → BASELINE_BLOCKED 박히고
+    #    target 도 NOT_FOUND 면 *추가로* TARGET_NOT_FOUND 박힘 (2026-05-27 url_dead 게이트 확장 —
+    #    사이트 통째 404 도 url_dead 로 rc=4 가야 함, 옛 동작은 rc=5 cap_blocked 으로 가는 버그였음).
     d4 = _run_diagnose(
         baseline_classes=[C.NOT_FOUND, C.NOT_FOUND],
         static_classes=[C.NOT_FOUND, C.NOT_FOUND, C.NOT_FOUND],
         headless_class=C.NOT_FOUND,
         captured_class=C.NOT_FOUND,
     )
-    cases.append(("baseline_dead_no_target_not_found",
-                  "TARGET_NOT_FOUND" not in d4.verdict, d4.verdict))
+    cases.append(("baseline_dead_target_not_found_added",
+                  "TARGET_NOT_FOUND" in d4.verdict and "BASELINE_BLOCKED" in d4.verdict,
+                  d4.verdict))
 
     # 5. baseline OK + target 다 BLOCKED_BOT → TARGET_NOT_FOUND X (BLOCKED 와 분리)
     d5 = _run_diagnose(

@@ -351,6 +351,27 @@ def diagnose(
         elif headless_ok:
             verdict_parts.append("JS 실행 필요 (Cloudflare 등)")
 
+    # baseline 이 CLOUDFLARE_PROTECTED_SITE 같은 안티-봇 verdict 박힘 + 입력 target *자체*가
+    # 명시적 HTTP 404 면 cap_blocked 아니라 url_dead. anti-bot 의 정책 평가와 404 의 path-없음
+    # 신호가 *다른 layer* 라서, 404 가 안티-봇 verdict 에 의해 가려지지 않게 별도 박는다.
+    # 예: vampire-survivors.com (root → poncle.uk anti-bot) + /news (HTTP 404 직접).
+    if "TARGET_NOT_FOUND" not in verdict_parts and "STATIC_PATH_DEAD" not in verdict_parts:
+        nf_primary = list(static_results)
+        if headless is not None:
+            nf_primary.append(headless)
+        if (
+            nf_primary
+            and all(r.classification == Classification.NOT_FOUND for r in nf_primary)
+            and any(v in verdict_parts for v in (
+                "CLOUDFLARE_PROTECTED_SITE", "BASELINE_BLOCKED", "WAF_406_BLOCK",
+            ))
+        ):
+            verdict_parts.append("TARGET_NOT_FOUND")
+            notes.append(
+                "baseline 은 차단/안티-봇 verdict 이지만 입력 URL 자체가 HTTP 404 — "
+                "사이트 anti-bot 이 아니라 그 path 가 사실상 없음 (url_dead)."
+            )
+
     # baseline 은 OK 인데 target URL 시도가 *전부 NOT_FOUND* 면 사이트 차단이 아니라 그 URL 자체가
     # 없음 (잘못된 URL 또는 글이 삭제됨). register.py 의 BLOCKED 메시지와 구분하기 위해 별도 verdict.
     if baseline_ok and not verdict_parts:
