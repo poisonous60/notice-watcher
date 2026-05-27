@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "site": "another-eden.jp",
+  "board": "news",
+  "strategy": "playwright_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ja,en;q=0.8"
+  },
+  "timeout": 30,
+  "polite_sleep": {"min": 2, "max": 4},
+  "list": {
+    "url_template": "https://another-eden.jp/news/",
+    "pagination": {"kind": "none"},
+    "wait_selector": "#backnumber > li",
+    "row_selector": "#backnumber > li",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {"from": "css", "selector": "dd a", "attr": "href", "transform": [["regex_extract", "/news/(\\d{8})/"]]}
+      ],
+      "title": [
+        {"from": "css", "selector": "dd a", "text": true, "transform": [["collapse_ws"]]}
+      ],
+      "url": [
+        {"from": "css", "selector": "dd a", "attr": "href", "transform": [["urljoin", "https://another-eden.jp/"]]}
+      ],
+      "published_at": [
+        {"from": "css", "selector": "dt", "text": true, "transform": [["regex_extract", "(\\d{4}\\.\\d{1,2}\\.\\d{1,2})"]]}
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {"from": "css", "selector": "article", "html": true},
+      {"from": "css", "selector": "main", "html": true}
+    ]
+  },
+  "disable_stealth": true,
+  "_source_url": "https://another-eden.jp/news/",
+  "_note": "Another Eden 공식 — 정적 HTML shell 만 (httpx fetch 시 #backnumber 비어있음), JS hydration 으로 116 row 채워짐. playwright_html 필수 + wait_selector. disable_stealth: true (anti-bot 아님, stealth-DNS race 회피 — commit 7ee403a flag). post_id=YYYYMMDD URL segment. published_at=dt 안 'YYYY.M.D' 형식. LLM/agentic 가 정적-vs-hydrated 신호 못 잡아 hand-config (2026-05-27 hand-config 잔여)."
+}
