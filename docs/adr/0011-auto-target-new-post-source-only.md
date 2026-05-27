@@ -38,3 +38,19 @@ auto 등록 대상을 **"새 글 올라오는 곳"** 으로 한정한다. 멤버
 - **미해결(별도 트랙)**: ① 멤버십 테스트의 *구현 메커니즘* — classify 정의 보강만으로 충분한가 vs 구조 신호(날짜 내림차순·RSS pubDate·sort label·detail fetch) 추가, 거부 채널·임계(위 Decision 참조). ② 수동 허용 배관 — OUT REJECTED 마커가 `register.py --config` 수동 경로를 막지 않는지 확인(`is_rejected` 가 수동 등록 차단하면 안 됨). ③ **기존 등록 정리** — 이번 batch 에 카탈로그로 *이미 등록된* ~12건(crates.io·hub.docker·pub.dev·pypi-rss 등) + nav/아카이브 오추출 ~10건의 `configs/`·`output/poll_state/`·구독을 sweep(거부 전환)할지 보존할지 결정 필요. ④ item-watcher 는 미구현 향후 기능 — 이 ADR 은 그 의존을 만들지 않음(OUT 은 그냥 수동 config, item-watcher 없어도 동작).
 
 cross-ref: ADR 0007(classify veto / multi-class page-type), CONTEXT.md(**새 글 올라오는 곳** / **카탈로그·목록** / **형태**).
+
+## Revision 2026-05-27 — catalog 자동거부 폐기
+
+원안의 가정 (catalog 자동 등록 = "폴링 junk") 자체가 사용자 요구와 맞지 않다는 관찰. 사용자 명시 enqueue (catalog yaml 박음, `/watch <url>`, batch 요청) 자체가 "이 갱신 알람 받고 싶다" 의사 표명. catalog 든 index 든 사용자가 요청했으면 등록해야 한다.
+
+추가로 catalog vs index 경계 자체가 모호하다 — mod/asset hub (nexusmods·curseforge·modrinth·gamebanana·thunderstore) 는 각 카드가 *상세 페이지* (설명·changelog·코멘트 = 글-콘텐츠) 로 연결되어 사용자 보기 index, 분류기 보기 catalog 로 갈리며 false-reject 발생 (2026-05-27 games-mods-hub batch 78/100 rc=3).
+
+**갱신된 게이트 기준** = "config 만들 수 있나" = **shape** (반복 row 추출 가능 + 각 카드 →상세 페이지 링크). semantic (catalog vs index) 판정은 게이트 결정 입력에서 제외. classifier 는 catalog 분류 자체는 계속 OK (정보 가치는 있음), 다만 `_CLASS_REJECT_RC` 에서 catalog 제거 = 게이트 거부 X.
+
+**구현 변경**:
+- `scripts/register.py:_CLASS_REJECT_RC` — `catalog` 제거. content(rc=3)·not_found(rc=4)·login(rc=2) 만 거부 채널 유지.
+- `tests/classify/test_classify_index_content.py` — `decisive_catalog_high_conf_none` (None 기대) 로 변경.
+
+**폴링 junk 책임 이동**: 시스템이 catalog 자동 차단으로 막던 "분당 수십 패키지 publish 노이즈" 는 *enqueue 시점* (catalog yaml 작성자 / `/watch` 사용자) 의 책임. 시스템 측에서는 catalog 든 index 든 무조건 통과. 사용자가 잘못 enqueue 한 noise 는 `/unwatch` 로 해제.
+
+**기존 ADR 0011 의 "수동 허용" 경로 유지**: catalog 가 게이트 통과해도 적합한 strategy/adapter 가 없으면 gen_fail 로 떨어짐 — 수동 config 작성 가능. catalog hard-blacklist 아님.

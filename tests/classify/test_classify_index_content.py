@@ -158,7 +158,8 @@ def run() -> list[tuple[str, bool, str]]:
 
     # _classify_decisive_rc: content→3 / not_found→4 / login→2 (모두 ≥0.7), index/?/저신뢰 → None
     cases.append(("decisive_content", reg._classify_decisive_rc({"class": "content", "confidence": 0.8}) == 3, ""))
-    cases.append(("decisive_catalog", reg._classify_decisive_rc({"class": "catalog", "confidence": 0.8}) == 3, ""))
+    # catalog 제거 (게이트 = shape 판정, semantic 아님 — 2026-05-27 ADR 0011 갱신)
+    cases.append(("decisive_catalog_high_conf_none", reg._classify_decisive_rc({"class": "catalog", "confidence": 0.99}) is None, ""))
     cases.append(("decisive_catalog_low_conf_none", reg._classify_decisive_rc({"class": "catalog", "confidence": 0.6}) is None, ""))
     cases.append(("decisive_not_found", reg._classify_decisive_rc({"class": "not_found", "confidence": 0.8}) == 4, ""))
     cases.append(("decisive_login", reg._classify_decisive_rc({"class": "login", "confidence": 0.8}) == 2, ""))

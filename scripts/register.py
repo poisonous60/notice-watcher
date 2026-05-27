@@ -1054,10 +1054,11 @@ def _veto_override(res: Optional[dict]) -> bool:
                 and res.get("confidence", 0.0) >= _CLASSIFY_OVERRIDE_MIN_CONF)
 
 
-# page-type class → 거부 rc (ADR 0007 §확장 multi-class / ADR 0011 catalog). index/?/저신뢰 → None.
-# content→gate_reject(3) / catalog→gate_reject(3) / not_found→url_dead(4) / login→policy_reject(2). 모두 거부 임계 0.7 (비대칭).
-# catalog = 아티팩트/비최신순 listing (패키지·제품·이미지) — "새 글 올라오는 곳" 아님 (ADR 0011). learn=False 라 수동 config 허용.
-_CLASS_REJECT_RC = {"content": 3, "catalog": 3, "not_found": 4, "login": 2}
+# page-type class → 거부 rc (ADR 0007 §확장 multi-class). index/catalog/?/저신뢰 → None.
+# content→gate_reject(3) / not_found→url_dead(4) / login→policy_reject(2). 모두 거부 임계 0.7 (비대칭).
+# catalog 제외: 게이트는 *shape* (config 만들 수 있나 = 반복 row 추출 가능) 판정, semantic (catalog vs index) 아님.
+# mod/asset hub 같이 분류기가 catalog 라 판정해도 반복 카드 있으면 config_writer 에게 넘김 (게이트 후속 board_shape 가 shape 검사 끝냄).
+_CLASS_REJECT_RC = {"content": 3, "not_found": 4, "login": 2}
 
 
 def _classify_decisive_rc(res: Optional[dict]) -> Optional[int]:
