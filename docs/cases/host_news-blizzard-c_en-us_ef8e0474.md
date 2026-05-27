@@ -64,7 +64,7 @@ BROKEN 큐 (cb=6) 복구 작업 중 `/api/news` endpoint 가 5일+ 연속 HTTP 5
 
 **N100 jobs reprobe history** (`bot.sqlite3`): 2026-05-22 ~ 2026-05-25 매일 rc=5 (job id 1439, 1583, 2147, 2166, 2184). **5일 연속** capability_blocked.
 
-**Track B 6-layer all miss** — engine 어디 박아도 dead upstream endpoint 못 살림. **Track A miss** — HTML SPA shell 만 살아 있어 손-config 짤 source 없음.
+**Track B 6-layer all miss** — engine 어디 박아도 dead upstream endpoint 못 살림. **Track A miss** — HTML SPA shell 만 살아 있어 수동 config 짤 source 없음.
 
 **terminal action** (`_save_rejected`, learn=False):
 - reason: `capability_blocked: upstream /api/news endpoint returning HTTP 500 for 5+ days (2026-05-22 ~ 2026-05-27), no alternative endpoint found. HTML shell 200 OK but no newsId/api exposure.`

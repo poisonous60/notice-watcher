@@ -184,6 +184,9 @@ async def fetch_list(adapter, *, page: int = 1, page_size: int = 30) -> list[Not
 async def fetch_article(adapter, post: NoticePost) -> NoticePost:
     cfg = adapter.cfg
     art = cfg.get("article") or {}
+    if art.get("fetch_kind") == "json":
+        from . import httpx_json as _j
+        return await _j.fetch_article(adapter, post)
     url = article_url_for(adapter, post)
     r = await _get(adapter, apply_proxy(url, cfg.get("proxy_url")))
     skip = art.get("skip_status") or []

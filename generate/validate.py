@@ -197,6 +197,25 @@ def _selector_count(html: str, selector: str) -> Optional[int]:
         return None
 
 
+def _probe_list_selector_hint(digest: dict) -> str:
+    lc = digest.get("list_candidates") or {}
+    parts: list[str] = []
+    patterns = lc.get("html_repeating_patterns") or []
+    if patterns and isinstance(patterns[0], dict):
+        top = patterns[0]
+        if top.get("selector"):
+            parts.append(f"probe top selector={top.get('selector')!r}")
+        if top.get("href_common_prefix"):
+            parts.append(f"href_common_prefix={top.get('href_common_prefix')!r}")
+        if top.get("sample_url"):
+            parts.append(f"sample_url={top.get('sample_url')!r}")
+    if lc.get("first_article_url"):
+        parts.append(f"first_article_url={lc.get('first_article_url')!r}")
+    if not parts:
+        return ""
+    return "; " + "; ".join(parts)
+
+
 def _source_basename(section: Any) -> str:
     if not isinstance(section, dict):
         return ""
@@ -294,7 +313,11 @@ def _add_probe_grounding_checks(rep: ValidationReport, cfg: dict, digest: Option
                     "probe_grounding_list_row_selector",
                     False,
                     hard=True,
-                    detail=f"row_selector {row_selector!r} matched 0 nodes in probe list_html; choose a selector grounded in digest evidence",
+                    detail=(
+                        f"row_selector {row_selector!r} matched 0 nodes in probe list_html; "
+                        f"choose a selector grounded in digest evidence"
+                        f"{_probe_list_selector_hint(digest)}"
+                    ),
                 )
         wait_selector = str(lst.get("wait_selector") or "")
         if strategy == "playwright_html" and wait_selector and _rendered_list_evidence(list_html):

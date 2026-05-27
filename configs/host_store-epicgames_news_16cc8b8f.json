@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "site": "store.epicgames.com",
+  "board": "news",
+  "strategy": "playwright_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,application/json;q=0.8,*/*;q=0.7",
+    "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Referer": "https://store.epicgames.com/news/",
+    "Origin": "https://store.epicgames.com",
+    "X-Requested-With": "XMLHttpRequest"
+  },
+  "timeout": 20,
+  "nav_timeout_ms": 20000,
+  "idle_timeout_ms": 12000,
+  "quiet_ms": 800,
+  "polite_sleep": {
+    "min": 5,
+    "max": 6
+  },
+  "list": {
+    "url_template": "https://store.epicgames.com/news/",
+    "pagination": {
+      "kind": "offset",
+      "offset_param": "start",
+      "page_unit": 10
+    },
+    "row_selector": "li:has(a[href^='/blog/'])",
+    "wait_selector": "li:has(a[href^='/blog/'])",
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a[href^='/blog/']",
+          "attr": "href",
+          "transform": [
+            [
+              "regex_extract",
+              "/blog/([^/?#]+)"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "a[href^='/blog/']",
+          "pick": "first_matching",
+          "match": ".{10,}",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a[href^='/blog/']",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://store.epicgames.com"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "url_template": "https://store-content-ipv4.ak.epicgames.com/api/ko/content/blog/{post_id}",
+    "fetch_kind": "json",
+    "content": [
+      {
+        "from": "json",
+        "path": [
+          "content"
+        ]
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "json",
+          "path": [
+            "title"
+          ]
+        }
+      ]
+    }
+  }
+}
