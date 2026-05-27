@@ -227,6 +227,10 @@ def _enrich_retry_feedback(rep, prev_cfg: Optional[dict], digest: dict, attempt_
 
 # RSS/Atom row selector 인지 판단 — Recipe 1 의 applies_to.
 _RSS_ROW_SELECTOR_RE = re.compile(r"\b(channel\s*>\s*item|^item$|>\s*item\b|feed\s*>\s*entry|^entry$|>\s*entry\b)", re.IGNORECASE)
+_STEALTH_DNS_RACE_RE = re.compile(
+    r"ERR_NAME_NOT_RESOLVED|Temporary failure in name resolution|Name or service not known",
+    re.IGNORECASE,
+)
 
 
 def _count_fail_key(attempt_history: list[dict], key: str) -> int:
@@ -235,6 +239,15 @@ def _count_fail_key(attempt_history: list[dict], key: str) -> int:
     for h in attempt_history:
         fails = h.get("fails") or []
         if key in fails:
+            n += 1
+    return n
+
+
+def _count_dns_nav_failures(attempt_history: list[dict]) -> int:
+    n = 0
+    for h in attempt_history:
+        hay = "\n".join(str(x) for x in (h.get("fails_detail") or h.get("fails") or []))
+        if _STEALTH_DNS_RACE_RE.search(hay):
             n += 1
     return n
 
@@ -370,6 +383,13 @@ def _pick_spa_wait_selector(digest: dict, host: Optional[str]) -> Optional[str]:
 def _select_retry_recipes(cfg: dict, digest: dict, attempt_history: list[dict]) -> list[str]:
     """attempt_history + cfg + digest 보고 적용 가능한 recipe name list 반환."""
     selected: list[str] = []
+    # Recipe 0: playwright stealth DNS race — selector 방향 문제가 아니므로 stealth 만 끈 후보를 재검증.
+    if (
+        (cfg.get("strategy") or "") == "playwright_html"
+        and cfg.get("disable_stealth") is not True
+        and _count_dns_nav_failures(attempt_history) >= 2
+    ):
+        selected.append("stealth_dns_disable")
     # Recipe 1: post_id_unique OR post_id_stable_shape 가 2회+ + applies_to
     n_pid = _count_fail_key(attempt_history, "post_id_unique") + _count_fail_key(attempt_history, "post_id_stable_shape")
     if n_pid >= 2 and _recipe_1_applies(cfg, digest):
@@ -397,6 +417,11 @@ def _apply_recipe_patch(prev_cfg: dict, recipes: list[str], digest: dict) -> Opt
         fields["post_id"] = copy.deepcopy(_RECIPE_1_POST_ID_PATCH)
         changed = True
 
+    if "stealth_dns_disable" in recipes:
+        if (patched.get("strategy") or "") == "playwright_html" and patched.get("disable_stealth") is not True:
+            patched["disable_stealth"] = True
+            changed = True
+
     if "spa_rendered_retry" in recipes:
         # strategy=httpx_html → playwright_html. 이미 playwright_html 이면 patch 없음 (text hint 만).
         if (patched.get("strategy") or "") == "httpx_html":
@@ -416,6 +441,12 @@ def _apply_recipe_patch(prev_cfg: dict, recipes: list[str], digest: dict) -> Opt
 
 
 _RECIPE_TEXT_HINTS = {
+    "stealth_dns_disable": (
+        "**Recipe stealth_dns_disable** — `playwright_html` 검증이 반복해서 "
+        "`ERR_NAME_NOT_RESOLVED` / DNS resolution 실패로 끝났다. selector/URL 선택 실패가 아니라 "
+        "patchright/playwright_stealth DNS race 가능성이 크다. 같은 config 방향을 유지하고 최상위 "
+        "`disable_stealth: true` 만 추가해 재검증해라. `headless:false` 는 금지."
+    ),
     "rss_post_id_from_link": (
         "**Recipe rss_post_id_from_link** — `post_id_unique`/`post_id_stable_shape` 반복 실패. "
         "RSS guid 가 `'<number> at <url>'` 류 불안정 형식이고, link 자체에도 promo 항목 중복이 있을 수 있음. "

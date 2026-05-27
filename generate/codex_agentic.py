@@ -1186,6 +1186,14 @@ async def _run_codex_agentic_once(
             )
 
         if not ok_flag or not isinstance(config, dict):
+            if not isinstance(config, dict) or not config:
+                recovered_config: Optional[dict] = None
+                try:
+                    recovered_config = _read_candidate_config(workdir)
+                except LLMParseError:
+                    recovered_config = None
+                if isinstance(recovered_config, dict) and recovered_config:
+                    config = recovered_config
             raise _gen_fail(
                 f"agent did not produce a passing config (stop_reason={stop_reason!r})",
                 stop=stop_reason or "agent_gave_up",

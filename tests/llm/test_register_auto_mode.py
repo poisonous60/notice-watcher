@@ -185,6 +185,55 @@ def test_generation_failure_self_veto_stop_reason_rc_mapping(monkeypatch, stop_r
     assert saved[0][1]["note"] == expected_note
 
 
+def test_generate_by_mode_revalidates_disable_stealth_after_agentic_dns_race():
+    reg = _load_register()
+    original_cfg = {
+        "version": 1,
+        "site": "example.com",
+        "board": "news",
+        "strategy": "playwright_html",
+        "list": {"url_template": "https://example.com/news", "row_selector": ".post-card"},
+        "article": {},
+    }
+    err = GenerationError(
+        "agent did not produce a passing config",
+        stop_reason="max_cycles",
+        last_config=original_cfg,
+        last_feedback=(
+            '[{"i":1,"validate_ok":false,"error":"Page.goto: net::ERR_NAME_NOT_RESOLVED"},'
+            '{"i":2,"validate_ok":false,"error":"Temporary failure in name resolution"}]'
+        ),
+    )
+    calls: list[tuple] = []
+
+    def failing_agentic(digest, slug, url, failure_packet=None):
+        calls.append(("agentic", failure_packet))
+        raise err
+
+    def fallback(digest, exc):
+        calls.append(("fallback", getattr(exc, "last_config", None)))
+        patched = dict(exc.last_config)
+        patched["disable_stealth"] = True
+        return patched, SimpleNamespace(ok=True)
+
+    cfg, rep = reg._generate_by_mode(
+        "agentic",
+        {"url": "https://example.com/news"},
+        "slugdns",
+        "https://example.com/news",
+        max_attempts=4,
+        model=None,
+        agentic_func=failing_agentic,
+        stealth_fallback_func=fallback,
+    )
+
+    assert cfg["disable_stealth"] is True
+    assert getattr(rep, "ok", False) is True
+    assert calls[0][0] == "agentic"
+    assert calls[1] == ("fallback", original_cfg)
+    assert "disable_stealth" not in original_cfg
+
+
 def run() -> list[tuple[str, bool, str]]:
     reg = _load_register()
     cases: list[tuple[str, bool, str]] = []

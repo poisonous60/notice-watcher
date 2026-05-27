@@ -522,6 +522,74 @@ def run() -> list[tuple[str, bool, str]]:
     finally:
         shutil.rmtree(fake_repo4, ignore_errors=True)
 
+    # ----- 8e. ok=false max_cycles still carries candidate.json for parent fallback -----
+    fake_repo4b = _make_tmp_repo()
+
+    class MaxCyclesCandidatePopen:
+        def __init__(self, args, **kwargs):
+            out_path = Path(args[args.index("--output-last-message") + 1])
+            workdir = out_path.parent
+            (workdir / "candidate.json").write_text(
+                json.dumps({
+                    "site": "https://example.com/",
+                    "board": "news",
+                    "version": 1,
+                    "strategy": "playwright_html",
+                    "list": {"url_template": "https://example.com/news", "row_selector": ".post"},
+                    "article": {},
+                }),
+                encoding="utf-8",
+            )
+            out_path.write_text(
+                json.dumps({
+                    "ok": False,
+                    "config": {},
+                    "attempts": [
+                        {"i": 1, "validate_ok": False, "error": "Page.goto: net::ERR_NAME_NOT_RESOLVED"}
+                    ],
+                    "stop_reason": "max_cycles",
+                }),
+                encoding="utf-8",
+            )
+            self.returncode = 0
+
+        def communicate(self, input=None, timeout=None):  # noqa: A002 - subprocess API
+            return (
+                '{"type":"turn.completed","usage":{"input_tokens":5,"output_tokens":6}}\n',
+                "",
+            )
+
+        def kill(self):
+            self.returncode = -9
+
+    err_candidate = None
+    try:
+        with mock.patch.object(ca, "_codex_preflight", return_value="codex-cli test"), \
+             mock.patch.object(ca, "_codex_bin", return_value="codex"), \
+             mock.patch.object(ca.subprocess, "Popen", MaxCyclesCandidatePopen):
+            try:
+                asyncio.run(ca.run_codex_agentic(
+                    digest={"url": "https://example.com/"},
+                    slug="candidatefail",
+                    url="https://example.com/",
+                    repo=fake_repo4b,
+                    timeout_s=5.0,
+                ))
+            except ca.GenerationError as e:
+                err_candidate = e
+        cases.append(_check(
+            "codex_max_cycles_carries_candidate_json_for_parent_fallback",
+            (err_candidate is not None
+             and isinstance(err_candidate.last_config, dict)
+             and err_candidate.last_config.get("strategy") == "playwright_html"
+             and err_candidate.stop_reason == "max_cycles"
+             and "ERR_NAME_NOT_RESOLVED" in err_candidate.last_feedback),
+            f"err={err_candidate!r} last_config={getattr(err_candidate, 'last_config', None)!r} "
+            f"feedback={getattr(err_candidate, 'last_feedback', '')!r}",
+        ))
+    finally:
+        shutil.rmtree(fake_repo4b, ignore_errors=True)
+
     # ----- 8b. GenerationError carries token/wall meta on failure path -----
     err = ca.GenerationError(
         "fake fail",

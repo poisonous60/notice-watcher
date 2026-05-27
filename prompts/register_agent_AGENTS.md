@@ -103,6 +103,11 @@ validator feedback.
 - If a previous candidate used a probe-grounded rendered selector and failed
   with DNS/browser launch infra errors, keep that direction and fix only fields
   that validation proves wrong.
+- If `playwright_html` validation repeatedly fails with
+  `ERR_NAME_NOT_RESOLVED`, `Temporary failure in name resolution`, or
+  `Name or service not known`, treat it as a possible stealth DNS race. Retry
+  the same probe-grounded config once with top-level `disable_stealth: true`.
+  Do not use `headless:false`.
 
 ## TOKEN DISCIPLINE
 
