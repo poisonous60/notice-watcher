@@ -14,7 +14,7 @@ from typing import Optional
 def hand_config_for_url(*, url: str, slug: Optional[str] = None,
                         fail_reason: Optional[str] = None,
                         job_id: Optional[int] = None) -> str:
-    lines = ["다음 사이트 수동 config 작성해줘 (skill: hand-config 모드 A).", ""]
+    lines = ["다음 `/preview` 실패 사이트 분석해줘 (skill: hand-config).", ""]
     lines.append(f"URL: {url}")
     if slug:
         lines.append(f"slug: {slug}")
@@ -23,29 +23,34 @@ def hand_config_for_url(*, url: str, slug: Optional[str] = None,
     if job_id is not None:
         lines.append(f"관련 잡: #{job_id}")
     lines.append("")
-    lines.append("두 트랙 *동시* 진행 (한쪽 막는 게이트 X):")
-    lines.append("  - 트랙 A (사용자 향 — 사이트 즉시 작동): 수동 config / 손어댑터 작성 → configs/ → N100 배포.")
-    lines.append("  - 트랙 B (미래 향 — 같은 패턴 자동 처리): 진단 중 분기 2a (인식기 확장) / 2b (--article-url) / "
-                 "2c (probe 휴리스틱 + retry feedback hint) / 2d (probe artifact 수정) 후보 한 줄씩 enumerate. "
-                 "매칭 있으면 그 자리도 같은 PR 에 박음. 매칭 0이면 case 파일에 이유 한 줄.")
+    lines.append("목표: 사이트 분석 → Track B 일반화 후보 먼저 도출. `/preview <url>` command origin 이 ship evidence 이므로 ship default=true.")
+    lines.append("Track B (1순위): canonical 6 자리 E/D/C/B/A/F 를 순서대로 audit "
+                 "(schema 거부 / retry feedback / probe digest 신호 / few-shot / system 규칙 추가 / 새 엔진 코드). "
+                 "한 자리라도 hit 면 그 일반화 개선을 우선 박음.")
+    lines.append("Track A (optional): Track B 6 자리 all miss + `/preview` ship evidence hit 일 때만 수동 config/손어댑터 진입. "
+                 "둘 다 아니면 park 가 valid terminal — 사이트 단위 ship 강제 X.")
     lines.append("")
-    lines.append("§2 분기 *전*: `triage.py show <slug>` 출력 받은 다음 메시지에서 4개 강제 인용 "
-                 "(last_feedback `[FAIL]` 줄 / diagnosis verdict / 매칭 §번호 / 분기 후보+이유). "
+    lines.append("§2 분기 *전*: `triage.py show <slug>` 출력 받은 다음 메시지에서 6개 강제 인용 "
+                 "(1 last_feedback / 2 verdict / 3 근거 / 4a Track B 6-layer / 4b Track A 결정 / "
+                 "4c context ship evidence(`/preview`) / 4d park 분기 / 5 cases_index / 6 preflight). "
                  "artifact 없는 §0 신규 case 만 예외. — SKILL.md \"§2 진입 전 강제 인용\" 박스.")
     return "\n".join(lines)
 
 
 def hand_config_redo_slug(*, slug: str, url: Optional[str] = None) -> str:
-    lines = ["다음 사이트 수동 config 재작성해줘 (skill: hand-config).", ""]
+    lines = ["다음 slug 재처리해줘 (skill: hand-config).", ""]
     lines.append(f"slug: {slug}")
     if url:
         lines.append(f"URL: {url}")
     lines.append(f"현재 config: configs.snapshot/{slug}.json (참고용 — dev 의 configs/ 가 진본)")
     lines.append("")
-    lines.append("문제 진단 → 수정 → fetch 확인 → 배포.")
+    lines.append("문제 진단 → Track B 일반화 후보(E/D/C/B/A/F) 먼저 audit → 필요 시 수정 → fetch 확인.")
+    lines.append("slug redo 요청 자체가 이 사이트 ship evidence 이므로 ship default=true. "
+                 "단 Track A(수동 config/손어댑터)는 Track B 6 자리 all miss 일 때만 optional 진입.")
     lines.append("")
-    lines.append("§2 분기 *전*: `triage.py show <slug>` 출력 받은 다음 메시지에서 4개 강제 인용 "
-                 "(last_feedback `[FAIL]` 줄 / diagnosis verdict / 매칭 §번호 / 분기 후보+이유). "
+    lines.append("§2 분기 *전*: `triage.py show <slug>` 출력 받은 다음 메시지에서 6개 강제 인용 "
+                 "(1 last_feedback / 2 verdict / 3 근거 / 4a Track B 6-layer / 4b Track A 결정 / "
+                 "4c context ship evidence(redo 요청) / 4d park 분기 / 5 cases_index / 6 preflight). "
                  "— SKILL.md \"§2 진입 전 강제 인용\" 박스.")
     return "\n".join(lines)
 
@@ -89,10 +94,11 @@ def hand_config_triage_queue(*, failed_slugs: list[str]) -> str:
         "dev box `triage_later.json` *만* 박는 건 X — 그건 dev box dashboard view 만, N100 봇·register 거동 영향 0. "
         "보고 시 종료 분포 명시 (`registered N / Later N / gate-fail-park N / REJECTED N / 정상거부 N = total`).",
         "",
-        "**gen_fail(rc=1) 은 §0b-2 screen-out 먼저** — '진짜 게시판 아님' 2종을 골라내 수동 config 낭비 차단: "
+        "**gen_fail(rc=1) 은 §0b-2 screen-out 먼저** — '진짜 게시판 아님' 3종을 골라내 사이트별 작업 낭비 차단: "
         "(P1) content-as-list 오탐(단일 글이 index 로 통과 — `list_candidates` 반복 행 0~소수+단일 본문 → `prompts/classify.system.txt` content 측 보강), "
-        "(P2) not-found shell 미분류(title/h1 not-found 인데 등록 진행 → 분류기 not_found 보강 `prompts/classify.system.txt`; 옛 _SOFT_404_PATTERNS regex 제거됨 ADR 0007 §확장). "
-        "둘 다 영구 게이트 봉합(§8a)+slug 거부, outcome=improved. 통과한 잔여만 hand-config 진단.",
+        "(P2) not-found shell 미분류(title/h1 not-found 인데 등록 진행 → 분류기 not_found 보강 `prompts/classify.system.txt`; 옛 _SOFT_404_PATTERNS regex 제거됨 ADR 0007 §확장), "
+        "(P3) empty/fake feed(RSS 후보지만 item 0 또는 HTML shell → 분류기 보강 + gate-fail park). "
+        "P1/P2 는 영구 게이트 봉합(§8a)+slug 거부, outcome=improved. 통과한 잔여만 hand-config 진단.",
         "",
         "**비-게시판인데 분류기가 이번 batch 에 자동거부 못 하면(classify `?`/미신뢰) → per-site 손-거부 X → "
         "`python scripts/triage.py park-gate-fail <slug> --reason=…`** (gate-fail 버킷, **Later 아님**). "
@@ -104,9 +110,18 @@ def hand_config_triage_queue(*, failed_slugs: list[str]) -> str:
     for s in failed_slugs:
         lines.append(f"- {s}  (output/snapshot/poll_state/{s}.FAILED.json)")
     lines.append("")
-    lines.append("각 slug 두 트랙 *동시* (codex 프롬프트에 박힘): A(사이트 즉시 작동) + "
-                 "B(추론 개선 — probe 휴리스틱/schema/prompt 로 미지 유형 자동화, 수동 config 의존도 ↓).")
-    lines.append("REJECT 사이트라도 구조 분석해 probe 개선이 1순위. 특수/tradeoff 명확할 때만 스킵 + case log 에 이유.")
+    lines.append("각 slug 기본 프레임: Track B 1순위 — canonical 6 자리 E/D/C/B/A/F "
+                 "(schema 거부 / retry feedback / probe digest 신호 / few-shot / system 규칙 추가 / 새 엔진 코드) 를 먼저 audit. "
+                 "batch/triage operator 흐름은 ship default=false.")
+    lines.append("Track A(수동 config/손어댑터)는 Track B 6 자리 all miss + 특정 slug/URL 에 묶인 명시 ship 요청이 있을 때만 optional. "
+                 "ship evidence = `Track A`·`수동 config`·`이 사이트 즉시 작동`·`ship 필요` + slug/URL 직결 문장. "
+                 "`codex`·`agentic`·`generic improvement` 는 Track B 의도라 ship evidence 로 세지 X.")
+    lines.append("Track A skip 시 park 가 valid terminal: classifier/gate fallthrough 는 `triage.py park-gate-fail`, "
+                 "true board + ship 요청 0 은 `case_log no_change` + `triage_later.json` 손-park, cap_blocked 는 auto Later.")
+    lines.append("REJECT 사이트라도 구조 분석해 Track B 개선이 1순위. 특수/tradeoff 명확할 때만 스킵 + case log 에 이유.")
+    lines.append("각 slug §2 분기 *전*: 6개 강제 인용 "
+                 "(1 last_feedback / 2 verdict / 3 근거 / 4a Track B 6-layer / 4b Track A 결정 / "
+                 "4c context ship evidence / 4d park 분기 / 5 cases_index / 6 preflight).")
     return "\n".join(lines)
 
 
@@ -171,7 +186,7 @@ def catalog_run_and_fix(*, catalog_name: str,
     lines.append("   1) **bug** (rc=-1/-2/-3/-5/-99, `.BUG.json`): *무조건 fix*, 최우선. traceback → bot/scripts/engine 코드 수정 (bug-fix workflow). `register.py 실행 시간 초과(300s)` 류 timeout 도 여기 — root-cause.")
     lines.append("   2) **gate_reject** (rc=3): board_shape/nav_only/single-article 게이트 거부 + LLM index/content 분류기(veto)도 content 판정(ADR 0007). 게시판/비게시판 false-reject 봉합은 *분류기 layer 의 일* — 임의로 '의도된 거부'라 신뢰 X. **사용자에게 분포·샘플 보고하고 확인 대기**, 받으면 fix 순서 = ① `prompts/classify.system.txt`/모델 보강 (게이트 휴리스틱 추가 X) → ② SPA(정적 HTML 에 목록 없음)면 render 트랙. SKILL.md §0a-2.")
     lines.append("   3) **capability_blocked** (rc=5, `.FAILED.json`): captcha/anti-bot/cloudflare 차단 = *능력 부족(정책 아님)*. stealth/anti-detection 어댑터로 재도전 (§2e + `docs/크롤링 지침.md` §6 stealth 허용).")
-    lines.append("   4) **gen_fail** (rc=1, `.FAILED.json`): **§0b-2 screen-out 먼저** — (P1) content-as-list 오탐(단일 글이 index 로 통과 → `prompts/classify.system.txt` content 측 보강) · (P2) not-found shell 미분류(title/h1 not-found 인데 등록 진행 → 분류기 not_found 보강 `prompts/classify.system.txt`; 옛 _SOFT_404_PATTERNS regex 제거 ADR 0007 §확장): 둘 다 영구 게이트 봉합+거부(진짜 게시판 아님). 통과한 잔여만 hand-config 진단 → 수동 config 또는 probe/prompt 개선 (두 트랙 동시).")
+    lines.append("   4) **gen_fail** (rc=1, `.FAILED.json`): **§0b-2 screen-out 먼저** — (P1) content-as-list 오탐(단일 글이 index 로 통과 → `prompts/classify.system.txt` content 측 보강) · (P2) not-found shell 미분류(title/h1 not-found 인데 등록 진행 → 분류기 not_found 보강 `prompts/classify.system.txt`; 옛 _SOFT_404_PATTERNS regex 제거 ADR 0007 §확장) · (P3) empty/fake feed(RSS 후보지만 item 0 또는 HTML shell): 진짜 게시판 아님. 통과한 잔여만 Track B 1순위 진단(heuristic/classifier/config_writer prompt/recognizer/engine); Track A 수동 config 는 ship 명시 요청 있을 때만 optional.")
     lines.append("   - **policy_reject** (rc=2, LOGIN_REQUIRED) · **url_dead** (rc=4, 404/cert·dns 깨짐) = 작업 X (정상 거부, `docs/크롤링 지침.md`). 우회 X.")
     lines.append("   - **실행 = codex 위임** (SKILL §0c): bug·gen_fail·capability_blocked 의 진단·fix 는 codex 보이는 창에 위임 "
                  "(`codex_handoff.py generic --task-file --launch`, ALLOW-LIST 박음). **disjoint 파일소유로 병렬** — "
@@ -187,15 +202,20 @@ def catalog_run_and_fix(*, catalog_name: str,
                  " 보고 시 종료 분포 명시 (예: `registered 19 / Later 7 / gate-fail-park 0 / REJECTED 2 / 정상거부 72 = 100`).")
     lines.append("6c. **dev box `triage_later.json` 만 박는 건 X** — 그건 dev box `triage.py list --skip-later` filter 뿐, N100 봇·register 거동에 영향 0 (`is_blocked(slug)` 는 N100 marker REJECTED/FAILED/BUG 봄, `triage_later.json` 은 dev box gitignored). FAILED 만 있어도 봇 진입은 차단되지만 응답 'failed=재시도 가능' 이라 영구 거부 의미 아님. 영구면 N100 `.REJECTED.json` 까지 박아야 응답 'rejected=영구' + sibling cleanup.")
     lines.append("")
-    lines.append("각 fail 두 트랙 *동시* 진행 (한쪽 막는 게이트 X):")
-    lines.append("  - 트랙 A (사용자 향 — 사이트 즉시 작동): 수동 config / 손어댑터 → configs/ → 배포.")
-    lines.append("  - 트랙 B (미래 향 — 같은 패턴 자동 처리): probe 휴리스틱 / 인식기 / prompt 개선 → 같은 패턴 자동.")
-    lines.append("매칭 있으면 같은 PR 에 박음. 매칭 0이면 case 파일에 이유.")
+    lines.append("각 fail 기본 프레임: Track B 1순위 — canonical 6 자리 E/D/C/B/A/F "
+                 "(schema 거부 / retry feedback / probe digest 신호 / few-shot / system 규칙 추가 / 새 엔진 코드) 를 먼저 audit. "
+                 "catalog/batch operator 흐름은 ship default=false.")
+    lines.append("Track A(수동 config/손어댑터)는 Track B 6 자리 all miss + 특정 slug/URL 에 묶인 명시 ship 요청이 있을 때만 optional. "
+                 "ship evidence = `Track A`·`수동 config`·`이 사이트 즉시 작동`·`ship 필요` + slug/URL 직결 문장. "
+                 "`codex`·`agentic`·`generic improvement` 는 Track B 의도라 ship evidence 로 세지 X.")
+    lines.append("Track A skip 시 park 가 valid terminal: classifier/gate fallthrough 는 `triage.py park-gate-fail`, "
+                 "true board + ship 요청 0 은 `case_log no_change` + `triage_later.json` 손-park, cap_blocked 는 auto Later.")
     lines.append("")
     lines.append("REJECT 사이트도 구조 분석 → probe 개선 시도. 특수 케이스나 tradeoff 명확하면 case log 이유 기록.")
     lines.append("")
-    lines.append("각 slug §2 분기 *전*: `triage.py show <slug>` 출력 받은 다음 메시지에서 4개 강제 인용 "
-                 "(last_feedback `[FAIL]` 줄 / diagnosis verdict / 매칭 §번호 / 분기 후보+이유). "
+    lines.append("각 slug §2 분기 *전*: `triage.py show <slug>` 출력 받은 다음 메시지에서 6개 강제 인용 "
+                 "(1 last_feedback / 2 verdict / 3 근거 / 4a Track B 6-layer / 4b Track A 결정 / "
+                 "4c context ship evidence / 4d park 분기 / 5 cases_index / 6 preflight). "
                  "— SKILL.md \"§2 진입 전 강제 인용\" 박스.")
     return "\n".join(lines)
 
