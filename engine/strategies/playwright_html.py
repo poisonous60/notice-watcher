@@ -174,12 +174,16 @@ async def open_session(adapter) -> None:
         if ssp and Path(ssp).exists():
             ctx_kwargs["storage_state"] = str(ssp)
         context = await browser.new_context(**ctx_kwargs)
-        # stealth (선택)
-        try:
-            from playwright_stealth import Stealth  # type: ignore
-            await Stealth().apply_stealth_async(context)
-        except Exception:
-            pass
+        # stealth (선택) — per-site config `disable_stealth: true` 로 끄기 가능.
+        # 일부 사이트(Vercel CDN + 특정 chromium build 조합)에서 stealth 가 DNS resolution
+        # 을 깨는 race 가 있음 (host_metacoregames-c_news_450fe577 = ERR_NAME_NOT_RESOLVED).
+        # 그런 사이트는 disable_stealth=true 로 stealth skip — anti-bot 강도와 trade-off.
+        if not cfg.get("disable_stealth"):
+            try:
+                from playwright_stealth import Stealth  # type: ignore
+                await Stealth().apply_stealth_async(context)
+            except Exception:
+                pass
         # 추가 헤더(UA 제외)도 주입
         extra = {k: v for k, v in (cfg.get("headers") or {}).items() if k.lower() != "user-agent"}
         if extra:

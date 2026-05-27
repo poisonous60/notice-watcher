@@ -87,6 +87,7 @@ CONFIG_JSON_SCHEMA: dict = {
         "kwargs": {"type": "object"},
         "storage_state_path": {"type": "string"},
         "headless": {"type": "boolean"},
+        "disable_stealth": {"type": "boolean"},
         "nav_timeout_ms": {"type": "integer"},
         "idle_timeout_ms": {"type": "integer"},
         "list": {

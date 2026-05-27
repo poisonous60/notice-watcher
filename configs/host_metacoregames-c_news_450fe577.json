@@ -3,6 +3,7 @@
   "site": "www.metacoregames.com",
   "board": "news",
   "strategy": "playwright_html",
+  "disable_stealth": true,
   "timeout": 30,
   "polite_sleep": {"min": 5, "max": 6},
   "_source_url": "https://metacoregames.com/news/",
