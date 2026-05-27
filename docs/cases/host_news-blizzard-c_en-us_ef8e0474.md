@@ -51,3 +51,23 @@ catalog batch run 2026-05-19 에서 board_shape gate_reject. 정적 HTML 7KB SPA
 handwritten config. list_path=`feed.contentItems`, post_id=`properties.newsId`, url=`properties.newsUrl`. URL 자체 absolute 라 url_template 안 씀. article body 는 fetch_kind=html (newsUrl 따라가서 `article` selector 추출).
 
 상세: `infra_catalog_batch_rev4_2026-05-19.md`.
+
+## 후속 (2026-05-27): REJECTED — upstream /api/news 영구 500
+
+BROKEN 큐 (cb=6) 복구 작업 중 `/api/news` endpoint 가 5일+ 연속 HTTP 500 으로 죽어 있음 확인. polling 영구 중단.
+
+**live 증거 (2026-05-27)**:
+- `GET https://news.blizzard.com/en-us/api/news` → `HTTP/1.1 500 Internal Server Error`, body=`Internal Server Error` (21 bytes, `text/plain`).
+- 4회 retry + browser headers 동일 500.
+- 대안 endpoint 탐색: `/en-us/feed` → 307 → 404 / `/en-us/rss` → 404 / HTML `/en-us/` → 200 OK 9.5KB (SPA shell, `newsId`/`/api/` 노출 X).
+- 도메인 자체는 살아 있음. 오직 `/api/news` 만 죽음.
+
+**N100 jobs reprobe history** (`bot.sqlite3`): 2026-05-22 ~ 2026-05-25 매일 rc=5 (job id 1439, 1583, 2147, 2166, 2184). **5일 연속** capability_blocked.
+
+**Track B 6-layer all miss** — engine 어디 박아도 dead upstream endpoint 못 살림. **Track A miss** — HTML SPA shell 만 살아 있어 손-config 짤 source 없음.
+
+**terminal action** (`_save_rejected`, learn=False):
+- reason: `capability_blocked: upstream /api/news endpoint returning HTTP 500 for 5+ days (2026-05-22 ~ 2026-05-27), no alternative endpoint found. HTML shell 200 OK but no newsId/api exposure.`
+- sibling cleanup 자동 (state.json/BROKEN.json/triage_queue).
+
+**rollback**: 향후 endpoint 복구 시 `ssh $DEPLOY_HOST 'rm output/poll_state/host_news-blizzard-c_en-us_ef8e0474.REJECTED.json'` + `/watch` 재요청.
