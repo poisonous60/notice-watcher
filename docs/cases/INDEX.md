@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 346 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 347 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -11,6 +11,7 @@
 | [`host_deadbydaylight-_news_7eed0155`](host_deadbydaylight-_news_7eed0155.md) | ✅ handcrafted — Dead by Daylight rendered list plus Gatsby article JSON | 2026-05-28 | F | article_body_len, article_fetch_kind, json_api | https://deadbydaylight.com/news/ |
 | [`host_bethesda-net_news_c5aa2960`](host_bethesda-net_news_c5aa2960.md) | ✅ handcrafted — non-www Bethesda news config registered | 2026-05-28 | F | posts_nonempty, hashed_selector | https://bethesda.net/news/ |
 | [`host_bethesda-net_news_29303712`](host_bethesda-net_news_29303712.md) | ✅ handcrafted — Bethesda news config registered from rendered article links | 2026-05-28 | F | posts_nonempty, hashed_selector | https://www.bethesda.net/news/ |
+| [`host_annapurnaintera_root_105cae87`](host_annapurnaintera_root_105cae87.md) | ❌ REJECTED — root URL = games catalog/marketing landing, no news board | 2026-05-28 | none | no_board, root_catalog_only, posts_nonempty | https://annapurnainteractive.com/ |
 | [`host_zynga-com_news_3aca3b50`](host_zynga-com_news_3aca3b50.md) | 🚫 REJECTED — capability_blocked (WP API + browser anti-bot) | 2026-05-27 | none | gen_fail, capability_blocked, wordpress_api_502, anti_bot | https://www.zynga.com/news/ |
 | [`host_yo-star-com_news_8f81136f`](host_yo-star-com_news_8f81136f.md) | 🚫 REJECTED — agent self-veto(non_board) | 2026-05-27 | none | gen_fail, non_board_self_veto, spa_shell, host_mismatch | https://www.yo-star.com/news/ |
 | [`host_travian-com_international_993a586a`](host_travian-com_international_993a586a.md) | ✅ handcrafted: sitemap list + hydrated SPA article body | 2026-05-27 | none | agentic_fake_config, posts_nonempty_zero, spa_shell, sitemap_article_urls | https://www.travian.com/international/news/ |
@@ -378,7 +379,7 @@
 | F+C | 3 |
 | adapter | 1 |
 | config | 8 |
-| none | 153 |
+| none | 154 |
 
 ### config_strategy 분포
 
@@ -391,12 +392,12 @@
 | httpx_json (미적용 — 콘텐츠 0) | 1 |
 | mixed | 1 |
 | n/a | 3 |
-| none | 42 |
+| none | 43 |
 | playwright_html | 60 |
 | rejected | 1 |
 | rss | 1 |
 
 ### 최근 90일 (≥ 2026-02-26)
 
-케이스 346 건.
+케이스 347 건.
 
