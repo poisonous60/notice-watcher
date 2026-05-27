@@ -389,7 +389,7 @@ def _policy_check(digest: dict, url: str) -> tuple[bool, list[str]]:
         if "cert_or_dns_broken" in verdict:
             return False, [f"목록 페이지 접근 단계 이전에 SSL 인증서/DNS/connect 가 깨짐 "
                            f"(verdict={digest.get('verdict')!r}). 사이트가 사라졌거나 운영 오설정 — 등록 거부."]
-        if "STATIC_PATH_DEAD" in verdict:
+        if "static_path_dead" in verdict:
             return False, [f"입력 URL path 만 TCP/HTTP 연결 단계에서 응답 끊김/timeout "
                            f"(verdict={digest.get('verdict')!r}). 도메인 자체는 정상이지만 그 path 가 "
                            "죽었거나 운영자가 끊음 — 사이트 차단/안티봇 아님, 등록 거부."]
@@ -3089,7 +3089,7 @@ def _main_inner(argv) -> int:
             is_url_dead = (
                 ("target_not_found" in verdict)
                 or ("cert_or_dns_broken" in verdict)
-                or ("STATIC_PATH_DEAD" in verdict)
+                or ("static_path_dead" in verdict)
             )
             if is_url_dead:
                 rc_out = 4
