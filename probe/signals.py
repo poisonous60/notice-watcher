@@ -69,6 +69,14 @@ _S3_SOFT_404_CODE_RE = re.compile(
     r"<Code>\s*AccessDenied\s*</Code>", re.IGNORECASE
 )
 _HTML_404_RE = re.compile(r"\b404\b", re.IGNORECASE)
+_PARKED_ACCESS_DENIED_RE = re.compile(
+    r"<title[^>]*>\s*Access\s+Denied\s*</title>",
+    re.IGNORECASE,
+)
+_JS_REDIRECT_LANDER_RE = re.compile(
+    r"window\.location\.href\s*=\s*[\"']\s*/?(lander|parked|expired)[\"']",
+    re.IGNORECASE,
+)
 
 _GEO_BODY_MARKERS = (
     "Unavailable For Legal Reasons",
@@ -125,6 +133,20 @@ def _looks_like_403_soft_not_found(
     return None
 
 
+def _looks_like_parked_access_denied(
+    *,
+    body_text: str,
+    visible_text: str,
+) -> Optional[str]:
+    if not body_text:
+        return None
+    if not _PARKED_ACCESS_DENIED_RE.search(body_text[:5000]):
+        return None
+    if len(visible_text.strip()) > 500:
+        return None
+    return "parked Access Denied"
+
+
 def classify(
     *,
     status: Optional[int],
@@ -173,6 +195,20 @@ def classify(
 
     # 2) NOT_FOUND
     if status == 404:
+        return Classification.NOT_FOUND, notable
+    parked = _looks_like_parked_access_denied(
+        body_text=body_text,
+        visible_text=visible_text,
+    )
+    if parked:
+        notable.append(f"parked-domain marker: {parked}")
+        return Classification.NOT_FOUND, notable
+    if (
+        status == 200
+        and len(body_text.strip()) < 400
+        and _JS_REDIRECT_LANDER_RE.search(body_text)
+    ):
+        notable.append("JS-redirect to parked path")
         return Classification.NOT_FOUND, notable
 
     # 3) BLOCKED_GEO

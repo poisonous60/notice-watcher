@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlsplit
 
 from .baseline import is_baseline_blocked
 from .extract import static_vs_headless_check
@@ -58,6 +59,41 @@ def _is_cert_or_dns_error(err: Optional[str]) -> bool:
     if not err:
         return False
     return any(m in err for m in _CERT_OR_DNS_ERROR_MARKERS)
+
+
+def _registrable_domain(host: str) -> str:
+    host = (host or "").strip(".").lower()
+    if not host:
+        return ""
+    parts = host.split(".")
+    if len(parts) <= 2:
+        return host
+    multi = {"co.kr", "co.jp", "co.uk", "com.au", "com.br", "com.cn", "ne.jp", "or.kr"}
+    last2 = ".".join(parts[-2:])
+    if last2 in multi and len(parts) >= 3:
+        return ".".join(parts[-3:])
+    return last2
+
+
+def _cross_host_redirects(input_url: str, results: list[Result]) -> list[tuple[str, str]]:
+    input_host = urlsplit(input_url).hostname or ""
+    input_site = _registrable_domain(input_host)
+    if not input_site:
+        return []
+
+    ok_results = [r for r in results if r.classification == Classification.OK]
+    if not ok_results:
+        return []
+
+    changed: list[tuple[str, str]] = []
+    for r in ok_results:
+        if not r.final_url:
+            continue
+        final_host = urlsplit(r.final_url).hostname or ""
+        final_site = _registrable_domain(final_host)
+        if final_site and final_site != input_site:
+            changed.append((r.url, r.final_url))
+    return changed if len(changed) == len(ok_results) else []
 
 
 def _static_row_evidence(static_like_ok: list[Result], list_payload: dict) -> Optional[dict]:
@@ -297,7 +333,18 @@ def diagnose(
         # 2026-05-26 batch games-kr valofe×4 사례 (research_cloudflare_findings.md §G).
         if static_results and all(r.status == 406 for r in static_results):
             verdict_parts.append("WAF_406_BLOCK")
-        if static_ok and not any("Cloudflare" in n for r in static_results for n in r.notable):
+        primary_target_results = list(static_results)
+        if headless is not None:
+            primary_target_results.append(headless)
+        cross_host_redirects = _cross_host_redirects(url, primary_target_results) if baseline_ok else []
+        if cross_host_redirects:
+            sample_from, sample_to = cross_host_redirects[0]
+            verdict_parts.append("CROSS_HOST_REDIRECT")
+            notes.append(
+                "입력 URL 이 eTLD+1 이 다른 host 의 marketing/landing 페이지로 redirect 됨 — "
+                f"{sample_from} -> {sample_to}. 입력 host 의 게시판 path 로 볼 수 없어 url_dead 로 취급."
+            )
+        elif static_ok and not any("Cloudflare" in n for r in static_results for n in r.notable):
             verdict_parts.append("정적 HTTP로 충분")
         elif captured_ok:
             verdict_parts.append("캡처 헤더 주입 시 정적 가능")

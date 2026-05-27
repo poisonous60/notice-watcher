@@ -301,6 +301,29 @@ def _run_probe(url: str, *, lite: bool, timeout_s: float) -> None:
         raise SystemExit(f"probe 실패 (rc={rc})")
 
 
+def _probe_timeout_host_dead_reason(
+    url: str,
+    *,
+    httpx_module=httpx,
+) -> Optional[str]:
+    parsed = urlsplit(url)
+    if not parsed.netloc:
+        return None
+    base = f"{parsed.scheme or 'https'}://{parsed.netloc}/"
+    try:
+        with httpx_module.Client(timeout=8.0, follow_redirects=True) as client:
+            client.head(base)
+    except (
+        httpx_module.ConnectError,
+        httpx_module.ConnectTimeout,
+        httpx_module.ReadTimeout,
+        httpx_module.RemoteProtocolError,
+        OSError,
+    ) as e:
+        return str(e)[:120] or type(e).__name__
+    return None
+
+
 def _entry_matrix_has_ok_list(digest: dict) -> bool:
     for r in (digest.get("entry_matrix") or []):
         if r.get("target") == "list" and r.get("classification") == "OK":
@@ -331,7 +354,7 @@ def _policy_reject_is_host_wide(verdict: str) -> bool:
     2026-05-20 grill-with-docs (4) 결정 + codex 리뷰 후속.
     """
     v = (verdict or "").lower()
-    return "target_not_found" not in v
+    return not any(k in v for k in ("target_not_found", "cross_host_redirect"))
 
 
 def _has_verified_feed(digest: dict) -> bool:
@@ -379,6 +402,9 @@ def _policy_check(digest: dict, url: str) -> tuple[bool, list[str]]:
     if "login_marker" in verdict:
         return False, [f"로그인 본문 마커/form 감지 (퍼지, verdict={digest.get('verdict')!r}) — 목록을 실제로 "
                        "가리는지 LLM 분류기로 판정 (board 면 구출)."]
+    if "cross_host_redirect" in verdict:
+        return False, [f"입력 URL 이 다른 사이트의 landing/marketing URL 로 redirect 됨 "
+                       f"(verdict={digest.get('verdict')!r}). 입력 host 의 게시판 path 로 볼 수 없어 등록 거부."]
     # (구) soft_404 verdict 분기 제거 — not-found 200 shell 은 분류기 not_found 가 arbiter (ADR 0007 §확장).
     if not _entry_matrix_has_ok_list(digest):
         # HTML 진입은 다 막혔지만(BLOCKED 등) fetch-검증된 공개 RSS 피드가 있으면 피드로 등록 진행.
@@ -3090,6 +3116,20 @@ def _main_inner(argv) -> int:
                     timeout_s=min(PROBE_TIMEOUT_S, _remaining_budget(wall_deadline, reserve_s=60.0)),
                 )
             except RegisterTimeoutError as e:
+                dead_reason = _probe_timeout_host_dead_reason(url)
+                if dead_reason:
+                    try:
+                        _save_rejected(
+                            slug,
+                            url,
+                            reason=f"cert_or_dns_broken (probe timeout + baseline 8s HEAD): {dead_reason}",
+                            note="probe-timeout-host-dead",
+                            learn=False,
+                        )
+                    except Exception as se:  # noqa: BLE001
+                        print(f"[register] ⚠ REJECTED 마커 저장 실패 (rc=4): {se}", file=sys.stderr)
+                    print("[register] ❌ host dead baseline 확인 — url_dead (rc=4). probe timeout + HEAD 실패.")
+                    return 4
                 fp = _save_failed(slug, url, f"register probe timeout: {e}",
                                   last_config=None,
                                   last_feedback=f"[FAIL] probe_timeout: {e}")
@@ -3169,6 +3209,7 @@ def _main_inner(argv) -> int:
                 ("target_not_found" in verdict)
                 or ("cert_or_dns_broken" in verdict)
                 or ("static_path_dead" in verdict)
+                or ("cross_host_redirect" in verdict)
             )
             if is_url_dead:
                 rc_out = 4
