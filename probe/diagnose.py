@@ -31,6 +31,9 @@ _CERT_OR_DNS_ERROR_MARKERS = (
     "WinError 10061",
     "WinError 10060",                  # WSAETIMEDOUT — TCP connect timeout (Windows)
     "All connection attempts failed",
+    "RemoteProtocolError",             # httpx: server disconnected mid-stream (TCP RST 류)
+    "Server disconnected",
+    "RemoteDisconnected",
 )
 
 
@@ -330,6 +333,19 @@ def diagnose(
             notes.append(
                 "baseline(도메인 루트) 은 OK 이지만 입력 URL 의 모든 진입 시도가 봇 보호로 차단됨 — "
                 "사이트 전체 차단보다 특정 경로/엔트리 보호에 가까움."
+            )
+        elif (
+            target_results
+            and all(r.classification == Classification.UNKNOWN_ERROR for r in target_results)
+            and any(_is_cert_or_dns_error(r.error) for r in target_results)
+        ):
+            # baseline(도메인 루트) 은 살아있는데 *입력 path 만* TCP/HTTP 단계에서 disconnect/timeout/refused.
+            # 사이트 운영자가 특정 path 만 응답 끊거나 dead URL (404 대신 RST). cap_blocked 아님 — url_dead.
+            sample = next((r.error for r in target_results if _is_cert_or_dns_error(r.error)), "")
+            verdict_parts.append("STATIC_PATH_DEAD")
+            notes.append(
+                "baseline(도메인 루트) 은 OK 이지만 입력 URL 의 모든 진입 시도가 TCP/HTTP 연결 단계에서 실패 — "
+                f"path 자체가 죽었거나 운영자가 그 path 만 끊음 (사이트 차단/안티봇 아님). 샘플 에러: {sample}"
             )
 
     verdict = " / ".join(verdict_parts) if verdict_parts else "분류 보류"
