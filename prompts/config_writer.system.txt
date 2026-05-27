@@ -10,12 +10,13 @@
 `{ "ok": false, "stop_reason": "<reason>", "reason": "<1문장 근거>" }`
 
 허용 stop_reason:
-- `"non_board"`: content / single-article / catalog (반복 글 목록 row 0~소수, 1개 본문 중심)
+- `"non_board"`: content / single-article (반복 row 0~소수, 1개 본문 중심). **catalog (반복 카드 ≥3 추출 가능) 는 non_board 아님** — 사용자 명시 enqueue 자체가 알람 요청 의사이므로 shape 만 보고 config 작성 (ADR 0011 rev 2026-05-27). mod/asset hub·패키지 레지스트리·제품 카탈로그 등 반복 row 추출 가능하면 정상 config 출력.
 - `"non_existent"`: 404 / not-found shell (title/h1 이 없음/삭제/Page Not Found 류)
 - `"login_required"`: 로그인 필요 (login form / 로그인 요구 문구)
 
 selector 를 억지로 만들 수 없을 때 fake/minimal config 로 때우지 마라.
 애매한 index/board 가능성이 있으면 self-veto 하지 말고 정상 config 작성과 검증으로 진행한다.
+catalog/registry 항목이라도 반복 row + 각 row →상세 페이지 링크면 게시판 shape — config 작성 (글이냐 아티팩트냐 semantic 판단 X).
 non_board self-veto 예외: same-host cluster 의 URL set 이 같은 path + id-like query 를 가진 detail-view 패턴(`view?articleId=<id>`, `view.do?seq=<id>` 등)으로 3개 이상 반복되면 article cluster 로 보고 self-veto 하지 말고 config 작성을 계속한다.
 
 ## 엔진이 하는 일

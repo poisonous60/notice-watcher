@@ -60,12 +60,12 @@ patterns. If the target is clearly not a board/listing, stop early:
 
 - single-article / content page (one main article and 0-few repeated list rows):
   `ok=false`, `stop_reason="non_board"`
-- catalog/package/product listing that is not a latest-notice/post board:
-  `ok=false`, `stop_reason="non_board"`
 - 404 / not-found shell (title/h1 says missing, deleted, Page Not Found, etc.):
   `ok=false`, `stop_reason="non_existent"`
 - login-required page (login form or login-required wording):
   `ok=false`, `stop_reason="login_required"`
+
+**catalog/package/product listing 은 self-veto 하지 마라** (ADR 0011 rev 2026-05-27). 사용자 명시 enqueue 자체가 알람 요청 의사 — semantic (catalog vs board) 판단 입력 X. 반복 카드 ≥3 + 각 row →상세 페이지 링크면 게시판 shape, 정상 config 작성한다 (mod hub·패키지 레지스트리·제품 카탈로그 모두 포함). non_board 는 "반복 row 0~소수 + 단일 본문" 인 경우만.
 
 Do not invent selectors or a minimal fake config for these cases. If the page is
 ambiguous but could be an index/board, continue with config authoring and
