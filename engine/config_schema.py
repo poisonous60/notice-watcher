@@ -174,8 +174,8 @@ def _check_transform_chain(chain: Any, where: str, errs: list[str]) -> None:
 
 def _check_css_selector(sel: Any, where: str, errs: list[str]) -> None:
     """CSS 선택자가 엔진의 매처(bs4 `.select` = soupsieve)로 컴파일되는지 검증.
-    런타임 `soupsieve.SelectorSyntaxError`(예: LLM 이 Tailwind 클래스 `space-y-1.5` 의 점을
-    미escape → `.5` 가 잘못된 클래스) 가 fetch_list 도중 크래시(rc=1)나는 걸 config 검증 시점에
+    런타임 `soupsieve.SelectorSyntaxError`/`NotImplementedError`(예: LLM 이 Tailwind 클래스
+    `space-y-1.5` 의 점이나 `lg:flex` 의 colon 을 미escape) 가 fetch_list 도중 크래시(rc=1)나는 걸 config 검증 시점에
     선반영 — register.py retry feedback 로 회수. soupsieve 미설치 시 skip (jsonschema 와 동일)."""
     if not isinstance(sel, str):
         return
@@ -191,12 +191,16 @@ def _check_css_selector(sel: Any, where: str, errs: list[str]) -> None:
     except soupsieve.SelectorSyntaxError as ex:
         first = str(ex).splitlines()[0] if str(ex) else ex.__class__.__name__
         errs.append(f"{where}: CSS 선택자 컴파일 실패 — {first}. "
-                    f"Tailwind 숫자 클래스(`space-y-1.5`)의 점은 `\\.` escape 필요 (예: `space-y-1\\.5`). 선택자={s!r}")
+                    f"Tailwind utility class 의 점(`.`)과 colon(`:`)은 class selector 안에서 backslash escape 필요: "
+                    f"`lg:space-y-1.5` → `.lg\\:space-y-1\\.5`. "
+                    f"`:aspect-w-1`처럼 leading `:`만 쓰면 pseudo-class 로 해석되므로 class selector 점(`.`)을 붙여라. 선택자={s!r}")
     except NotImplementedError as ex:
         first = str(ex).splitlines()[0] if str(ex) else ex.__class__.__name__
         errs.append(f"{where}: CSS 선택자 컴파일 실패 — {first}. "
                     f"soupsieve(bs4 `.select`)는 pseudo-element(`::before`/`::after`/`::first-line` 등)를 지원하지 않음 — "
-                    f"엔진은 DOM 노드만 매칭하므로 pseudo-element 제거 또는 일반 자식 selector 로 대체 필요. 선택자={s!r}")
+                    f"엔진은 DOM 노드만 매칭하므로 pseudo-element 제거 또는 일반 자식 selector 로 대체 필요. "
+                    f"또한 `Pseudo-class ':<name>'` 오류는 Tailwind colon-variant 를 escape 하지 않았거나 class 점(`.`)을 빠뜨린 신호일 수 있음: "
+                    f"`.lg\\:flex` 처럼 backslash 로 escape. 선택자={s!r}")
 
 
 _ALWAYS_CONTEXT = {"site", "board"}  # extract_row 가 항상 context 에 넣는 키

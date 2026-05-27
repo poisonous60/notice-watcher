@@ -38,7 +38,12 @@ def run() -> list[tuple[str, bool, str]]:
         cases.append(("row_selector_malformed_rejected", False, "거부 안 됨"))
     except ConfigError as e:
         msg = str(e)
-        ok = "row_selector" in msg and "CSS 선택자 컴파일 실패" in msg and "escape" in msg
+        ok = (
+            "row_selector" in msg
+            and "CSS 선택자 컴파일 실패" in msg
+            and "escape" in msg
+            and r".lg\:space-y-1\.5" in msg
+        )
         cases.append(("row_selector_malformed_rejected", ok, msg.splitlines()[1] if "\n" in msg else msg))
 
     # 3) field source selector 의 미escape 클래스 → 거부 (_check_source 경유).
@@ -73,6 +78,20 @@ def run() -> list[tuple[str, bool, str]]:
         msg = str(e)
         ok = "CSS 선택자 컴파일 실패" in msg and "pseudo-element" in msg.lower()
         cases.append(("pseudo_element_rejected", ok, msg.splitlines()[1] if "\n" in msg else msg))
+
+    # 7) Tailwind colon variant 를 leading pseudo-class 처럼 쓴 selector → escape 힌트 포함 거부 (outfit7 재현).
+    try:
+        validate_config(_cfg(row_selector="a:aspect-w-1"))
+        cases.append(("tailwind_colon_variant_feedback", False, "거부 안 됨"))
+    except ConfigError as e:
+        msg = str(e)
+        ok = (
+            "CSS 선택자 컴파일 실패" in msg
+            and "Tailwind" in msg
+            and "colon-variant" in msg
+            and r".lg\:flex" in msg
+        )
+        cases.append(("tailwind_colon_variant_feedback", ok, msg.splitlines()[1] if "\n" in msg else msg))
 
     return cases
 
