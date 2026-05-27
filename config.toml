@@ -17,6 +17,7 @@ page_size = 30               # fetch_list 첫 페이지 크기
 max_new_articles = 10        # 폴링 1회당 본문 fetch 상한 (사이트당)
 breakage_threshold = 2       # 연속 N회 깨지면 reprobe 잡 enqueue
 reprobe_fail_streak_limit = 3  # reprobe 가 N회 연속 fail 이면 .BUG.json 자동 박아 자동 재시도 차단 (운영자 review 대기)
+broken_threshold = 3         # 연속 N회 깨지면 .BROKEN.json health sidecar — deliver_due 가 사용자에 "❗ 깨졌어요" 안내 (notify_empty=1 구독만). dashboard `/triage/broken` 큐.
 seen_cap = 5000              # seen_post_ids 무한 증가 방지 상한
 
 [worker]
