@@ -46,4 +46,4 @@ live curl 결과:
 
 ## 후보 (deferred)
 
-`_deferred_heuristics.md` 의 `wp_recognizer_502_immediate_cap_blocked` — WP recognizer dispatch 가 502/timeout 만나면 폴백 X, 즉시 cap_blocked REJECTED 자동 박기 (agentic generate 호출 낭비 방지). cohort 1건이라 보류.
+`_deferred_heuristics.md` 의 `wp_recognizer_502_immediate_cap_blocked` — WP recognizer dispatch 가 502/timeout 만나면 폴백 X, 즉시 cap_blocked REJECTED 자동 박기 (agentic generate 호출 낭비 방지). catalog 1건이라 보류.

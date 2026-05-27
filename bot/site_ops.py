@@ -187,6 +187,17 @@ def public_reason(reason: Optional[str]) -> str:
     return _INTERNAL_HINT_TAIL_RE.sub("", reason).strip() or "-"
 
 
+def public_rejected_note(info: Optional[dict]) -> str:
+    """사용자에게 보여줄 REJECTED note. canonical URL 변경이면 재시도할 URL hint 를 붙인다."""
+    info = info or {}
+    note = str(info.get("note") or "없음")
+    hint = str(info.get("hint") or "").strip()
+    if info.get("reason") == "canonical_url_change" and hint.startswith(("http://", "https://")):
+        retry = f"URL이 바뀐 것 같아요. `/watch {hint}` 로 다시 시도해 주세요."
+        return retry if note == "없음" else f"{note}\n{retry}"
+    return note
+
+
 def baseline_count(slug: str) -> Optional[int]:
     st = STATE_DIR / f"{slug}.json"
     try:

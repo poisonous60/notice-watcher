@@ -31,4 +31,4 @@ dev box `register.py --reuse-probe` 1회: probe artifact reuse → agent api_loo
 
 ## 후보 (deferred)
 
-`_deferred_heuristics.md` 의 `spa_shell_with_hr_aggregator_detail_click` — SPA shell + detail click host ≠ list host = aggregator 패턴. cohort 1건이라 보류.
+`_deferred_heuristics.md` 의 `spa_shell_with_hr_aggregator_detail_click` — SPA shell + detail click host ≠ list host = aggregator 패턴. catalog 1건이라 보류.
