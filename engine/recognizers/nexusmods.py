@@ -56,9 +56,9 @@ def _build(m: "re.Match", url: str) -> Optional[dict]:
             "Origin": "https://www.nexusmods.com",
         },
         "timeout": 15,
-        "nav_timeout_ms": 20000,
-        "idle_timeout_ms": 12000,
-        "quiet_ms": 800,
+        "nav_timeout_ms": 12000,
+        "idle_timeout_ms": 3000,
+        "quiet_ms": 250,
         "list": {
             "url_template": f"https://www.nexusmods.com/{game}/mods/?BH={{board}}",
             "pagination": {"kind": "query_param", "page_param": "page"},
