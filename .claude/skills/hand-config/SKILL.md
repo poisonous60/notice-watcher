@@ -189,12 +189,12 @@ Claude 직접 처리 예외 — *AND 조건 전부 만족* 일 때만:
 2. **일반화 신호 punt** — 청크 안에 2+ slug 가 같은 패턴(URL 누락 파라미터·JS detail 함수·TLS handshake 실패·platform CMS 동형) 보이는데 case body §일반화 후보 섹션이 비었거나 "사이트별 매핑이라 일반화 X" 1줄. (2026-05-24 krpublic: KR egov `menuid`/`menuCd` 누락 4건 동일 + `goView(seq)` JS detail 3건 동일 punt.)
 3. **ALLOW-LIST 밖 punt** — fix layer 가 engine/probe/prompts 인데 "allow-list 밖이라 안 함" 1줄로 끝남 (후속 chunk 에 정보 전달 X). 정상은: 단일 site config 는 ALLOW-LIST 안에서 진행 + escalate 섹션에 분석 완전 적기.
 4. **`no_change` 정당화 불충분** — 시도/차단신호(verbatim)/진짜 해결 경로 3개 중 빠진 게 있음.
-5. **`no_change` layer 오판** — auto/api_loop 이 fail 이고 generic layer 를 못 찾았는데 `no_change escalate` 로 끝냄. 이 경우 §2 의 최종 트랙은 §2e(수동/handwritten config) 검토다. generic improvement 부재는 site outcome 이 아니며, case outcome 은 그 사이트에 실제로 한 조치 기준으로 기록한다.
+5. **`no_change` 정당화 (refactor v3 기준)** — `no_change` outcome 은 valid terminal 이다 (Track B 6 자리 all miss + ship evidence 0 일 때). *invalid* 인 경우만: (a) ship evidence 가 있는데 (사용자 명시 요청 또는 `/watch`·`/preview` command origin) §2e 안 박았거나 (b) §2 강제 인용 4a/4b/4d evidence 가 빠짐. case body 가 6-layer miss 이유 + park 자리 분기 명시 안 했으면 `no_change` 정당화 불충분. site 단위 ship 강제 X — generic improvement 부재 자체는 invalid 아님.
 
 **Claude 의 audit 절차** (각 chunk merge 전):
 - 모든 case body 를 grep: `일반화 안 되는 이유` + `allow-list` + `보류` 라인 등장 빈도. 청크 멤버 수 대비 절반 이상이면 §0c-회피 2/3 의심.
 - 같은 청크 안에서 failure_keys 또는 fix surface 가 겹치는 slug 쌍 검색 — 일반화 후보 섹션 있는지 확인.
-- `no_change` case .md 의 `fix_layer` 를 audit: §2a~§2d 근거 없이 끝난 case 는 §2e(configs/host_*.json 또는 handwritten adapter) 검토가 있었는지 확인.
+- `no_change` case .md 의 audit: 6-layer (E/D/C/B/A/F) miss 이유 각각 1줄 적혔는지, park bucket 분기 (4d) 명시 됐는지, ship evidence 가 *있다면* §2e 진입 흔적 있는지. 없으면 `no_change` 정당화 불충분 (위 5번).
 - 위반 잡으면 발견 사실을 다음 chunk 의 task 입력 머리에 명시 (codex 가 두 번째에도 같은 punt 안 하게).
 
 ---
@@ -331,7 +331,7 @@ artifact 없는 §0 신규 진입 (link 만 받은 첫 시도) 케이스는 예�
 
 진입 조건 (둘 다 만족 필수):
 - (a) Track B canonical 6-layer (E/D/C/B/A/F) 모두 miss, 각 이유 case body 적힘
-- (b) 사용자가 봇 사용자 향 *이 사이트 즉시 작동* 을 명시 요청 (user prompt 어휘 verbatim 인용 — 자기-해석 X)
+- (b) 사용자가 봇 사용자 향 *이 사이트 즉시 작동* 을 명시 요청 (§2 4c context 분기: `/watch`·`/preview` 직접 흐름 = command origin 자체가 evidence, 별도 verbatim 인용 불요 · batch/operator 흐름 = user prompt 어휘 verbatim 인용 필수, 자기-해석 X)
 
 handwritten 만 가능: 클릭/스크롤로만 글이 뜨는 SPA, 강한 anti-bot, 비공개판이지만 *사용자가 storage_state 로그인 경로 제공 의사 있음*, 본문이 클라이언트 라우트라 server-render 본문 없음 등 진짜 코너 케이스.
 
@@ -440,12 +440,17 @@ dynamic family (`recognizer:*`, `[FAIL]:<check>`) 는 추가 필요 X — 자동
      --reason "<1-3줄>" [--fix-layer <C+D>] [--failure-keys <k1,k2>] [--case-md-slug <slug>]
    ```
    이 시점 HEAD = 본 case 의 commit → `commit_sha` 와 `files_changed` 정확. commit 전 실행하면 stderr 에 `⚠ staged/working tree 변경 있음 — commit 후 호출 권장` 경고만 박고 진행 (derive 부정확 가능). outcome 분류는 §6 step 5 표 참조. 잊어도 push 차단 X (~10% gap). dashboard `/cases` 에서 표시.
-   **outcome 결정 rule (Track B + Track A 두 축)**: Track B 6 자리 (E/D/C/B/A/F) all miss + 사용자 ship 명시 요청 0 = `no_change` outcome + park (자리는 §1 분기 4d — classifier fallthrough 면 `park-gate-fail`, true board 면 `triage_later.json` 손-park). Track B miss + ship 요청 hit = §2e 진입 (수동 config). Track B hit 1+ = `improved` outcome (commit prefix `[fix-layer: X]`). Track A handcraft 만 = `handcrafted`. case outcome 은 *실제 한 조치* 기준이고, generic improvement 부재 자체는 outcome 아님 — 그 경우 park = valid terminal. **site 단위 ship 강제 X**.
+   **outcome 결정 rule (mechanism 기준 — ADR 0005)**: Track B hit = `fix_layer` 박힘 (commit prefix `[fix-layer: X]`). *outcome* 은 mechanism (scope) 기준 별도:
+   - **`improved`** = generic unknown-type 해결 (probe heuristic·classifier prompt·config_writer prompt·새 strategy/transform·D retry recipe 등 — 같은 패턴 사이트 *N개* 자동 처리)
+   - **`handcrafted`** = platform/config/adapter coverage (recognizer 신설·수동 config·손어댑터 — fix_layer F 여도 *그 platform/사이트 묶음만*, ADR 0005)
+   - **`no_change`** = Track B 6 자리 all miss + ship evidence 0 (park = valid terminal)
+   - **`rejected`** / **`rejected_with_policy`** = `.REJECTED.json` 박힘 (영구 거부)
+   - **`error`** = 진단/배포 중 bug
 
-8. **N100 배포** (운영 메모 §8 SoT) — `ssh <user>@<host> 'cd ~/notice-watcher && git pull --ff-only && .venv/bin/python scripts/register.py --config "configs/<slug>.json"'`.
-   - **`adapters/`·`engine/`·`scripts/notify.py`·`bot/` 변경 시 뒤에 `&& systemctl --user restart notice-bot.service`** — 봇 import 캐시. 안 하면 `make_adapter() ValueError`.
-   - `requirements.txt` 변경 시 앞에 `.venv/bin/pip install -r requirements.txt &&`.
-   - 확인: `register.py --list` 에 slug 가 `registered`. SSH 안 되면 Tailscale 먼저 (`tailscale status` 로 `n100-noticewatcher` 보이는지) → LAN-only 면 콘솔 `ip a` 로 IP 확인 (운영 메모 §1~2).
+   즉 Track B hit ≠ 무조건 improved. C-layer 휴리스틱 추가가 (a) 미지 unknown-type 해결 → improved, (b) 특정 platform 의 row 패턴 추출 한정 → handcrafted. case outcome 은 *실제 mechanism* 기준이고, generic improvement 부재 자체는 invalid `no_change` 아님 — 그 경우 park = valid terminal. **site 단위 ship 강제 X**.
+
+8. **N100 배포** (운영 메모 §8 + ADR 0018 SoT) — `ssh $DEPLOY_HOST 'bash ~/notice-watcher/scripts/n100_deploy.sh'`. wrapper 가 atomic stop/start (notice-poll.timer stop → in-flight service 끝나기 대기 → git pull → requirements 변경 시 pip install → bot 코드 변경 시 notice-bot.service restart → notice-poll.timer start). **raw `git pull --ff-only` 직접 호출 금지** (cron×commit race window). config 한 장만 추가했고 봇 코드 변경 0 이면 wrapper 가 restart skip — `--list` 로 등록 확인만.
+   - 확인: `ssh $DEPLOY_HOST '.venv/bin/python scripts/register.py --list'` 에 slug 가 `registered`. SSH 안 되면 Tailscale 먼저 (`tailscale status` 로 `n100-noticewatcher` 보이는지) → LAN-only 면 콘솔 `ip a` 로 IP 확인 (운영 메모 §1~2).
 
 8c. **모든 fail 의 종료 상태 박기 의무** (2026-05-26 박힘) — batch/triage 작업 *종료 보고 전* 각 미등록 slug 가 다음 4종 중 하나여야 한다. **목적 = triage/FAILED marker 잔존 X (다음 batch/세션이 작업큐서 또 안 봄) + 사용자 향 응답 분류 정확화 (FAILED='재시도 가능' / REJECTED='영구 거부') + sibling state.json/FAILED.json/triage_queue 일괄 cleanup**. dashboard fail-kind KPI 는 jobs row 기반 history 통계라 marker 영향 X — *dashboard KPI 정리 목적 아님*.
 
@@ -575,7 +580,7 @@ review_prompt = f'''너는 notice-watcher 의 hand-config 변경 reviewer 다.
 
 원칙: 위에서부터 차례 (E > D > C > B > A > F).
 
-# 검증 항목 (8 개) — 하나라도 FAIL 이면 전체 FAIL
+# 검증 항목 (11 개) — 하나라도 FAIL 이면 전체 FAIL
 
 1. case 파일 존재 + 필수 frontmatter (slug/url/status/date)
 2. fix_layer 정합성 — declared layer 와 변경 파일 세트 일치
@@ -585,6 +590,9 @@ review_prompt = f'''너는 notice-watcher 의 hand-config 변경 reviewer 다.
 6. docs/cases/INDEX.md 동기화 — cases_index.py 실행 흔적
 7. 새 strategy → scripts/probe_smoke.py 의 REPS 에 fixture entry + _stage2_check_digest 분기 추가
 8. 새 @heuristic → tests/probe_heuristics/test_<name>.py fixture 추가
+9. **Track B 6-layer audit (4a)** — case body 에 E/D/C/B/A/F 각 자리별 `hit — <자리>` 또는 `miss — <이유 1줄>` 적혔는지. C miss 시 §2c 3카테고리 매핑까지. 빠진 자리 있으면 FAIL.
+10. **Track A 진입 ship evidence (4b)** — Track A (수동 config/손어댑터) 변경 있으면 case body 에 ship evidence verbatim 인용 있어야 함 (`/watch`·`/preview` command origin 또는 사용자 명시 요청 문장 + slug/URL 직결). evidence 없는 config-only 변경 = FAIL.
+11. **park 자리 분기 (4d)** — `no_change` outcome 이면 park bucket (classifier fallthrough = `park-gate-fail` / true-board no-ship = `triage_later.json` / cap_blocked = auto Later) 중 어느 자리인지 case body 에 명시. 빠지면 FAIL.
 
 # case_runs row 추가 검증
 - row=[] 면 cases_index --backfill-db 잊음. PASS but warn.
