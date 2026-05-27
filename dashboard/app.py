@@ -391,7 +391,9 @@ async def triage_broken_page(request: Request, conn=Depends(get_conn)):
     # cb 큰 순서 (자가복구 한계 가까운 후보 위로). 같은 cb 면 last_at 최신 우선.
     items.sort(key=lambda r: (-r["cb"], r["last_at"], r["slug"]), reverse=False)
     items.sort(key=lambda r: -r["cb"])
-    return _render("triage_broken.html", request, items=items, active="triage")
+    bulk_prompt = prompts.broken_recover_bulk(items=items) if items else None
+    return _render("triage_broken.html", request,
+                   items=items, bulk_prompt=bulk_prompt, active="triage")
 
 
 @app.post("/triage/broken/clear", response_class=HTMLResponse)
@@ -776,6 +778,18 @@ async def sub_detail(request: Request, slug: str = Depends(require_slug),
         sample_url = result.latest_job.get("url")
     p_redo = prompts.hand_config_redo_slug(slug=slug, url=sample_url)
     p_diag = prompts.diagnose_slug(slug=slug)
+    # BROKEN sidecar 있으면 복구 프롬프트 (등록은 성공 + reprobe 자가 봉합 실패 frame).
+    p_broken = None
+    if broken_payload:
+        p_broken = prompts.broken_recover_slug(
+            slug=slug,
+            url=broken_payload.get("url") or sample_url,
+            cb=int(broken_payload.get("consecutive_breakage", 0) or 0),
+            last_status=str(broken_payload.get("last_status", "") or ""),
+            first_at=str(broken_payload.get("first_at", "") or ""),
+            last_at=str(broken_payload.get("last_at", "") or ""),
+            count=int(broken_payload.get("count", 1) or 1),
+        )
     # 뒤로가기 — 어디서 왔는지에 따라. 기본은 /subs.
     back = {
         "triage": ("/triage/failed", "FAILED 큐"),
@@ -784,7 +798,7 @@ async def sub_detail(request: Request, slug: str = Depends(require_slug),
     return _render("sub_detail.html", request,
                    result=result, slug=slug, failed=failed_payload,
                    broken=broken_payload,
-                   p_redo=p_redo, p_diag=p_diag,
+                   p_redo=p_redo, p_diag=p_diag, p_broken=p_broken,
                    back_href=back[0], back_label=back[1], active="subs")
 
 

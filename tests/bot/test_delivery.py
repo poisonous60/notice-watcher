@@ -175,6 +175,68 @@ def run() -> list[tuple[str, bool, str]]:
                       and any("s1" in c and "없어요" in c for c in contents3)
                       and any("Tnew" in c for c in contents3),
                       f"n={n3} status={status3} sent={sent!r}"))
+
+        # ----- 12. broken rev3: owed>0 + broken slug → digest 마지막 chunk 끝에 푸터 append.
+        # 별도 deliver() 호출 0 (broken 만 별도 message 금지). empty trailing 은 그대로 (사용자 정정).
+        from bot import site_ops
+        from scripts import register as _reg
+        sent.clear()
+        conn9 = _conn()
+        # s1 = broken (구독자 1, notify_empty=1, posts 0), s2 = 새 글 1 있음
+        for slug in ("s1", "s2"):
+            conn9.execute(
+                "INSERT INTO subscriptions(user_id,slug,url,filter_prompt,schedule,target_kind,target_id,notify_empty,created_at) "
+                "VALUES('u1',?,?,NULL,'realtime','dm','u1',1,'2000-01-01T00:00:00+00:00')",
+                (slug, f"https://example.com/{slug}"))
+        db.ensure_setting(conn9, target_kind="dm", target_id="u1")
+        conn9.commit()
+        db.upsert_post(conn9, "s2", _post("new2"))
+        # state_dir 임시 — broken sidecar 박음
+        tmpd = Path(tempfile.mkdtemp())
+        orig_so_state = site_ops.STATE_DIR
+        orig_rg_state = _reg.STATE_DIR
+        site_ops.STATE_DIR = tmpd
+        _reg.STATE_DIR = tmpd
+        try:
+            _reg._save_broken("s1", "https://example.com/s1", cb=9, last_status="poll_timeout")
+            n4, status4 = dd.flush_target(conn9, "tok", {"target_kind": "dm", "target_id": "u1"},
+                                           today_kst="2026-05-20", dry_run=False)
+        finally:
+            site_ops.STATE_DIR = orig_so_state
+            _reg.STATE_DIR = orig_rg_state
+        contents4 = [row[2] for row in sent]
+        # s1 broken — empty_slugs 안 들어감 (broken path). empty_notice trailing 도 X.
+        # digest 1 chunk + 푸터 append → 발송 message 1개.
+        digest_has_footer = any("Tnew2" in c and "참고: 며칠째 깨진" in c and "s1" in c
+                                for c in contents4)
+        cases.append(("flush_broken_owed_pos_footer_in_digest",
+                      n4 == 1 and status4 == "ok" and len(sent) == 1 and digest_has_footer,
+                      f"n={n4} status={status4} sent_n={len(sent)} contents={contents4!r}"))
+
+        # ----- 13. broken rev3: owed=0 + broken → empty_notice 자리 inline replace. 메시지 1개.
+        sent.clear()
+        conn10 = _conn()
+        conn10.execute(
+            "INSERT INTO subscriptions(user_id,slug,url,filter_prompt,schedule,target_kind,target_id,notify_empty,created_at) "
+            "VALUES('u1','s_brk','u',NULL,'realtime','dm','u1',1,'2000-01-01T00:00:00+00:00')")
+        db.ensure_setting(conn10, target_kind="dm", target_id="u1")
+        conn10.commit()
+        tmpd2 = Path(tempfile.mkdtemp())
+        site_ops.STATE_DIR = tmpd2
+        _reg.STATE_DIR = tmpd2
+        try:
+            _reg._save_broken("s_brk", "https://example.com/brk", cb=5, last_status="poll_timeout")
+            n5, status5 = dd.flush_target(conn10, "tok", {"target_kind": "dm", "target_id": "u1"},
+                                           today_kst="2026-05-20", dry_run=False)
+        finally:
+            site_ops.STATE_DIR = orig_so_state
+            _reg.STATE_DIR = orig_rg_state
+        contents5 = [row[2] for row in sent]
+        cases.append(("flush_broken_owed_zero_inline_only",
+                      n5 == 0 and status5 == "empty" and len(sent) == 1
+                       and "❗" in contents5[0] and "s_brk" in contents5[0]
+                       and "5회" in contents5[0],
+                      f"n={n5} status={status5} sent={sent!r}"))
     finally:
         dd.summarize_post, dd.filter_pass, dd.deliver, dd.client_for = orig
 

@@ -264,3 +264,120 @@ def diagnose_slug(*, slug: str) -> str:
         f"- 필요하면 `python scripts/inspect_subs.py fetch {slug}` 로 fetch 결과 확인\n"
         f"- 깨졌으면 수동 config 재작성 (hand-config skill) 까지 진행."
     )
+
+
+# --------------------------------------------------------------------------- #
+# BROKEN 복구 — `.BROKEN.json` health sidecar 박힌 slug 의 자가 복구 실패 후 사람-개입 경로.
+# hand-config (FAILED 큐) 와 평행 — 다른 entry frame:
+#   - 등록은 *성공* 한 상태 (state.json 살아있음, polling 계속)
+#   - reprobe rc=0 가 자체 봉합 못 함 / 또는 reprobe 도 똑같이 깨짐
+#   - 다음 deliver_due 에서 사용자에게 ❗ 인라인 표시 중 (notify_empty=1 구독만)
+#   - 복구 목표 = root-cause 봉합 후 commit + push + N100 deploy → 다음 poll 가 자동 cb=0 + BROKEN unlink
+# --------------------------------------------------------------------------- #
+def broken_recover_slug(*, slug: str, url: Optional[str] = None,
+                          cb: int = 0, last_status: str = "",
+                          first_at: str = "", last_at: str = "",
+                          count: int = 1) -> str:
+    """단일 BROKEN slug 복구 프롬프트 (sub_detail / triage_broken 에서 1건씩 복사).
+
+    hand-config (FAILED) 와 entry frame 다름 — 등록 성공 + 자가 복구 실패 = root-cause 추적·봉합.
+    """
+    lines = [
+        f"다음 broken slug 복구해줘 (skill: hand-config — BROKEN sidecar 복구 모드).",
+        "",
+        f"slug: {slug}",
+    ]
+    if url:
+        lines.append(f"URL: {url}")
+    lines += [
+        f"consecutive_breakage: {cb}",
+        f"last_status: {last_status or '?'}",
+        f"first_broken_at: {first_at or '?'}",
+        f"last_seen_at: {last_at or '?'}",
+        f"BROKEN 마커 갱신 횟수: {count}",
+        "",
+        "상태: 등록은 성공한 상태 (state.json 살아있음, polling 계속 도는 중). N100 reprobe 가",
+        "자체 복구 못해서 .BROKEN.json health sidecar 박힘 — 사용자에게는 다음 deliver_due 에서",
+        "인라인 표시 (digest 푸터 또는 owed=0 자리 ❗). 너는 root-cause 봉합 후 commit + N100 deploy 까지.",
+        "",
+        "## 진단 frame (live first — feedback-batch-frame-live-first)",
+        "0. **live 확인** — `curl -sI <URL>` 또는 browser 로 *지금* 사이트 직접 본 1줄.",
+        "   (probe artifact 만 보지 마라 — stale 일 수 있음.)",
+        "1. **probe artifact pull** — `python scripts/triage.py pull --slug <slug>` 시도.",
+        "   결과: register_signal_log + traffic.har + diagnosis.json 받음.",
+        "2. **last_status 별 가설**:",
+        "   - `poll_timeout` → fetch wall-cap 넘김. SPA 무거움 / chromium hang / 새 anti-bot.",
+        "   - `chromium_lock_timeout` → flock 경합 (다른 사이트 락 점유). per-site 문제 아닐 가능성.",
+        "   - `reprobe_enqueued` → poll 마다 깨짐, reprobe rc=0 zombie 후보 OR reprobe 도 같은 fail.",
+        "   - 기타 status: 깨짐 신호 trace 확인 (output/snapshot/poll_state/<slug>.json `last_status`).",
+        "3. **root-cause 후보 (Track B 1순위)**:",
+        "   - C (probe heuristic) / B (few-shot) / A (system prompt) / F (engine) 중 일반화 자리 봉합.",
+        "   - 이번 slug 단일 fix 가 필요한 경우 `configs/<slug>.json` 손-편집 (Track A) — 최후 수단.",
+        "4. **fix 적용** → `python scripts/probe_smoke.py --stage 3 --stage 5` PASS.",
+        "5. `docs/cases/<slug>.md` 작성 (outcome=improved / handcrafted / no_change).",
+        "6. **commit + push + N100 deploy**:",
+        "   - `git add <명시 파일>` (남의 파일 X — CLAUDE.md §9b)",
+        "   - `git commit -m \"fix(broken): " + slug + " — <root-cause> 봉합\"`",
+        "   - `git push origin main`  (pre-push hook = probe_smoke gate)",
+        "   - `ssh $DEPLOY_HOST 'bash ~/notice-watcher/scripts/n100_deploy.sh'`",
+        "7. 다음 poll 사이클에서 정상 fetch 면 N100 가 cb=0 + .BROKEN.json unlink 자동.",
+        "   dashboard `/triage/broken` 에서 빠짐 → 사용자 deliver 도 ❗ 제거됨.",
+        "",
+        "## 회수 한계",
+        "- 복구 안 풀리면 case 에 보류 사유 (capability_blocked → Later / cap 한계 → REJECTED) 명시.",
+        "- N100 의 `.BROKEN.json` 직접 unlink 금지 — 자가 복구가 정상 경로 (마커 상태 살아있어야 다음 deliver 에 표시).",
+        "- N100 가 자가 복구 실패 누적 (count↑) 이면 dashboard 에 cb 표시되어 우선순위 가시화됨.",
+    ]
+    return "\n".join(lines)
+
+
+def broken_recover_bulk(*, items: list[dict]) -> str:
+    """BROKEN 큐 일괄 복구 프롬프트 (triage_broken 페이지 상단 액션).
+
+    items = [{"slug", "url", "cb", "last_status", "first_at", "last_at", "count"}, ...].
+    bulk = 같은 host/플랫폼 cluster 면 한 번 fix 로 여러 slug 봉합 (Track B 일반화).
+    """
+    n = len(items)
+    lines = [
+        f"BROKEN 큐 일괄 복구해줘 (skill: hand-config — BROKEN sidecar 복구 모드). 총 {n}건.",
+        "",
+        "## 상태 (rev3)",
+        "- 모두 등록 성공 상태 + N100 자가 복구 실패 → `.BROKEN.json` sidecar 박힘.",
+        "- 사용자 deliver_due 가 인라인 ❗ 로 슬러그별 표시 중 (notify_empty=1 구독만).",
+        "- 자동 트리거 X — dashboard 보고 사람-호출. 자가 복구 (다음 reprobe rc=0 / 정상 poll) 1차 경로.",
+        "",
+        "## 처리 우선순위",
+        "1. **같은 host / 플랫폼 cluster** 먼저 — 한 번 Track B (probe/prompt/engine) fix 로 여러 slug 봉합.",
+        "2. 단일 slug 만 깨짐 = `broken_recover_slug` frame (live → probe pull → root-cause → fix → push).",
+        "3. capability_blocked (anti-bot/captcha/stealth 한계) 의심이면 손-config 그만, Later (`triage_later.json`) 박기.",
+        "4. 진짜 cap 한계 (TLS reset / cloudflare turnstile / etc) 면 REJECTED 박고 polling 중단 (`_save_rejected` ssh remote).",
+        "",
+        "## 청크 분할",
+        f"- 총 {n}건 — 보통 4~10 건 규모라 청크 분할 의미 X. 단일 Claude 가 순서대로 처리.",
+        "- 같은 host 묶음 식별: 슬러그 prefix 매칭 (`host_<host>_<seg>_<hash>`).",
+        "",
+        "## 대상 slug",
+    ]
+    for it in items:
+        cb = int(it.get("cb", 0) or 0)
+        last_status = it.get("last_status") or "?"
+        url = it.get("url") or ""
+        url_note = f" ({url})" if url else ""
+        lines.append(f"- `{it['slug']}` cb={cb} status={last_status}{url_note}")
+    lines += [
+        "",
+        "## 절차 (각 slug)",
+        "각 slug 에 `broken_recover_slug` frame 적용:",
+        "0. live 확인 (curl -sI 또는 browser)",
+        "1. probe artifact pull",
+        "2. last_status 별 가설 → root-cause",
+        "3. Track B 일반화 시도, 안 되면 Track A (slug-specific config) 또는 capability_blocked Later/REJECTED",
+        "4. probe_smoke PASS",
+        "5. case 작성",
+        "6. commit + push + N100 deploy",
+        "",
+        "## 종료 보고",
+        f"보고 시 종료 분포 명시 (`recovered N / Later N / REJECTED N / pending N = {n}`).",
+        "각 slug 가 4종 종료 중 하나에 있어야 함 — `.BROKEN.json` 잔존도 OK (다음 poll 가 자가 복구 또는 재박음).",
+    ]
+    return "\n".join(lines)

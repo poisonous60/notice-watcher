@@ -7,9 +7,23 @@
 <p class="muted">
   등록은 됐지만 <code>consecutive_breakage ≥ broken_threshold</code> 도달 → <code>output/poll_state/&lt;slug&gt;.BROKEN.json</code> health sidecar 박힘.
   <b>차단 marker 아님</b> — polling/reprobe/delivery 그대로 진행. 다음 reprobe rc=0 또는 정상 poll 가 자동으로 <code>cb=0</code> reset + sidecar unlink.
-  사용자에게는 <code>deliver_due</code> 의 status notice 자리에서 "❗ 깨졌어요" 안내가 표시됨 (notify_empty=1 구독만).
-  자가 복구 안 풀리면 운영자가 root-cause 봉합 후 "BROKEN clear" 로 손-정리.
+  사용자에게는 <code>deliver_due</code> 의 인라인 상태 (digest 푸터 또는 owed=0 자리) 에서 "❗ 깨졌어요" 표시 (notify_empty=1 구독만).
+  자가 복구 안 풀리면 운영자가 root-cause 봉합 → commit + push + N100 deploy → 다음 poll 가 자동 정리.
 </p>
+
+{% if bulk_prompt %}
+<h3>🛠 Claude Code 복구 프롬프트 (일괄)</h3>
+<div class="prompt-card">
+  <div class="row">
+    <span class="label">BROKEN {{ items | length }}건 복구 (skill: hand-config — broken 모드)</span>
+    <button class="secondary" data-copy-target="#qp-broken-bulk">📋 복사</button>
+  </div>
+  <details>
+    <summary>미리보기</summary>
+    <pre id="qp-broken-bulk">{{ bulk_prompt }}</pre>
+  </details>
+</div>
+{% endif %}
 
 <form method="post" action="/triage/broken/clear">
   <div class="row" style="margin:.4em 0;gap:.6em;align-items:center;">

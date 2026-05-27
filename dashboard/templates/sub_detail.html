@@ -77,6 +77,15 @@
 <div id="fetch-out"></div>
 
 <h3>🛠 Skill 액션</h3>
+{% if p_broken %}
+<div class="prompt-card">
+  <div class="row">
+    <span class="label">❗ BROKEN 복구 (skill: hand-config — broken 모드)</span>
+    <button class="secondary" data-copy-target="#p-broken">📋 복사</button>
+  </div>
+  <details open><summary>미리보기</summary><pre id="p-broken">{{ p_broken }}</pre></details>
+</div>
+{% endif %}
 <div class="prompt-card">
   <div class="row">
     <span class="label">수동 config 재작성</span>
