@@ -22,6 +22,7 @@ class Result:
     strategy: str                       # "S1.H3", "S4", "S5", "Jina", "Crawl4AI", ...
     target: str                         # "list" | "article" | "baseline" | "replay"
     url: str
+    final_url: Optional[str] = None      # after redirects/navigation, if different or known
     status: Optional[int] = None
     duration_ms: int = 0
     body_path: Optional[str] = None     # 디스크 저장된 응답 본문 경로

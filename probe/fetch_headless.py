@@ -576,6 +576,7 @@ def fetch_with_capture(
         strategy="S4" if target == "list" else "S4.article",
         target=target,
         url=url,
+        final_url=final_url,
         status=status,
         duration_ms=duration_ms,
         body_path=str(html_path) if body is not None else None,
@@ -987,9 +988,11 @@ def fetch_article_by_click(
                   "consent_dismissed": 0}
 
     def _result(cls: Classification, body_path: Optional[str], status: Optional[int], dur: int,
-                notable: list[str], error: Optional[str], url: str) -> "Result":
+                notable: list[str], error: Optional[str], url: str,
+                final_url: Optional[str] = None) -> "Result":
         return Result(strategy="S4.click", target="article", url=url, status=status, duration_ms=dur,
-                      body_path=body_path, classification=cls, notable=notable, error=error)
+                      body_path=body_path, classification=cls, notable=notable, error=error,
+                      final_url=final_url)
 
     if not is_available():
         meta["note"] = "playwright not installed"
@@ -1159,4 +1162,4 @@ def fetch_article_by_click(
     if meta.get("note"):
         notable.append(meta["note"][:80])
     return (_result(cls, str(html_path) if body is not None else None, status, duration_ms,
-                    notable, error, final_url or list_url), meta)
+                    notable, error, final_url or list_url, final_url=final_url), meta)

@@ -82,6 +82,7 @@ def fetch(
         strategy=strategy,
         target=target,
         url=url,
+        final_url=final_url,
         status=status,
         duration_ms=duration_ms,
         body_path=body_path,

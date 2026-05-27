@@ -11,6 +11,7 @@ covers = [
     "signals_classify_robots_size",
     "signals_classify_js_challenge",
     "signals_classify_403_soft_not_found",
+    "signals_classify_parked_access_denied",
 ]
 
 
@@ -114,6 +115,32 @@ def run() -> list[tuple[str, bool, str]]:
     cases.append(("empty_403_is_not_found",
                   cls_empty_403 == Classification.NOT_FOUND,
                   f"got {cls_empty_403!r} notable={notable_empty_403}"))
+
+    parked_access_denied = (
+        "<HTML><HEAD><TITLE>Access Denied</TITLE></HEAD>"
+        "<BODY>You don't have permission to access this server.<P>Reference #18.</BODY></HTML>"
+    )
+    cls_parked, notable_parked = classify(
+        status=200,
+        body=parked_access_denied,
+        headers={"content-type": "text/html"},
+    )
+    cases.append(("parked_access_denied_200_is_not_found",
+                  cls_parked == Classification.NOT_FOUND,
+                  f"got {cls_parked!r} notable={notable_parked}"))
+
+    js_lander = (
+        '<!DOCTYPE html><html><head><script>window.onload=function(){'
+        'window.location.href="/lander"}</script></head></html>'
+    )
+    cls_lander, notable_lander = classify(
+        status=200,
+        body=js_lander,
+        headers={"content-type": "text/html"},
+    )
+    cases.append(("js_redirect_lander_shell_is_not_found",
+                  cls_lander == Classification.NOT_FOUND,
+                  f"got {cls_lander!r} notable={notable_lander}"))
 
     cf_403 = (
         '<html><body><script src="/cdn-cgi/challenge-platform/h/g/orchestrate/__cf_chl/v1">'

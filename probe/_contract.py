@@ -74,6 +74,8 @@ _DIAGNOSIS_RESULT_FIELDS: tuple[_ContractField, ...] = (
     _ContractField("strategy", note="전략 명. S1.H1~H4 / S4 / S4.click / Jina / Crawl4AI / Zyte 등"),
     _ContractField("target", note="'list' | 'article' | 'baseline' | 'replay'"),
     _ContractField("url"),
+    _ContractField("final_url", required=False, type_hint="str|null",
+                   note="최종 redirect/navigation URL, known when captured"),
     _ContractField("status", type_hint="int|null"),
     _ContractField("duration_ms", type_hint="int"),
     _ContractField("body_path", type_hint="str|null", note="응답 본문이 저장된 디스크 경로"),
