@@ -382,8 +382,8 @@ def _dot_svg(site: dict, x: float, y: float, radius: float, color_map: dict) -> 
 
 
 def svg_grouped_scatter(sites: list[dict], color_map: dict) -> str:
-    width = 880
-    height = 720
+    width = 920
+    height = 840
     cx = width / 2
     cy = height / 2
 
