@@ -1,16 +1,16 @@
 ---
 slug: host_community-plays_root_dc9ef028
 url: https://community.playstarbound.com/
-status: "📝 audit only — Track A not shipped by request"
-outcome: no_change
+status: improved — F-layer RSS fallback registered baseline 6 (games-indie-news-05 batch)
+outcome: improved
 date: 2026-05-28
-fix_layer: none
-failure_keys: [posts_nonempty, xenforo_rss, forum_index]
-config_strategy: none
+fix_layer: F
+failure_keys: [posts_nonempty, xenforo_rss, forum_index, validated_feed_available]
+config_strategy: httpx_html
 adapters_changed: []
-engine_files_touched: []
-tags: [games-indie-01, playstarbound, xenforo, audit-only]
-requested_by: poisonous60
+engine_files_touched: [scripts/register.py]
+tags: [games-indie-news-05, playstarbound, xenforo, rss-fallback]
+requested_by: batch
 ---
 
 ## Summary
@@ -38,4 +38,8 @@ Terminal bucket: true-board no-ship; no `triage_later.json`, `REJECTED`, or gate
 - Live root fetch: 200, title `Chucklefish Forums`, `div.nodeText` count 22, `li.threadListItem` count 5.
 - Generic XenForo RSS direct smoke: `https://community.playstarbound.com/index.php?forums/-/index.rss` fetched 6 posts with numeric IDs (`181780`, `181771`, `181770`).
 - No config file was added for this slug.
+
+## 후속 (2026-05-28 03e7735 — games-indie-news-05 batch)
+
+F-layer RSS-fallback override (see [`_generic_rss_fallback_override`](_generic_rss_fallback_override.md)) registered baseline 6 from `https://community.playstarbound.com/forums/-/index.rss` after gen_fail. Per-board XenForo registration (per-forum-id) is a separate Track A path not needed here since site-wide feed covers user need. Outcome flipped audit-only → improved.
 

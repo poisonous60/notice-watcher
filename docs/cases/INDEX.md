@@ -2,20 +2,22 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 356 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 358 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
 | [`host_wildrift-league_news_8313486f`](host_wildrift-league_news_8313486f.md) | ✅ 수동 config (Riot Next.js data-testid cards) | 2026-05-28 | F | posts_nonempty, schema_invalid_source | https://wildrift.leagueoflegends.com/news/ |
 | [`host_umamusume-com_news_074ee55a`](host_umamusume-com_news_074ee55a.md) | ✅ handcrafted | 2026-05-28 | none | svelte_spa_shell, session_gated_post_api, posts_nonempty_zero, schema_missing_root | https://umamusume.com/news/ |
 | [`host_store-epicgames_news_16cc8b8f`](host_store-epicgames_news_16cc8b8f.md) | ✅ handcrafted — Epic Store news list via Playwright, article via JSON API | 2026-05-28 | F | probe_grounding_list_row_selector, hashed_selector, article_json_api | https://store.epicgames.com/news/ |
+| [`host_randomascii-wor_root_f74fd8ea`](host_randomascii-wor_root_f74fd8ea.md) | improved — RSS fallback registered baseline 10 (WordPress.com hosted, /wp-json 404) | 2026-05-28 | F | posts_nonempty, probe_grounding_list_row_selector, post_id_unique, validated_feed_available | https://randomascii.wordpress.com/ |
 | [`host_priconne-redive_root_aed5ee66`](host_priconne-redive_root_aed5ee66.md) | ✅ improved | 2026-05-28 | none | wordpress_rest_404, llm_picked_wrong_row_selector, posts_nonempty_zero | https://priconne-redive.jp/ |
 | [`host_pokemongo-com_news_002609a9`](host_pokemongo-com_news_002609a9.md) | ✅ handcrafted | 2026-05-28 | none | css_module_hashed_class, unescaped_tailwind_colon, posts_nonempty_zero | https://pokemongo.com/news/ |
 | [`host_megacrit-com_news_4cc63275`](host_megacrit-com_news_4cc63275.md) | ✅ handcrafted — Mega Crit Hugo news cards | 2026-05-28 | none | title_nonempty, article_card, hugo_news | https://megacrit.com/news/ |
 | [`host_forums-terraria_root_02d8aba0`](host_forums-terraria_root_02d8aba0.md) | ✅ handcrafted — XenForo Porta portal news | 2026-05-28 | none | posts_nonempty, porta_article_item, xenforo_portal | https://forums.terraria.org/ |
 | [`host_epicgames-com_news_4655a152`](host_epicgames-com_news_4655a152.md) | ✅ handcrafted — Epic news config registered without hashed selectors | 2026-05-28 | F | probe_grounding_list_row_selector, hashed_selector, article_json_api | https://www.epicgames.com/news/ |
 | [`host_deadbydaylight-_news_7eed0155`](host_deadbydaylight-_news_7eed0155.md) | ✅ handcrafted — Dead by Daylight rendered list plus Gatsby article JSON | 2026-05-28 | F | article_body_len, article_fetch_kind, json_api | https://deadbydaylight.com/news/ |
-| [`host_community-plays_root_dc9ef028`](host_community-plays_root_dc9ef028.md) | 📝 audit only — Track A not shipped by request | 2026-05-28 | none | posts_nonempty, xenforo_rss, forum_index | https://community.playstarbound.com/ |
+| [`host_community-plays_root_dc9ef028`](host_community-plays_root_dc9ef028.md) | improved — F-layer RSS fallback registered baseline 6 (games-indie-news-05 batch) | 2026-05-28 | F | posts_nonempty, xenforo_rss, forum_index, validated_feed_available | https://community.playstarbound.com/ |
+| [`host_box2d-org_root_c360d996`](host_box2d-org_root_c360d996.md) | improved — RSS fallback registered baseline 22 (Hugo landing, real posts at /posts/) | 2026-05-28 | F | posts_nonempty, probe_grounding_list_row_selector, validated_feed_available | https://box2d.org/ |
 | [`host_bethesda-net_news_c5aa2960`](host_bethesda-net_news_c5aa2960.md) | ✅ handcrafted — non-www Bethesda news config registered | 2026-05-28 | F | posts_nonempty, hashed_selector | https://bethesda.net/news/ |
 | [`host_bethesda-net_news_29303712`](host_bethesda-net_news_29303712.md) | ✅ handcrafted — Bethesda news config registered from rendered article links | 2026-05-28 | F | posts_nonempty, hashed_selector | https://www.bethesda.net/news/ |
 | [`host_bay12games-com_dwarves_230ae845`](host_bay12games-com_dwarves_230ae845.md) | ✅ handcrafted — Bay 12 inline devlog list | 2026-05-28 | none | posts_nonempty, post_id_stable_shape, inline_devlog | https://www.bay12games.com/dwarves/ |
@@ -383,12 +385,12 @@
 | D | 2 |
 | E | 6 |
 | E+A+C+D | 1 |
-| F | 102 |
+| F | 105 |
 | F+A | 1 |
 | F+C | 3 |
 | adapter | 1 |
 | config | 8 |
-| none | 161 |
+| none | 160 |
 
 ### config_strategy 분포
 
@@ -396,17 +398,17 @@
 |---|---|
 | (미기재) | 56 |
 | handwritten | 31 |
-| httpx_html | 130 |
+| httpx_html | 133 |
 | httpx_json | 27 |
 | httpx_json (미적용 — 콘텐츠 0) | 1 |
 | mixed | 1 |
 | n/a | 3 |
-| none | 44 |
+| none | 43 |
 | playwright_html | 61 |
 | rejected | 1 |
 | rss | 1 |
 
 ### 최근 90일 (≥ 2026-02-27)
 
-케이스 356 건.
+케이스 358 건.
 
