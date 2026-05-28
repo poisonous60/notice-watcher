@@ -2164,12 +2164,67 @@ def read_har_details(*, force_recompute: bool = False) -> dict:
 def write_probe_raw_assets(site_dir: Path, har_detail: dict | None) -> None:
     panels = (har_detail or {}).get("panels") or []
     raw_root = site_dir / "probe-raw"
-    try:
-        if raw_root.exists():
-            shutil.rmtree(raw_root)
-        raw_root.mkdir(parents=True, exist_ok=True)
-    except OSError:
-        return
+    manifest_items: list[dict[str, object]] = []
+    operations: list[tuple[str, str, Path | None, str | None]] = []
+
+    def _write_text_if_changed(dst: Path, text: str) -> None:
+        data = text.encode("utf-8")
+        try:
+            if dst.exists():
+                st = dst.stat()
+                if st.st_size == len(data) and hashlib.sha256(dst.read_bytes()).digest() == hashlib.sha256(data).digest():
+                    return
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            tmp = dst.with_suffix(dst.suffix + ".tmp")
+            tmp.write_bytes(data)
+            os.replace(tmp, dst)
+        except OSError:
+            pass
+
+    def _copy_if_changed(src: Path, dst: Path, url: str) -> None:
+        try:
+            if not src.exists():
+                return
+            st = src.stat()
+            if dst.exists():
+                dst_st = dst.stat()
+                if dst_st.st_size == st.st_size and dst_st.st_mtime_ns == st.st_mtime_ns:
+                    return
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+        except OSError:
+            pass
+
+    def _track_copy(url: str, src: Path, fallback_text: str = "") -> None:
+        if not url:
+            return
+        try:
+            if src.exists():
+                st = src.stat()
+                manifest_items.append({
+                    "url": url,
+                    "kind": "copy",
+                    "source": str(src.relative_to(ROOT)) if src.is_relative_to(ROOT) else str(src),
+                    "size": st.st_size,
+                    "mtime_ns": st.st_mtime_ns,
+                })
+                operations.append(("copy", url, src, None))
+                return
+        except OSError:
+            pass
+        _track_text(url, fallback_text)
+
+    def _track_text(url: str, text: str) -> None:
+        if not url:
+            return
+        data = text.encode("utf-8")
+        manifest_items.append({
+            "url": url,
+            "kind": "text",
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "size": len(data),
+        })
+        operations.append(("text", url, None, text))
 
     for panel in panels:
         detail = panel.get("detail") or {}
@@ -2183,39 +2238,39 @@ def write_probe_raw_assets(site_dir: Path, har_detail: dict | None) -> None:
             if not raw_url or not rel_path:
                 continue
             src = ROOT / rel_path
-            dst = site_dir / raw_url
-            try:
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                if src.exists():
-                    shutil.copyfile(src, dst)
-                else:
-                    dst.write_text(str(item.get("preview") or ""), encoding="utf-8")
-            except OSError:
-                pass
+            _track_copy(raw_url, src, str(item.get("preview") or ""))
         for f in packet.get("files") or []:
             raw_url = str(f.get("raw_url") or "")
-            if not raw_url:
-                continue
-            try:
-                dst = site_dir / raw_url
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                dst.write_text(str(f.get("raw") or ""), encoding="utf-8")
-            except OSError:
-                pass
-        try:
-            full_url = str(packet.get("raw_url") or "")
-            if full_url:
-                dst = site_dir / full_url
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                dst.write_text(str(packet.get("raw_text") or ""), encoding="utf-8")
-            result = packet.get("result") or {}
-            result_url = str(result.get("raw_url") or "")
-            if result_url:
-                dst = site_dir / result_url
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                dst.write_text(str(result.get("raw") or result.get("preview") or ""), encoding="utf-8")
-        except OSError:
-            pass
+            _track_text(raw_url, str(f.get("raw") or ""))
+        _track_text(str(packet.get("raw_url") or ""), str(packet.get("raw_text") or ""))
+        result = packet.get("result") or {}
+        _track_text(
+            str(result.get("raw_url") or ""),
+            str(result.get("raw") or result.get("preview") or ""),
+        )
+
+    manifest = {
+        "panels": len(panels),
+        "items": sorted(manifest_items, key=lambda item: str(item.get("url") or "")),
+    }
+    manifest_path = raw_root / "manifest.json"
+    try:
+        old_manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else None
+    except (OSError, json.JSONDecodeError):
+        old_manifest = None
+    if old_manifest == manifest:
+        return
+    try:
+        raw_root.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return
+    for kind, url, src, text in operations:
+        dst = site_dir / url
+        if kind == "copy" and src is not None:
+            _copy_if_changed(src, dst, url)
+        elif kind == "text":
+            _write_text_if_changed(dst, text or "")
+    _write_text_if_changed(manifest_path, json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2))
 
 
 def _placeholder_har_panel() -> dict:
@@ -4073,9 +4128,10 @@ def render_html(
         var probeAgentSearch = document.getElementById('probeAgentSearch');
         var probeAgentOpenUrl = document.getElementById('probeAgentOpenUrl');
         var probeAgentCount = document.getElementById('probeAgentCount');
-        var probeAgentPanels = document.querySelectorAll('.probe-agent-panel');
+        var activeProbeAgentPanel = document.querySelector('.probe-agent-panel:not([hidden])');
         var probeAgentOptions = probeAgentPicker ? Array.prototype.map.call(probeAgentPicker.options, function (opt) {{
           return {{
+            option: opt,
             value: opt.value,
             text: opt.textContent || '',
             url: opt.getAttribute('data-url') || '',
@@ -4097,26 +4153,25 @@ def render_html(
           }}
         }}
         function setProbeAgentPanel(targetId) {{
-          probeAgentPanels.forEach(function (el) {{
-            el.hidden = el.id !== targetId;
-          }});
+          if (activeProbeAgentPanel && activeProbeAgentPanel.id === targetId) {{
+            updateProbeAgentUrl();
+            return;
+          }}
+          if (activeProbeAgentPanel) activeProbeAgentPanel.hidden = true;
+          activeProbeAgentPanel = targetId ? document.getElementById(targetId) : null;
+          if (activeProbeAgentPanel) activeProbeAgentPanel.hidden = false;
           updateProbeAgentUrl();
         }}
         function renderProbeAgentOptions(query) {{
           if (!probeAgentPicker) return;
           var q = (query || '').trim().toLowerCase();
           var current = probeAgentPicker.value;
-          var matches = probeAgentOptions.filter(function (item) {{
-            return !q || item.search.indexOf(q) !== -1 || item.text.toLowerCase().indexOf(q) !== -1;
-          }});
-          probeAgentPicker.innerHTML = '';
-          matches.forEach(function (item) {{
-            var opt = document.createElement('option');
-            opt.value = item.value;
-            opt.textContent = item.text;
-            opt.setAttribute('data-url', item.url);
-            opt.setAttribute('data-search', item.search);
-            probeAgentPicker.appendChild(opt);
+          var matches = [];
+          probeAgentOptions.forEach(function (item) {{
+            var ok = !q || item.search.indexOf(q) !== -1 || item.text.toLowerCase().indexOf(q) !== -1;
+            item.option.hidden = !ok;
+            item.option.disabled = !ok;
+            if (ok) matches.push(item);
           }});
           if (probeAgentCount) {{
             probeAgentCount.textContent = matches.length + ' / ' + probeAgentOptions.length + ' registered probe examples';
@@ -4130,7 +4185,7 @@ def render_html(
           probeAgentPicker.value = next;
           setProbeAgentPanel(next);
         }}
-        if (probeAgentPicker && probeAgentPanels.length) {{
+        if (probeAgentPicker && probeAgentOptions.length) {{
           probeAgentPicker.addEventListener('change', function () {{
             setProbeAgentPanel(probeAgentPicker.value);
           }});
