@@ -12,7 +12,7 @@
 | **Figure 2** Case block grid + modal | `id="caseTimeline"` + `id="caseModal"` + `id="caseDB"` | `docs/cases/*.md` frontmatter + body | `read_case_records` · `svg_case_blocks` · `render_case_db` |
 | Public Source Domains | host search list | `read_configs().hosts` + sites | inline in `render_html` |
 | Recent Activity | table 20 row | `output/bot.sqlite3` jobs | `read_jobs` |
-| **Figure 3** Probe pipeline funnel + stage panels | `id="harPipeline"` + `id="harFunnel"` + `id="harStagePanels"` | `PROBE_PIPELINE` const | `svg_har_funnel` · `render_stage_panels` · `render_stage_flow_html` |
+| **Figure 3** `/watch` call icicle | `id="harPipeline"` + `id="watchIcicle"` | `WATCH_CALL_TREE` const + `GITHUB_BASE`/`LANE_COLORS`/`LANE_LABELS` | `svg_watch_icicle` · `_render_icicle_node` · `_icicle_leaf_count` · `_icicle_truncate_path` · `_icicle_tooltip_html` |
 | **Figure 4** Live HAR analysis | `id="harDetailFigure"` + `id="harSlugPicker"` + `.har-detail-panel` | `output/probe/<slug>/` artifacts | `pick_har_showcases` · `read_har_details` · `build_har_detail` · `render_har_detail_html` |
 | Footer | bottom | — | inline |
 
@@ -48,22 +48,23 @@
 - bucket 우선순위 F > C > A > B/D/E 첫-매치, `config`/`adapter` → B/D/E (`_fix_layer_bucket`)
 - 코드 = `svg_case_blocks` · `render_case_db` ([scripts/generate_site.py:857](../scripts/generate_site.py), [:992](../scripts/generate_site.py))
 
-### 2c. Figure 3 — Probe pipeline funnel + stage panels
+### 2c. Figure 3 — `/watch` call icicle
 
-- 5 단계 가로 funnel (Step 1 ~ 5), 박스 안 = "Step N / Title / tagline"
-- **숫자 없음** (사용자 피드백 — aggregate count "Probe runs 4878" 류 의미 없다)
-- 박스 클릭 → 해당 stage panel 펼침 (다른 panel hidden)
-- 키보드 a11y = `tabindex="0" role="button" aria-controls aria-expanded`
-- 5 stage:
-  1. **Probe fetches** (static + browser) — `scripts/probe.py main`, `probe/fetch_static.py fetch`, `probe/fetch_headless.py fetch_with_capture`
-  2. **Capture HAR** (network log + HTML) — `record_har_path on new_context`, `traffic.har`, `list.html`, `environment.json`
-  3. **Inspect entries** (data calls, not assets) — `json.loads(har)`, `_entry_resource_type`, `_AD_TRACKER_RE` filter
-  4. **Match signals** (APIs · feeds · pages · platforms) — `traffic_api_candidates`, `traffic_article_body_candidates`, `rss_feed_urls`, `pagination_hints`, `detect_*_platform`
-  5. **Choose path** (digest · recognizer · writer) — `_try_known_platform`, `build_digest`, probe-marker platform config, `auto: api_loop_once → agentic`, `_register_built_config`
-- stage panel 안 = `<ol class="stage-flow"><li class="step-row">` flat row. 왼쪽 rail + 숫자 dot 으로 순서를 표현한다.
-- 카드 border/background 제거. 화살표는 row 안의 `step-sep` 텍스트만 쓴다.
-- `PROBE_PIPELINE` const = 손-maintain (probe 코드 refactor 시 갱신 의무)
-- 코드 = `svg_har_funnel` ([scripts/generate_site.py:1071](../scripts/generate_site.py)), `PROBE_PIPELINE` ([:31](../scripts/generate_site.py)), `render_stage_panels` ([:1158](../scripts/generate_site.py)), `render_stage_flow_html` ([:1134](../scripts/generate_site.py))
+- **What**: 처음 보는 사이트를 `/watch` 한 순간부터 publish 까지 *어느 파일·함수가* 순서대로 도는지 보여주는 flame-icicle. 사용자 피드백 ("probe 안만 보임 — bot 진입부터 보고 싶다") 으로 funnel 폐기 + 전체 chain 으로 재설계 (2026-05-28).
+- **Form**: top-down flame icicle. Y row = call depth (root 위), X = sequence. 부모 박스가 자식들의 X 범위를 spanning 한다 (flame-graph 룰).
+- **Width 의미**: 박스 width = 그 노드 아래 leaf sub-step 수 (cascade shape — 시간 **아님**). 캡션 disclaimer 박혔다.
+- **Lane 색** (process 경계): bot asyncio (`#3d737f` teal) / worker asyncio (`#6f7f52` olive) / register subprocess (`#8a6f4d` brown). 상단에 horizontal legend (swatch + 라벨). 박스 fill 색이 lane = 인라인 색인. lane 변화 = async hand-off (bot→worker) 또는 OS subprocess spawn (worker→subprocess).
+- **분기**: 같은 grid 안 dashed border + tag chip (위) + fill-opacity 0.42 — `skip if already registered` / `fast-path: recognizer hit`.
+- **Exit chip**: publish 박스 아래 작은 라벨 — `→ configs/<slug>.json + poll_state/<slug>.json` 으로 chain 종착지 명시.
+- **Click → GitHub**: 각 박스 = `<a href="{GITHUB_BASE}/{file}#L{line}" target="_blank">` wrapping. 정확 라인 새 탭. `GITHUB_BASE = "https://github.com/poisonous60/notice-watcher/blob/main"`.
+- **Hover → tooltip**: `data-tip-html` 에 `<strong>file</strong><br/>fn() · L<line><br/><em>branch-tag</em><br/>role` — 기존 Figure 4 의 `packetHoverTip` JS 핸들러 (4099 라인대) 가 그대로 catches. 라벨 truncation 의 손실분이 tooltip 으로 보강.
+- **Truncation**: 박스 width 가 좁으면 `dir/file.py` → `file.py` (마지막 segment) → 추가 좁으면 trailing `…`. `_icicle_truncate_path` 가 처리.
+- **Mobile**: SVG min-width 720px + container `overflow-x:auto` → 좁은 viewport 에서 가로 swipe. reflow 별 layout 안 만듦 (renderer 1개 유지).
+- **Depth 4 rows × 56px + header 30 + footer 24 = SVG 278px high** (총 13 leaves). 기존 funnel 170px 보다 살짝 큼.
+- **A11y**: `<svg role="img" aria-label="...">` 1개 (각 박스 tabindex X — 다중 tabstop 회피). 박스 자체는 SVG `<a>` 라 키보드 focus 받음. `:focus-visible` 시 stroke 강조.
+- `WATCH_CALL_TREE` const = 손-maintain. 노드 = `{label, file, fn, line, lane, role, children?, branch?, exit_chip?}`. 코드 refactor 시 `line` 갱신 의무 (drift 허용 — best-effort anchor).
+- **삭제됨** (2026-05-28): `svg_har_funnel`, `render_stage_panels`, `render_stage_flow_html`, `.funnel-*` / `.stage-panel-*` / `.step-*` CSS, funnel click/keyboard JS. `PROBE_PIPELINE` 상수 자체는 *데드 코드로 남음* (병렬 세션 fragment cache 작업이 잠시 참조 — 머지 후 정리 대상).
+- 코드 = `svg_watch_icicle` ([scripts/generate_site.py:1306](../scripts/generate_site.py)), `WATCH_CALL_TREE` ([:49](../scripts/generate_site.py)), `_render_icicle_node` ([:1190](../scripts/generate_site.py)), `_icicle_truncate_path` ([:1160](../scripts/generate_site.py)), `_icicle_tooltip_html` ([:1175](../scripts/generate_site.py))
 
 ### 2d. Figure 4 — Live HAR analysis (dashboard parity)
 

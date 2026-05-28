@@ -24,112 +24,142 @@ from zoneinfo import ZoneInfo
 ROOT = Path(__file__).resolve().parent.parent
 KST = ZoneInfo("Asia/Seoul")
 
-# Static narrative of the probe pipeline — used by the Figure 3 HAR section.
-# Edit when probe code refactors so the public page keeps describing what runs.
-# Stages reflect the actual execution order: static GET first, headless+HAR
-# captured only when needed, signal extractors are per-extractor (no shared
-# load step), and the decision path is the multi-arm register dispatch.
-PROBE_PIPELINE: list[dict] = [
-    {
-        "id": "fetch",
-        "title": "Probe fetches",
-        "tagline": "static + browser",
-        "summary": (
-            "Static GET first; if the page can't be read without a real "
-            "browser, Playwright launches and replays it."
-        ),
-        "steps": [
-            ("scripts/probe.py", "main(argv) → _run(args, url, slug)",
-             "CLI entry — parses URL + flags, opens output/probe/<slug>/."),
-            ("probe/fetch_static.py", "fetch()",
-             "Static httpx GET with preset headers; first attempt before the browser."),
-            ("probe/fetch_headless.py", "fetch_with_capture()",
-             "Playwright Chromium with record_har_path on the context — runs only "
-             "when static is insufficient."),
-        ],
-    },
-    {
-        "id": "har",
-        "title": "Capture HAR",
-        "tagline": "network log + HTML",
-        "summary": (
-            "When the headless run was needed, Playwright writes traffic.har "
-            "plus the rendered HTML and screenshots."
-        ),
-        "steps": [
-            ("probe/fetch_headless.py", "browser.new_context(record_har_path=…)",
-             "HAR is buffered as the page runs; context.close() flushes it to disk."),
-            ("output/probe/<slug>/traffic.har", "—",
-             "Primary network log every later extractor reads when present."),
-            ("output/probe/<slug>/list.html", "—",
-             "Parallel HTML snapshot consumed by RSS / pagination / platform detectors."),
-            ("output/probe/<slug>/environment.json", "—",
-             "Runtime info: platform, Python, arch, outbound IP, goodbyedpi flag, proxy env."),
-        ],
-    },
-    {
-        "id": "entries",
-        "title": "Inspect entries",
-        "tagline": "data calls, not assets",
-        "summary": (
-            "Each extractor parses the HAR itself and drops static assets and "
-            "ad/tracker hosts before scoring candidates."
-        ),
-        "steps": [
-            ("probe/extract.py", "json.loads(har_path.read_text())",
-             "Every extractor loads the HAR JSON it needs — there is no shared "
-             "filtered-entry artifact."),
-            ("probe/extract.py", "_entry_resource_type()",
-             "Tags each entry by resourceType (xhr / fetch / document / image / ...)."),
-            ("probe/extract.py", "_AD_TRACKER_RE + per-extractor filters",
-             "Drops static assets, ad/tracker hosts, and image responses."),
-        ],
-    },
-    {
-        "id": "signals",
-        "title": "Match signals",
-        "tagline": "APIs · feeds · pages · platforms",
-        "summary": (
-            "Five extractors hunt JSON APIs, body APIs, RSS, pagination, and "
-            "known platform fingerprints."
-        ),
-        "steps": [
-            ("probe/extract.py", "traffic_api_candidates()",
-             "Detect JSON list endpoints — cross-host brand match included."),
-            ("probe/extract.py", "traffic_article_body_candidates()",
-             "Detect article-body JSON endpoints (per-post payloads)."),
-            ("probe/extract.py", "rss_feed_urls()",
-             "Find RSS / Atom feeds in <link> + HAR responses."),
-            ("probe/extract.py", "pagination_hints()",
-             "Detect ?page=, /p/2/, infinite-scroll templates."),
-            ("probe/extract.py", "detect_*_platform()",
-             "Fingerprint WordPress / Discourse / XenForo / Lemmy / Mastodon / ..."),
-        ],
-    },
-    {
-        "id": "decide",
-        "title": "Choose path",
-        "tagline": "digest · recognizer · writer",
-        "summary": (
-            "Signals fold into a digest. URL fast-path, probe-marker platform "
-            "config, api_loop, or agentic LLM commits the final config."
-        ),
-        "steps": [
-            ("scripts/register.py", "_try_known_platform(url)",
-             "URL fast-path — known platform shortcut runs before any probe."),
-            ("engine/digest.py", "build_digest(*, slug, url, …)",
-             "Roll signals + artifacts into one recommendation."),
-            ("scripts/register.py", "probe-marker platform config",
-             "WordPress / Discourse / XenForo / Lemmy / PeerTube / Mbin detected "
-             "from probe artifacts."),
-            ("scripts/register.py", "auto: api_loop_once → agentic",
-             "Generation dispatch — api_loop one-shot, escalates to multi-turn "
-             "agent in auto mode."),
-            ("scripts/register.py", "_register_built_config()",
-             "Validate end-to-end then write configs/<slug>.json."),
-        ],
-    },
-]
+# Static narrative of the full /watch backend chain — used by the Figure 3 HAR
+# section. Edit when bot / worker / register code refactors so the public page
+# keeps describing the actual call order. Rendered as a flame-icicle SVG by
+# `svg_watch_icicle()`. Each node optionally carries (file, fn, line) — those
+# become a GitHub deep-link on click. Branches (skip / fast-path / early
+# return) live inline in the tree with `branch: {tag: ...}` and render dashed.
+# Line numbers can drift when code is refactored; treat them as best-effort
+# anchors, not contracts (see `docs/공개 사이트 figure 설계.md` §2c).
+GITHUB_BASE = "https://github.com/poisonous60/notice-watcher/blob/main"
+
+LANE_COLORS = {
+    "bot":        "#3d737f",   # bot asyncio (matches Figure 1/2 teal)
+    "worker":     "#6f7f52",   # worker asyncio pool (olive)
+    "subprocess": "#8a6f4d",   # register subprocess + probe + LLM (brown)
+}
+
+LANE_LABELS = {
+    "bot":        "bot asyncio",
+    "worker":     "worker asyncio",
+    "subprocess": "register subprocess",
+}
+
+WATCH_CALL_TREE: dict = {
+    "label": "/watch <url>", "file": "bot/main.py", "fn": "watch", "line": 173,
+    "lane": "bot",
+    "role": (
+        "Discord slash command handler. defer 응답 → url_to_slug → 이미 등록된 "
+        "slug 흡수 → is_blocked / is_registered 가드."
+    ),
+    "children": [
+        {
+            "label": "url_gate.check", "file": "bot/url_gate.py", "fn": "check", "line": 516,
+            "lane": "bot",
+            "role": (
+                "probe 시작 전 URL 4 stage 검사. 하나라도 막히면 UrlRejected → "
+                "ack 거부."
+            ),
+            "children": [
+                {"label": "struct validate", "file": "bot/url_gate.py",
+                 "fn": "_check_structural", "line": 330, "lane": "bot",
+                 "role": "scheme/host 형식, user:pass@ / 제어문자 / IP 리터럴 (공인·사설·IPv6) 거부 (stdlib urllib만)."},
+                {"label": "blacklist", "file": "bot/url_gate.py",
+                 "fn": "_check_policy", "line": 371, "lane": "bot",
+                 "role": "bot/url_blacklist.json — SNS · 동영상 · 축약 호스트 / 파일 직링 host_suffix · path_ext 매치."},
+                {"label": "SSRF (DNS)", "file": "bot/url_gate.py",
+                 "fn": "_check_ip", "line": 434, "lane": "bot",
+                 "role": "host IDNA → DNS 해석. 모든 IP 가 private/loopback/link-local/reserved 면 거부."},
+                {"label": "Safe Browsing v4", "file": "bot/url_gate.py",
+                 "fn": "_check_safe_browsing", "line": 497, "lane": "bot",
+                 "role": "Google Safe Browsing threatMatches:find. fail-closed — 키 미설정/네트워크 오류/non-200 도 거부."},
+            ],
+        },
+        {
+            "label": "is_registered?", "file": "bot/main.py",
+            "fn": "watch", "line": 211, "lane": "bot",
+            "branch": {"tag": "skip if already registered"},
+            "role": (
+                "이미 등록된 사이트면 subprocess 안 띄움 — subscription 추가 + 예시 "
+                "글 1개 노출 후 종료. (분기 — 본 chain 안 옴)"
+            ),
+        },
+        {
+            "label": "db.enqueue_job", "file": "bot/db.py",
+            "fn": "enqueue_job", "line": 1077, "lane": "bot",
+            "role": (
+                "jobs 큐 row insert (kind=register, priority=0=user). interaction 응답을 "
+                "ack 메시지로 promote → worker 가 끝나면 channel edit (token 만료 무관)."
+            ),
+        },
+        {
+            "label": "worker._process_job_inner", "file": "bot/worker.py",
+            "fn": "_process_job_inner", "line": 494, "lane": "worker",
+            "role": (
+                "worker pool task 가 claim 시점에 잡 꺼내 처리. slug_lock + chromium_lock "
+                "잡고 subprocess. async hand-off 경계 (bot enqueue → worker claim)."
+            ),
+            "children": [
+                {"label": "chromium_lock acquire", "file": "bot/site_ops.py",
+                 "fn": "blocking_register", "line": 317, "lane": "worker",
+                 "role": (
+                     "scripts/_chromium_lock.py 의 cross-process flock — 동시 chromium "
+                     "browser 차단. settings.chromium_lock.slots (보통 2)."
+                 )},
+                {"label": "blocking_register (subprocess)", "file": "bot/site_ops.py",
+                 "fn": "blocking_register", "line": 291, "lane": "subprocess",
+                 "role": (
+                     "scripts/register.py 별 OS process spawn. start_new_session=True "
+                     "+ timeout killer thread. async→subprocess 경계."
+                 ),
+                 "children": [
+                     {"label": "_try_known_platform", "file": "scripts/register.py",
+                      "fn": "_try_known_platform", "line": 2946, "lane": "subprocess",
+                      "branch": {"tag": "fast-path: recognizer hit → publish, skip probe + generate"},
+                      "role": (
+                          "engine/recognizers/<plat>.py URL 클래스 매칭 (arca/discourse/"
+                          "xenforo/reddit/…). 매치되면 probe + LLM 우회, 즉시 config 발급."
+                      )},
+                     {"label": "probe.py main", "file": "scripts/probe.py",
+                      "fn": "main", "line": 524, "lane": "subprocess",
+                      "role": (
+                          "fetch_static (httpx) → 부족하면 fetch_headless (Playwright + "
+                          "record_har_path). list.html / traffic.har / environment.json "
+                          "산출. Figure 4 가 HAR 산출물 deep dive."
+                      )},
+                     {"label": "_preflight (article re-probe)", "file": "scripts/register.py",
+                      "fn": "_preflight", "line": 2882, "lane": "subprocess",
+                      "role": (
+                          "probe 가 잡은 첫 글 페이지를 Playwright+HAR 로 re-probe → "
+                          "article_candidates.json + digest.escalation_hint 주입. 1 라운드 "
+                          "안 1회만 (--no-escalate 면 skip)."
+                      )},
+                     {"label": "build_digest", "file": "engine/digest.py",
+                      "fn": "build_digest", "line": 839, "lane": "subprocess",
+                      "role": (
+                          "probe 산출물 + preflight 결과 → digest.json (LLM 입력용 압축 "
+                          "evidence bundle)."
+                      )},
+                     {"label": "run_codex_agentic", "file": "generate/codex_agentic.py",
+                      "fn": "run_codex_agentic", "line": 1254, "lane": "subprocess",
+                      "role": (
+                          "Codex CLI multi-turn agent. tmpdir 안 prompts/examples/validator "
+                          "복사 → candidate.json + run_validator. parent 가 audit + publish. "
+                          "Figure 4 가 packet 시각화."
+                      )},
+                     {"label": "_register_built_config", "file": "scripts/register.py",
+                      "fn": "_register_built_config", "line": 3112, "lane": "subprocess",
+                      "exit_chip": "→ configs/<slug>.json + poll_state/<slug>.json",
+                      "role": (
+                          "end-to-end validate (실제 fetch + parse + baseline 빌드). 통과 "
+                          "시 atomic publish. ack 메시지 'OK', 폴링 대상 진입."
+                      )},
+                 ]},
+            ],
+        },
+    ],
+}
 
 # Figure 2 — fix-layer bucket vocabulary (CONTEXT.md "추론 개선" / fix-layer letters).
 # Priority for combos = F > C > A > B/D/E first-match. Legacy `config`/`adapter` → B/D/E.
@@ -1035,110 +1065,293 @@ def _redact_public_text(value: object) -> str:
     return "" if value is None else str(value)
 
 
-def svg_har_funnel() -> str:
-    """Pipeline funnel — five labelled boxes left → right, one per pipeline
-    stage. No aggregate numbers (the user called them meaningless). Click
-    target = whole <g class="funnel-stage"> with tabindex + role for
-    keyboard activation; the first stage is active by default."""
-    width = 920
-    height = 170
-    margin_x = 28
-    n = len(PROBE_PIPELINE)
-    col_w = (width - 2 * margin_x) / n
-    box_w = col_w - 16
-    box_h = 110
-    y_mid = height / 2
+PROBE_PIPELINE: list[dict] = [
+    {
+        "id": "fetch",
+        "title": "Probe fetches",
+        "tagline": "static + browser",
+        "summary": "Static GET first; Playwright captures the rendered page only when static fetch is insufficient.",
+        "steps": [
+            ("scripts/probe.py", "main(argv) → _run(args, url, slug)", "CLI entry and output/probe/<slug>/ setup."),
+            ("probe/fetch_static.py", "fetch()", "First static httpx request with preset headers."),
+            ("probe/fetch_headless.py", "fetch_with_capture()", "Browser fallback with HAR capture."),
+        ],
+    },
+    {
+        "id": "har",
+        "title": "Capture HAR",
+        "tagline": "network log + HTML",
+        "summary": "Headless runs write traffic.har plus rendered HTML and related probe artifacts.",
+        "steps": [
+            ("output/probe/<slug>/traffic.har", "—", "Primary network log used by later extractors."),
+            ("output/probe/<slug>/list.html", "—", "Rendered list-page HTML snapshot."),
+            ("output/probe/<slug>/environment.json", "—", "Runtime metadata for diagnosing probe differences."),
+        ],
+    },
+    {
+        "id": "entries",
+        "title": "Inspect entries",
+        "tagline": "data calls, not assets",
+        "summary": "Extractors parse HAR entries and ignore static assets, trackers, and low-value responses.",
+        "steps": [
+            ("probe/extract.py", "json.loads(har_path.read_text())", "Each extractor reads the HAR it needs."),
+            ("probe/extract.py", "_entry_resource_type()", "Tags entries by xhr / fetch / document / asset type."),
+            ("probe/extract.py", "_AD_TRACKER_RE + filters", "Drops noisy ad/tracker/static asset entries."),
+        ],
+    },
+    {
+        "id": "signals",
+        "title": "Match signals",
+        "tagline": "APIs · feeds · pages · platforms",
+        "summary": "Probe extracts JSON API, body API, RSS, pagination, audio-share, and platform hints.",
+        "steps": [
+            ("probe/extract.py", "traffic_api_candidates()", "Detect JSON list endpoints."),
+            ("probe/extract.py", "traffic_article_body_candidates()", "Detect per-article JSON payloads."),
+            ("probe/extract.py", "rss_feed_urls() / pagination_hints()", "Find feeds and page templates."),
+        ],
+    },
+    {
+        "id": "decide",
+        "title": "Choose path",
+        "tagline": "digest · recognizer · writer",
+        "summary": "Signals become a digest; register chooses a recognizer, API loop, or agentic config writer path.",
+        "steps": [
+            ("engine/digest.py", "build_digest(...)", "Fold artifacts and signals into model-facing evidence."),
+            ("scripts/register.py", "probe-marker platform config", "Use known platform configs when probe markers match."),
+            ("scripts/register.py", "auto: api_loop_once → agentic", "Generate, validate, and publish configs/<slug>.json."),
+        ],
+    },
+]
 
-    boxes: list[str] = []
-    arrows: list[str] = []
-    last_right = None
-    for i, stage in enumerate(PROBE_PIPELINE):
-        cx_box = margin_x + i * col_w + (col_w - box_w) / 2
-        by = y_mid - box_h / 2
-        active = " active" if i == 0 else ""
-        boxes.append(
-            f'<g class="funnel-stage{active}" data-stage-id="{esc(stage["id"])}" '
-            f'tabindex="0" role="button" '
-            f'aria-controls="har-panel-{esc(stage["id"])}" '
-            f'aria-expanded="{"true" if i == 0 else "false"}" '
-            f'aria-label="Stage {i + 1}: {esc(stage["title"])} — click to see files">'
-            f'<rect x="{cx_box:.1f}" y="{by:.1f}" width="{box_w:.1f}" height="{box_h}" '
-            f'rx="8" ry="8" class="funnel-box"></rect>'
-            f'<text class="funnel-step" x="{cx_box + box_w / 2:.1f}" y="{by + 22:.0f}" '
-            f'text-anchor="middle">Step {i + 1}</text>'
-            f'<text class="funnel-label" x="{cx_box + box_w / 2:.1f}" y="{by + 50:.0f}" '
-            f'text-anchor="middle">{esc(stage["title"])}</text>'
-            f'<text class="funnel-tagline" x="{cx_box + box_w / 2:.1f}" y="{by + 78:.0f}" '
-            f'text-anchor="middle">{esc(stage["tagline"])}</text>'
-            f"</g>"
+
+def _icicle_leaf_count(node: dict) -> int:
+    """Leaf count = horizontal weight. Branch nodes count as 1 leaf (they sit
+    inline alongside happy-path siblings so they consume a slot)."""
+    children = node.get("children") or []
+    if not children:
+        return 1
+    return sum(_icicle_leaf_count(c) for c in children)
+
+
+def _icicle_tree_depth(node: dict) -> int:
+    children = node.get("children") or []
+    if not children:
+        return 1
+    return 1 + max(_icicle_tree_depth(c) for c in children)
+
+
+def _github_url(node: dict) -> str:
+    f = node.get("file")
+    if not f:
+        return ""
+    base = f"{GITHUB_BASE}/{f}"
+    line_n = node.get("line")
+    return f"{base}#L{int(line_n)}" if line_n else base
+
+
+def _icicle_truncate(s: str, max_chars: int) -> str:
+    if max_chars <= 1:
+        return "…"
+    if len(s) <= max_chars:
+        return s
+    return s[: max_chars - 1] + "…"
+
+
+def _icicle_truncate_path(path: str, max_chars: int) -> str:
+    """Truncate `dir/.../file.ext` preferring to keep the file basename (and
+    its extension) intact. Falls back to plain trailing-ellipsis when even
+    the basename won't fit."""
+    if max_chars <= 1:
+        return "…"
+    if len(path) <= max_chars:
+        return path
+    if "/" in path:
+        last = path.rsplit("/", 1)[1]
+        if len(last) <= max_chars:
+            return last
+        return _icicle_truncate(last, max_chars)
+    return _icicle_truncate(path, max_chars)
+
+
+def _icicle_tooltip_html(node: dict) -> str:
+    """Tooltip = file (bold) · fn · line · branch-tag (italic) · role.
+    Each segment passes through esc() — the existing tip handler sets
+    innerHTML from data-tip-html, so unsanitized angle brackets in label
+    strings would break the page."""
+    file = node.get("file", "") or ""
+    fn = node.get("fn", "") or ""
+    line_n = node.get("line")
+    role = node.get("role", "") or node.get("label", "")
+    branch_tag = ((node.get("branch") or {}).get("tag") or "")
+    exit_chip = node.get("exit_chip", "")
+    parts: list[str] = []
+    head = esc(file or node.get("label", ""))
+    if head:
+        parts.append(f"<strong>{head}</strong>")
+    if fn:
+        line_str = f" · L{int(line_n)}" if line_n else ""
+        parts.append(f"{esc(fn)}(){esc(line_str)}")
+    if branch_tag:
+        parts.append(f"<em>{esc(branch_tag)}</em>")
+    if role:
+        parts.append(esc(role))
+    if exit_chip:
+        parts.append(f"<small>{esc(exit_chip)}</small>")
+    return "<br/>".join(parts)
+
+
+def _render_icicle_node(node: dict, x: float, y: float, w: float,
+                        row_h: float) -> list[str]:
+    """Recursive: emit this node's <a><g><rect><text>...</g></a> then recurse
+    children packed proportional to their leaf count."""
+    out: list[str] = []
+    is_branch = bool(node.get("branch"))
+    lane = node.get("lane", "bot")
+    color = LANE_COLORS.get(lane, "#9b6b6b")
+
+    label = node.get("label", "")
+    file_path = node.get("file", "")
+    fn = node.get("fn", "")
+    branch_tag = ((node.get("branch") or {}).get("tag") or "")
+    exit_chip = node.get("exit_chip", "")
+    href = _github_url(node)
+
+    pad = 2
+    bx = x + pad
+    by = y + pad
+    bw = max(2.0, w - 2 * pad)
+    bh = max(8.0, row_h - 2 * pad)
+
+    # Approximate char widths (sans 10px ~= 6px wide, 9px ~= 5.4px).
+    char_w_file = 6.2
+    char_w_fn = 5.6
+    avail_file = max(1, int(bw / char_w_file) - 1)
+    avail_fn = max(1, int(bw / char_w_fn) - 1)
+
+    text_elems: list[str] = []
+    if file_path and bw >= 46:
+        text_elems.append(
+            f'<text class="icicle-file" x="{bx + bw / 2:.1f}" '
+            f'y="{by + bh / 2 - 2:.1f}" text-anchor="middle">'
+            f'{esc(_icicle_truncate_path(file_path, avail_file))}</text>'
         )
-        if last_right is not None:
-            arrows.append(
-                f'<line class="funnel-arrow" x1="{last_right:.1f}" y1="{y_mid:.0f}" '
-                f'x2="{cx_box:.1f}" y2="{y_mid:.0f}" '
-                f'marker-end="url(#funnel-arrow-head)"></line>'
+        if fn:
+            text_elems.append(
+                f'<text class="icicle-fn" x="{bx + bw / 2:.1f}" '
+                f'y="{by + bh / 2 + 12:.1f}" text-anchor="middle">'
+                f'{esc(_icicle_truncate(fn + "()", avail_fn))}</text>'
             )
-        last_right = cx_box + box_w
+    else:
+        text_elems.append(
+            f'<text class="icicle-label" x="{bx + bw / 2:.1f}" '
+            f'y="{by + bh / 2 + 4:.1f}" text-anchor="middle">'
+            f'{esc(_icicle_truncate(label, avail_file))}</text>'
+        )
 
-    arrow_marker = (
-        '<defs><marker id="funnel-arrow-head" viewBox="0 0 10 10" refX="9" refY="5" '
-        'markerWidth="6" markerHeight="6" orient="auto-start-reverse">'
-        '<path d="M0,0 L10,5 L0,10 z" fill="currentColor"></path>'
-        "</marker></defs>"
+    rect_classes = "icicle-box" + (" branch" if is_branch else "")
+    extra_stroke = ' stroke-dasharray="6 3"' if is_branch else ""
+    fill_opacity = ' fill-opacity="0.42"' if is_branch else ""
+    rect = (
+        f'<rect class="{rect_classes}" x="{bx:.1f}" y="{by:.1f}" '
+        f'width="{bw:.1f}" height="{bh:.1f}" rx="4" ry="4" '
+        f'fill="{color}"{fill_opacity} stroke="{color}" '
+        f'stroke-width="{1.5 if is_branch else 0.8}"{extra_stroke}></rect>'
     )
+
+    tag_elem = ""
+    if branch_tag:
+        tag_elem = (
+            f'<text class="icicle-tag" x="{bx + bw / 2:.1f}" '
+            f'y="{by - 2:.1f}" text-anchor="middle">'
+            f'{esc(_icicle_truncate(branch_tag, avail_file + 6))}</text>'
+        )
+
+    exit_elem = ""
+    if exit_chip:
+        exit_elem = (
+            f'<text class="icicle-exit" x="{bx + bw / 2:.1f}" '
+            f'y="{by + bh + 14:.1f}" text-anchor="middle">'
+            f'{esc(_icicle_truncate(exit_chip, avail_file + 12))}</text>'
+        )
+
+    g_attrs = (
+        f'class="icicle-node lane-{esc(lane)}'
+        + (' branch' if is_branch else '')
+        + f'" data-tip-html="{esc(_icicle_tooltip_html(node))}"'
+    )
+    inner = rect + "".join(text_elems) + tag_elem + exit_elem
+    g_open = f'<g {g_attrs}>'
+    g_close = "</g>"
+
+    if href:
+        out.append(
+            f'<a href="{esc(href)}" target="_blank" rel="noopener" '
+            f'aria-label="{esc(file_path or label)} — open on GitHub">'
+            + g_open + inner + g_close + "</a>"
+        )
+    else:
+        out.append(g_open + inner + g_close)
+
+    # Recurse children (packed proportional to leaf count).
+    children = node.get("children") or []
+    if children:
+        child_y = y + row_h
+        leaf_sum = sum(_icicle_leaf_count(c) for c in children) or 1
+        cx = x
+        for c in children:
+            cw = w * _icicle_leaf_count(c) / leaf_sum
+            out.extend(_render_icicle_node(c, cx, child_y, cw, row_h))
+            cx += cw
+    return out
+
+
+def svg_watch_icicle(tree: dict, *, width: int = 920, row_h: int = 56,
+                     header_h: int = 30, footer_h: int = 24) -> str:
+    """Top-down flame icicle for the /watch backend chain.
+
+    - Y row = call depth (root on top).
+    - X = sequence; parent box spans its children horizontally.
+    - Box width = leaf count under that node (cascade shape, NOT time).
+    - Lane color = process boundary (bot / worker / subprocess).
+    - Branch nodes = dashed border + tag chip above (skip / fast-path / exit).
+    - Click = open file at line on GitHub. Hover = file · fn · line · role.
+    """
+    depth = _icicle_tree_depth(tree)
+    inner_y0 = header_h
+    height = header_h + depth * row_h + footer_h
+
+    # Horizontal lane legend at the top — small swatch + label, inline.
+    legend_x = 8
+    legend_y = 12
+    legend_elems: list[str] = []
+    for key in ("bot", "worker", "subprocess"):
+        legend_elems.append(
+            f'<rect x="{legend_x:.1f}" y="{legend_y - 9:.1f}" width="12" '
+            f'height="12" rx="2" fill="{LANE_COLORS[key]}"></rect>'
+        )
+        legend_elems.append(
+            f'<text class="icicle-legend" x="{legend_x + 16:.1f}" '
+            f'y="{legend_y + 1:.1f}">{esc(LANE_LABELS[key])}</text>'
+        )
+        legend_x += 16 + len(LANE_LABELS[key]) * 7 + 22
+
+    body_nodes = _render_icicle_node(tree, 0, inner_y0, width, row_h)
 
     return (
-        f'<svg id="harFunnel" viewBox="0 0 {width} {height}" role="img" '
-        f'aria-label="Probe pipeline — 5 stages, click any stage for files">'
-        f'<rect class="scatter-bg" x="0" y="0" width="{width}" height="{height}"></rect>'
-        + arrow_marker
-        + "".join(arrows)
-        + "".join(boxes)
+        f'<svg id="watchIcicle" viewBox="0 0 {width} {height}" '
+        f'xmlns="http://www.w3.org/2000/svg" '
+        f'preserveAspectRatio="xMidYMin meet" '
+        f'role="img" '
+        f'aria-label="What runs when you /watch a new site — call icicle. '
+        f'Lanes: bot asyncio, worker asyncio, register subprocess. '
+        f'Dashed boxes = conditional branches. Click any box to open the '
+        f'source file on GitHub.">'
+        f'<rect class="scatter-bg" x="0" y="0" width="{width}" '
+        f'height="{height}"></rect>'
+        + "".join(legend_elems)
+        + "".join(body_nodes)
         + "</svg>"
     )
-
-
-def render_stage_flow_html(stage: dict) -> str:
-    """Per-stage file flow as a flat numbered rail."""
-    steps = stage["steps"] or []
-    if not steps:
-        return '<p class="muted">No file steps recorded for this stage.</p>'
-    items = []
-    for i, (file_path, fn, role) in enumerate(steps):
-        items.append(
-            '<li class="step-row">'
-            f'<span class="step-num">{esc(i + 1)}</span>'
-            '<div class="step-body">'
-            f'<code class="step-file">{esc(file_path)}</code>'
-            '<span class="step-sep">&rarr;</span>'
-            f'<code class="step-fn">{esc(fn)}</code>'
-            f'<p class="step-role">{esc(role)}</p>'
-            '</div>'
-            "</li>"
-        )
-    return f'<ol class="stage-flow">{"".join(items)}</ol>'
-
-
-def render_stage_panels() -> str:
-    """One <section> per pipeline stage. Only the first is visible (others
-    carry `hidden`). The funnel JS toggles `hidden` + `aria-expanded` on the
-    matching `<g class="funnel-stage">`."""
-    parts: list[str] = []
-    for i, stage in enumerate(PROBE_PIPELINE):
-        hidden_attr = "" if i == 0 else " hidden"
-        parts.append(
-            f'<section class="stage-panel" id="har-panel-{esc(stage["id"])}" '
-            f'data-stage-id="{esc(stage["id"])}"'
-            f'{hidden_attr} aria-labelledby="har-panel-{esc(stage["id"])}-title">'
-            f'<header class="stage-panel-head">'
-            f'<span class="stage-panel-num">Step {esc(i + 1)}</span>'
-            f'<h3 id="har-panel-{esc(stage["id"])}-title">{esc(stage["title"])}</h3>'
-            f'<p class="stage-panel-summary">{esc(stage["summary"])}</p>'
-            f"</header>"
-            f'{render_stage_flow_html(stage)}'
-            f"</section>"
-        )
-    return "".join(parts)
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -2845,8 +3058,7 @@ def render_html(
         for b in reversed(BUCKET_ORDER)
     ) or '<li><button type="button" class="legend-toggle" disabled>No case history</button></li>'
 
-    har_funnel_svg = svg_har_funnel()
-    har_stage_panels_html = render_stage_panels()
+    watch_icicle_svg = svg_watch_icicle(WATCH_CALL_TREE)
     probe_agentic_html = render_probe_agentic_html(har_detail)
 
     recent_rows = []
@@ -3249,96 +3461,32 @@ def render_html(
     }}
     .timeline-legend .legend-off {{ opacity: 0.42; text-decoration: line-through; }}
     .timeline-legend b {{ color: var(--ink); margin-left: 4px; }}
-    .funnel-stage {{ cursor: pointer; color: var(--accent-2); }}
-    .funnel-stage:focus {{ outline: none; }}
-    .funnel-stage:focus-visible .funnel-box {{
-      outline: 2px solid var(--accent);
-      outline-offset: 3px;
-    }}
-    .funnel-box {{ fill: var(--panel); stroke: var(--accent); stroke-width: 1.2; transition: fill 100ms, stroke-width 100ms; }}
-    .funnel-stage:hover .funnel-box {{ fill: #eaf1f2; }}
-    .funnel-stage.active .funnel-box {{ fill: #d6e6e9; stroke-width: 2.4; }}
-    .funnel-step {{ fill: var(--muted); font: 600 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 0.08em; text-transform: uppercase; }}
-    .funnel-label {{ fill: var(--ink); font: 600 15px Georgia, "Times New Roman", serif; }}
-    .funnel-tagline {{ fill: var(--muted); font: italic 12px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
-    .funnel-arrow {{ stroke: var(--accent-2); stroke-width: 1.8; color: var(--accent-2); }}
+    /* Figure 3 — /watch call icicle */
+    .watch-icicle-wrap {{ overflow-x: auto; margin: 0 0 12px; }}
+    #watchIcicle {{ display: block; min-width: 720px; max-width: 100%; height: auto; }}
+    .icicle-node {{ cursor: pointer; }}
+    .icicle-box {{ transition: filter 120ms, stroke-width 120ms; }}
+    .icicle-node:hover .icicle-box {{ filter: brightness(1.08); stroke-width: 2.4; }}
+    .icicle-node.branch {{ opacity: 0.92; }}
+    .icicle-file  {{ fill: #fff; font: 600 10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; pointer-events: none; }}
+    .icicle-fn    {{ fill: #f4ece0; font: 400 9px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; pointer-events: none; }}
+    .icicle-label {{ fill: #fff; font: 600 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; pointer-events: none; }}
+    .icicle-tag   {{ fill: var(--accent-2); font: italic 9px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; pointer-events: none; }}
+    .icicle-exit  {{ fill: var(--accent); font: 600 10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; pointer-events: none; }}
+    .icicle-legend {{ fill: var(--muted); font: 600 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
+    /* GitHub deep-link wrappers — kill underline; icicle hover already signals interactivity. */
+    #watchIcicle a {{ text-decoration: none; outline: none; }}
+    #watchIcicle a:focus-visible .icicle-box {{ stroke: var(--accent); stroke-width: 2.6; }}
+    /* figcaption lane swatches */
+    .lane-swatch {{ display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: middle; margin: -2px 2px 0; }}
+    .lane-swatch.lane-bot {{ background: #3d737f; }}
+    .lane-swatch.lane-worker {{ background: #6f7f52; }}
+    .lane-swatch.lane-subprocess {{ background: #8a6f4d; }}
     /* Scoped section-gap tokens (codex v4 review §8 — global selector over-fires). */
     main > section + section {{ margin-top: var(--section-gap, 36px); }}
     #figures figure + figure {{ margin-top: var(--subsection-gap, 22px); }}
     #probeAgenticFigure {{ margin-top: var(--section-gap, 36px); }}
     #probeAgenticFigure .har-section + .har-section {{ margin-top: var(--subsection-gap, 22px); }}
-
-    .stage-panels {{ margin: 18px 0 6px; }}
-    .stage-panel {{
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 6px;
-      padding: 16px 18px 14px;
-      margin: 0 0 14px;
-    }}
-    .stage-panel-head {{ display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin: 0 0 12px; }}
-    .stage-panel-head h3 {{ margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 1.15rem; }}
-    .stage-panel-num {{
-      display: inline-block;
-      padding: 2px 9px;
-      background: var(--paper);
-      border-radius: 10px;
-      color: var(--accent);
-      font: 600 0.76rem -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-    }}
-    .stage-panel-summary {{ flex-basis: 100%; margin: 4px 0 0; color: var(--muted); font-size: 0.94rem; }}
-    /* Figure 3 stage rail. */
-    .stage-flow {{
-      border-left: 1px solid var(--line);
-      padding: 0 0 0 18px;
-      margin: 0;
-      list-style: none;
-    }}
-    .step-row {{
-      display: flex;
-      gap: 12px;
-      margin: 0 0 14px;
-    }}
-    .step-num {{
-      width: 24px;
-      height: 24px;
-      margin-left: -31px;
-      border-radius: 50%;
-      background: var(--panel);
-      border: 1px solid var(--accent);
-      text-align: center;
-      line-height: 22px;
-      font: 700 0.9rem Georgia, "Times New Roman", serif;
-      color: var(--accent);
-      flex: 0 0 24px;
-    }}
-    .step-body {{
-      min-width: 0;
-      flex: 1;
-    }}
-    .step-file {{
-      display: inline;
-      font: 600 0.82rem ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      color: var(--ink);
-      word-break: break-all;
-      overflow-wrap: anywhere;
-    }}
-    .step-sep {{ color: var(--muted); margin: 0 6px; }}
-    .step-fn {{
-      display: inline;
-      font: 0.78rem ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      color: var(--accent);
-      word-break: break-all;
-      overflow-wrap: anywhere;
-    }}
-    .step-role {{
-      margin: 4px 0 0;
-      font-size: 0.8rem;
-      color: var(--muted);
-      line-height: 1.4;
-    }}
     /* Figure 4 — live HAR detail */
     #probeAgenticFigure {{
       background: var(--panel);
@@ -4168,18 +4316,22 @@ def render_html(
   </section>
 
   <section aria-labelledby="har">
-    <h2 id="har">How the probe reads a site (HAR)</h2>
-    <p class="lead">When a new URL is offered, probe runs in five stages. The funnel below
-      shows the order — <strong>click any stage</strong> (or focus + Enter / Space) to see which
-      files in this repo actually execute during that stage and in what order.</p>
-    <figure id="harPipeline">
-      {har_funnel_svg}
-      <figcaption>Figure 3. Probe pipeline — click any stage to see the files executed in
-        that stage. The detail expands inside the same panel below.</figcaption>
+    <h2 id="har">What runs when you /watch a new site (HAR)</h2>
+    <p class="lead">A first-time <code>/watch &lt;url&gt;</code> cascades top &rarr; bottom through
+      bot &rarr; worker &rarr; <em>register</em> subprocess. Each box is a real call —
+      <strong>hover</strong> to read the role, <strong>click</strong> to open the source on GitHub.
+      Dashed boxes are conditional branches (skip / fast-path / early return).
+      Figure&nbsp;4 below drills into the <code>generate</code> step with a live probe artifact.</p>
+    <figure id="harPipeline" class="watch-icicle-wrap">
+      {watch_icicle_svg}
+      <figcaption>Figure 3. <code>/watch</code> call icicle &mdash; lane color =
+        which process the call runs in (<span class="lane-swatch lane-bot"></span>&nbsp;bot asyncio,
+        <span class="lane-swatch lane-worker"></span>&nbsp;worker asyncio,
+        <span class="lane-swatch lane-subprocess"></span>&nbsp;register subprocess).
+        Box width = how many sub-steps live inside &mdash; <strong>not</strong> wall-clock time.
+        Lane transitions mark async hand-off (bot &rarr; worker) and OS subprocess spawn (worker &rarr; register).
+        On mobile, swipe horizontally if boxes get tight.</figcaption>
     </figure>
-    <div class="stage-panels" id="harStagePanels">
-      {har_stage_panels_html}
-    </div>
     <figure id="probeAgenticFigure">
       <h3>Figure 4. From probe artifacts to the agentic config packet</h3>
       <p class="figure-lead">Pick a URL example to read the full path in one place:
@@ -4206,33 +4358,6 @@ def render_html(
     <div id="packetHoverTip" class="packet-hover-tip" hidden></div>
     <script>
       (function () {{
-        var funnel = document.getElementById('harFunnel');
-        var panels = document.getElementById('harStagePanels');
-        if (funnel && panels) {{
-          function setActive(stageId) {{
-            funnel.querySelectorAll('.funnel-stage').forEach(function (g) {{
-              var match = g.getAttribute('data-stage-id') === stageId;
-              g.classList.toggle('active', match);
-              g.setAttribute('aria-expanded', match ? 'true' : 'false');
-            }});
-            panels.querySelectorAll('.stage-panel').forEach(function (p) {{
-              var match = p.getAttribute('data-stage-id') === stageId;
-              p.hidden = !match;
-            }});
-          }}
-          funnel.addEventListener('click', function (e) {{
-            var g = e.target.closest ? e.target.closest('.funnel-stage') : null;
-            if (!g) return;
-            setActive(g.getAttribute('data-stage-id') || '');
-          }});
-          funnel.addEventListener('keydown', function (e) {{
-            if (e.key !== 'Enter' && e.key !== ' ') return;
-            var g = e.target.closest ? e.target.closest('.funnel-stage') : null;
-            if (!g) return;
-            e.preventDefault();
-            setActive(g.getAttribute('data-stage-id') || '');
-          }});
-        }}
         var probeAgentPicker = document.getElementById('probeAgentPicker');
         var probeAgentSearch = document.getElementById('probeAgentSearch');
         var probeAgentOpenUrl = document.getElementById('probeAgentOpenUrl');
