@@ -124,9 +124,12 @@ def run() -> list[tuple[str, bool, str]]:
     cases.append((
         "render_explains_agentic_flow",
         "probeAgentPicker" in html
+        and "probeAgentSearch" in html
+        and "probeAgentOpenUrl" in html
         and "Model input packet" in html
         and "packet-input-table" in html
         and "data-tip-html" in html
+        and "traffic_api_candidates[0]" in html
         and "https://example.com/api/news" in html
         and "<td>2</td>" in html
         and "candidate.json" in html

@@ -10,6 +10,7 @@ import json
 import math
 import os
 import re
+import shutil
 import sqlite3
 import sys
 import time
@@ -1358,8 +1359,8 @@ def _manifest_for(run_dir: Path, slug: str) -> dict:
     return {"slug": slug, "items": items}
 
 
-def pick_har_showcases(top_n: int = 5) -> list[tuple[str, Path]]:
-    """Pick up to five probe runs for Figure 4."""
+def pick_har_showcases(top_n: int | None = None) -> list[tuple[str, Path]]:
+    """Pick registered probe runs for Figure 4."""
     pdir = ROOT / "output" / "probe"
     if not pdir.exists():
         return []
@@ -1458,7 +1459,8 @@ def pick_har_showcases(top_n: int = 5) -> list[tuple[str, Path]]:
                     item for item in eligible if item[3] != slug
                 ]
                 break
-    return [(slug, primary) for _, _, _, slug, primary in eligible[:top_n]]
+    picked = eligible if top_n is None else eligible[:top_n]
+    return [(slug, primary) for _, _, _, slug, primary in picked]
 
 
 def _row_api(c: dict) -> dict:
@@ -1796,23 +1798,38 @@ def _clip_text(text: str, *, max_chars: int) -> str:
     return text if len(text) <= max_chars else text[:max_chars].rstrip() + "\n..."
 
 
+def _asset_name(value: object) -> str:
+    name = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value or "").strip())
+    return name.strip("._") or "raw"
+
+
 _OVERLAY_SEQ = 0
 
 
-def overlay_button(title: str, content: object, *, label: str = "open full view") -> str:
+def overlay_button(
+    title: str,
+    content: object | None = None,
+    *,
+    label: str = "open full view",
+    raw_url: str = "",
+) -> str:
     """Full-screen disclosure control for long generated text."""
     global _OVERLAY_SEQ
     _OVERLAY_SEQ += 1
     tid = f"overlay-template-{_OVERLAY_SEQ}"
+    raw_attr = f' data-overlay-raw-url="{esc(raw_url)}"' if raw_url else ""
+    button = (
+        f'<button type="button" class="overlay-open" '
+        f'data-overlay-template="{esc(tid)}" data-overlay-title="{esc(title)}"{raw_attr}>'
+        f'{esc(label)}</button>'
+    )
+    if raw_url:
+        return button
     if isinstance(content, str):
         text = content
     else:
         text = json.dumps(content, ensure_ascii=False, indent=2)
-    return (
-        f'<button type="button" class="overlay-open" '
-        f'data-overlay-template="{esc(tid)}" data-overlay-title="{esc(title)}">{esc(label)}</button>'
-        f'<template id="{esc(tid)}"><pre>{esc(text)}</pre></template>'
-    )
+    return f'{button}<template id="{esc(tid)}"><pre>{esc(text)}</pre></template>'
 
 
 def _find_section(detail: dict, key: str) -> dict:
@@ -1940,7 +1957,7 @@ def build_agentic_packet(detail: dict, *, run_dir: Path | None = None) -> dict:
                 "size": size,
                 "role": _artifact_explainer(name)[0],
                 "why": _artifact_explainer(name)[1],
-                "raw": _read_text_full(p),
+                "raw_url": f"probe-raw/{slug}/artifacts/{_asset_name(name)}",
                 "preview": _read_text_excerpt(p, max_chars=900) if p.suffix in {".json", ".txt"} else f"{size} bytes",
             })
 
@@ -1995,6 +2012,7 @@ def build_agentic_packet(detail: dict, *, run_dir: Path | None = None) -> dict:
             "role": "System-like local instructions: scope, reading order, self-veto, output contract.",
             "contains": ["read order", "tmpdir-only scope", "self-veto rules", "final JSON contract"],
             "raw": agentic_agents,
+            "raw_url": f"probe-raw/{slug}/agentic/AGENTS.md",
             "preview": _clip_text(agentic_agents, max_chars=1800),
         },
         {
@@ -2004,6 +2022,7 @@ def build_agentic_packet(detail: dict, *, run_dir: Path | None = None) -> dict:
             "role": "The actual task text passed to `codex exec` on stdin.",
             "contains": ["target slug", "target URL", "short command recipe", "success/failure output shape"],
             "raw": user_prompt,
+            "raw_url": f"probe-raw/{slug}/agentic/stdin_prompt.txt",
             "preview": user_prompt,
         },
         {
@@ -2013,6 +2032,7 @@ def build_agentic_packet(detail: dict, *, run_dir: Path | None = None) -> dict:
             "role": "Primary model evidence: strategy hint, list/article HTML samples, probe signals, and notes.",
             "contains": ["probe URL", "strategy hints", "list candidates", "article sample", "traffic/feed/pagination signals"],
             "raw": _json_full(digest_packet),
+            "raw_url": f"probe-raw/{slug}/agentic/digest.json",
             "preview": _json_excerpt(digest_packet, max_chars=6000),
         },
         {
@@ -2022,6 +2042,7 @@ def build_agentic_packet(detail: dict, *, run_dir: Path | None = None) -> dict:
             "role": "Validator-only evidence so probe-grounding checks use full HTML, not compressed prompt snippets.",
             "contains": ["same keys as digest.json", "uncompressed HTML", "full grounding evidence for validator"],
             "raw": _json_full(validator_digest_packet),
+            "raw_url": f"probe-raw/{slug}/agentic/validator_digest.json",
             "preview": _json_excerpt(validator_digest_packet),
         },
         {
@@ -2031,6 +2052,7 @@ def build_agentic_packet(detail: dict, *, run_dir: Path | None = None) -> dict:
             "role": "Optional: only present when auto mode first tried api_loop_once and escalated to agentic.",
             "contains": ["previous candidate_config", "validation_feedback", "api_loop_once error", "attempt number"],
             "raw": _json_full(failure_packet),
+            "raw_url": f"probe-raw/{slug}/agentic/failure_packet.json",
             "preview": _json_excerpt(failure_packet),
         },
         {
@@ -2040,6 +2062,7 @@ def build_agentic_packet(detail: dict, *, run_dir: Path | None = None) -> dict:
             "role": "Two closest successful configs ranked by recognizer, host, and strategy similarity.",
             "contains": ["example slugs", "similarity score", "why each example was picked", "2 copied config JSON files"],
             "raw": _json_full(examples_packet),
+            "raw_url": f"probe-raw/{slug}/agentic/examples_manifest.json",
             "preview": _json_excerpt(examples_packet),
         },
         {
@@ -2049,6 +2072,7 @@ def build_agentic_packet(detail: dict, *, run_dir: Path | None = None) -> dict:
             "role": "Full config-authoring rules. The agent is told to skim it only when uncertain.",
             "contains": ["allowed config schema vocabulary", "strategy-specific rules", "selector/API guidance", "retry constraints"],
             "raw": config_writer_rules,
+            "raw_url": f"probe-raw/{slug}/agentic/config_writer_rules.txt",
             "preview": _clip_text(config_writer_rules, max_chars=6000),
         },
         {
@@ -2058,6 +2082,7 @@ def build_agentic_packet(detail: dict, *, run_dir: Path | None = None) -> dict:
             "role": "The agent runs this against ./candidate.json; the parent validates again after the agent exits.",
             "contains": ["launcher command", "python interpreter path", "validator timing log path", "candidate input path"],
             "raw": _json_full(validator_packet),
+            "raw_url": f"probe-raw/{slug}/agentic/validator_handoff.json",
             "preview": _json_excerpt(validator_packet),
         },
         {
@@ -2067,6 +2092,7 @@ def build_agentic_packet(detail: dict, *, run_dir: Path | None = None) -> dict:
             "role": "candidate.json holds the attempted config; last.json is the tiny final JSON message with ok/attempts/stop_reason.",
             "contains": ["candidate config file", "ok flag", "attempt results", "stop_reason", "published config path"],
             "raw": _json_full(output_packet),
+            "raw_url": f"probe-raw/{slug}/agentic/candidate_and_last.json",
             "preview": _json_excerpt(output_packet),
         },
     ]
@@ -2086,18 +2112,20 @@ def build_agentic_packet(detail: dict, *, run_dir: Path | None = None) -> dict:
         "artifacts": artifacts[:8],
         "files": files,
         "raw_text": raw_text,
+        "raw_url": f"probe-raw/{slug}/agentic/full_packet.txt",
         "result": {
             "strategy": config_strategy,
             "config_path": f"configs/{slug}.json" if slug else "configs/<slug>.json",
             "raw": _json_full(config_json) if config_json else config_preview,
+            "raw_url": f"probe-raw/{slug}/agentic/published_config.json",
             "preview": config_preview,
         },
     }
 
 
 def read_har_details(*, force_recompute: bool = False) -> dict:
-    """Build or read the up-to-five Figure 4 panel payload."""
-    picks = pick_har_showcases(top_n=5)
+    """Build or read the registered Figure 4 panel payload."""
+    picks = pick_har_showcases(top_n=None)
     if not picks:
         return {"computed_at": datetime.now(KST).isoformat(), "panels": []}
     manifests = [_manifest_for(har_path.parent, slug) for slug, har_path in picks]
@@ -2131,6 +2159,63 @@ def read_har_details(*, force_recompute: bool = False) -> dict:
     except OSError:
         pass
     return payload
+
+
+def write_probe_raw_assets(site_dir: Path, har_detail: dict | None) -> None:
+    panels = (har_detail or {}).get("panels") or []
+    raw_root = site_dir / "probe-raw"
+    try:
+        if raw_root.exists():
+            shutil.rmtree(raw_root)
+        raw_root.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return
+
+    for panel in panels:
+        detail = panel.get("detail") or {}
+        slug = str(detail.get("slug") or "")
+        if not slug:
+            continue
+        packet = detail.get("agentic_packet") or {}
+        for item in packet.get("artifacts") or []:
+            raw_url = str(item.get("raw_url") or "")
+            rel_path = str(item.get("path") or "")
+            if not raw_url or not rel_path:
+                continue
+            src = ROOT / rel_path
+            dst = site_dir / raw_url
+            try:
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                if src.exists():
+                    shutil.copyfile(src, dst)
+                else:
+                    dst.write_text(str(item.get("preview") or ""), encoding="utf-8")
+            except OSError:
+                pass
+        for f in packet.get("files") or []:
+            raw_url = str(f.get("raw_url") or "")
+            if not raw_url:
+                continue
+            try:
+                dst = site_dir / raw_url
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                dst.write_text(str(f.get("raw") or ""), encoding="utf-8")
+            except OSError:
+                pass
+        try:
+            full_url = str(packet.get("raw_url") or "")
+            if full_url:
+                dst = site_dir / full_url
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                dst.write_text(str(packet.get("raw_text") or ""), encoding="utf-8")
+            result = packet.get("result") or {}
+            result_url = str(result.get("raw_url") or "")
+            if result_url:
+                dst = site_dir / result_url
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                dst.write_text(str(result.get("raw") or result.get("preview") or ""), encoding="utf-8")
+        except OSError:
+            pass
 
 
 def _placeholder_har_panel() -> dict:
@@ -2249,11 +2334,18 @@ def _render_har_detail_panel(panel: dict, *, hidden: bool) -> str:
     signal_rows: list[dict] = []
     raw_dump: dict[str, object] = {}
     for sec in detail.get("sections") or []:
-        raw_dump[sec["key"]] = sec.get("raw_redacted")
-        signal_rows.extend(sec.get("rows") or [])
+        section_key = sec["key"]
+        raw_dump[section_key] = sec.get("raw_redacted")
+        for idx, row in enumerate(sec.get("rows") or []):
+            item = dict(row)
+            if section_key != "digest":
+                item["key"] = f"{section_key}[{idx}]"
+            item.setdefault("kind", item.get("badge") or sec.get("title") or section_key)
+            item.setdefault("count", item.get("total_rows") or item.get("count") or 1)
+            signal_rows.append(item)
         if sec.get("more"):
             signal_rows.append({
-                "key": sec["key"],
+                "key": section_key,
                 "kind": sec["title"],
                 "count": sec["more"],
                 "badge": "MORE",
@@ -2375,6 +2467,7 @@ def render_probe_agentic_html(payload: dict | None) -> str:
         detail = panel.get("detail") or {}
         host_label = panel.get("host_label") or "site"
         path_label = detail.get("path_label") or ""
+        probe_url = detail.get("probe_url") or ""
         verdict = detail.get("verdict") or ""
         bits = [f"{host_label}{path_label}" if path_label else host_label]
         if multi:
@@ -2382,16 +2475,28 @@ def render_probe_agentic_html(payload: dict | None) -> str:
         if verdict:
             bits.append(verdict if len(verdict) <= 28 else verdict[:27] + "…")
         panel_id = f"probe-agent-panel-{i}"
+        search_text = " ".join(
+            str(x) for x in (probe_url, host_label, path_label, detail.get("slug") or "", verdict)
+            if x
+        )
         options_parts.append(
-            f'<option value="{esc(panel_id)}">{esc(" · ".join(bits))}</option>'
+            f'<option value="{esc(panel_id)}" data-url="{esc(probe_url)}" '
+            f'data-search="{esc(search_text.lower())}">{esc(" · ".join(bits))}</option>'
         )
     panel_html = "".join(
         _render_probe_agentic_panel(panel, panel_index=i, hidden=i != 0)
         for i, panel in enumerate(panels)
     )
+    count_label = f"{len(panels)} registered probe examples"
     return (
-        '<label class="har-picker">URL example '
+        '<div class="har-picker probe-agent-picker">'
+        '<label>Search URL '
+        '<input id="probeAgentSearch" type="search" placeholder="type URL, host, or slug" autocomplete="off"></label>'
+        '<label>URL example '
         f'<select id="probeAgentPicker">{"".join(options_parts)}</select></label>'
+        f'<a id="probeAgentOpenUrl" class="probe-agent-url" href="#" target="_blank" rel="noopener noreferrer">open URL</a>'
+        f'<span id="probeAgentCount" class="probe-agent-count">{esc(count_label)}</span>'
+        '</div>'
         f"{panel_html}"
     )
 
@@ -2438,7 +2543,7 @@ def _render_agentic_packet_panel(panel: dict, *, hidden: bool) -> str:
     input_rows = ""
     for item in packet.get("artifacts") or []:
         preview = str(item.get("preview") or "")
-        overlay_text = str(item.get("raw") if item.get("raw") is not None else preview)
+        raw_url = str(item.get("raw_url") or "")
         key = str(item.get("name") or item.get("path") or "")
         tip_html = (
             f'<div class="packet-pop-row"><b>path</b><code>{esc(item.get("path") or "")}</code></div>'
@@ -2448,7 +2553,7 @@ def _render_agentic_packet_panel(panel: dict, *, hidden: bool) -> str:
         input_rows += (
             f'<tr class="packet-input-row" tabindex="0" data-tip-html="{esc(tip_html)}">'
             '<td class="packet-key-cell">'
-            f'{overlay_button(str(item.get("path") or "probe artifact"), overlay_text, label=key)}'
+            f'{overlay_button(str(item.get("path") or "probe artifact"), label=key, raw_url=raw_url)}'
             '</td>'
             '<td><span class="badge">probe</span></td>'
             f'<td>{esc(str(item.get("size")) + " bytes" if item.get("size") else "—")}</td>'
@@ -2457,7 +2562,7 @@ def _render_agentic_packet_panel(panel: dict, *, hidden: bool) -> str:
         )
     for f in packet.get("files") or []:
         contains_text = ", ".join(str(x) for x in (f.get("contains") or []))
-        overlay_text = str(f.get("raw") if f.get("raw") is not None else f.get("preview") or "")
+        raw_url = str(f.get("raw_url") or "")
         preview = str(f.get("preview") or "")
         tip_html = (
             f'<div class="packet-pop-row"><b>source</b><code>{esc(f.get("source") or "")}</code></div>'
@@ -2467,7 +2572,7 @@ def _render_agentic_packet_panel(panel: dict, *, hidden: bool) -> str:
         input_rows += (
             f'<tr class="packet-input-row" tabindex="0" data-tip-html="{esc(tip_html)}">'
             '<td class="packet-key-cell">'
-            f'{overlay_button(str(f.get("path") or "staged file"), overlay_text, label=str(f.get("path") or ""))}'
+            f'{overlay_button(str(f.get("path") or "staged file"), label=str(f.get("path") or ""), raw_url=raw_url)}'
             '</td>'
             f'<td><span class="packet-phase">{esc(f.get("phase") or "")}</span></td>'
             f'<td>{esc(len(f.get("contains") or []))}</td>'
@@ -2480,8 +2585,8 @@ def _render_agentic_packet_panel(panel: dict, *, hidden: bool) -> str:
     result = packet.get("result") or {}
     result_preview = str(result.get("preview") or "")
     raw_text = str(packet.get("raw_text") or "")
-    raw_overlay_text = raw_text
-    result_overlay_text = str(result.get("raw") if result.get("raw") is not None else result_preview)
+    raw_overlay_url = str(packet.get("raw_url") or "")
+    result_overlay_url = str(result.get("raw_url") or "")
     return (
         f'<div class="agentic-packet-panel" id="{esc(panel_id)}"{hidden_attr}>'
         '<ol class="packet-flow">'
@@ -2497,14 +2602,14 @@ def _render_agentic_packet_panel(panel: dict, *, hidden: bool) -> str:
         '<section class="packet-subsection packet-raw">'
         '<h4>Raw text view</h4>'
         '<p>One full-screen bundle: command shape, stdin prompt, JSON evidence, rules, validator handoff, and expected output contract.</p>'
-        f'{overlay_button("Full staged agentic packet", raw_overlay_text, label="open raw packet")}'
+        f'{overlay_button("Full staged agentic packet", label="open raw packet", raw_url=raw_overlay_url)}'
         '</section>'
         '<section class="packet-subsection packet-result">'
         '<h4>Result path</h4>'
         f'<p>The agent writes <code>candidate.json</code>; the parent re-validates it and publishes '
         f'<code>{esc(result.get("config_path") or "configs/<slug>.json")}</code>. '
         f'Current published strategy: <code>{esc(result.get("strategy") or "—")}</code>.</p>'
-        f'{overlay_button("Published config summary", result_overlay_text, label="open config summary")}'
+        f'{overlay_button("Published config summary", label="open config summary", raw_url=result_overlay_url)}'
         '</section>'
         '</div>'
     )
@@ -3151,20 +3256,43 @@ def render_html(
       overflow-wrap: anywhere;
     }}
     .har-picker {{
-      display: inline-flex;
+      display: flex;
       align-items: center;
       gap: 8px;
+      flex-wrap: wrap;
       margin: 0 0 14px;
       color: var(--muted);
       font-size: 0.9rem;
     }}
-    .har-picker select {{
+    .har-picker label {{
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }}
+    .har-picker select,
+    .har-picker input {{
       border: 1px solid var(--line);
       background: var(--paper);
       color: var(--ink);
       padding: 5px 8px;
       border-radius: 4px;
     }}
+    .probe-agent-picker input {{ width: min(360px, 80vw); }}
+    .probe-agent-picker select {{ width: min(520px, 88vw); }}
+    .probe-agent-url {{
+      color: var(--accent);
+      border: 1px solid var(--line);
+      background: var(--paper);
+      border-radius: 4px;
+      padding: 4px 9px;
+      text-decoration: none;
+      font-weight: 600;
+    }}
+    .probe-agent-url[aria-disabled="true"] {{
+      color: var(--muted);
+      pointer-events: none;
+    }}
+    .probe-agent-count {{ font-size: 0.82rem; }}
     .har-detail-panel {{ margin-top: 4px; }}
     .probe-agent-grid {{
       display: block;
@@ -3942,14 +4070,76 @@ def render_html(
           }});
         }}
         var probeAgentPicker = document.getElementById('probeAgentPicker');
+        var probeAgentSearch = document.getElementById('probeAgentSearch');
+        var probeAgentOpenUrl = document.getElementById('probeAgentOpenUrl');
+        var probeAgentCount = document.getElementById('probeAgentCount');
         var probeAgentPanels = document.querySelectorAll('.probe-agent-panel');
+        var probeAgentOptions = probeAgentPicker ? Array.prototype.map.call(probeAgentPicker.options, function (opt) {{
+          return {{
+            value: opt.value,
+            text: opt.textContent || '',
+            url: opt.getAttribute('data-url') || '',
+            search: opt.getAttribute('data-search') || ''
+          }};
+        }}) : [];
+        function updateProbeAgentUrl() {{
+          if (!probeAgentPicker || !probeAgentOpenUrl) return;
+          var opt = probeAgentPicker.selectedOptions && probeAgentPicker.selectedOptions[0];
+          var url = opt ? (opt.getAttribute('data-url') || '') : '';
+          if (url) {{
+            probeAgentOpenUrl.href = url;
+            probeAgentOpenUrl.textContent = 'open URL';
+            probeAgentOpenUrl.setAttribute('aria-disabled', 'false');
+          }} else {{
+            probeAgentOpenUrl.href = '#';
+            probeAgentOpenUrl.textContent = 'no URL';
+            probeAgentOpenUrl.setAttribute('aria-disabled', 'true');
+          }}
+        }}
+        function setProbeAgentPanel(targetId) {{
+          probeAgentPanels.forEach(function (el) {{
+            el.hidden = el.id !== targetId;
+          }});
+          updateProbeAgentUrl();
+        }}
+        function renderProbeAgentOptions(query) {{
+          if (!probeAgentPicker) return;
+          var q = (query || '').trim().toLowerCase();
+          var current = probeAgentPicker.value;
+          var matches = probeAgentOptions.filter(function (item) {{
+            return !q || item.search.indexOf(q) !== -1 || item.text.toLowerCase().indexOf(q) !== -1;
+          }});
+          probeAgentPicker.innerHTML = '';
+          matches.forEach(function (item) {{
+            var opt = document.createElement('option');
+            opt.value = item.value;
+            opt.textContent = item.text;
+            opt.setAttribute('data-url', item.url);
+            opt.setAttribute('data-search', item.search);
+            probeAgentPicker.appendChild(opt);
+          }});
+          if (probeAgentCount) {{
+            probeAgentCount.textContent = matches.length + ' / ' + probeAgentOptions.length + ' registered probe examples';
+          }}
+          if (!matches.length) {{
+            setProbeAgentPanel('');
+            updateProbeAgentUrl();
+            return;
+          }}
+          var next = matches.some(function (item) {{ return item.value === current; }}) ? current : matches[0].value;
+          probeAgentPicker.value = next;
+          setProbeAgentPanel(next);
+        }}
         if (probeAgentPicker && probeAgentPanels.length) {{
           probeAgentPicker.addEventListener('change', function () {{
-            var targetId = probeAgentPicker.value;
-            probeAgentPanels.forEach(function (el) {{
-              el.hidden = el.id !== targetId;
-            }});
+            setProbeAgentPanel(probeAgentPicker.value);
           }});
+          if (probeAgentSearch) {{
+            probeAgentSearch.addEventListener('input', function () {{
+              renderProbeAgentOptions(probeAgentSearch.value);
+            }});
+          }}
+          updateProbeAgentUrl();
         }}
         var overlay = document.getElementById('contentOverlay');
         var overlayTitle = document.getElementById('contentOverlayTitle');
@@ -4005,11 +4195,31 @@ def render_html(
           var openBtn = e.target.closest ? e.target.closest('.overlay-open') : null;
           if (openBtn) {{
             var tid = openBtn.getAttribute('data-overlay-template') || '';
+            var rawUrl = openBtn.getAttribute('data-overlay-raw-url') || '';
             var tpl = document.getElementById(tid);
-            if (!tpl || !overlay || !overlayBody || !overlayTitle) return;
+            if (!overlay || !overlayBody || !overlayTitle) return;
             overlayTitle.textContent = openBtn.getAttribute('data-overlay-title') || 'Details';
-            overlayBody.innerHTML = tpl.innerHTML;
             overlay.hidden = false;
+            if (rawUrl) {{
+              overlayBody.innerHTML = '<pre>loading raw text...</pre>';
+              fetch(rawUrl).then(function (res) {{
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                return res.text();
+              }}).then(function (text) {{
+                var pre = document.createElement('pre');
+                pre.textContent = text;
+                overlayBody.innerHTML = '';
+                overlayBody.appendChild(pre);
+              }}).catch(function (err) {{
+                var pre = document.createElement('pre');
+                pre.textContent = 'failed to load raw text: ' + err.message;
+                overlayBody.innerHTML = '';
+                overlayBody.appendChild(pre);
+              }});
+              return;
+            }}
+            if (!tpl) return;
+            overlayBody.innerHTML = tpl.innerHTML;
             return;
           }}
           if (e.target && e.target.getAttribute && e.target.getAttribute('data-overlay-close') === '1') {{
@@ -4064,6 +4274,7 @@ def main(argv: list[str]) -> int:
     )
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    write_probe_raw_assets(out_path.parent, har_detail)
     tmp_path = out_path.with_suffix(out_path.suffix + ".tmp")
     tmp_path.write_text(page, encoding="utf-8")
     os.replace(tmp_path, out_path)
