@@ -1466,6 +1466,9 @@ def _row_api(c: dict) -> dict:
     first = hits[0] if hits else {}
     keys = ", ".join(str(k) for k in (first.get("sample_keys") or [])[:6])
     return {
+        "key": _host_mask(c.get("url")),
+        "kind": "List JSON API",
+        "count": len(hits),
         "type": "api",
         "badge": "List JSON API",
         "badge_class": "sig-api",
@@ -1482,6 +1485,9 @@ def _row_api(c: dict) -> dict:
 
 def _row_body(c: dict) -> dict:
     return {
+        "key": _host_mask(c.get("url")),
+        "kind": "Article body JSON",
+        "count": c.get("body_len") or 0,
         "type": "body",
         "badge": "Article body JSON",
         "badge_class": "sig-body",
@@ -1499,14 +1505,17 @@ def _row_body(c: dict) -> dict:
 def _row_simple(c: dict, keys: list[str], signal_type: str, badge: str) -> dict:
     if not c:
         return {"type": signal_type, "badge": badge, "badge_class": f"sig-{signal_type}",
+                "key": signal_type, "kind": badge, "count": 0,
                 "host": "", "meta": "", "evidence": ""}
+    signal_key = _host_mask(c.get("url") or c.get("sample_url") or c.get("url_template"))
     return {
+        "key": signal_key or signal_type,
+        "kind": badge,
+        "count": 1,
         "type": signal_type,
         "badge": badge,
         "badge_class": f"sig-{signal_type}",
-        "host": _host_mask(
-            c.get("url") or c.get("sample_url") or c.get("url_template")
-        ),
+        "host": signal_key,
         "meta": " · ".join(
             f"{k}={_host_mask(c.get(k)) if 'url' in k else _short_text(c.get(k), 40)}"
             for k in keys
@@ -1540,6 +1549,9 @@ def _digest_signal_rows(*, slug: str, base_url: str, run_dir: Path) -> tuple[lis
     primary_feed = _host_mask(site_kind.get("primary_feed_url"))
     if primary_feed:
         rows.append({
+            "key": "site_kind.primary_feed_url",
+            "kind": "Register digest",
+            "count": 1,
             "type": "digest",
             "badge": "Register digest",
             "badge_class": "sig-digest",
@@ -1553,6 +1565,9 @@ def _digest_signal_rows(*, slug: str, base_url: str, run_dir: Path) -> tuple[lis
         source = item.get("source")
         if source:
             rows.append({
+                "key": label,
+                "kind": "Register digest",
+                "count": 1,
                 "type": "digest",
                 "badge": "Register digest",
                 "badge_class": "sig-digest",
@@ -1565,6 +1580,9 @@ def _digest_signal_rows(*, slug: str, base_url: str, run_dir: Path) -> tuple[lis
     rss_n = len(digest.get("feed_candidates") or [])
     pag_n = len(list_cands.get("pagination_hints") or [])
     rows.append({
+        "key": "signal_counts",
+        "kind": "Register digest",
+        "count": api_n + rss_n + pag_n,
         "type": "digest",
         "badge": "Register digest",
         "badge_class": "sig-digest",
@@ -1575,6 +1593,9 @@ def _digest_signal_rows(*, slug: str, base_url: str, run_dir: Path) -> tuple[lis
     notes = digest.get("notes") or []
     if notes:
         rows.append({
+            "key": "notes[0]",
+            "kind": "Register digest",
+            "count": len(notes),
             "type": "digest",
             "badge": "Register digest",
             "badge_class": "sig-digest",
@@ -2197,6 +2218,9 @@ def _render_har_detail_panel(panel: dict, *, hidden: bool) -> str:
         signal_rows.extend(sec.get("rows") or [])
         if sec.get("more"):
             signal_rows.append({
+                "key": sec["key"],
+                "kind": sec["title"],
+                "count": sec["more"],
                 "badge": "MORE",
                 "badge_class": "sig-empty",
                 "host": "—",
@@ -2210,6 +2234,9 @@ def _render_har_detail_panel(panel: dict, *, hidden: bool) -> str:
     ):
         if signal_type not in present:
             signal_rows.append({
+                "key": signal_type,
+                "kind": badge,
+                "count": 0,
                 "type": signal_type,
                 "badge": badge,
                 "badge_class": f"sig-{signal_type} sig-empty",
@@ -2219,6 +2246,9 @@ def _render_har_detail_panel(panel: dict, *, hidden: bool) -> str:
             })
     if "digest" not in present:
         signal_rows.append({
+            "key": "digest",
+            "kind": "Register digest",
+            "count": 0,
             "type": "digest",
             "badge": "Register digest",
             "badge_class": "sig-digest sig-empty",
@@ -2231,6 +2261,9 @@ def _render_har_detail_panel(panel: dict, *, hidden: bool) -> str:
     if artifact_rows:
         for row in artifact_rows:
             signal_rows.append({
+                "key": row.get("key", ""),
+                "kind": row.get("kind", "stored"),
+                "count": row.get("count") or "—",
                 "type": "stored",
                 "badge": "Stored probe summary",
                 "badge_class": "sig-stored",
@@ -2241,6 +2274,9 @@ def _render_har_detail_panel(panel: dict, *, hidden: bool) -> str:
             })
     else:
         signal_rows.append({
+            "key": "list_candidates.json",
+            "kind": "Stored probe summary",
+            "count": 0,
             "type": "stored",
             "badge": "Stored probe summary",
             "badge_class": "sig-stored sig-empty",
@@ -2258,8 +2294,14 @@ def _render_har_detail_panel(panel: dict, *, hidden: bool) -> str:
         empty_cls = " sig-empty" if "sig-empty" in str(item.get("badge_class")) else ""
         meta = str(item.get("meta") or "")
         evidence = str(item.get("evidence") or "")
+        key = str(item.get("key") or item.get("host") or item.get("badge") or "—")
+        kind = str(item.get("kind") or item.get("badge") or item.get("type") or "—")
+        count = str(item.get("count") if item.get("count") not in (None, "") else "—")
         preview = " · ".join(x for x in (meta, evidence) if x and x != "—") or "—"
         tip_html = (
+            f'<div class="packet-pop-row"><b>key</b><code>{esc(key)}</code></div>'
+            f'<div class="packet-pop-row"><b>type</b>{esc(kind)}</div>'
+            f'<div class="packet-pop-row"><b>count</b>{esc(count)}</div>'
             f'<div class="packet-pop-row"><b>host</b><code>{esc(item.get("host") or "—")}</code></div>'
             f'<div class="packet-pop-row"><b>meta</b>{esc(meta or "—")}</div>'
             f'<div class="packet-pop-row"><b>evidence</b>{esc(evidence or "—")}</div>'
@@ -2267,10 +2309,10 @@ def _render_har_detail_panel(panel: dict, *, hidden: bool) -> str:
         body += (
             f'<tr class="har-signal-row{empty_cls}" tabindex="0" data-tip-html="{esc(tip_html)}">'
             '<td class="har-signal-key">'
-            f'<span class="sig-badge {esc(item["badge_class"])}">{esc(item["badge"])}</span>'
+            f'<code>{esc(key)}</code>'
             '</td>'
-            f'<td><code>{esc(item.get("host") or "—")}</code></td>'
-            f'<td>{esc(item.get("type") or "—")}</td>'
+            f'<td><span class="sig-badge {esc(item["badge_class"])}">{esc(kind)}</span></td>'
+            f'<td>{esc(count)}</td>'
             f'<td><small>{esc(_short_text(preview, 180))}</small></td>'
             '</tr>'
         )

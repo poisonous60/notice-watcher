@@ -34,6 +34,17 @@ def run() -> list[tuple[str, bool, str]]:
             {
                 "key": "traffic_api_candidates",
                 "total_rows": 2,
+                "rows": [{
+                    "key": "https://example.com/api/news",
+                    "kind": "List JSON API",
+                    "count": 2,
+                    "type": "api",
+                    "badge": "List JSON API",
+                    "badge_class": "sig-api",
+                    "host": "https://example.com/api/news",
+                    "meta": "score=7 · GET 200",
+                    "evidence": "list_hits=2",
+                }],
                 "raw_redacted": [{"url": "https://example.com/api/news"}],
             },
             {
@@ -116,6 +127,8 @@ def run() -> list[tuple[str, bool, str]]:
         and "Model input packet" in html
         and "packet-input-table" in html
         and "data-tip-html" in html
+        and "https://example.com/api/news" in html
+        and "<td>2</td>" in html
         and "candidate.json" in html
         and "open raw packet" in html
         and "probe-agent-panel-0" in html
