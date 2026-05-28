@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 362 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 364 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -12,10 +12,12 @@
 | [`host_store-epicgames_news_16cc8b8f`](host_store-epicgames_news_16cc8b8f.md) | ✅ handcrafted — Epic Store news list via Playwright, article via JSON API | 2026-05-28 | F | probe_grounding_list_row_selector, hashed_selector, article_json_api | https://store.epicgames.com/news/ |
 | [`host_skullgirls-com_news_fb614856`](host_skullgirls-com_news_fb614856.md) | ✅ registered (re-probe 자동 회복) | 2026-05-28 |  | probe_grounding_list_row_selector, posts_nonempty | https://skullgirls.com/news/ |
 | [`host_randomascii-wor_root_f74fd8ea`](host_randomascii-wor_root_f74fd8ea.md) | improved — RSS fallback registered baseline 10 (WordPress.com hosted, /wp-json 404) | 2026-05-28 | F | posts_nonempty, probe_grounding_list_row_selector, post_id_unique, validated_feed_available | https://randomascii.wordpress.com/ |
+| [`host_pubg-com_news_17f4ebc1`](host_pubg-com_news_17f4ebc1.md) | ✅ improved — static placeholder no longer accepted as static row evidence | 2026-05-28 | C | fetch_list_0_url_mismatch, probe_grounding_article_content_selector | https://pubg.com/news/ |
 | [`host_priconne-redive_root_aed5ee66`](host_priconne-redive_root_aed5ee66.md) | ✅ improved | 2026-05-28 | none | wordpress_rest_404, llm_picked_wrong_row_selector, posts_nonempty_zero | https://priconne-redive.jp/ |
 | [`host_pokemongo-com_news_002609a9`](host_pokemongo-com_news_002609a9.md) | ✅ handcrafted | 2026-05-28 | none | css_module_hashed_class, unescaped_tailwind_colon, posts_nonempty_zero | https://pokemongo.com/news/ |
 | [`host_ncase-me_root_0db0456b`](host_ncase-me_root_0db0456b.md) | registered - classifier signal landed, but LLM verdict accepted board; user closed as registered | 2026-05-28 | A+C | classifier_single_artist_portfolio_false_accept, gate_reject, content_as_list | https://ncase.me/ |
 | [`host_megacrit-com_news_4cc63275`](host_megacrit-com_news_4cc63275.md) | ✅ handcrafted — Mega Crit Hugo news cards | 2026-05-28 | none | title_nonempty, article_card, hugo_news | https://megacrit.com/news/ |
+| [`host_leagueoflegends_news_b91e98e2`](host_leagueoflegends_news_b91e98e2.md) | ✅ improved — article cards outrank SVG decoration in probe row candidates | 2026-05-28 | C | posts_nonempty, probe_grounding_list_row_selector | https://leagueoflegends.com/news/ |
 | [`host_indiedb-com_news_537bc4e7`](host_indiedb-com_news_537bc4e7.md) | handcrafted - IndieDB news RSS config + DBolical recognizer | 2026-05-28 | F | cloudflare_challenge, rss_feed_available, agentic_max_cycles | https://indiedb.com/news/ |
 | [`host_forums-terraria_root_02d8aba0`](host_forums-terraria_root_02d8aba0.md) | ✅ handcrafted — XenForo Porta portal news | 2026-05-28 | none | posts_nonempty, porta_article_item, xenforo_portal | https://forums.terraria.org/ |
 | [`host_epicgames-com_news_4655a152`](host_epicgames-com_news_4655a152.md) | ✅ handcrafted — Epic news config registered without hashed selectors | 2026-05-28 | F | probe_grounding_list_row_selector, hashed_selector, article_json_api | https://www.epicgames.com/news/ |
@@ -378,7 +380,7 @@
 | (미기재) | 39 |
 | A+C | 2 |
 | B | 1 |
-| C | 18 |
+| C | 20 |
 | C+A | 1 |
 | C+A+D | 2 |
 | C+A+D+F | 1 |
@@ -401,6 +403,7 @@
 | strategy | count |
 |---|---|
 | (미기재) | 56 |
+| auto | 2 |
 | handwritten | 32 |
 | httpx_html | 135 |
 | httpx_json | 27 |
@@ -414,5 +417,5 @@
 
 ### 최근 90일 (≥ 2026-02-27)
 
-케이스 362 건.
+케이스 364 건.
 
