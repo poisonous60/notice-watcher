@@ -507,12 +507,16 @@ def _dot_svg(site: dict, x: float, y: float, radius: float, color_map: dict) -> 
     color_key = str(site.get("color_key") or "other method")
     fill = color_map.get(color_key, FETCH_COLORS["other method"])
     status = str(site.get("status") or "unknown")
-    return (
+    url = str(site.get("url") or "")
+    circle = (
         f'<circle class="dot" cx="{x:.1f}" cy="{y:.1f}" r="{radius:.1f}" '
         f'fill="{fill}" '
         f'data-pf="{esc(color_key)}" data-domain="{esc(site["host"])}" '
-        f'data-status="{esc(status)}"></circle>'
+        f'data-status="{esc(status)}" data-url="{esc(url)}"></circle>'
     )
+    if url:
+        return f'<a xlink:href="{esc(url)}" target="_blank" rel="noopener noreferrer">{circle}</a>'
+    return circle
 
 
 def svg_grouped_scatter(sites: list[dict], color_map: dict) -> str:
@@ -523,7 +527,7 @@ def svg_grouped_scatter(sites: list[dict], color_map: dict) -> str:
 
     if not sites:
         return (
-            f'<svg id="siteScatter" '
+            f'<svg id="siteScatter" xmlns:xlink="http://www.w3.org/1999/xlink" '
             f'viewBox="0 0 {width} {height}" role="img" aria-label="Site outcome radial">'
             f'<rect x="0" y="0" width="{width}" height="{height}" class="scatter-bg"></rect>'
             f'<text x="{cx:.0f}" y="{cy:.0f}" text-anchor="middle" class="svg-label">No sites yet</text>'
@@ -689,7 +693,7 @@ def svg_grouped_scatter(sites: list[dict], color_map: dict) -> str:
     )
 
     return (
-        f'<svg id="siteScatter" '
+        f'<svg id="siteScatter" xmlns:xlink="http://www.w3.org/1999/xlink" '
         f'viewBox="0 0 {width} {height}" role="img" aria-label="Site outcome radial">'
         f'<rect x="0" y="0" width="{width}" height="{height}" class="scatter-bg"></rect>'
         + guides
@@ -843,6 +847,7 @@ def read_case_records() -> list[dict]:
     return out
 
 
+GITHUB_CASES_BASE = "https://github.com/poisonous60/notice-watcher/blob/main/docs/cases/"
 # Sort key inside each day's column so the foundational "engine" lives at the
 # bottom and lighter patches pile on top — visually echoes the user's
 # "engine + scrap welded on" metaphor.
@@ -891,7 +896,6 @@ def svg_case_blocks(records: list[dict], events: list[tuple[str, str, str]]) -> 
     cell = block_size + block_gap
     per_row = max(1, int((day_slot - 4) / cell))
 
-    case_ids = {id(rec): f"case-{i}" for i, rec in enumerate(records)}
     by_day: dict[str, list[dict]] = {}
     for r in records:
         by_day.setdefault(r["date"], []).append(r)
@@ -920,10 +924,10 @@ def svg_case_blocks(records: list[dict], events: list[tuple[str, str, str]]) -> 
                 f'outcome-{rec["outcome_class"]}" '
                 f'x="{bx:.1f}" y="{by:.1f}" '
                 f'width="{block_size}" height="{block_size}" rx="0.5" ry="0.5" '
-                f'data-case-id="{esc(case_ids[id(rec)])}" '
+                f'data-slug="{esc(rec["slug"])}" '
                 f'data-bucket="{esc(bucket)}" '
                 f'tabindex="0" role="button" '
-                f'aria-label="{esc(rec["date"])} · {esc(bucket)} case"></rect>'
+                f'aria-label="{esc(rec["date"])} · {esc(rec["slug"])} · {esc(bucket)}"></rect>'
             )
 
     engine_line = (
@@ -991,17 +995,18 @@ def render_case_db(records: list[dict]) -> str:
     and the first paragraph as innerHTML.
     """
     parts: list[str] = []
-    for i, rec in enumerate(records):
-        host = _short_host(rec.get("url")) or "host masked"
+    for rec in records:
+        gh_url = GITHUB_CASES_BASE + rec["filename"]
         parts.append(
-            f'<div class="case-record" data-case-id="case-{esc(i)}" '
+            f'<div class="case-record" data-slug="{esc(rec["slug"])}" '
             f'data-date="{esc(rec["date"])}" '
             f'data-bucket="{esc(rec["bucket"])}" '
             f'data-fix-layer="{esc(rec["fix_layer"])}" '
             f'data-outcome="{esc(rec["outcome"])}" '
-            f'data-status="{esc(_redact_public_text(rec["status"]))}" '
-            f'data-host="{esc(host)}">'
-            f"{esc(_redact_public_text(rec['first_paragraph']))}"
+            f'data-status="{esc(rec["status"])}" '
+            f'data-url="{esc(rec["url"])}" '
+            f'data-gh="{esc(gh_url)}">'
+            f"{esc(rec['first_paragraph'])}"
             f"</div>"
         )
     return f'<div id="caseDB" hidden>{"".join(parts)}</div>'
@@ -2718,7 +2723,7 @@ def render_html(
         HTML, JSON API, headless browser, or a custom adapter; see legend), and the spiral layout has no
         meaning beyond even packing. The outer rings are URLs we evaluated but did not subscribe to:
         single content pages, anti-bot blocks, and dead or broken URLs. Hover a dot to highlight the
-        same fetch method and see the domain.</figcaption>
+        same fetch method and see the domain; click to open the URL in a new tab.</figcaption>
     </figure>
     <script>
       (function () {{
@@ -2751,7 +2756,16 @@ def render_html(
           var pf = c.getAttribute('data-pf');
           setActive(pf);
           var domain = c.getAttribute('data-domain') || '';
-          tip.innerHTML = '<b>' + domain + '</b>'
+          var url = c.getAttribute('data-url') || '';
+          var path = '';
+          if (url) {{
+            try {{
+              var u = new URL(url);
+              path = u.pathname + (u.search || '');
+              if (path.length > 60) path = path.slice(0, 57) + '…';
+            }} catch (err) {{ path = ''; }}
+          }}
+          tip.innerHTML = '<b>' + domain + (path && path !== '/' ? '<i>' + path + '</i>' : '') + '</b>'
             + '<span>' + pf + ' · ' + c.getAttribute('data-status') + '</span>';
           tip.hidden = false;
         }});
@@ -2785,7 +2799,7 @@ def render_html(
         <strong>Solid borders</strong> mark the cases that became <em>improvements</em> — patterns
         the solver now handles on its own next time. Dashed verticals are infra milestones
         (hover for what shipped). <strong>Click any block</strong> to read its note inline, or
-        open its redacted note inline.</figcaption>
+        open the full markdown on GitHub from the modal footer.</figcaption>
     </figure>
     {case_db_html}
     <div id="caseModal" class="modal" hidden role="dialog" aria-labelledby="caseModalTitle" aria-modal="true">
@@ -2795,6 +2809,7 @@ def render_html(
         <p class="modal-meta" id="caseModalMeta"></p>
         <h3 class="modal-title" id="caseModalTitle"></h3>
         <p class="modal-body" id="caseModalBody"></p>
+        <p class="modal-link"><a id="caseModalLink" href="#" target="_blank" rel="noopener noreferrer">Read full case on GitHub →</a></p>
       </div>
     </div>
     <script>
@@ -2817,23 +2832,25 @@ def render_html(
           tip.style.top = (e.clientY + 14) + 'px';
         }}
         function hideTip() {{ if (tip) tip.hidden = true; }}
-        function recordFor(caseId) {{
-          return document.querySelector('#caseDB .case-record[data-case-id="' + caseId.replace(/"/g, '\\\\"') + '"]');
+        function recordFor(slug) {{
+          return document.querySelector('#caseDB .case-record[data-slug="' + slug.replace(/"/g, '\\\\"') + '"]');
         }}
-        function openCase(caseId) {{
-          var rec = recordFor(caseId);
+        function openCase(slug) {{
+          var rec = recordFor(slug);
           if (!rec || !modal) return;
-          var status = rec.getAttribute('data-status') || caseId;
+          var status = rec.getAttribute('data-status') || slug;
           var date = rec.getAttribute('data-date') || '';
           var bucket = rec.getAttribute('data-bucket') || '';
           var outcome = rec.getAttribute('data-outcome') || '';
           var fix = rec.getAttribute('data-fix-layer') || '';
-          var host = rec.getAttribute('data-host') || 'host masked';
+          var gh = rec.getAttribute('data-gh') || '#';
           document.getElementById('caseModalTitle').textContent = status;
           document.getElementById('caseModalMeta').textContent =
-            date + ' · ' + host + ' · ' + bucket + ' · outcome: ' + (outcome || '—') +
+            date + ' · ' + bucket + ' · outcome: ' + (outcome || '—') +
             (fix ? ' · fix_layer: ' + fix : '');
           document.getElementById('caseModalBody').textContent = rec.textContent || '(no body excerpt)';
+          var link = document.getElementById('caseModalLink');
+          link.setAttribute('href', gh);
           modal.hidden = false;
         }}
         function closeModal() {{ if (modal) modal.hidden = true; }}
@@ -2845,9 +2862,9 @@ def render_html(
         svg.addEventListener('mouseover', function (e) {{
           var block = e.target.closest ? e.target.closest('.case-block') : null;
           if (block) {{
-            var caseId = block.getAttribute('data-case-id') || '';
+            var slug = block.getAttribute('data-slug') || '';
             var bucket = block.getAttribute('data-bucket') || '';
-            showTip('<b>' + caseId + '</b><span>' + bucket + ' · click to open</span>', e);
+            showTip('<b>' + slug + '</b><span>' + bucket + ' · click to open</span>', e);
             return;
           }}
           var annot = e.target.closest ? e.target.closest('.annot') : null;
@@ -2863,7 +2880,7 @@ def render_html(
         svg.addEventListener('click', function (e) {{
           var block = e.target.closest ? e.target.closest('.case-block') : null;
           if (block) {{
-            openCase(block.getAttribute('data-case-id') || '');
+            openCase(block.getAttribute('data-slug') || '');
           }}
         }});
         svg.addEventListener('keydown', function (e) {{
@@ -2871,7 +2888,7 @@ def render_html(
           var block = e.target.closest ? e.target.closest('.case-block') : null;
           if (block) {{
             e.preventDefault();
-            openCase(block.getAttribute('data-case-id') || '');
+            openCase(block.getAttribute('data-slug') || '');
           }}
         }});
         if (modal) {{
