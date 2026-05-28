@@ -1776,9 +1776,20 @@ def _read_text_excerpt(path: Path, *, max_chars: int = 1600) -> str:
     return text if len(text) <= max_chars else text[:max_chars].rstrip() + "\n..."
 
 
+def _read_text_full(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return "(file unavailable)"
+
+
 def _json_excerpt(obj: object, *, max_chars: int = 1800) -> str:
     text = json.dumps(_agentic_public_json(obj), ensure_ascii=False, indent=2)
     return text if len(text) <= max_chars else text[:max_chars].rstrip() + "\n..."
+
+
+def _json_full(obj: object) -> str:
+    return json.dumps(obj, ensure_ascii=False, indent=2)
 
 
 def _clip_text(text: str, *, max_chars: int) -> str:
@@ -1929,9 +1940,53 @@ def build_agentic_packet(detail: dict, *, run_dir: Path | None = None) -> dict:
                 "size": size,
                 "role": _artifact_explainer(name)[0],
                 "why": _artifact_explainer(name)[1],
+                "raw": _read_text_full(p),
                 "preview": _read_text_excerpt(p, max_chars=900) if p.suffix in {".json", ".txt"} else f"{size} bytes",
             })
 
+    agentic_agents = _read_text_full(ROOT / "prompts" / "register_agent_AGENTS.md")
+    config_writer_rules = _read_text_full(ROOT / "prompts" / "config_writer.system.txt")
+    user_prompt = _render_agentic_user_prompt(slug, probe_url)
+    digest_packet = {"slug": slug, "url": probe_url, "signal_counts": signal_counts, "digest": digest_raw}
+    validator_digest_packet = {
+        "same_keys_as": "digest.json",
+        "html": "uncompressed in the real tmpdir",
+        "signal_counts": signal_counts,
+    }
+    failure_packet = {
+        "source": "api_loop_once",
+        "attempt": 1,
+        "candidate_config": "previous failed config, if any",
+        "validation_feedback": "short validator failure text",
+        "error": "generation exception text, if any",
+    }
+    examples_packet = {
+        "selection_rule": "top 2 scored configs excluding the current slug",
+        "current_strategy": config_strategy,
+        "manifest_shape": [{"slug": "<example-slug>", "score": 0, "reason": "recognizer/host/strategy match"}],
+    }
+    validator_packet = {
+        "launcher": "run_validator.bat on Windows, run_validator.sh elsewhere",
+        "python_path": sys.executable,
+        "input": "./candidate.json",
+        "timing_log": "validate_timing/agentic_attempt__*.json",
+    }
+    output_packet = {
+        "last_json": {
+            "ok": True,
+            "candidate_path": "./candidate.json",
+            "config": {},
+            "attempts": [{"i": 1, "validate_ok": True, "error": ""}],
+            "stop_reason": "validate_pass",
+        },
+        "published_config_preview": {
+            k: v for k, v in {
+                "site": config_json.get("site") or config_json.get("url"),
+                "strategy": config_json.get("strategy"),
+                "recognizer": config_json.get("recognizer"),
+            }.items() if v
+        } or config_preview,
+    }
     files = [
         {
             "phase": "Prompt",
@@ -1939,7 +1994,8 @@ def build_agentic_packet(detail: dict, *, run_dir: Path | None = None) -> dict:
             "source": "prompts/register_agent_AGENTS.md",
             "role": "System-like local instructions: scope, reading order, self-veto, output contract.",
             "contains": ["read order", "tmpdir-only scope", "self-veto rules", "final JSON contract"],
-            "preview": _read_text_excerpt(ROOT / "prompts" / "register_agent_AGENTS.md", max_chars=1800),
+            "raw": agentic_agents,
+            "preview": _clip_text(agentic_agents, max_chars=1800),
         },
         {
             "phase": "Prompt",
@@ -1947,7 +2003,8 @@ def build_agentic_packet(detail: dict, *, run_dir: Path | None = None) -> dict:
             "source": "prompts/register_agent_user.txt",
             "role": "The actual task text passed to `codex exec` on stdin.",
             "contains": ["target slug", "target URL", "short command recipe", "success/failure output shape"],
-            "preview": _render_agentic_user_prompt(slug, probe_url),
+            "raw": user_prompt,
+            "preview": user_prompt,
         },
         {
             "phase": "Evidence",
@@ -1955,7 +2012,8 @@ def build_agentic_packet(detail: dict, *, run_dir: Path | None = None) -> dict:
             "source": "engine.digest.build_digest(...), compressed for prompt use",
             "role": "Primary model evidence: strategy hint, list/article HTML samples, probe signals, and notes.",
             "contains": ["probe URL", "strategy hints", "list candidates", "article sample", "traffic/feed/pagination signals"],
-            "preview": _json_excerpt({"slug": slug, "url": probe_url, "signal_counts": signal_counts, "digest": digest_raw}, max_chars=6000),
+            "raw": _json_full(digest_packet),
+            "preview": _json_excerpt(digest_packet, max_chars=6000),
         },
         {
             "phase": "Evidence",
@@ -1963,7 +2021,8 @@ def build_agentic_packet(detail: dict, *, run_dir: Path | None = None) -> dict:
             "source": "same digest before HTML compression",
             "role": "Validator-only evidence so probe-grounding checks use full HTML, not compressed prompt snippets.",
             "contains": ["same keys as digest.json", "uncompressed HTML", "full grounding evidence for validator"],
-            "preview": _json_excerpt({"same_keys_as": "digest.json", "html": "uncompressed in the real tmpdir", "signal_counts": signal_counts}),
+            "raw": _json_full(validator_digest_packet),
+            "preview": _json_excerpt(validator_digest_packet),
         },
         {
             "phase": "Evidence",
@@ -1971,13 +2030,8 @@ def build_agentic_packet(detail: dict, *, run_dir: Path | None = None) -> dict:
             "source": "scripts/register.py::_build_failure_packet(...)",
             "role": "Optional: only present when auto mode first tried api_loop_once and escalated to agentic.",
             "contains": ["previous candidate_config", "validation_feedback", "api_loop_once error", "attempt number"],
-            "preview": _json_excerpt({
-                "source": "api_loop_once",
-                "attempt": 1,
-                "candidate_config": "previous failed config, if any",
-                "validation_feedback": "short validator failure text",
-                "error": "generation exception text, if any",
-            }),
+            "raw": _json_full(failure_packet),
+            "preview": _json_excerpt(failure_packet),
         },
         {
             "phase": "Examples",
@@ -1985,11 +2039,8 @@ def build_agentic_packet(detail: dict, *, run_dir: Path | None = None) -> dict:
             "source": "generate.codex_agentic._pick_examples(...)",
             "role": "Two closest successful configs ranked by recognizer, host, and strategy similarity.",
             "contains": ["example slugs", "similarity score", "why each example was picked", "2 copied config JSON files"],
-            "preview": _json_excerpt({
-                "selection_rule": "top 2 scored configs excluding the current slug",
-                "current_strategy": config_strategy,
-                "manifest_shape": [{"slug": "<example-slug>", "score": 0, "reason": "recognizer/host/strategy match"}],
-            }),
+            "raw": _json_full(examples_packet),
+            "preview": _json_excerpt(examples_packet),
         },
         {
             "phase": "Rules",
@@ -1997,7 +2048,8 @@ def build_agentic_packet(detail: dict, *, run_dir: Path | None = None) -> dict:
             "source": "prompts/config_writer.system.txt",
             "role": "Full config-authoring rules. The agent is told to skim it only when uncertain.",
             "contains": ["allowed config schema vocabulary", "strategy-specific rules", "selector/API guidance", "retry constraints"],
-            "preview": _read_text_excerpt(ROOT / "prompts" / "config_writer.system.txt", max_chars=6000),
+            "raw": config_writer_rules,
+            "preview": _clip_text(config_writer_rules, max_chars=6000),
         },
         {
             "phase": "Validator",
@@ -2005,12 +2057,8 @@ def build_agentic_packet(detail: dict, *, run_dir: Path | None = None) -> dict:
             "source": "scripts/validate_config.py copied with a platform launcher",
             "role": "The agent runs this against ./candidate.json; the parent validates again after the agent exits.",
             "contains": ["launcher command", "python interpreter path", "validator timing log path", "candidate input path"],
-            "preview": _json_excerpt({
-                "launcher": "run_validator.bat on Windows, run_validator.sh elsewhere",
-                "python_path": sys.executable,
-                "input": "./candidate.json",
-                "timing_log": "validate_timing/agentic_attempt__*.json",
-            }),
+            "raw": _json_full(validator_packet),
+            "preview": _json_excerpt(validator_packet),
         },
         {
             "phase": "Output",
@@ -2018,22 +2066,8 @@ def build_agentic_packet(detail: dict, *, run_dir: Path | None = None) -> dict:
             "source": "agent-written tmpdir files",
             "role": "candidate.json holds the attempted config; last.json is the tiny final JSON message with ok/attempts/stop_reason.",
             "contains": ["candidate config file", "ok flag", "attempt results", "stop_reason", "published config path"],
-            "preview": _json_excerpt({
-                "last_json": {
-                    "ok": True,
-                    "candidate_path": "./candidate.json",
-                    "config": {},
-                    "attempts": [{"i": 1, "validate_ok": True, "error": ""}],
-                    "stop_reason": "validate_pass",
-                },
-                "published_config_preview": {
-                    k: v for k, v in {
-                        "site": config_json.get("site") or config_json.get("url"),
-                        "strategy": config_json.get("strategy"),
-                        "recognizer": config_json.get("recognizer"),
-                    }.items() if v
-                } or config_preview,
-            }),
+            "raw": _json_full(output_packet),
+            "preview": _json_excerpt(output_packet),
         },
     ]
     raw_text = "\n\n".join(
@@ -2042,7 +2076,7 @@ def build_agentic_packet(detail: dict, *, run_dir: Path | None = None) -> dict:
             f"codex exec -C <tmpdir> --json --output-last-message <tmpdir>/last.json",
             "",
             *[
-                f"===== {f['path']} =====\nsource: {f['source']}\n\n{f['preview']}"
+                f"===== {f['path']} =====\nsource: {f['source']}\n\n{f.get('raw') or f['preview']}"
                 for f in files
             ],
         ]
@@ -2051,10 +2085,11 @@ def build_agentic_packet(detail: dict, *, run_dir: Path | None = None) -> dict:
         "flow": _AGENTIC_PACKET_FLOW,
         "artifacts": artifacts[:8],
         "files": files,
-        "raw_text": _clip_text(raw_text, max_chars=45_000),
+        "raw_text": raw_text,
         "result": {
             "strategy": config_strategy,
             "config_path": f"configs/{slug}.json" if slug else "configs/<slug>.json",
+            "raw": _json_full(config_json) if config_json else config_preview,
             "preview": config_preview,
         },
     }
@@ -2403,12 +2438,7 @@ def _render_agentic_packet_panel(panel: dict, *, hidden: bool) -> str:
     input_rows = ""
     for item in packet.get("artifacts") or []:
         preview = str(item.get("preview") or "")
-        overlay_text = (
-            f"FIELD\n{item.get('path') or ''}\n\n"
-            f"WHAT IT CONTAINS\n{item.get('role') or ''}\n\n"
-            f"WHY IT MATTERS\n{item.get('why') or ''}\n\n"
-            f"RAW / PREVIEW\n{preview}"
-        )
+        overlay_text = str(item.get("raw") if item.get("raw") is not None else preview)
         key = str(item.get("name") or item.get("path") or "")
         tip_html = (
             f'<div class="packet-pop-row"><b>path</b><code>{esc(item.get("path") or "")}</code></div>'
@@ -2427,14 +2457,7 @@ def _render_agentic_packet_panel(panel: dict, *, hidden: bool) -> str:
         )
     for f in packet.get("files") or []:
         contains_text = ", ".join(str(x) for x in (f.get("contains") or []))
-        overlay_text = (
-            f"FIELD\n{f.get('path') or ''}\n\n"
-            f"STAGE\n{f.get('phase') or ''}\n\n"
-            f"SOURCE\n{f.get('source') or ''}\n\n"
-            f"WHAT IT CONTAINS\n{f.get('role') or ''}\n\n"
-            f"IMPORTANT SUBFIELDS\n{contains_text}\n\n"
-            f"RAW / PREVIEW\n{f.get('preview') or ''}"
-        )
+        overlay_text = str(f.get("raw") if f.get("raw") is not None else f.get("preview") or "")
         preview = str(f.get("preview") or "")
         tip_html = (
             f'<div class="packet-pop-row"><b>source</b><code>{esc(f.get("source") or "")}</code></div>'
@@ -2457,18 +2480,8 @@ def _render_agentic_packet_panel(panel: dict, *, hidden: bool) -> str:
     result = packet.get("result") or {}
     result_preview = str(result.get("preview") or "")
     raw_text = str(packet.get("raw_text") or "")
-    raw_overlay_text = (
-        "FIELD\nFull staged agentic packet\n\n"
-        "WHAT IT CONTAINS\nThe command shape plus every major prompt/evidence/rules/validator/output file staged for Codex.\n\n"
-        "WHY IT MATTERS\nThis is the easiest way to see, in one place, what information the config-generation agent receives and what it is expected to write back.\n\n"
-        f"RAW / PREVIEW\n{raw_text}"
-    )
-    result_overlay_text = (
-        f"FIELD\n{result.get('config_path') or 'configs/<slug>.json'}\n\n"
-        "WHAT IT CONTAINS\nThe config that the parent publishes after candidate.json passes validation.\n\n"
-        "WHY IT MATTERS\nThis is the end product of the agentic generation path: a strategy plus list/article extraction rules that polling can run later.\n\n"
-        f"RAW / PREVIEW\n{result_preview}"
-    )
+    raw_overlay_text = raw_text
+    result_overlay_text = str(result.get("raw") if result.get("raw") is not None else result_preview)
     return (
         f'<div class="agentic-packet-panel" id="{esc(panel_id)}"{hidden_attr}>'
         '<ol class="packet-flow">'

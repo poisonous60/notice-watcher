@@ -145,6 +145,13 @@ def run() -> list[tuple[str, bool, str]]:
         packet["raw_text"][:500],
     ))
     cases.append((
+        "detail_overlays_are_raw_only",
+        "WHAT IT CONTAINS" not in html
+        and "RAW / PREVIEW" not in html
+        and "FIELD\n" not in html,
+        html[:800],
+    ))
+    cases.append((
         "manifest_tracks_agentic_source_files",
         "__agentic__generate/codex_agentic.py" in manifest_names
         and "__agentic__prompts/register_agent_AGENTS.md" in manifest_names
