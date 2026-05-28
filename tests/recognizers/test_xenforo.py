@@ -17,7 +17,7 @@ def run() -> list[tuple[str, bool, str]]:
     cfg = build_config("https://hardforum.com")
     ok = (cfg is not None
           and cfg["strategy"] == "httpx_html"
-          and cfg["list"]["url_template"] == "https://hardforum.com/forums/-/index.rss"
+          and cfg["list"]["url_template"] == "https://hardforum.com/index.php?forums/-/index.rss"
           and cfg["list"]["row_selector"] == "channel > item")
     cases.append(("build_config_rss_shape", ok, f"got {cfg and cfg.get('list',{}).get('url_template')!r}"))
 
@@ -30,6 +30,8 @@ def run() -> list[tuple[str, bool, str]]:
 
     # 2. RSS / whats-new URL → recognize 매칭.
     cases.append(("rss_url_recognized", recognize("https://hardforum.com/forums/-/index.rss") is not None, ""))
+    cases.append(("index_php_rss_url_recognized",
+                  recognize("https://hardforum.com/index.php?forums/-/index.rss") is not None, ""))
     cases.append(("whatsnew_url_recognized", recognize("https://www.avsforum.com/whats-new/posts/") is not None, ""))
 
     # 3. root 도메인 → 미매칭 (false-positive 폭발 차단 — detect_xenforo_platform 가 봉합).
@@ -45,7 +47,7 @@ def run() -> list[tuple[str, bool, str]]:
     # 6. 서브폴더 설치 — install path 보존 (xenforo.com/community → /community/forums/-/index.rss).
     sub = build_config("https://xenforo.com/community/")
     ok = (sub is not None
-          and sub["list"]["url_template"] == "https://xenforo.com/community/forums/-/index.rss"
+          and sub["list"]["url_template"] == "https://xenforo.com/community/index.php?forums/-/index.rss"
           and sub["_slug_board"] == "xenforo.com/community")
     cases.append(("subpath_install_preserved", ok,
                   f"got {sub and sub.get('list',{}).get('url_template')!r}"))
@@ -53,5 +55,14 @@ def run() -> list[tuple[str, bool, str]]:
     # 7. 서브폴더 RSS URL → recognize 매칭 (regex install prefix 흡수).
     cases.append(("subpath_rss_recognized",
                   recognize("https://xenforo.com/community/forums/-/index.rss") is not None, ""))
+    cases.append(("subpath_index_php_rss_recognized",
+                  recognize("https://xenforo.com/community/index.php?forums/-/index.rss") is not None, ""))
+
+    # 8. guid 가 full URL 인 XenForo 1.x 계열도 있으므로 post_id 는 link 의 thread 숫자를 우선한다.
+    pid = (((cfg or {}).get("list") or {}).get("fields") or {}).get("post_id") or []
+    first = pid[0] if pid else {}
+    ok = (first.get("selector") == "link"
+          and ["regex_extract", r"\.(\d+)/?$"] in first.get("transform", []))
+    cases.append(("post_id_prefers_link_thread_id", ok, f"got {first!r}"))
 
     return cases

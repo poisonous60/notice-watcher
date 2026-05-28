@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "site": "megacrit.com",
+  "board": "news",
+  "strategy": "httpx_html",
+  "list": {
+    "url_template": "https://megacrit.com/news/",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "article.news-card:has(h2.entry-title a[href^='/news/'])",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "css",
+          "selector": "h2.entry-title a[href^='/news/']",
+          "attr": "href",
+          "transform": [["regex_extract", "^/news/([^/]+)/?$"]]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "h2.entry-title a[href^='/news/']",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ],
+      "url": [
+        {
+          "from": "css",
+          "selector": "h2.entry-title a[href^='/news/']",
+          "attr": "href",
+          "transform": [["urljoin", "https://megacrit.com/"]]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "div.entry-meta",
+          "text": true,
+          "transform": [["collapse_ws"], ["iso8601", ["%b %d, %Y", "%B %d, %Y"], "+00:00"]]
+        }
+      ],
+      "category": [
+        {
+          "from": "css",
+          "selector": "div.tags li",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "div.entry-content",
+        "html": true
+      }
+    ]
+  },
+  "_source_url": "https://megacrit.com/news/",
+  "_note": "Mega Crit Hugo news cards expose stable article.news-card rows; title is inside h2.entry-title a, not the empty entry-content summary."
+}

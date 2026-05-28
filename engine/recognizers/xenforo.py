@@ -1,7 +1,8 @@
-"""XenForo 포럼 → 전역 RSS (`<base>/forums/-/index.rss`) httpx_html config.
+"""XenForo 포럼 → 전역 RSS (`<base>/index.php?forums/-/index.rss`) httpx_html config.
 
 URL 폼 (recognizer 직접 매칭):
   - https://<host>/forums/-/index.rss   (XenForo 전역 RSS 직접 URL)
+  - https://<host>/index.php?forums/-/index.rss   (friendly URLs off/compatible RSS URL)
   - https://<host>/whats-new/posts/     (XenForo 최근 글 페이지 — RSS 로 매핑)
 
 root 도메인(`https://www.watchuseek.com/`)은 URL 만으론 XenForo 판정 불가(모든 root 매칭 시
@@ -11,9 +12,10 @@ build_config 호출.
 
 왜 RSS:
   XenForo 글 목록 페이지(`/whats-new/posts/`, 서브포럼)는 Cloudflare 앞단 + JS 라 httpx 가
-  ReadTimeout / 빈 DOM. 하지만 전역 RSS `<base>/forums/-/index.rss` 는 Cloudflare 가 허용하는
+  ReadTimeout / 빈 DOM. 하지만 전역 RSS `<base>/index.php?forums/-/index.rss` 는 Cloudflare 가 허용하는
   경우가 많아(wordreference·hardforum 확인: 200, item 40~50건) httpx 로 안정 수집된다. RSS item =
-  guid(thread id) · title · link · pubDate(RFC822) · content:encoded(본문).
+  title · link · guid · pubDate(RFC822) · content:encoded(본문). XenForo 1.x 는 guid 가 full URL 인
+  경우가 있어 link 의 thread 숫자를 post_id 로 우선한다.
 
 오인 매칭 안전망:
   RSS 가 404(비표준 경로 — eevblog `/forum/`)·빈 목록·차단이면 fetch_list 0건 → register.py 의
@@ -27,7 +29,7 @@ from urllib.parse import urlsplit
 
 NAME = "xenforo"
 
-_NOTE = ("XenForo 포럼 — known-platform 자동 인식. 전역 RSS `<base>/forums/-/index.rss` 를 "
+_NOTE = ("XenForo 포럼 — known-platform 자동 인식. 전역 RSS `<base>/index.php?forums/-/index.rss` 를 "
          "httpx_html(XML) 로 수집 (guid=thread id, title, link, pubDate). 글 목록 페이지는 "
          "Cloudflare/JS 라 httpx 불가지만 RSS 는 허용되는 경우가 많음.")
 
@@ -63,20 +65,23 @@ def build_config(base_url: str) -> Optional[dict]:
         return None
     install = _install_path(parts.path or "")
     base = f"{parts.scheme or 'https'}://{host}{install}"
+    rss_url = f"{base}/index.php?forums/-/index.rss"
     return {
         "version": 1,
         "site": host,
         "board": "whats-new",
         "strategy": "httpx_html",
         "list": {
-            "url_template": f"{base}/forums/-/index.rss",
+            "url_template": rss_url,
             "pagination": {"kind": "none"},
             "row_selector": "channel > item",
             "include_notices": True,
             "fields": {
                 "post_id": [
+                    {"from": "css", "selector": "link", "text": True,
+                     "transform": [["collapse_ws"], ["strip"], ["regex_extract", r"\.(\d+)/?$"]]},
                     {"from": "css", "selector": "guid", "text": True,
-                     "transform": [["collapse_ws"], ["strip"]]},
+                     "transform": [["collapse_ws"], ["strip"], ["regex_extract", r"(\d+)$"]]},
                 ],
                 "title": [
                     {"from": "css", "selector": "title", "text": True,
@@ -94,7 +99,7 @@ def build_config(base_url: str) -> Optional[dict]:
         },
         "article": {"fetch_kind": "html", "content": [], "body_empty_acceptable": True},
         "_slug_board": f"{host}{install}",
-        "_source_url": f"{base}/forums/-/index.rss",
+        "_source_url": rss_url,
         "_note": _NOTE,
     }
 
@@ -107,9 +112,11 @@ def _build(m: "re.Match", url: str) -> Optional[dict]:
 # XenForo-distinctive URL paths (root 도메인은 detect_xenforo_platform 가 봉합).
 # install path prefix (`/community` 등) 허용 — `(?:/[\w-]+)*?` 가 route 세그먼트 앞 서브폴더 흡수.
 _RSS_RE = re.compile(r"^https?://[^/?#]+(?:/[\w-]+)*?/forums/-/index\.rss\b", re.I)
+_INDEX_PHP_RSS_RE = re.compile(r"^https?://[^/?#]+(?:/[\w-]+)*?/index\.php\?forums/-/index\.rss\b", re.I)
 _WHATSNEW_RE = re.compile(r"^https?://[^/?#]+(?:/[\w-]+)*?/whats-new/posts/?(?:\?|#|$)", re.I)
 
 PATTERNS = [
     (_RSS_RE, _build),
+    (_INDEX_PHP_RSS_RE, _build),
     (_WHATSNEW_RE, _build),
 ]
