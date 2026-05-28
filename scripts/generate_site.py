@@ -23,8 +23,112 @@ from zoneinfo import ZoneInfo
 ROOT = Path(__file__).resolve().parent.parent
 KST = ZoneInfo("Asia/Seoul")
 
-# Bump when funnel/extraction logic changes — invalidates cached HAR aggregate.
-EXTRACTOR_VERSION = "v1-2026-05-28"
+# Static narrative of the probe pipeline — used by the Figure 3 HAR section.
+# Edit when probe code refactors so the public page keeps describing what runs.
+# Stages reflect the actual execution order: static GET first, headless+HAR
+# captured only when needed, signal extractors are per-extractor (no shared
+# load step), and the decision path is the multi-arm register dispatch.
+PROBE_PIPELINE: list[dict] = [
+    {
+        "id": "fetch",
+        "title": "Probe fetches",
+        "tagline": "static + browser",
+        "summary": (
+            "Static GET first; if the page can't be read without a real "
+            "browser, Playwright launches and replays it."
+        ),
+        "steps": [
+            ("scripts/probe.py", "main(argv) → _run(args, url, slug)",
+             "CLI entry — parses URL + flags, opens output/probe/<slug>/."),
+            ("probe/fetch_static.py", "fetch()",
+             "Static httpx GET with preset headers; first attempt before the browser."),
+            ("probe/fetch_headless.py", "fetch_with_capture()",
+             "Playwright Chromium with record_har_path on the context — runs only "
+             "when static is insufficient."),
+        ],
+    },
+    {
+        "id": "har",
+        "title": "Capture HAR",
+        "tagline": "network log + HTML",
+        "summary": (
+            "When the headless run was needed, Playwright writes traffic.har "
+            "plus the rendered HTML and screenshots."
+        ),
+        "steps": [
+            ("probe/fetch_headless.py", "browser.new_context(record_har_path=…)",
+             "HAR is buffered as the page runs; context.close() flushes it to disk."),
+            ("output/probe/<slug>/traffic.har", "—",
+             "Primary network log every later extractor reads when present."),
+            ("output/probe/<slug>/list.html", "—",
+             "Parallel HTML snapshot consumed by RSS / pagination / platform detectors."),
+            ("output/probe/<slug>/environment.json", "—",
+             "Runtime info: platform, Python, arch, outbound IP, goodbyedpi flag, proxy env."),
+        ],
+    },
+    {
+        "id": "entries",
+        "title": "Inspect entries",
+        "tagline": "data calls, not assets",
+        "summary": (
+            "Each extractor parses the HAR itself and drops static assets and "
+            "ad/tracker hosts before scoring candidates."
+        ),
+        "steps": [
+            ("probe/extract.py", "json.loads(har_path.read_text())",
+             "Every extractor loads the HAR JSON it needs — there is no shared "
+             "filtered-entry artifact."),
+            ("probe/extract.py", "_entry_resource_type()",
+             "Tags each entry by resourceType (xhr / fetch / document / image / ...)."),
+            ("probe/extract.py", "_AD_TRACKER_RE + per-extractor filters",
+             "Drops static assets, ad/tracker hosts, and image responses."),
+        ],
+    },
+    {
+        "id": "signals",
+        "title": "Match signals",
+        "tagline": "APIs · feeds · pages · platforms",
+        "summary": (
+            "Five extractors hunt JSON APIs, body APIs, RSS, pagination, and "
+            "known platform fingerprints."
+        ),
+        "steps": [
+            ("probe/extract.py", "traffic_api_candidates()",
+             "Detect JSON list endpoints — cross-host brand match included."),
+            ("probe/extract.py", "traffic_article_body_candidates()",
+             "Detect article-body JSON endpoints (per-post payloads)."),
+            ("probe/extract.py", "rss_feed_urls()",
+             "Find RSS / Atom feeds in <link> + HAR responses."),
+            ("probe/extract.py", "pagination_hints()",
+             "Detect ?page=, /p/2/, infinite-scroll templates."),
+            ("probe/extract.py", "detect_*_platform()",
+             "Fingerprint WordPress / Discourse / XenForo / Lemmy / Mastodon / ..."),
+        ],
+    },
+    {
+        "id": "decide",
+        "title": "Choose path",
+        "tagline": "digest · recognizer · writer",
+        "summary": (
+            "Signals fold into a digest. URL fast-path, probe-marker platform "
+            "config, api_loop, or agentic LLM commits the final config."
+        ),
+        "steps": [
+            ("scripts/register.py", "_try_known_platform(url)",
+             "URL fast-path — known platform shortcut runs before any probe."),
+            ("engine/digest.py", "build_digest(*, slug, url, …)",
+             "Roll signals + artifacts into one recommendation."),
+            ("scripts/register.py", "probe-marker platform config",
+             "WordPress / Discourse / XenForo / Lemmy / PeerTube / Mbin detected "
+             "from probe artifacts."),
+            ("scripts/register.py", "auto: api_loop_once → agentic",
+             "Generation dispatch — api_loop one-shot, escalates to multi-turn "
+             "agent in auto mode."),
+            ("scripts/register.py", "_register_built_config()",
+             "Validate end-to-end then write configs/<slug>.json."),
+        ],
+    },
+]
 
 # Figure 2 — fix-layer bucket vocabulary (CONTEXT.md "추론 개선" / fix-layer letters).
 # Priority for combos = F > C > A > B/D/E first-match. Legacy `config`/`adapter` → B/D/E.
@@ -907,18 +1011,13 @@ def render_case_db(records: list[dict]) -> str:
         )
     return f'<div id="caseDB" hidden>{"".join(parts)}</div>'
 
-
 # ────────────────────────────────────────────────────────────────────────────
-# HAR section — aggregate funnel + row anatomy + dynamic case sample
+# HAR section — clickable pipeline funnel + per-stage file-flow diagram
 # ────────────────────────────────────────────────────────────────────────────
 
 
 def _short_host(value: object) -> str:
-    """ADR 0010 §17 whitelist helper — host only, no path/query/fragment.
-
-    Used everywhere the HAR section surfaces a URL-derived value to the public
-    page. Never emit `request.url` raw text; route through this.
-    """
+    """ADR 0010 §17 whitelist helper — host only, no path/query/fragment."""
     host = hostname_from_url(value) if value is not None else ""
     if not host:
         return ""
@@ -926,653 +1025,294 @@ def _short_host(value: object) -> str:
     return host if len(host) <= 60 else host[:57] + "…"
 
 
-def _fmt_bytes(n: object) -> str:
-    try:
-        v = int(n)
-    except (TypeError, ValueError):
-        return "—"
-    if v < 0:
-        return "—"
-    if v < 1024:
-        return f"{v} B"
-    if v < 1024 * 1024:
-        return f"{v / 1024:.1f} KB"
-    return f"{v / 1024 / 1024:.2f} MB"
-
-
-def _short_text(value: object, limit: int = 40) -> str:
+def _short_text(value: object, limit: int = 60) -> str:
     s = "" if value is None else str(value)
     return s if len(s) <= limit else s[: limit - 1] + "…"
 
 
-def _extractor_fingerprint() -> tuple[int, str]:
-    extract_mtime = 0
-    extract_path = ROOT / "probe" / "extract.py"
-    if extract_path.exists():
-        try:
-            extract_mtime = extract_path.stat().st_mtime_ns
-        except OSError:
-            pass
-    return extract_mtime, EXTRACTOR_VERSION
-
-
-def _slug_har_fingerprint(run_dir: Path) -> list[list]:
-    """Per-slug fingerprint = list of [name, size, mtime_ns] for every traffic*.har.
-
-    Used to detect whether a single probe run's HAR set changed since the
-    last aggregate computation — keeps the per-slug cache valid even when
-    other slugs' HARs change.
-    """
-    out: list[list] = []
-    for p in sorted(run_dir.glob("traffic*.har")):
-        try:
-            st = p.stat()
-        except OSError:
-            continue
-        out.append([p.name, st.st_size, st.st_mtime_ns])
-    return out
-
-
-def _lazy_extract():
-    """Returns (api_fn, body_fn, rss_fn, pag_fn, plat_fn) or None on ImportError.
-
-    When this script is invoked as ``python scripts/generate_site.py``,
-    ``sys.path[0]`` is ``scripts/`` and `probe.extract` is unreachable. Inject
-    the repo root before the import so the lazy load works under both invocation
-    patterns.
-    """
-    if str(ROOT) not in sys.path:
-        sys.path.insert(0, str(ROOT))
-    try:
-        from probe.extract import (
-            traffic_api_candidates,
-            traffic_article_body_candidates,
-            rss_feed_urls,
-            pagination_hints,
-            detect_common_platform,
-        )
-    except ImportError:
-        return None
-    return (
-        traffic_api_candidates,
-        traffic_article_body_candidates,
-        rss_feed_urls,
-        pagination_hints,
-        detect_common_platform,
-    )
-
-
-def _read_har_entries(path: Path, *, cap: int = 1000) -> list[dict]:
-    try:
-        with path.open("r", encoding="utf-8", errors="replace") as f:
-            har = json.load(f)
-    except (OSError, json.JSONDecodeError):
-        return []
-    entries = (har.get("log") or {}).get("entries") or []
-    return entries[:cap] if cap > 0 else entries
-
-
-def _scan_slug_signals(run_dir: Path, fns) -> dict:
-    """Run signal extractors against a single probe directory. Returns the
-    per-slug record cached in ``_har_per_slug.json``. Expensive — only called
-    for slugs whose fingerprint changed since the last computation.
-    """
-    api_fn, _body_fn, rss_fn, pag_fn, plat_fn = fns
-    entries_total = 0
-    sig = {"api": False, "rss": False, "pagination": False, "platform": False, "article_body": False}
-    har_paths = sorted(run_dir.glob("traffic*.har"))
-    for hp in har_paths:
-        entries = _read_har_entries(hp, cap=2000)
-        entries_total += len(entries)
-        if not sig["api"]:
-            try:
-                if api_fn(hp):
-                    sig["api"] = True
-            except Exception:
-                pass
-
-    list_html_path = run_dir / "list.html"
-    if list_html_path.exists():
-        try:
-            list_html_text = list_html_path.read_text(
-                encoding="utf-8", errors="replace"
-            )[:120_000]
-        except OSError:
-            list_html_text = ""
-        if list_html_text:
-            try:
-                if rss_fn(html=list_html_text, base_url="https://example.invalid/"):
-                    sig["rss"] = True
-            except Exception:
-                pass
-            try:
-                if pag_fn(list_html_text, "https://example.invalid/"):
-                    sig["pagination"] = True
-            except Exception:
-                pass
-            try:
-                if plat_fn(list_html_text, "https://example.invalid/"):
-                    sig["platform"] = True
-            except Exception:
-                pass
-    return {"entries": entries_total, "signals": sig}
-
-
-def _compute_har_aggregate(
-    *, budget_seconds: float = 35.0, cache_dir: Path | None = None
-) -> dict:
-    """Walk probe artifacts incrementally to build the funnel stage counts.
-
-    Strategy = **per-slug cache**. Each probe directory's HAR set has a
-    fingerprint of ``[(name, size, mtime_ns), …]``. We keep the previously
-    computed ``entries`` + ``signals`` per slug in ``_har_per_slug.json``.
-    On each call we re-walk the slug list and only re-run the (expensive)
-    signal extractors for slugs whose fingerprint changed since last time —
-    so a brand-new probe arriving on N100 between 10-minute cycles only
-    re-processes that one slug, not the whole 700-HAR set.
-
-    Time budget guard kicks in only when many slugs changed at once.
-    """
-    pdir = ROOT / "output" / "probe"
-    stages = {
-        "probe_runs": 0,
-        "har_captured": 0,
-        "entries_total": 0,
-        "signals": {"api": 0, "rss": 0, "pagination": 0, "platform": 0, "article_body": 0},
-        "strategies_lane_A": {},
-        "strategies_lane_B": {},
-        "unmatched_configs": 0,
-        "_truncated": False,
-        "_reused_slugs": 0,
-        "_rescanned_slugs": 0,
-    }
-    if not pdir.exists():
-        return stages
-    fns = _lazy_extract()
-    if fns is None:
-        return stages
-
-    extractor_mt, extractor_ver = _extractor_fingerprint()
-    cache_root = cache_dir if cache_dir is not None else (ROOT / "output" / "site")
-    per_slug_cache_path = cache_root / "_har_per_slug.json"
-    prior: dict = {}
-    if per_slug_cache_path.exists():
-        cached_blob = load_json(per_slug_cache_path)
-        # Extractor change forces a full re-scan.
-        if (
-            cached_blob.get("extractor_version") == extractor_ver
-            and cached_blob.get("extractor_mtime_ns") == extractor_mt
-        ):
-            prior = cached_blob.get("per_slug") or {}
-
-    new_per_slug: dict[str, dict] = {}
-    har_signal_slugs: dict[str, bool] = {}
-    deadline = time.monotonic() + budget_seconds
-
-    for run_dir in sorted(pdir.iterdir()):
-        if not run_dir.is_dir():
-            continue
-        stages["probe_runs"] += 1
-        slug = run_dir.name
-        fp = _slug_har_fingerprint(run_dir)
-        if not fp:
-            continue
-        stages["har_captured"] += 1
-
-        # Try cache: if fingerprint unchanged, reuse last record.
-        cached_entry = prior.get(slug)
-        reuse = bool(cached_entry) and cached_entry.get("fp") == fp
-        if reuse:
-            entry_data = cached_entry
-            stages["_reused_slugs"] += 1
-        else:
-            if time.monotonic() > deadline:
-                stages["_truncated"] = True
-                # Preserve old data for slugs we did not rescan in time.
-                if cached_entry:
-                    entry_data = cached_entry
-                else:
-                    new_per_slug[slug] = {"fp": fp, "entries": 0,
-                                           "signals": {"api": False, "rss": False,
-                                                       "pagination": False,
-                                                       "platform": False,
-                                                       "article_body": False}}
-                    continue
-            else:
-                scanned = _scan_slug_signals(run_dir, fns)
-                entry_data = {"fp": fp, **scanned}
-                stages["_rescanned_slugs"] += 1
-        new_per_slug[slug] = entry_data
-        stages["entries_total"] += int(entry_data.get("entries") or 0)
-        for k, v in (entry_data.get("signals") or {}).items():
-            if v and k in stages["signals"]:
-                stages["signals"][k] += 1
-        har_signal_slugs[slug] = any((entry_data.get("signals") or {}).values())
-
-    # Persist per-slug cache.
-    try:
-        cache_root.mkdir(parents=True, exist_ok=True)
-        blob = {
-            "computed_at": datetime.now(KST).isoformat(),
-            "extractor_version": extractor_ver,
-            "extractor_mtime_ns": extractor_mt,
-            "per_slug": new_per_slug,
-        }
-        tmp = per_slug_cache_path.with_suffix(per_slug_cache_path.suffix + ".tmp")
-        tmp.write_text(json.dumps(blob), encoding="utf-8")
-        os.replace(tmp, per_slug_cache_path)
-    except OSError:
-        pass
-
+def read_har_lane_counts() -> dict:
+    """Cheap configs-only summary. Codex review §7 flagged "HAR-driven" as
+    misleading for configs without `_recognized_platform` (most came from
+    static HTML / RSS / manual paths, not HAR), so returns counts under
+    explicit `no_marker` / `platform_marked` labels and leaves wording to
+    the renderer."""
+    no_marker: dict[str, int] = {}
+    platform_marked: dict[str, int] = {}
     cfg_dir = ROOT / "configs"
     if cfg_dir.exists():
-        for cfg_path in sorted(cfg_dir.glob("*.json")):
-            slug = cfg_path.stem
-            data = load_json(cfg_path)
+        for p in sorted(cfg_dir.glob("*.json")):
+            data = load_json(p)
             strategy = str(data.get("strategy") or "unknown")
-            recognized = bool(data.get("_recognized_platform"))
-            has_har_signal = har_signal_slugs.get(slug, False)
-            if has_har_signal:
-                d = stages["strategies_lane_A"]
-                d[strategy] = d.get(strategy, 0) + 1
-            elif recognized:
-                d = stages["strategies_lane_B"]
-                d[strategy] = d.get(strategy, 0) + 1
+            if data.get("_recognized_platform"):
+                platform_marked[strategy] = platform_marked.get(strategy, 0) + 1
             else:
-                stages["unmatched_configs"] += 1
-    return stages
+                no_marker[strategy] = no_marker.get(strategy, 0) + 1
 
-
-def read_har_aggregate(*, cache_dir: Path | None = None) -> dict:
-    """Return funnel stage counts. Cache lives in ``_har_per_slug.json`` (per
-    probe directory) so new HARs only force a rescan of *their own* slug. The
-    aggregate is rebuilt every call but the per-slug work is incremental.
-    """
-    aggregate = _compute_har_aggregate(cache_dir=cache_dir)
-    return {
-        "computed_at": datetime.now(KST).isoformat(),
-        "stages": aggregate,
-    }
-
-
-def _entry_first_get(entries: list[dict]) -> dict:
-    for e in entries:
-        req = e.get("request") or {}
-        if (req.get("method") or "").upper() != "GET":
-            continue
-        resp = e.get("response") or {}
-        mime = ((resp.get("content") or {}).get("mimeType") or "").lower()
-        if any(skip in mime for skip in ("image/", "font/", "css", "javascript", "video/", "audio/")):
-            continue
-        ct = ""
-        for h in resp.get("headers") or []:
-            if (h.get("name") or "").lower() == "content-type":
-                ct = h.get("value") or ""
-                break
-        return {
-            "host": _short_host(req.get("url")),
-            "method": req.get("method") or "",
-            "status": resp.get("status"),
-            "content_type": ct or mime or "—",
-            "size": (resp.get("content") or {}).get("size"),
-        }
-    return {}
-
-
-def pick_case_sample() -> dict:
-    """Score-based selection of one probe run to showcase in the HAR case-sample
-    panel. Returns dict with `slug, host, score, steps, row_anatomy_example,
-    strategy`. Empty dict when nothing qualifies.
-    """
     pdir = ROOT / "output" / "probe"
-    if not pdir.exists():
-        return {}
+    probe_runs = 0
+    har_captured = 0
+    if pdir.exists():
+        for run_dir in pdir.iterdir():
+            if not run_dir.is_dir():
+                continue
+            probe_runs += 1
+            for _ in run_dir.glob("traffic*.har"):
+                har_captured += 1
+                break
 
-    recent_ok_urls: set[str] = set()
-    bot_db = ROOT / "output" / "bot.sqlite3"
-    if bot_db.exists():
-        try:
-            con = sqlite3.connect(str(bot_db))
-            with con:
-                for row in con.execute(
-                    "SELECT url FROM jobs WHERE result_rc = 0 AND finished_at IS NOT NULL"
-                ):
-                    u = str(row[0] or "")
-                    if u:
-                        recent_ok_urls.add(u)
-        except sqlite3.Error:
-            pass
-        finally:
-            try:
-                con.close()
-            except (sqlite3.Error, UnboundLocalError):
-                pass
-
-    candidates: list[tuple[int, str, Path, list[dict], int]] = []
-    for run_dir in pdir.iterdir():
-        if not run_dir.is_dir():
-            continue
-        primary = run_dir / "traffic.har"
-        if not primary.exists():
-            others = sorted(run_dir.glob("traffic*.har"))
-            primary = others[0] if others else None
-        if primary is None:
-            continue
-        entries_all = _read_har_entries(primary, cap=0)
-        n_entries = len(entries_all)
-        if n_entries < 30:
-            continue
-        score = 0
-        if n_entries >= 50:
-            score += 1
-        if n_entries >= 200:
-            score += 1
-        if 50 <= n_entries <= 3000:
-            score += 1
-        json_n = 0
-        for e in entries_all[:500]:
-            mime = ((e.get("response") or {}).get("content") or {}).get("mimeType") or ""
-            if "json" in mime.lower():
-                json_n += 1
-                if json_n >= 3:
-                    break
-        if json_n >= 3:
-            score += 2
-        feed_cand = run_dir / "feed_candidates.json"
-        if feed_cand.exists():
-            try:
-                if load_json(feed_cand):
-                    score += 1
-            except Exception:
-                pass
-        env_path = run_dir / "environment.json"
-        if env_path.exists():
-            env_data = load_json(env_path)
-            src_url = str(env_data.get("url") or env_data.get("source_url") or "")
-            if src_url and src_url in recent_ok_urls:
-                score += 1
-        candidates.append((score, run_dir.name, run_dir, entries_all, json_n))
-
-    candidates.sort(key=lambda c: (-c[0], c[1]))
-    if not candidates or candidates[0][0] < 4:
-        return {}
-    score, slug, run_dir, entries_all, json_n = candidates[0]
-
-    env_path = run_dir / "environment.json"
-    src_url = ""
-    if env_path.exists():
-        env_data = load_json(env_path)
-        src_url = str(env_data.get("url") or env_data.get("source_url") or "")
-    src_host = _short_host(src_url)
-    if not src_host:
-        # environment.json doesn't always store the source URL — fall back to the
-        # first GET entry's host (matches the probe's actual target).
-        first_anatomy = _entry_first_get(entries_all)
-        src_host = first_anatomy.get("host") or ""
-
-    filtered = 0
-    for e in entries_all:
-        req = e.get("request") or {}
-        if (req.get("method") or "").upper() != "GET":
-            continue
-        mime = ((e.get("response") or {}).get("content") or {}).get("mimeType") or ""
-        if any(s in mime.lower() for s in ("image/", "font/", "css", "javascript", "video/", "audio/")):
-            continue
-        filtered += 1
-
-    api_n = rss_n = pag_n = plat_n = body_n = 0
-    fns = _lazy_extract()
-    primary = run_dir / "traffic.har"
-    if not primary.exists():
-        others = sorted(run_dir.glob("traffic*.har"))
-        primary = others[0] if others else None
-    if fns and primary is not None and primary.exists():
-        api_fn, body_fn, rss_fn, pag_fn, plat_fn = fns
-        try:
-            api_n = len(api_fn(primary, page_url=src_url) or [])
-        except Exception:
-            pass
-        try:
-            body_n = len(body_fn(primary, article_url="") or [])
-        except Exception:
-            pass
-        list_html_p = run_dir / "list.html"
-        if list_html_p.exists():
-            try:
-                text = list_html_p.read_text(encoding="utf-8", errors="replace")[:200_000]
-                base = src_url or "https://example.invalid/"
-                try:
-                    rss_n = len(rss_fn(html=text, base_url=base) or [])
-                except Exception:
-                    pass
-                try:
-                    pag_n = len(pag_fn(text, base) or [])
-                except Exception:
-                    pass
-                try:
-                    plat_n = 1 if plat_fn(text, base) else 0
-                except Exception:
-                    pass
-            except OSError:
-                pass
-
-    strategy = ""
-    cfg_path = ROOT / "configs" / f"{slug}.json"
-    if cfg_path.exists():
-        cfg = load_json(cfg_path)
-        strategy = str(cfg.get("strategy") or "")
-
-    steps = [
-        {
-            "stage": 1,
-            "label": "Visit URL",
-            "count": None,
-            "detail": (
-                f"playwright drove a headless browser at host {src_host or '(unknown)'} "
-                f"and saved every network request to traffic.har."
-            ),
-        },
-        {
-            "stage": 2,
-            "label": "Entries inspected",
-            "count": len(entries_all),
-            "detail": "Raw HAR log[].entries — every request the page made.",
-        },
-        {
-            "stage": 3,
-            "label": "Filtered (GET + non-asset)",
-            "count": filtered,
-            "detail": "Drop non-GET and image/font/css/javascript/media MIME types.",
-        },
-        {
-            "stage": 4,
-            "label": "Signals matched",
-            "count": api_n + rss_n + pag_n + plat_n + body_n,
-            "detail": (
-                f"JSON API: {api_n} · RSS: {rss_n} · pagination: {pag_n} · "
-                f"platform: {plat_n} · article-body: {body_n}"
-            ),
-        },
-        {
-            "stage": 5,
-            "label": "Strategy chosen",
-            "count": None,
-            "detail": f"config strategy = {strategy or '(none)'}",
-        },
-    ]
     return {
-        "slug": slug,
-        "host": src_host,
-        "score": score,
-        "steps": steps,
-        "row_anatomy_example": _entry_first_get(entries_all),
-        "strategy": strategy,
+        "no_marker": no_marker,
+        "platform_marked": platform_marked,
+        "probe_runs": probe_runs,
+        "har_captured": har_captured,
     }
 
 
-def svg_har_funnel(stages: dict) -> str:
+def svg_har_funnel() -> str:
+    """Pipeline funnel — five labelled boxes left → right, one per pipeline
+    stage. No aggregate numbers (the user called them meaningless). Click
+    target = whole <g class="funnel-stage"> with tabindex + role for
+    keyboard activation; the first stage is active by default."""
     width = 920
-    height = 360
-    margin_x = 24
-    col_w = (width - 2 * margin_x) / 5
+    height = 170
+    margin_x = 28
+    n = len(PROBE_PIPELINE)
+    col_w = (width - 2 * margin_x) / n
+    box_w = col_w - 16
+    box_h = 110
+    y_mid = height / 2
 
-    sig = stages.get("signals") or {}
-    laneA = stages.get("strategies_lane_A") or {}
-    laneB = stages.get("strategies_lane_B") or {}
-    unmatched = stages.get("unmatched_configs", 0)
-
-    cols = [
-        ("Probe runs", stages.get("probe_runs", 0), "Probe directories on disk."),
-        ("HAR captured", stages.get("har_captured", 0), "Runs with at least one traffic*.har file."),
-        (
-            "Entries scanned",
-            stages.get("entries_total", 0),
-            "HAR log[].entries summed (capped at 1000 per file).",
-        ),
-        (
-            "Signals matched",
-            sum(sig.values()),
-            (
-                f"API {sig.get('api', 0)} · RSS {sig.get('rss', 0)} · "
-                f"pagination {sig.get('pagination', 0)} · "
-                f"platform {sig.get('platform', 0)} · article-body {sig.get('article_body', 0)}"
-            ),
-        ),
-        (
-            "Strategy chosen",
-            sum(laneA.values()) + sum(laneB.values()),
-            (
-                f"Lane A (HAR-driven) {sum(laneA.values())} · "
-                f"Lane B (recognizer, no HAR) {sum(laneB.values())} · "
-                f"Unmatched configs {unmatched}"
-            ),
-        ),
-    ]
-
-    box_h = 80
-    y_mid = 130
-    boxes = []
-    arrows = []
-    last_x_right = None
-    for i, (label, value, detail) in enumerate(cols):
-        x = margin_x + i * col_w
-        bx = x + 4
-        bw = col_w - 8
+    boxes: list[str] = []
+    arrows: list[str] = []
+    last_right = None
+    for i, stage in enumerate(PROBE_PIPELINE):
+        cx_box = margin_x + i * col_w + (col_w - box_w) / 2
         by = y_mid - box_h / 2
+        active = " active" if i == 0 else ""
         boxes.append(
-            f'<g class="funnel-stage" data-label="{esc(label)}" data-detail="{esc(detail)}">'
-            f'<rect x="{bx:.1f}" y="{by:.1f}" width="{bw:.1f}" height="{box_h}" '
-            f'rx="6" ry="6" class="funnel-box"></rect>'
-            f'<text class="funnel-label" x="{bx + bw / 2:.1f}" y="{by + 26:.0f}" '
-            f'text-anchor="middle">{esc(label)}</text>'
-            f'<text class="funnel-value" x="{bx + bw / 2:.1f}" y="{by + 58:.0f}" '
-            f'text-anchor="middle">{esc(value)}</text>'
+            f'<g class="funnel-stage{active}" data-stage-id="{esc(stage["id"])}" '
+            f'tabindex="0" role="button" '
+            f'aria-controls="har-panel-{esc(stage["id"])}" '
+            f'aria-expanded="{"true" if i == 0 else "false"}" '
+            f'aria-label="Stage {i + 1}: {esc(stage["title"])} — click to see files">'
+            f'<rect x="{cx_box:.1f}" y="{by:.1f}" width="{box_w:.1f}" height="{box_h}" '
+            f'rx="8" ry="8" class="funnel-box"></rect>'
+            f'<text class="funnel-step" x="{cx_box + box_w / 2:.1f}" y="{by + 22:.0f}" '
+            f'text-anchor="middle">Step {i + 1}</text>'
+            f'<text class="funnel-label" x="{cx_box + box_w / 2:.1f}" y="{by + 50:.0f}" '
+            f'text-anchor="middle">{esc(stage["title"])}</text>'
+            f'<text class="funnel-tagline" x="{cx_box + box_w / 2:.1f}" y="{by + 78:.0f}" '
+            f'text-anchor="middle">{esc(stage["tagline"])}</text>'
             f"</g>"
         )
-        if last_x_right is not None:
+        if last_right is not None:
             arrows.append(
-                f'<line class="funnel-arrow" x1="{last_x_right:.1f}" y1="{y_mid:.0f}" '
-                f'x2="{bx:.1f}" y2="{y_mid:.0f}"></line>'
+                f'<line class="funnel-arrow" x1="{last_right:.1f}" y1="{y_mid:.0f}" '
+                f'x2="{cx_box:.1f}" y2="{y_mid:.0f}" '
+                f'marker-end="url(#funnel-arrow-head)"></line>'
             )
-        last_x_right = bx + bw
+        last_right = cx_box + box_w
 
-    lane_y = y_mid + box_h / 2 + 30
-    lane_x = margin_x + 4 * col_w + 4
-    lane_w = col_w - 8
-
-    def _lane_top5(d: dict) -> str:
-        if not d:
-            return "(none)"
-        items = sorted(d.items(), key=lambda kv: -kv[1])[:5]
-        return ", ".join(f"{esc(k)}: {esc(v)}" for k, v in items)
-
-    laneA_text = _lane_top5(laneA)
-    laneB_text = _lane_top5(laneB)
-
-    lanes_svg = (
-        f'<g class="funnel-lane" data-label="Lane A" '
-        f'data-detail="HAR-driven: configs whose probe HAR matched a signal.">'
-        f'<text class="funnel-sub" x="{lane_x:.1f}" y="{lane_y:.0f}">'
-        f"Lane A — HAR-driven</text>"
-        f'<text class="funnel-sub-detail" x="{lane_x:.1f}" y="{lane_y + 16:.0f}">{laneA_text}</text>'
-        f"</g>"
-        f'<g class="funnel-lane" data-label="Lane B" '
-        f'data-detail="Recognizer-only: configs issued by URL-pattern recognizers '
-        f'without needing HAR.">'
-        f'<text class="funnel-sub" x="{lane_x:.1f}" y="{lane_y + 48:.0f}">'
-        f"Lane B — Recognizer (no HAR)</text>"
-        f'<text class="funnel-sub-detail" x="{lane_x:.1f}" y="{lane_y + 64:.0f}">{laneB_text}</text>'
-        f"</g>"
+    arrow_marker = (
+        '<defs><marker id="funnel-arrow-head" viewBox="0 0 10 10" refX="9" refY="5" '
+        'markerWidth="6" markerHeight="6" orient="auto-start-reverse">'
+        '<path d="M0,0 L10,5 L0,10 z" fill="currentColor"></path>'
+        "</marker></defs>"
     )
-
-    note = ""
-    if unmatched > 0:
-        note = (
-            f'<text class="funnel-note" x="{margin_x:.0f}" y="{height - 14:.0f}">'
-            f"Side note · {esc(unmatched)} configs in this snapshot have neither a HAR signal "
-            f"nor a recognizer match (legacy or pre-HAR registrations)."
-            f"</text>"
-        )
 
     return (
         f'<svg id="harFunnel" viewBox="0 0 {width} {height}" role="img" '
-        f'aria-label="HAR analysis funnel">'
+        f'aria-label="Probe pipeline — 5 stages, click any stage for files">'
         f'<rect class="scatter-bg" x="0" y="0" width="{width}" height="{height}"></rect>'
+        + arrow_marker
         + "".join(arrows)
         + "".join(boxes)
-        + lanes_svg
-        + note
         + "</svg>"
     )
 
 
-def render_har_anatomy(sample: dict) -> str:
-    ex = sample.get("row_anatomy_example") or {}
+def _wrap_role(role: str, x: float, y: float, w: float) -> str:
+    """Naive 2-line wrap so the role text fits inside the step box."""
+    char_cap = max(20, int(w / 5.6))
+    words = role.split()
+    line_a: list[str] = []
+    line_b: list[str] = []
+    for word in words:
+        target = line_b if line_a and len(" ".join(line_a + [word])) > char_cap else line_a
+        if target is line_b:
+            if len(" ".join(line_b + [word])) > char_cap:
+                truncated = (" ".join(line_b + [word]))[: char_cap - 1] + "…"
+                line_b = truncated.split(" ")
+                break
+        target.append(word)
+    text_a = " ".join(line_a)
+    text_b = " ".join(line_b)
+    if not text_b and len(text_a) > char_cap:
+        text_a = text_a[: char_cap - 1] + "…"
+    out = (
+        f'<text class="step-box-role" x="{x + w / 2:.1f}" y="{y:.0f}" '
+        f'text-anchor="middle">{esc(text_a)}</text>'
+    )
+    if text_b:
+        out += (
+            f'<text class="step-box-role" x="{x + w / 2:.1f}" y="{y + 14:.0f}" '
+            f'text-anchor="middle">{esc(text_b)}</text>'
+        )
+    return out
+
+
+def svg_stage_flow(stage: dict) -> str:
+    """Per-stage horizontal flow diagram — one box per file/step with arrows.
+    Single row when boxes fit (5 × 168 + 4 × 14 = 896, fits within 920);
+    otherwise wraps."""
+    steps = stage["steps"] or []
+    n = len(steps) or 1
+    box_w = 168
+    box_h = 132
+    gap_x = 14
+    gap_y = 24
+    width = 920
+    margin_x = 24
+
+    per_row_cap = max(1, (width - 2 * margin_x + gap_x) // (box_w + gap_x))
+    per_row = min(n, int(per_row_cap))
+    rows = (n + per_row - 1) // per_row
+    used_w = per_row * box_w + (per_row - 1) * gap_x
+    x0 = (width - used_w) / 2
+    height = rows * box_h + (rows - 1) * gap_y + 16
+
+    parts: list[str] = []
+    for idx, (file_path, fn, role) in enumerate(steps):
+        row = idx // per_row
+        col = idx % per_row
+        bx = x0 + col * (box_w + gap_x)
+        by = 8 + row * (box_h + gap_y)
+        parts.append(
+            f'<g class="step-box-g">'
+            f'<rect class="step-box" x="{bx:.1f}" y="{by:.1f}" '
+            f'width="{box_w}" height="{box_h}" rx="6" ry="6"></rect>'
+            f'<text class="step-box-index" x="{bx + 12:.1f}" y="{by + 22:.0f}">'
+            f"{esc(idx + 1)}</text>"
+            f'<text class="step-box-file" x="{bx + box_w / 2:.1f}" y="{by + 40:.0f}" '
+            f'text-anchor="middle">{esc(_short_text(file_path, 28))}</text>'
+            f'<text class="step-box-fn" x="{bx + box_w / 2:.1f}" y="{by + 64:.0f}" '
+            f'text-anchor="middle">{esc(_short_text(fn, 30))}</text>'
+            f'{_wrap_role(role, bx + 10, by + 88, box_w - 20)}'
+            f"</g>"
+        )
+        if col < per_row - 1 and idx + 1 < n:
+            ax1 = bx + box_w
+            ax2 = bx + box_w + gap_x
+            ay = by + box_h / 2
+            parts.append(
+                f'<line class="step-arrow" x1="{ax1:.1f}" y1="{ay:.0f}" '
+                f'x2="{ax2:.1f}" y2="{ay:.0f}" '
+                f'marker-end="url(#step-arrow-head)"></line>'
+            )
+        elif col == per_row - 1 and idx + 1 < n:
+            ax = bx + box_w / 2
+            ay1 = by + box_h
+            ay2 = by + box_h + gap_y
+            parts.append(
+                f'<line class="step-arrow" x1="{ax:.1f}" y1="{ay1:.0f}" '
+                f'x2="{ax:.1f}" y2="{ay2:.0f}" '
+                f'marker-end="url(#step-arrow-head)"></line>'
+            )
+
+    arrow_marker = (
+        '<defs><marker id="step-arrow-head" viewBox="0 0 10 10" refX="9" refY="5" '
+        'markerWidth="5" markerHeight="5" orient="auto-start-reverse">'
+        '<path d="M0,0 L10,5 L0,10 z" fill="currentColor"></path>'
+        "</marker></defs>"
+    )
+
+    return (
+        f'<svg viewBox="0 0 {width} {height:.0f}" role="img" '
+        f'aria-label="{esc(stage["title"])} — file flow" class="stage-flow-svg">'
+        + arrow_marker
+        + "".join(parts)
+        + "</svg>"
+    )
+
+
+def render_stage_panels() -> str:
+    """One <section> per pipeline stage. Only the first is visible (others
+    carry `hidden`). The funnel JS toggles `hidden` + `aria-expanded` on the
+    matching `<g class="funnel-stage">`."""
+    parts: list[str] = []
+    for i, stage in enumerate(PROBE_PIPELINE):
+        hidden_attr = "" if i == 0 else " hidden"
+        parts.append(
+            f'<section class="stage-panel" id="har-panel-{esc(stage["id"])}" '
+            f'data-stage-id="{esc(stage["id"])}"'
+            f'{hidden_attr} aria-labelledby="har-panel-{esc(stage["id"])}-title">'
+            f'<header class="stage-panel-head">'
+            f'<span class="stage-panel-num">Step {esc(i + 1)}</span>'
+            f'<h3 id="har-panel-{esc(stage["id"])}-title">{esc(stage["title"])}</h3>'
+            f'<p class="stage-panel-summary">{esc(stage["summary"])}</p>'
+            f"</header>"
+            f'{svg_stage_flow(stage)}'
+            f"</section>"
+        )
+    return "".join(parts)
+
+
+def render_har_anatomy_static() -> str:
+    """Five-row HAR-entry field table — pure documentation, no live sample
+    values (ADR 0010 §17 keeps URL/header content off the public page)."""
     rows = [
-        ("request.url", "URL that the headless browser fetched", "Host filter (ad/tracker drop); cross-host API detection.", ex.get("host") or "—"),
-        ("request.method", "HTTP method", "Only GET considered for list extraction.", ex.get("method") or "—"),
-        ("response.status", "HTTP status code", "Drop non-2xx responses before signal extraction.", str(ex.get("status") or "—")),
-        ("response.headers.content-type", "MIME from response headers", "Route JSON candidates to API lane, HTML to platform/RSS lanes.", _short_text(ex.get("content_type") or "—", 38)),
-        ("response.content.size", "Response body size", "Drop empty / tracker pixels; rank list endpoints.", _fmt_bytes(ex.get("size"))),
+        ("request.url", "URL the headless browser fetched",
+         "Used by every extractor — drops ad/tracker hosts and detects cross-host JSON APIs."),
+        ("request.method", "HTTP method",
+         "Only GET candidates are kept; POST/PUT entries are dropped before scoring."),
+        ("response.status", "HTTP status code",
+         "Non-2xx entries are dropped early so 4xx/5xx noise doesn't reach the API-list extractor."),
+        ("response.headers.content-type", "MIME type from response headers",
+         "Routes JSON candidates to the API lane and HTML to the platform/RSS lanes."),
+        ("response.content.size", "Response body size in bytes",
+         "Drops empty / tracker-pixel responses and ranks list endpoints by payload weight."),
     ]
     body = "".join(
-        '<tr><td><code>{f}</code></td><td>{w}</td><td>{y}</td><td><code>{v}</code></td></tr>'.format(
-            f=esc(field), w=esc(what), y=esc(why), v=esc(value)
-        )
-        for field, what, why, value in rows
+        f'<tr><td><code>{esc(f)}</code></td><td>{esc(w)}</td><td>{esc(y)}</td></tr>'
+        for f, w, y in rows
     )
     return (
         '<table class="har-anatomy">'
-        '<thead><tr><th>HAR field</th><th>What it is</th><th>Why probe cares</th>'
-        '<th>This case sample</th></tr></thead>'
+        '<thead><tr><th>HAR field</th><th>What it is</th><th>Why probe cares</th></tr></thead>'
         f"<tbody>{body}</tbody></table>"
     )
 
 
-def render_har_case_steps(sample: dict) -> str:
-    if not sample:
-        return (
-            '<p class="meta">No qualifying probe artifact for the case-sample panel '
-            "right now — it auto-fills once a recent run scores at least 4.</p>"
+def render_lane_summary(counts: dict) -> str:
+    """Compact configs/ summary line. Labels reviewed by codex (plan v3 §7):
+    no "HAR-driven" claim for configs without `_recognized_platform`."""
+    no_marker = counts.get("no_marker") or {}
+    platform_marked = counts.get("platform_marked") or {}
+
+    def _top(d: dict) -> str:
+        if not d:
+            return "(none)"
+        return " · ".join(
+            f"<code>{esc(k)}</code>: {esc(v)}"
+            for k, v in sorted(d.items(), key=lambda kv: -kv[1])[:5]
         )
-    items = []
-    steps = sample.get("steps") or []
-    for i, step in enumerate(steps):
-        cnt_html = ""
-        if step.get("count") is not None:
-            cnt_html = f' <span class="step-count">{esc(step["count"])}</span>'
-        open_attr = " open" if i == 0 else ""
-        items.append(
-            f'<details class="case-step"{open_attr}>'
-            f"<summary>Step {esc(step['stage'])}. {esc(step['label'])}{cnt_html}</summary>"
-            f'<div class="step-detail">{esc(step["detail"])}</div>'
-            f"</details>"
-        )
+
+    nm_total = sum(no_marker.values())
+    pm_total = sum(platform_marked.values())
+
     return (
-        f'<p class="meta">Case sample host: <code>{esc(sample.get("host") or "(unknown)")}</code>'
-        f' · selection score <code>{esc(sample.get("score", "-"))}</code>'
-        f' · final strategy <code>{esc(sample.get("strategy") or "(none)")}</code></p>'
-        + "".join(items)
+        '<p class="har-lane-summary">'
+        f'<strong>Configs without a platform marker</strong> ({esc(nm_total)} total) — '
+        f"{_top(no_marker)}. "
+        f'<strong>Platform-marked configs</strong> ({esc(pm_total)} total) — '
+        f"{_top(platform_marked)}. "
+        f'Probe artifacts on disk: {esc(counts.get("probe_runs", 0))} runs · '
+        f'{esc(counts.get("har_captured", 0))} with HAR.'
+        '<br><small class="muted">Platform marker = config carries '
+        "<code>_recognized_platform</code>. The unmarked group covers HAR-derived, "
+        "static-HTML, RSS, manual, and legacy paths — they cannot be cleanly "
+        "separated without a per-config provenance field.</small>"
+        "</p>"
     )
 
 
@@ -1588,8 +1328,7 @@ def render_html(
     generated_at: datetime,
     *,
     case_records: list[dict] | None = None,
-    har_aggregate: dict | None = None,
-    har_sample: dict | None = None,
+    har_lane: dict | None = None,
 ) -> str:
     config_count = len(configs["items"])
     polling_count = poll["markers"].get("polling", 0)
@@ -1643,18 +1382,10 @@ def render_html(
         for b in reversed(BUCKET_ORDER)
     ) or '<li><button type="button" class="legend-toggle" disabled>No case history</button></li>'
 
-    har_data = har_aggregate or {"stages": {}}
-    har_stages = har_data.get("stages") or {}
-    har_funnel_svg = svg_har_funnel(har_stages)
-    har_anatomy_html = render_har_anatomy(har_sample or {})
-    har_case_html = render_har_case_steps(har_sample or {})
-    har_extractor_ok = bool(har_stages.get("har_captured", 0)) or bool(har_stages.get("probe_runs", 0))
-    har_meta_line = (
-        f'Aggregate computed at {esc(har_data.get("computed_at", "—"))} '
-        f'· extractor {esc(EXTRACTOR_VERSION)}'
-        if har_extractor_ok
-        else "HAR extraction is unavailable on this host (probe artifacts or `probe.extract` module not reachable)."
-    )
+    har_funnel_svg = svg_har_funnel()
+    har_stage_panels_html = render_stage_panels()
+    har_anatomy_html = render_har_anatomy_static()
+    har_lane_html = render_lane_summary(har_lane or {})
 
     recent_rows = []
     for item in jobs["recent"]:
@@ -2056,15 +1787,62 @@ def render_html(
     }}
     .timeline-legend .legend-off {{ opacity: 0.42; text-decoration: line-through; }}
     .timeline-legend b {{ color: var(--ink); margin-left: 4px; }}
-    .funnel-box {{ fill: var(--panel); stroke: var(--accent); stroke-width: 1.4; transition: fill 100ms ease; }}
-    .funnel-stage:hover .funnel-box, .funnel-lane:hover {{ cursor: help; }}
+    .funnel-stage {{ cursor: pointer; color: var(--accent-2); }}
+    .funnel-stage:focus {{ outline: none; }}
+    .funnel-stage:focus-visible .funnel-box {{
+      outline: 2px solid var(--accent);
+      outline-offset: 3px;
+    }}
+    .funnel-box {{ fill: var(--panel); stroke: var(--accent); stroke-width: 1.2; transition: fill 100ms, stroke-width 100ms; }}
     .funnel-stage:hover .funnel-box {{ fill: #eaf1f2; }}
-    .funnel-label {{ fill: var(--ink); font: 600 13px Georgia, "Times New Roman", serif; }}
-    .funnel-value {{ fill: var(--accent); font: 700 22px Georgia, "Times New Roman", serif; }}
-    .funnel-arrow {{ stroke: var(--accent-2); stroke-width: 1.6; }}
-    .funnel-sub {{ fill: var(--ink); font: 700 12px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
-    .funnel-sub-detail {{ fill: var(--muted); font: 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
-    .funnel-note {{ fill: var(--muted); font: italic 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
+    .funnel-stage.active .funnel-box {{ fill: #d6e6e9; stroke-width: 2.4; }}
+    .funnel-step {{ fill: var(--muted); font: 600 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 0.08em; text-transform: uppercase; }}
+    .funnel-label {{ fill: var(--ink); font: 600 15px Georgia, "Times New Roman", serif; }}
+    .funnel-tagline {{ fill: var(--muted); font: italic 12px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
+    .funnel-arrow {{ stroke: var(--accent-2); stroke-width: 1.8; color: var(--accent-2); }}
+    .stage-panels {{ margin: 18px 0 6px; }}
+    .stage-panel {{
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 16px 18px 12px;
+      margin: 0 0 14px;
+    }}
+    .stage-panel-head {{ display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin: 0 0 10px; }}
+    .stage-panel-head h3 {{ margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 1.15rem; }}
+    .stage-panel-num {{
+      display: inline-block;
+      padding: 2px 9px;
+      background: var(--paper);
+      border-radius: 10px;
+      color: var(--accent);
+      font: 600 0.76rem -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }}
+    .stage-panel-summary {{ flex-basis: 100%; margin: 4px 0 0; color: var(--muted); font-size: 0.94rem; }}
+    .stage-flow-svg {{ display: block; max-width: 100%; color: var(--accent-2); }}
+    .step-box {{ fill: var(--paper); stroke: var(--accent-2); stroke-width: 1.2; opacity: 0.96; }}
+    .step-box-g:hover .step-box {{ stroke-width: 1.8; opacity: 1; }}
+    .step-box-index {{ fill: var(--accent); font: 700 13px Georgia, "Times New Roman", serif; }}
+    .step-box-file {{ fill: var(--ink); font: 600 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }}
+    .step-box-fn {{ fill: var(--accent); font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }}
+    .step-box-role {{ fill: var(--muted); font: 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
+    .step-arrow {{ stroke: var(--accent-2); stroke-width: 1.4; color: var(--accent-2); }}
+    .har-lane-summary {{
+      background: var(--panel);
+      border-left: 3px solid var(--accent);
+      padding: 12px 16px;
+      margin: 6px 0 18px;
+      font-size: 0.92rem;
+      line-height: 1.55;
+    }}
+    .har-lane-summary code {{
+      background: var(--paper);
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-size: 0.86rem;
+    }}
     .har-subheader {{
       font-family: Georgia, "Times New Roman", serif;
       font-size: 1.1rem;
@@ -2076,33 +1854,6 @@ def render_html(
       border-radius: 3px;
       font-size: 0.86rem;
     }}
-    .case-step {{
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 4px;
-      margin: 6px 0;
-      padding: 0;
-    }}
-    .case-step summary {{
-      list-style: none;
-      cursor: pointer;
-      padding: 10px 14px;
-      font-weight: 600;
-      color: var(--ink);
-    }}
-    .case-step summary::-webkit-details-marker {{ display: none; }}
-    .case-step[open] summary {{ border-bottom: 1px solid var(--line); }}
-    .step-count {{
-      display: inline-block;
-      margin-left: 8px;
-      padding: 1px 8px;
-      background: var(--paper);
-      border-radius: 10px;
-      color: var(--accent);
-      font-family: Georgia, "Times New Roman", serif;
-      font-size: 0.96rem;
-    }}
-    .step-detail {{ padding: 10px 14px; color: var(--muted); font-size: 0.92rem; }}
     table {{
       width: 100%;
       border-collapse: collapse;
@@ -2391,48 +2142,54 @@ def render_html(
 
   <section aria-labelledby="har">
     <h2 id="har">How the probe reads a site (HAR)</h2>
-    <p class="lead">When a new URL is offered, a headless browser visits it and records every
-      network request to a <code>traffic.har</code> file. The pipeline then asks five questions of
-      that file to decide how to fetch the site afterwards. The funnel below counts how many
-      probes traveled through each question this snapshot; below it, one live case sample shows the
-      same five questions answered for a real site.</p>
-    <p class="meta">{har_meta_line}</p>
+    <p class="lead">When a new URL is offered, probe runs in five stages. The funnel below
+      shows the order — <strong>click any stage</strong> (or focus + Enter / Space) to see which
+      files in this repo actually execute during that stage and in what order.</p>
     <figure>
       {har_funnel_svg}
-      <div id="harFunnelTip" class="dot-tip" hidden></div>
-      <figcaption>Figure 3. Stage counts roll up across every probe run with a <code>traffic*.har</code>
-        on disk. Lane A counts configs where a HAR signal directly triggered the strategy; Lane B
-        counts configs issued by URL-pattern recognizers that did not need HAR at all. Hover a
-        stage for the breakdown.</figcaption>
+      <figcaption>Figure 3. Probe pipeline — click any of the five stages to expand the file
+        flow underneath. Each stage's expanded view shows the actual <code>scripts/</code>,
+        <code>probe/</code>, and <code>engine/</code> entry points hit during that stage, in
+        execution order.</figcaption>
     </figure>
+    <div class="stage-panels" id="harStagePanels">
+      {har_stage_panels_html}
+    </div>
+    {har_lane_html}
     <h3 class="har-subheader">What fields are read from each HAR entry</h3>
     {har_anatomy_html}
-    <h3 class="har-subheader">A live case sample (auto-selected each cycle)</h3>
-    {har_case_html}
     <script>
       (function () {{
-        var svg = document.getElementById('harFunnel');
-        var tip = document.getElementById('harFunnelTip');
-        if (!svg || !tip) return;
-        function showTip(label, detail, e) {{
-          tip.innerHTML = '<b>' + label + '</b><span>' + detail + '</span>';
-          tip.hidden = false;
-          tip.style.left = (e.clientX + 14) + 'px';
-          tip.style.top = (e.clientY + 14) + 'px';
+        var funnel = document.getElementById('harFunnel');
+        var panels = document.getElementById('harStagePanels');
+        if (!funnel || !panels) return;
+        function setActive(stageId) {{
+          funnel.querySelectorAll('.funnel-stage').forEach(function (g) {{
+            var match = g.getAttribute('data-stage-id') === stageId;
+            g.classList.toggle('active', match);
+            g.setAttribute('aria-expanded', match ? 'true' : 'false');
+          }});
+          panels.querySelectorAll('.stage-panel').forEach(function (p) {{
+            var match = p.getAttribute('data-stage-id') === stageId;
+            if (match) {{
+              p.hidden = false;
+            }} else {{
+              p.hidden = true;
+            }}
+          }});
         }}
-        svg.addEventListener('mousemove', function (e) {{
-          if (tip.hidden) return;
-          tip.style.left = (e.clientX + 14) + 'px';
-          tip.style.top = (e.clientY + 14) + 'px';
+        funnel.addEventListener('click', function (e) {{
+          var g = e.target.closest ? e.target.closest('.funnel-stage') : null;
+          if (!g) return;
+          setActive(g.getAttribute('data-stage-id') || '');
         }});
-        svg.addEventListener('mouseover', function (e) {{
-          var stage = e.target.closest ? e.target.closest('.funnel-stage, .funnel-lane') : null;
-          if (!stage) {{ tip.hidden = true; return; }}
-          var label = stage.getAttribute('data-label') || '';
-          var detail = stage.getAttribute('data-detail') || '';
-          showTip(label, detail, e);
+        funnel.addEventListener('keydown', function (e) {{
+          if (e.key !== 'Enter' && e.key !== ' ') return;
+          var g = e.target.closest ? e.target.closest('.funnel-stage') : null;
+          if (!g) return;
+          e.preventDefault();
+          setActive(g.getAttribute('data-stage-id') || '');
         }});
-        svg.addEventListener('mouseleave', function () {{ tip.hidden = true; }});
       }})();
     </script>
   </section>
@@ -2463,8 +2220,7 @@ def main(argv: list[str]) -> int:
     poll = read_poll_state()
     jobs = read_jobs()
     case_records = read_case_records()
-    har_aggregate = read_har_aggregate(cache_dir=out_path.parent)
-    har_sample = pick_case_sample()
+    har_lane = read_har_lane_counts()
     generated_at = datetime.now(KST)
     page = render_html(
         configs,
@@ -2472,8 +2228,7 @@ def main(argv: list[str]) -> int:
         jobs,
         generated_at,
         case_records=case_records,
-        har_aggregate=har_aggregate,
-        har_sample=har_sample,
+        har_lane=har_lane,
     )
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2482,13 +2237,12 @@ def main(argv: list[str]) -> int:
     os.replace(tmp_path, out_path)
 
     elapsed = time.monotonic() - t0
-    har_stages = (har_aggregate or {}).get("stages") or {}
     print(
         "[generate_site] wrote "
         f"{out_path} ({len(configs['items'])} configs, {poll['total']} polling, "
         f"{len(jobs['recent'])} recent jobs, "
         f"{len(case_records)} cases, "
-        f"{har_stages.get('har_captured', 0)} HAR runs) "
+        f"{har_lane.get('har_captured', 0)} HAR runs) "
         f"elapsed={elapsed:.2f}s"
     )
     return 0
