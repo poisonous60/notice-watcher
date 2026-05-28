@@ -59,12 +59,24 @@
 {% if quick.hand_config_triage %}
 <div class="prompt-card">
   <div class="row">
-    <span class="label">🛠 FAILED 큐 일괄 처리 ({{ active_failed_count }}건)</span>
+    <span class="label">🛠 FAILED 큐 일괄 처리 — codex 위임 모드 ({{ active_failed_count }}건)</span>
     <button class="secondary" data-copy-target="#qp-hc-tri">📋 복사</button>
   </div>
   <details>
     <summary>미리보기</summary>
     <pre id="qp-hc-tri">{{ quick.hand_config_triage }}</pre>
+  </details>
+</div>
+{% endif %}
+{% if quick.hand_config_triage_claude %}
+<div class="prompt-card">
+  <div class="row">
+    <span class="label">🧠 FAILED 큐 일괄 처리 — claude 직접 모드 ({{ active_failed_count }}건)</span>
+    <button class="secondary" data-copy-target="#qp-hc-tri-claude">📋 복사</button>
+  </div>
+  <details>
+    <summary>미리보기 (codex 위임 X · Claude main thread 가 진단·fix·배포 전부)</summary>
+    <pre id="qp-hc-tri-claude">{{ quick.hand_config_triage_claude }}</pre>
   </details>
 </div>
 {% endif %}
@@ -96,7 +108,7 @@
         {% set rb = r.requested_by %}
         {% if rb is mapping %}{{ rb.get('name', '?') }}{% else %}?{% endif %}
       </td>
-      <td style="white-space:nowrap;">{{ (r.finished_at or r.created_at or "")[:16] }}</td>
+      <td style="white-space:nowrap;">{{ (r.finished_at or r.created_at)|ts('short') }}</td>
     </tr>
     {% endfor %}
   </tbody>

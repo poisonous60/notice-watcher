@@ -46,7 +46,7 @@
         {% else %}<span class="badge err">✗</span>{% endif %}
       </td>
       <td class="mono">{{ e.kind }}</td>
-      <td class="muted" style="font-size:0.8rem;">{{ e.t_start_str }}</td>
+      <td class="muted" style="font-size:0.8rem;">{{ e.t_start_str|ts }}</td>
       <td class="mono">{% if e.duration_ms is not none %}{{ '%.2f'|format(e.duration_ms / 1000) }} s{% else %}—{% endif %}</td>
       <td class="mono">{{ e.n_spans or '—' }}</td>
       <td class="muted" style="font-size:0.8rem;max-width:30em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">

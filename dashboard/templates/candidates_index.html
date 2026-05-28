@@ -10,7 +10,7 @@
 {% endif %}
 
 <p class="muted">
-  snapshot: {{ snapshot_ts }}
+  snapshot: {{ snapshot_ts|ts }}
   · 카탈로그: <strong>{{ catalogs|length }}</strong>개
   · 전체 entry: <strong>{{ agg.total }}</strong>
   · 등록률: <strong>{{ (100 * agg.registered / agg.total) | round(1) if agg.total else 0 }}%</strong>
@@ -71,7 +71,7 @@
       <td>{{ c.bug }}</td>
       <td>{{ c.unknown }}</td>
       <td>{{ c.done }}</td>
-      <td><small class="muted">{{ c.last_ts or '—' }}</small></td>
+      <td><small class="muted">{{ c.last_ts|ts }}</small></td>
     </tr>
     {% else %}
     <tr><td colspan="13" class="muted">카탈로그 없음 — 아래 "+ 새 catalog" 폼으로 박으세요.</td></tr>

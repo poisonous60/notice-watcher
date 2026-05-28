@@ -96,7 +96,7 @@
       <td class="nowrap">{{ "%.0f"|format(r.wasted_fetch_pct) }}</td>
       <td class="nowrap">{{ "%.0f"|format(r.index_pct) }}</td>
       <td class="nowrap">{{ "%.0f"|format(r.error_pct) }}</td>
-      <td class="mono nowrap">{{ r.last_ts }}</td>
+      <td class="mono nowrap">{{ r.last_ts|ts }}</td>
     </tr>
     {% endfor %}
   </tbody>
@@ -124,11 +124,11 @@
   <tbody>
     {% for r in rows %}
     <tr>
-      <td class="mono nowrap">{{ r.ts_short }}</td>
+      <td class="mono nowrap">{{ r.ts|ts }}</td>
       <td><code>{{ r.slug }}</code></td>
       <td class="nowrap"><code>{{ r.lastmod_source }}</code></td>
-      <td class="mono nowrap" title="{{ r.prev_lastmod or '' }}">{{ r.prev_short }}</td>
-      <td class="mono nowrap" title="{{ r.current_lastmod or '' }}">{{ r.current_short }}</td>
+      <td class="mono nowrap" title="{{ r.prev_lastmod or '' }}">{{ r.prev_lastmod|ts }}</td>
+      <td class="mono nowrap" title="{{ r.current_lastmod or '' }}">{{ r.current_lastmod|ts }}</td>
       <td class="nowrap">
         {% if r.would_skip %}<b>YES</b>{% elif r.is_sitemap_index %}<span class="muted">idx</span>{% else %}—{% endif %}
       </td>
@@ -228,7 +228,7 @@
   <tbody>
     {% for r in reg_rows %}
     <tr>
-      <td class="mono nowrap">{{ r.ts_short }}</td>
+      <td class="mono nowrap">{{ r.ts|ts }}</td>
       <td><code>{{ r.slug }}</code></td>
       <td class="nowrap">
         {% if r.outcome == "registered" %}<b style="color:var(--pico-color-green-500, #2a7);">✅</b> registered{% elif r.outcome == "rejected" %}<span class="muted">❎ rejected</span>{% elif r.outcome == "failed" %}<span style="color:var(--pico-color-red-500, #c33);">⚠ failed</span>{% else %}{{ r.outcome }}{% endif %}

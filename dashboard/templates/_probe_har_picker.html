@@ -27,7 +27,7 @@
       <td class="har-url-cell"><small title="{{ r.url }}">{{ r.url or '—' }}</small></td>
       <td class="har-url-cell"><small title="{{ r.first_article_url }}">{{ r.first_article_url or '—' }}</small></td>
       <td><small>{{ r.verdict or '—' }}</small></td>
-      <td><small class="muted">{{ r.mtime_str }}</small></td>
+      <td><small class="muted">{{ r.mtime_str|ts }}</small></td>
     </tr>
     {% endfor %}
   </tbody>

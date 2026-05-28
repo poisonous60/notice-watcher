@@ -482,10 +482,17 @@ def register(app, templates, _render):  # noqa: ARG001
             failed=kpis.get("gen_fail", 0),
             bug=kpis.get("bug", 0),
         )
+        run_and_fix_prompt_claude = prompts.catalog_run_and_fix_claude(
+            catalog_name=name,
+            untried=kpis.get("untried", 0),
+            failed=kpis.get("gen_fail", 0),
+            bug=kpis.get("bug", 0),
+        )
         return _render(
             "candidates_detail.html", request,
             catalog_name=name,
             run_and_fix_prompt=run_and_fix_prompt,
+            run_and_fix_prompt_claude=run_and_fix_prompt_claude,
             rows=rows, kpis=kpis, distribution=distribution,
             jobs_db_error=jobs_db_error,
             total_filtered=len(rows), total_all=len(all_rows),

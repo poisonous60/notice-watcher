@@ -75,10 +75,14 @@ def hand_config_triage_queue(*, failed_slugs: list[str]) -> str:
         "1b. **실전 경로 유지**: batch/FAILED 재시도는 현재 기본 `auto` 그대로 둔다 "
         "(api_loop_once → agentic). `--no-agentic` 은 cheap 가설 확인 전용이지 batch 성공률 판단에 쓰지 않는다. "
         "개선 포인트는 agent 호출 억제가 아니라 agent 입력 축소/품질 개선: `failure_packet`·curated examples·rules compact 를 확인한다.",
-        "1c. **agentic-first / per-site codex 는 최후 수단** (SKILL.md §0c-0, 2026-05-26). "
+        "1c. **agentic-first / per-site Track A 는 최후 수단** (SKILL.md §0c-0, 2026-05-26 + 2026-05-28 per-site Track B 분기 보강). "
         "default `auto` 가 agentic 까지 자동 타기 때문에 *2+ slug 가 같은 fail 신호* 면 그 generic 해결을 "
         "**agentic 입력/휴리스틱/프롬프트**(C/B/A/F-layer) 자리에 박는다 — 한 PR 봉합 → batch 재시도 시 agentic 자동 처리. "
-        "per-site codex 는 *cross-site 일반화 0인 잔여만*. 위임 시에도 **각 task 에 같은 batch 동료 slug 의 (URL, fail_reason) 목록 박기 의무** — "
+        "⚠ **각 site 가 다른 shape (XenForo plugin · inline devlog · Hugo article.news-card 등) 라고 Track A 직행 X** — "
+        "그건 cross-site shortcut 만 없을 뿐, *각 site 마다 자기 Track B 6-layer audit* (특히 F-layer recognizer 신설/확장, C-layer 휴리스틱) "
+        "먼저 거쳐야 한다. F-layer recognizer = 그 platform 의 다른 게시판도 자동 처리 (handcrafted 이지만 Track B). "
+        "per-site Track A (selector 손-쓴 단일 config) 는 *그 site 가 자기 6-layer 도 all-miss* + ship evidence 있는 잔여만. "
+        "위임 시 **각 task 에 같은 batch 동료 slug 의 (URL, fail_reason) 목록 박기 의무** — "
         "isolated brief 만 주면 codex 가 'site 전용' punt 하여 §0c-회피 게이트 2 무력화 (2026-05-26 games-indie 박힘).",
         "2. **청크 분할 = 분석 응집 단위** (`codex_batch.py plan` 은 단서). 같은 플랫폼/host/cohort 신호를 한 청크로 묶어 cross-site 패턴을 보게 한다. "
         "파일 소유 목록은 만들지 않는다 — Track B 후보를 사전에 막지 않기 위해서다.",
@@ -135,6 +139,121 @@ def hand_config_triage_queue(*, failed_slugs: list[str]) -> str:
     return "\n".join(lines)
 
 
+def hand_config_triage_queue_claude(*, failed_slugs: list[str]) -> str:
+    """Claude main thread 직접 처리 모드 (codex 위임 X). SKILL.md §0d.
+
+    codex quota 소진 또는 사용자 명시 시. §0c 와 평행 — entry/middle/exit 다 Claude.
+    """
+    n = len(failed_slugs)
+    lines = [
+        f"FAILED 큐 직접 처리해줘 (skill: hand-config — claude 직접 모드). 총 {n}건.",
+        "",
+        "codex 위임 X — Claude 본인 thread 가 진단·fix·검증·commit·배포 전부. "
+        "절차 = SKILL.md \"§0d claude 직접 모드\". 핵심:",
+        "",
+        "1. `python scripts/triage.py pull --skip-later`  (FAILED + probe 받기).",
+        "2. **청크 = slug 1~3개** (같은 host/플랫폼/cohort 묶음 우선). "
+        "각 청크 끝마다 사용자에게 결과 보고 + 다음 chunk 진행 의향 확인. context 폭발 회피.",
+        "3. **각 slug §2 분기 *전* 강제 인용** 의무 "
+        "(**0 live 확인 — `curl -sI <URL>` 또는 browser 로 *지금* 사이트 직접 본 1줄 (stale probe artifact entry 금지)** / "
+        "1 last_feedback / 2 verdict / 3 근거 / 4a Track B 6-layer / 4b Track A 결정 / "
+        "4c context ship evidence / 4d park 분기 / 5 cases_index / 6 preflight). "
+        "live 와 probe digest 모순이면 **live 우선**. — SKILL.md \"§2 진입 전 강제 인용\".",
+        "4. **Track B 1순위** — canonical 6 자리 E/D/C/B/A/F "
+        "(schema 거부 / retry feedback / probe digest 신호 / few-shot / system 규칙 추가 / 새 엔진 코드) audit. "
+        "hit 면 그 자리 박음. batch/triage operator 흐름은 ship default=false. "
+        "Track A (수동 config/손어댑터) 는 Track B all miss + 특정 slug/URL 직결 ship evidence 있을 때만 optional.",
+        "5. **gen_fail(rc=1) 은 §0b-2 screen-out 먼저** — (P1) content-as-list 오탐 / (P2) not-found shell 미분류 / (P3) empty/fake feed 는 "
+        "진짜 게시판 아님 → `prompts/classify.system.txt` 영구 게이트 봉합 + 그 slug 거부. 통과 잔여만 Track B 진단.",
+        "6. **cross-site 패턴 = 일반화 1순위, 다른 shape = per-site Track B 먼저** — 청크 안 2+ slug 같은 fail 신호(host suffix 모음·JS detail 함수·CMS 동형 등) 면 "
+        "**Track B 자리(C/B/A/F)** 에 박는다. per-site config 6장 찍기 전에 일반화 자리 먼저. "
+        "⚠ 각 slug 가 *다른 shape* 라도 Track A 직행 X — 각자 F-layer recognizer 신설/확장 또는 C-layer 휴리스틱 가능성 audit 먼저. "
+        "Track A (selector 손-쓴 단일 config) 는 *그 slug 자기 6-layer all-miss* + ship evidence 있는 잔여만 (2026-05-28 박힘).",
+        "7. **(선택) subagent 로 context 절약** — 강제 X:",
+        "   - 코드 위치 찾기 / map = `Agent(subagent_type='cavecrew-investigator')` (caveman 압축 출력, main context ~60% 절약)",
+        "   - 1-2 파일 surgical edit = `Agent(subagent_type='cavecrew-builder')` (3+ 파일·새 feature 거부)",
+        "   - 직전 diff self-review = `Agent(subagent_type='cavecrew-reviewer')`",
+        "   - context 여유 있으면 main thread 직접 처리가 더 빠름. quota 여유 적거나 청크 크면 subagent 활용.",
+        "8. **terminal action freeze** (SKILL §0b-1) — `REJECTED` 손-박기 / `park-gate-fail` / true-board Later / `no_change` 는 정리 작업 X, terminal decision. "
+        "실행 전 slug별 4줄 제안: `live 확인` / `probe artifact` (stale 보조 only) / `terminal bucket` / `rollback`. "
+        "**generic `진행해` 는 terminal 실행 승인 X** — 위 증거 보인 뒤 slug별 명시 승인만 실행. "
+        "**raw 503/DNS/timeout 한 줄로 REJECTED 금지** — 첫 진단 pass 에서도 live + probe + 실전 경로 증거 + 우회·개선하지 않을 capability 한계면 REJECTED 가능.",
+        "9. `python scripts/probe_smoke.py --stage 3 --stage 5` PASS → "
+        "`python scripts/cases_index.py --backfill-db output/cases.sqlite3` → "
+        "**검토 통과 파일만 명시 stage** (`git add -A` 금지, CLAUDE.md §9b) → commit → "
+        "`git push origin main` (pre-push hook = probe_smoke gate) → "
+        "`ssh $DEPLOY_HOST 'bash ~/notice-watcher/scripts/n100_deploy.sh'` → "
+        "`python scripts/case_log.py log` (commit 후) → "
+        "`python scripts/triage.py prune-orphans --execute` (recognizer 추가 시).",
+        "10. **모든 fail 종료 상태 박기 의무** — 보고 전 각 미등록 slug 가 4종 중 하나: "
+        "① `registered` ② `Later` (cap_blocked auto-defer) ③ `gate-fail park` (`triage.py park-gate-fail`) ④ **`REJECTED`** (영구, N100 `_save_rejected` ssh 호출 — `.FAILED.json` → `.REJECTED.json`). "
+        "**`.FAILED.json` 잔존 금지** (다음 batch/세션 작업큐서 또 봄). "
+        "dev box `triage_later.json` *만* 박는 건 X — N100 봇·register 거동 영향 0. "
+        "종료 분포 명시 (`registered N / Later N / gate-fail-park N / REJECTED N / 정상거부 N = total`).",
+        "",
+        "대상 slug:",
+    ]
+    for s in failed_slugs:
+        lines.append(f"- {s}  (output/snapshot/poll_state/{s}.FAILED.json)")
+    return "\n".join(lines)
+
+
+def catalog_run_and_fix_claude(*, catalog_name: str,
+                               untried: int = 0, failed: int = 0, bug: int = 0) -> str:
+    """catalog batch run + Claude 직접 진단·수정. codex 위임 X. SKILL.md §0d.
+
+    dashboard `/candidates/<name>` 에서 복사. codex quota 소진 또는 사용자 명시 시.
+    """
+    lines = [
+        f"catalog `{catalog_name}` batch 돌리고 결과 진단·수정해줘 (skill: hand-config — claude 직접 모드).",
+        "",
+        f"현재 분포: untried={untried} / failed={failed} / bug={bug}",
+        "",
+        "codex 위임 X — Claude 본인 thread 가 batch 실행·fail 분류·진단·fix·검증·commit·배포 전부. "
+        "절차 = SKILL.md \"§0d claude 직접 모드\".",
+        "",
+        "절차:",
+        f"1. `python scripts/remote.py batch-register --catalog={catalog_name}` 호출 → untried entry enqueue.",
+        f"2. drain 대기 — `python scripts/remote.py jobs --since <분> --min-id <batch 시작 id> --max-id <batch 끝 id> --wait --interval 60 --max-wait 3600` "
+        "(harness 백그라운드, pending+running=0 검출 시 알림). **`--max-id` 필수** — `register_batch.py` summary 가 박는 `enqueued_ids_max=…` 그대로 박는다. "
+        "안 박으면 동시 다른 batch enqueue 시 새 id 흡수돼 무한 polling (2026-05-28 박힘). sparse batch 는 `--ids <csv>` 로 정확 pin. "
+        "dashboard `/candidates/" + catalog_name + "` KPI 도 보조 view.",
+        "3. drain 완료 후 fail_kind 분포 확인 (dashboard 또는 `python scripts/remote.py jobs`).",
+        "4. **아래 우선순위대로** 처리 (SKILL.md §0a):",
+        "   1) **bug** (rc=-1/-2/-3/-5/-99, `.BUG.json`): *무조건 fix*, 최우선. traceback → bot/scripts/engine 코드 수정.",
+        "   2) **gate_reject** (rc=3): board_shape/single-article 게이트 + LLM 분류기 content 판정 (ADR 0007). "
+        "사용자에게 분포 보고 후 fix = `prompts/classify.system.txt`/모델 보강 → SPA 면 render 트랙. "
+        "**게이트 휴리스틱 추가 X** (분류기 layer 의 일).",
+        "   3) **capability_blocked** (rc=5, `.FAILED.json`): captcha/anti-bot/cloudflare = 능력 부족. stealth/anti-detection 재도전 (§2e).",
+        "   4) **gen_fail** (rc=1, `.FAILED.json`): §0b-2 screen-out 먼저 (P1/P2/P3 → `prompts/classify.system.txt` 영구 게이트). "
+        "통과 잔여만 Track B 1순위 진단(C/B/A/F-layer); Track A 수동 config 는 ship 명시 요청 있을 때만.",
+        "   - **policy_reject** (rc=2) · **url_dead** (rc=4) = 작업 X (정상 거부).",
+        "5. **청크 = slug 1~3개** (같은 host/플랫폼/cohort 묶음 우선). 각 청크 끝마다 사용자에게 결과 보고 + 진행 의향 확인.",
+        "6. **cross-site 패턴 = 일반화 1순위, 다른 shape = per-site Track B 먼저** — 청크 안 2+ slug 같은 fail 신호면 Track B 자리(C/B/A/F)에 박는다. "
+        "각 slug 가 *다른 shape* 라도 Track A 직행 X — 각자 F-layer recognizer 신설/확장 또는 C-layer 휴리스틱 audit 먼저. "
+        "per-site Track A (selector 손-쓴 단일 config) 는 자기 6-layer all-miss + ship evidence 잔여만 (2026-05-28 박힘).",
+        "7. **(선택) subagent 활용** — context 절약: cavecrew-investigator(코드 찾기) / cavecrew-builder(1-2 파일 edit) / cavecrew-reviewer(diff review). 강제 X.",
+        "8. **각 slug §2 분기 *전* 강제 인용** (0 live / 1 last_feedback / 2 verdict / 3 근거 / "
+        "4a Track B 6-layer / 4b Track A 결정 / 4c context ship / 4d park 분기 / 5 cases_index / 6 preflight). "
+        "live ↔ probe digest 모순 = live 우선. cross-site 패턴 발견 시 일반화 자리 먼저.",
+        f"9. 재시도: `python scripts/remote.py batch-register --catalog={catalog_name} --failed all`.",
+        "10. registered 100% 또는 root-cause 못 잡는 사이트만 남을 때까지 반복.",
+        "11. **terminal action freeze** (SKILL §0b-1) — REJECTED/park-gate-fail/Later/no_change 는 "
+        "`live 확인` + `probe artifact` + `terminal bucket` + `rollback` 4줄 제안 후 slug별 명시 승인만 실행. "
+        "**generic `진행해` 승인 X**. **raw 503/DNS/timeout 한 줄로 REJECTED X** — 첫 진단 pass 에서도 live + 실전 경로 증거 + 우회·개선 안 할 capability 한계면 REJECTED 가능.",
+        "12. **모든 fail 종료 상태 박기 의무** — 보고 전 각 미등록 slug 가 4종 종료 중 하나에: "
+        "① `registered` ② `Later` (cap_blocked auto-defer) ③ `gate-fail park` (`triage.py park-gate-fail`) ④ **`REJECTED`** (영구, N100 `_save_rejected` ssh 호출). "
+        "**`.FAILED.json` 잔존 금지**. dev box `triage_later.json` 만 박는 건 X — N100 봇 영향 0. "
+        "종료 분포 명시 (`registered N / Later N / gate-fail-park N / REJECTED N / 정상거부 N = total`).",
+        "",
+        "각 fail 기본 프레임: Track B 1순위 — canonical 6 자리 E/D/C/B/A/F audit. "
+        "catalog/batch operator 흐름은 ship default=false. "
+        "Track A 는 Track B all miss + 특정 slug/URL 직결 ship 요청 있을 때만 optional. "
+        "ship evidence = `Track A`·`수동 config`·`이 사이트 즉시 작동`·`ship 필요` + slug/URL 직결 문장.",
+    ]
+    return "\n".join(lines)
+
+
 def report_triage_single(*, report_id: int, slug: Optional[str],
                          issue: Optional[str], reporter: Optional[str]) -> str:
     lines = [f"사용자 신고 #{report_id} 처리해줘 (skill: report-triage).", ""]
@@ -183,15 +302,19 @@ def catalog_run_and_fix(*, catalog_name: str,
     lines.append("3b. **실전 경로 유지**: batch/FAILED 재시도는 현재 기본 `auto` 그대로 둔다 "
                  "(api_loop_once → agentic). `--no-agentic` 은 cheap 가설 확인 전용이지 batch 성공률 판단에 쓰지 않는다. "
                  "개선 포인트는 agent 호출 억제가 아니라 agent 입력 축소/품질 개선: `failure_packet`·curated examples·rules compact 를 확인한다.")
-    lines.append("3c. **agentic-first / per-site codex 는 최후 수단** (SKILL.md §0c-0, 2026-05-26 박힘). "
+    lines.append("3c. **agentic-first / per-site Track A 는 최후 수단** (SKILL.md §0c-0, 2026-05-26 + 2026-05-28 per-site Track B 분기 보강). "
                  "default `auto` 가 agentic(codex) 까지 자동 타기 때문에 *같은 batch 의 2+ sites 가 같은 fail 신호* 면 "
                  "그 generic 해결을 **agentic 입력/휴리스틱/프롬프트** 자리(C/B/A/F-layer) 에 박는다 — "
                  "indie studio /news/ subpath, RSS feed 자동 detect, SPA shell row-count 분기 같은 cross-site 패턴은 "
                  "여기서 한 PR 로 봉합하면 batch 재시도 시 agentic 이 자동 처리. "
-                 "per-site codex 위임으로 site 별 수동 config 찍어내는 건 *cross-site 일반화 0인 잔여만* — "
+                 "⚠ **각 site 가 다른 shape (XenForo plugin · inline devlog · Hugo article.news-card 등) 라고 per-site Track A 직행 X** — "
+                 "그건 cross-site shortcut 만 없을 뿐, *각 site 마다 자기 Track B 6-layer audit* (특히 F-layer recognizer 신설/확장, C-layer 휴리스틱) 먼저. "
+                 "F-layer recognizer = 그 platform 의 다른 게시판도 자동 처리 (handcrafted 이지만 Track B). "
+                 "per-site Track A (selector 손-쓴 단일 config) 는 *그 site 6-layer all-miss + ship evidence* 있는 잔여만. "
                  "위임 시에도 **각 task 에 같은 batch 동료 sites 의 (URL, fail_reason) 목록 박기 의무** "
                  "(없으면 codex 가 isolated brief 라 cross-site 패턴 못 보고 '이 사이트 전용' punt — §0c-회피 게이트 2 무력화). "
-                 "위임 전 1분 rubric: '같은 fail_reason/신호/fix layer 가 2+ sites?' YES → agentic 자리. NO → per-site codex (동료 brief 포함).")
+                 "위임 전 1분 rubric (3분기): '같은 fail_reason/신호/fix layer 가 2+ sites?' YES → cross-site agentic 자리. "
+                 "NO → **per-site Track B (F-layer recognizer · C-layer 휴리스틱) 먼저 audit, all-miss 시만 per-site Track A** (동료 brief 포함).")
     lines.append("4. **아래 우선순위대로** 처리 (2026-05-21 사용자 결정 — SKILL.md §0a):")
     lines.append("   1) **bug** (rc=-1/-2/-3/-5/-99, `.BUG.json`): *무조건 fix*, 최우선. traceback → bot/scripts/engine 코드 수정 (bug-fix workflow). `register.py 실행 시간 초과(300s)` 류 timeout 도 여기 — root-cause.")
     lines.append("   2) **gate_reject** (rc=3): board_shape/nav_only/single-article 게이트 거부 + LLM index/content 분류기(veto)도 content 판정(ADR 0007). 게시판/비게시판 false-reject 봉합은 *분류기 layer 의 일* — 임의로 '의도된 거부'라 신뢰 X. **사용자에게 분포·샘플 보고하고 확인 대기**, 받으면 fix 순서 = ① `prompts/classify.system.txt`/모델 보강 (게이트 휴리스틱 추가 X) → ② SPA(정적 HTML 에 목록 없음)면 render 트랙. SKILL.md §0a-2.")

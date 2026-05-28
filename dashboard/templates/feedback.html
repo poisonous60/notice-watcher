@@ -9,7 +9,7 @@
   <div class="row" style="display:flex;gap:0.6rem;align-items:baseline;">
     <strong>#{{ r.id }}</strong>
     <code>{{ r.username or r.user_id }}</code>
-    <span class="muted">· {{ (r.created_at or '')[:16] }}</span>
+    <span class="muted">· {{ r.created_at|ts('short') }}</span>
   </div>
   <pre style="white-space:pre-wrap;margin:0.5rem 0 0 0;font-family:inherit;font-size:0.95rem;">{{ r.message }}</pre>
 </article>

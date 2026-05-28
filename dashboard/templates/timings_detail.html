@@ -10,7 +10,7 @@
 </h2>
 <p class="muted" style="font-size:0.85rem;">
   spans: {{ trace.spans | length }}  ·
-  start: <code>{{ start_str }}</code>  ·
+  start: {{ start_str|ts }}  ·
   duration: <code>{{ '%.3f'|format(gantt.duration_ms / 1000) }} s</code>
   {% if trace.ok is sameas false %} · <span class="badge err">failed</span> {{ trace.err or '' }}{% endif %}
 </p>

@@ -146,12 +146,61 @@
 })();
 </script>
 
+<h3 style="margin-top:1.5rem;">🕐 시간 형식</h3>
+<p class="muted">전 dashboard 의 시각 표시 형식. localStorage 저장 (브라우저별).</p>
+<div class="theme-size-row" data-time-format-row>
+  <button type="button" data-tf="full">서버 기본 (YYYY-MM-DD HH:MM:SS)</button>
+  <button type="button" data-tf="short">짧게 (MM-DD HH:MM)</button>
+  <button type="button" data-tf="date">날짜만 (YYYY-MM-DD)</button>
+  <button type="button" data-tf="time">시각만 (HH:MM:SS)</button>
+  <button type="button" data-tf="relative">상대 (n분 전)</button>
+  <button type="button" data-tf="iso-utc">ISO UTC</button>
+</div>
+<p class="muted" style="font-size:0.85rem;">
+  예시 (1분 전): <time class="nw-ts" datetime="" id="tf-sample">—</time>
+</p>
+<script>
+(function () {
+  var KEY = 'nw.timeFormat';
+  function pref() { try { return localStorage.getItem(KEY) || 'full'; } catch (e) { return 'full'; } }
+  function markActive(v) {
+    document.querySelectorAll('[data-tf]').forEach(function (el) {
+      el.classList.toggle('is-active', el.getAttribute('data-tf') === v);
+    });
+  }
+  function refreshSample() {
+    var el = document.getElementById('tf-sample');
+    if (!el) return;
+    var d = new Date(Date.now() - 60 * 1000);
+    el.setAttribute('datetime', d.toISOString().replace(/\.\d+Z$/, 'Z'));
+    el.setAttribute('data-kind', 'full');
+    if (window.nwReformatTimes) window.nwReformatTimes();
+  }
+  function init() {
+    markActive(pref());
+    refreshSample();
+    var row = document.querySelector('[data-time-format-row]');
+    row.addEventListener('click', function (ev) {
+      var el = ev.target.closest('[data-tf]');
+      if (!el) return;
+      var v = el.getAttribute('data-tf');
+      try { localStorage.setItem(KEY, v); } catch (e) {}
+      markActive(v);
+      refreshSample();
+      if (window.nwReformatTimes) window.nwReformatTimes();
+    });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
+})();
+</script>
+
 <h3 style="margin-top:1.5rem;">📂 Snapshot</h3>
 <dl class="kv">
   <dt>snapshot DB</dt><dd class="mono">{{ info.snapshot_db }}</dd>
   <dt>configs dir</dt><dd class="mono">{{ info.configs_dir }}</dd>
   <dt>state dir</dt><dd class="mono">{{ info.state_dir }}</dd>
-  <dt>마지막 pull</dt><dd>{{ info.last_pull }}</dd>
+  <dt>마지막 pull</dt><dd>{{ info.last_pull|ts }}</dd>
   <dt>configs 파일 수</dt><dd>{{ info.n_configs }}</dd>
   <dt>state 파일 수</dt><dd>{{ info.n_states }}</dd>
   <dt>FAILED 수</dt><dd>{{ info.n_failed }}</dd>

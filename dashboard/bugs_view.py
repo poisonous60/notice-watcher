@@ -28,8 +28,6 @@ def _row_to_view(d: dict) -> dict[str, Any]:
     out["reason_short"] = (reason[:80] + "…") if len(reason) > 80 else reason
     url = d.get("url") or ""
     out["url_short"] = (url[:80] + "…") if len(url) > 80 else url
-    out["last_at_short"] = (d.get("last_at") or "")[:19]
-    out["first_at_short"] = (d.get("first_at") or "")[:19]
     out["tail_short"] = "\n".join((d.get("tail") or "").splitlines()[-6:])
     return out
 

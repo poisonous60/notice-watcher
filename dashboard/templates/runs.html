@@ -53,7 +53,7 @@
     <tr>
       <td><a href="/runs/poll/{{ r.id }}">{{ r.id }}</a></td>
       <td><small>{{ r.run_label }}</small></td>
-      <td><small>{{ r.started_at[:19] }}</small></td>
+      <td><small>{{ r.started_at|ts }}</small></td>
       <td>
         {% if r.status == 'running' %}<span style="color:#b58900;">⏳ running</span>
         {% elif r.status == 'done' and r.persist_mismatch_sites %}<span style="color:#dc322f;">⚠ done(mismatch)</span>
@@ -95,7 +95,7 @@
     {% for r in notify_rows %}
     <tr>
       <td><a href="/runs/notify/{{ r.id }}">{{ r.id }}</a></td>
-      <td><small>{{ r.started_at[:19] }}</small></td>
+      <td><small>{{ r.started_at|ts }}</small></td>
       <td>
         {% if r.status == 'running' %}<span style="color:#b58900;">⏳ running</span>
         {% elif r.status == 'done' %}<span style="color:#0a8a0a;">✅ done</span>

@@ -102,10 +102,11 @@ def last_pull_dt() -> Optional[datetime]:
 
 
 def last_pull_str() -> str:
+    """UTC ISO-8601. `|ts` 필터가 KST 변환·재포맷 (timezone naive 문자열 박지 X)."""
     dt = last_pull_dt()
     if dt is None:
-        return "(snapshot 없음 — Pull 먼저)"
-    return dt.strftime("%Y-%m-%d %H:%M:%S")
+        return ""
+    return dt.astimezone(timezone.utc).isoformat(timespec="seconds")
 
 
 def failed_slugs() -> list[str]:

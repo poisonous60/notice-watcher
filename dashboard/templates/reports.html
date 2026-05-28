@@ -42,7 +42,7 @@
       </td>
       <td>{{ r.username or r.user_id }}</td>
       <td>{{ ((r.issue or '') | replace('\n', ' '))[:120] }}</td>
-      <td>{{ (r.created_at or '')[:16] }}</td>
+      <td>{{ r.created_at|ts('short') }}</td>
     </tr>
     {% endfor %}
   </tbody>

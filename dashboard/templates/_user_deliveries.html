@@ -13,7 +13,7 @@
     {% for r in rows %}
     <tr>
       <td class="mono" style="font-size:0.78rem;">{{ r.post_id }}</td>
-      <td class="muted" style="font-size:0.78rem;">{{ (r.sent_at or '')[:19] }}</td>
+      <td class="muted" style="font-size:0.78rem;">{{ r.sent_at|ts }}</td>
       <td>
         {% if r.post_id in seen %}<span class="badge ok">in seen</span>
         {% else %}<span class="badge warn" title="seen cap 에서 evict — 재현 불가 가능">evicted</span>{% endif %}

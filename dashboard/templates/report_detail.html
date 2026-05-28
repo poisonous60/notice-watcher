@@ -10,7 +10,7 @@
     <span class="badge {{ 'ok' if report.status=='resolved' else 'warn' }}">{{ report.status }}</span>
   </dd>
   <dt>신고자</dt><dd>{{ report.username or '?' }} (<code>{{ report.user_id }}</code>)</dd>
-  <dt>시각</dt><dd>{{ report.created_at }}</dd>
+  <dt>시각</dt><dd>{{ report.created_at|ts }}</dd>
   {% if report.resolved_note %}<dt>resolved_note</dt><dd>{{ report.resolved_note }}</dd>{% endif %}
 </dl>
 

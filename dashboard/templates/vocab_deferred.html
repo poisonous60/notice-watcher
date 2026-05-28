@@ -20,7 +20,7 @@
   <b>총 후보:</b> {{ candidates_total }}
   · <b>threshold:</b> {{ threshold }}
   · <b>전체 알림 누적:</b> {{ total_alerts }}회
-  {% if history.first_alert_at %} · <b>첫 알림:</b> <code>{{ history.first_alert_at[:19] }}</code>{% endif %}
+  {% if history.first_alert_at %} · <b>첫 알림:</b> {{ history.first_alert_at|ts }}{% endif %}
 </p>
 
 {% if triggered %}
@@ -54,7 +54,7 @@
       <td class="mono">{% for k, v in t.confidences.items() %}{{ k }}:{{ v }}{% if not loop.last %} / {% endif %}{% endfor %}</td>
       <td class="mono">{{ t.reason }}</td>
       <td>{{ t.history.alert_count or 0 }}회</td>
-      <td class="mono">{{ (t.history.last_seen_at or '')[:19] or '—' }}</td>
+      <td class="mono">{{ t.history.last_seen_at|ts }}</td>
       <td class="mono">{{ t.cases|join(', ') }}</td>
     </tr>
     {% endfor %}

@@ -1,0 +1,142 @@
+{
+  "version": 1,
+  "site": "gamebanana.com",
+  "board": "3",
+  "_slug_board": "3",
+  "_source_url": "https://gamebanana.com/games/3",
+  "_note": "GameBanana games/3 hub — SubmissionsListModule(mods 섹션)만 폴링. 다른 RecordsGrid(articles/threads/sub-games) 잡지 않게 scope 강제. playwright_html + disable_stealth (DNS race 회피).",
+  "strategy": "playwright_html",
+  "disable_stealth": true,
+  "headers": {
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+    "Accept-Language": "ko-KR,en;q=0.9",
+    "Upgrade-Insecure-Requests": "1",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+    "Sec-CH-UA": "\"Chromium\";v=\"148\", \"Google Chrome\";v=\"148\", \"Not/A)Brand\";v=\"99\"",
+    "Sec-CH-UA-Mobile": "?0",
+    "Sec-CH-UA-Platform": "\"Windows\"",
+    "Referer": "https://gamebanana.com/"
+  },
+  "timeout": 15,
+  "nav_timeout_ms": 15000,
+  "idle_timeout_ms": 4000,
+  "quiet_ms": 300,
+  "list": {
+    "url_template": "https://gamebanana.com/games/{board}",
+    "pagination": {
+      "kind": "none"
+    },
+    "wait_selector": "module#SubmissionsListModule div.RecordsGrid > div.Record",
+    "row_selector": "module#SubmissionsListModule div.RecordsGrid > div.Record",
+    "row_required_selector": "a.Name[href*='/mods/']",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a.Name[href*='/mods/']",
+          "attr": "href",
+          "transform": [
+            [
+              "regex_extract",
+              "/mods/(\\d+)"
+            ]
+          ]
+        },
+        {
+          "from": "attr",
+          "selector": "a.Preview[href*='/mods/']",
+          "attr": "href",
+          "transform": [
+            [
+              "regex_extract",
+              "/mods/(\\d+)"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "a.Name",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a.Name[href*='/mods/']",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://gamebanana.com"
+            ]
+          ]
+        }
+      ],
+      "author": [
+        {
+          "from": "css",
+          "selector": "a.Submitter, span.Submitter, .Authors a",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "cover_image": [
+        {
+          "from": "attr",
+          "selector": "img[src*='/img/']",
+          "attr": "src",
+          "transform": [
+            [
+              "urljoin",
+              "https://gamebanana.com"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "json",
+    "url_template": "https://gamebanana.com/apiv12/Mod/{post_id}/ProfilePage",
+    "content": [
+      {
+        "from": "json",
+        "path": [
+          "_sText"
+        ]
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "json",
+          "path": [
+            "_sName"
+          ]
+        }
+      ],
+      "author": [
+        {
+          "from": "json",
+          "path": [
+            "_aSubmitter",
+            "_sName"
+          ]
+        }
+      ]
+    }
+  },
+  "_recognized_platform": "gamebanana"
+}

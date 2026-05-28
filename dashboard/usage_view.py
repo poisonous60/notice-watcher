@@ -20,16 +20,16 @@ _KST = timezone(timedelta(hours=9))
 
 
 def _ts_to_kst_str(iso: str) -> str:
-    """ISO-8601 UTC → 'YYYY-MM-DD HH:MM:SS' (KST). 파싱 실패 시 raw."""
+    """ISO-8601 UTC 정규화 (TZ 없으면 UTC). 템플릿이 `|ts` 로 KST 변환."""
     if not iso:
         return ""
     try:
         dt = datetime.fromisoformat(iso)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(_KST).strftime("%Y-%m-%d %H:%M:%S")
+        return dt.astimezone(timezone.utc).isoformat(timespec="seconds")
     except ValueError:
-        return iso
+        return ""
 
 
 def open_usage_conn(path: Path) -> Optional[sqlite3.Connection]:

@@ -33,7 +33,7 @@
     {% if rb is mapping %}{{ rb.get('name', '?') }} (id={{ rb.get('id', '?') }}){% else %}?{% endif %}
   </dd>
   {% if job.dedupe_key %}<dt>dedupe_key</dt><dd class="mono"><code>{{ job.dedupe_key }}</code></dd>{% endif %}
-  {% if job.requeue_at %}<dt>requeue_at</dt><dd class="mono"><code>{{ job.requeue_at }}</code> <span class="muted" style="font-size:0.8rem;">(barrier 대기 중 — 이후 시각에 재claim)</span></dd>{% endif %}
+  {% if job.requeue_at %}<dt>requeue_at</dt><dd class="mono">{{ job.requeue_at|ts }} <span class="muted" style="font-size:0.8rem;">(barrier 대기 중 — 이후 시각에 재claim)</span></dd>{% endif %}
   {% if job.url %}<dt>제출 URL</dt><dd class="mono">
     {% if is_http_url(job.url) %}
       <a href="{{ job.url }}" target="_blank" rel="noopener">{{ job.url }}</a>
@@ -43,7 +43,7 @@
   </dd>{% endif %}
   {% if job.article_url %}<dt>article_url</dt><dd class="mono">{{ job.article_url }}</dd>{% endif %}
   {% if job.sub_payload %}<dt>payload</dt><dd class="mono"><details><summary>JSON ({{ (job.sub_payload | length) if (job.sub_payload is string) else '...' }} chars)</summary><pre style="font-size:0.78rem;max-height:14em;overflow:auto;">{{ job.sub_payload if job.sub_payload is string else (job.sub_payload | tojson(indent=2)) }}</pre></details></dd>{% endif %}
-  <dt>시작/종료</dt><dd>{{ job.started_at }} → {{ job.finished_at }}</dd>
+  <dt>시작/종료</dt><dd>{{ job.started_at|ts }} → {{ job.finished_at|ts }}</dd>
 </dl>
 
 <h3>진단</h3>

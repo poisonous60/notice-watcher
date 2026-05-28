@@ -472,15 +472,27 @@ def _jobs_status_bucket_expr() -> str:
     )
 
 
-def _jobs_query(kind: str, since_minutes: int, min_id: int) -> tuple[int, str, str, dict[str, int], int]:
+def _jobs_query(kind: str, since_minutes: int, min_id: int,
+                max_id: int = 0, ids: tuple[int, ...] = ()) -> tuple[int, str, str, dict[str, int], int]:
     """jobs 테이블 1회 조회. returns (rc, stdout_human, stderr, status_counts, total).
 
     stdout_human = column-formatted (사용자 view). status_counts = parsed dict.
     total = `total` row 의 count (있으면, 없으면 sum).
+
+    `ids` 가 비지 않으면 *명시 id set 만* 본다 (since/min_id/max_id 무시). drain watcher 가
+    `register_batch.py` 가 stdout 에 박은 `enqueued_ids=...` 그대로 pin 할 때 사용.
+    그렇지 않으면 (kind, since_minutes, min_id, max_id) AND-window.
     """
-    where = f"kind='{kind}' AND created_at > datetime('now', '-{int(since_minutes)} minutes')"
-    if min_id > 0:
-        where += f" AND id >= {int(min_id)}"
+    if ids:
+        # id literal whitelist — 호출자(`cmd_jobs`)가 int 변환·범위 검증 후 전달.
+        id_csv = ",".join(str(int(i)) for i in ids)
+        where = f"kind='{kind}' AND id IN ({id_csv})"
+    else:
+        where = f"kind='{kind}' AND created_at > datetime('now', '-{int(since_minutes)} minutes')"
+        if min_id > 0:
+            where += f" AND id >= {int(min_id)}"
+        if max_id > 0:
+            where += f" AND id <= {int(max_id)}"
     # 두 SQL 한 ssh 호출에 묶음 — 사람 view (column) + 파싱 view (pipe-list).
     bucket = _jobs_status_bucket_expr()
     sql = (
@@ -523,7 +535,8 @@ def _jobs_query(kind: str, since_minutes: int, min_id: int) -> tuple[int, str, s
 
 
 def cmd_jobs(kind: str, since_minutes: int, min_id: int, *,
-             wait: bool = False, interval: int = 60, max_wait: int = 3600) -> int:
+             wait: bool = False, interval: int = 60, max_wait: int = 3600,
+             max_id: int = 0, ids: tuple[int, ...] = ()) -> int:
     """운영 호스트 `output/bot.sqlite3` jobs 테이블의 상태별 카운트.
 
     batch drain 모니터링용. ad-hoc `ssh ... 'sqlite3 ... "SELECT ... WHERE kind=\"register\""'`
@@ -536,6 +549,12 @@ def cmd_jobs(kind: str, since_minutes: int, min_id: int, *,
     완료 시 0행 row 가 출력에서 사라지면 매칭 0건 → `bool([])=False` → 무한 loop 버그.
     이 helper 는 SQL count 직접 본다(0행도 0 으로 알림).
 
+    drain pinning (2026-05-28 박음): `--min-id`/`--max-id` upper bound 또는 `--ids`
+    명시 set 으로 *이 batch* 만 본다. 안 박으면 동시 다른 batch 가 enqueue 한 새 id 도
+    같은 window 에 흡수돼 in_flight 가 0 도달 X → 무한 polling (2026-05-28 박음).
+    `register_batch.py` 가 stdout 에 `enqueued_ids_max=…` / `enqueued_ids=…` 박음
+    — watcher 가 그대로 pin.
+
     인자는 모두 regex/int 로 검증 → SSH command 안전 interpolation. SQL 안의 값은
     int(고정 변환)·whitelisted kind 만 들어가므로 injection 표면 0.
     """
@@ -546,6 +565,20 @@ def cmd_jobs(kind: str, since_minutes: int, min_id: int, *,
     if min_id < 0 or min_id > 10_000_000:
         print(f"[remote] min-id 범위 0..10000000: {min_id!r}", file=sys.stderr)
         return 4
+    if max_id < 0 or max_id > 10_000_000:
+        print(f"[remote] max-id 범위 0..10000000: {max_id!r}", file=sys.stderr)
+        return 4
+    if max_id and min_id and max_id < min_id:
+        print(f"[remote] max-id({max_id}) < min-id({min_id})", file=sys.stderr)
+        return 4
+    if ids:
+        if len(ids) > 5000:
+            print(f"[remote] --ids 5000개 초과 ({len(ids)}). batch split.", file=sys.stderr)
+            return 4
+        for i in ids:
+            if i < 1 or i > 10_000_000:
+                print(f"[remote] --ids 항목 범위 1..10000000: {i!r}", file=sys.stderr)
+                return 4
     if wait:
         if interval < 5 or interval > 600:
             print(f"[remote] --interval 범위 5..600 초: {interval!r}", file=sys.stderr)
@@ -555,7 +588,7 @@ def cmd_jobs(kind: str, since_minutes: int, min_id: int, *,
             return 4
         elapsed = 0
         while True:
-            rc, human, stderr, counts, total = _jobs_query(kind, since_minutes, min_id)
+            rc, human, stderr, counts, total = _jobs_query(kind, since_minutes, min_id, max_id, ids)
             if rc != 0:
                 sys.stdout.write(human)
                 sys.stderr.write(stderr)
@@ -573,7 +606,7 @@ def cmd_jobs(kind: str, since_minutes: int, min_id: int, *,
                 return 2
             time.sleep(interval)
             elapsed += interval
-    rc, human, stderr, _counts, _total = _jobs_query(kind, since_minutes, min_id)
+    rc, human, stderr, _counts, _total = _jobs_query(kind, since_minutes, min_id, max_id, ids)
     sys.stdout.write(human)
     sys.stderr.write(stderr)
     return rc
@@ -604,8 +637,8 @@ def list_actions() -> int:
     print("  announce-scoped <base64-json>                  좁힌 공지 발송")
     print("  batch-register --catalog <name>[...] [--url URL ...] [--failed[=all|gen|blocked]|--rc 1,-99|--force]")
     print("                                                 catalog/url scope × filter (rev5)")
-    print("  jobs [--kind register] [--since 60] [--min-id N]")
-    print("                                                 bot.sqlite3 jobs 상태 카운트 (drain 모니터링)")
+    print("  jobs [--kind register] [--since 60] [--min-id N] [--max-id N] [--ids 1,2,...]")
+    print("                                                 bot.sqlite3 jobs 상태 카운트 (drain 모니터링; --max-id/--ids 로 *이* batch pin)")
     print("  unlearn <pattern_id>                           learned_blacklist 패턴 제거")
     print("  clear-bug <slug>                               .BUG.json 마커 제거 (bug-fix workflow)")
     print("  trace-index <kind>                             output/traces/index.<kind>.jsonl tail")
@@ -653,6 +686,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     sp.add_argument("--kind", default="register", help="jobs.kind 컬럼 (영소문자+_, default: register)")
     sp.add_argument("--since", type=int, default=60, help="최근 N분 (default: 60)")
     sp.add_argument("--min-id", type=int, default=0, dest="min_id", help="id >= N filter (batch 시작 id 부터 보고 싶을 때)")
+    sp.add_argument("--max-id", type=int, default=0, dest="max_id",
+                    help="id <= N filter (이 batch 의 마지막 enqueued id; "
+                         "register_batch.py 가 stdout 에 박는 `enqueued_ids_max=…` 그대로 박기. "
+                         "동시 다른 batch enqueue 시에도 *이* batch 만 추적, drain 무한loop 차단.)")
+    sp.add_argument("--ids", default="",
+                    help="명시 job id set (comma-list). 박으면 since/min/max 무시하고 이 id 들만. "
+                         "register_batch.py 의 `enqueued_ids=<csv>` 그대로 박으면 sparse batch 도 정확 pin.")
     sp.add_argument("--wait", action="store_true",
                     help="drain 완료(pending+running=0)까지 polling, exit 0. 인라인 regex 패턴 대체 (drain 시 0행 표시→regex 0매칭→무한loop 버그 회피).")
     sp.add_argument("--interval", type=int, default=60,
@@ -692,8 +732,16 @@ def main(argv: Optional[list[str]] = None) -> int:
     if args.cmd == "batch-register":
         return cmd_batch_register(args.catalog, args.url, args.failed, args.rc, args.force)
     if args.cmd == "jobs":
+        ids_tuple: tuple[int, ...] = ()
+        if args.ids:
+            try:
+                ids_tuple = tuple(int(x) for x in args.ids.split(",") if x.strip())
+            except ValueError:
+                print(f"[remote] --ids 는 정수,콤마 list: {args.ids!r}", file=sys.stderr)
+                return 4
         return cmd_jobs(args.kind, args.since, args.min_id,
-                        wait=args.wait, interval=args.interval, max_wait=args.max_wait)
+                        wait=args.wait, interval=args.interval, max_wait=args.max_wait,
+                        max_id=args.max_id, ids=ids_tuple)
     if args.cmd == "unlearn":
         return cmd_unlearn(args.pattern_id)
     if args.cmd == "clear-bug":

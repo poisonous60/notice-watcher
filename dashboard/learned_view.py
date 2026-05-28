@@ -71,8 +71,6 @@ def _row_to_view(p: dict) -> dict[str, Any]:
     d["reason_short"] = (reason[:80] + "…") if len(reason) > 80 else reason
     url = d.get("last_url") or ""
     d["url_short"] = (url[:80] + "…") if len(url) > 80 else url
-    d["last_rejected_at_short"] = (d.get("last_rejected_at") or "")[:19]
-    d["first_rejected_at_short"] = (d.get("first_rejected_at") or "")[:19]
     return d
 
 

@@ -69,8 +69,8 @@
         <td class="mono" title="BROKEN 마커 갱신 횟수 (임계 재도달 누적)">{{ it.count }}</td>
         <td style="white-space:nowrap;">{{ it.last_status or '—' }}</td>
         <td>{{ it.subscriber_count }}</td>
-        <td style="white-space:nowrap;">{{ it.first_at or '—' }}</td>
-        <td style="white-space:nowrap;">{{ it.last_at or '—' }}</td>
+        <td style="white-space:nowrap;">{{ it.first_at|ts }}</td>
+        <td style="white-space:nowrap;">{{ it.last_at|ts }}</td>
         <td class="mono" style="max-width:22em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
           <span title="{{ it.url }}">{{ it.url or '—' }}</span>
         </td>

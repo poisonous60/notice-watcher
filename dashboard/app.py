@@ -59,6 +59,9 @@ def _is_http_url(value: object) -> bool:
 templates.env.filters["is_http"] = _is_http_url
 templates.env.globals["is_http_url"] = _is_http_url
 
+from dashboard import timeutil as _timeutil  # noqa: E402
+templates.env.filters["ts"] = _timeutil.render_ts
+
 # fail_taxonomy 카탈로그 → 템플릿 헬퍼 (filter dropdown / badge color 한 곳에서 derive).
 from bot.fail_taxonomy import (  # noqa: E402
     fail_filter_options as _fail_filter_options,
@@ -263,6 +266,9 @@ async def triage_page(request: Request, conn=Depends(get_conn)):
             report_ids=[r["id"] for r in db.list_reports(conn, status="open", limit=200)]
         ) if summary["open_reports"] > 0 else None,
         "hand_config_triage": prompts.hand_config_triage_queue(
+            failed_slugs=active_failed
+        ) if active_failed else None,
+        "hand_config_triage_claude": prompts.hand_config_triage_queue_claude(
             failed_slugs=active_failed
         ) if active_failed else None,
     }
@@ -1034,14 +1040,15 @@ async def users_announce_resolve_slugs(request: Request,
 # --------------------------------------------------------------------------- #
 # Timings — workflow trace gantt
 # --------------------------------------------------------------------------- #
-from datetime import datetime as _dt
+from datetime import datetime as _dt, timezone as _tz
 
 
 def _ts_str(t: float) -> str:
+    """epoch → UTC ISO. 템플릿이 `|ts` 로 KST 변환."""
     try:
-        return _dt.fromtimestamp(float(t)).strftime("%Y-%m-%d %H:%M:%S")
+        return _dt.fromtimestamp(float(t), tz=_tz.utc).isoformat(timespec="seconds")
     except (TypeError, ValueError, OSError):
-        return "—"
+        return ""
 
 
 def _attrs_short(attrs: dict) -> str:

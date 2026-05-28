@@ -94,10 +94,10 @@
       <td data-col="n_feedback">{{ r.n_feedback }}</td>
       <td data-col="n_reports_open">{% if r.n_reports_open > 0 %}<span class="badge warn">{{ r.n_reports_open }}</span>{% else %}0{% endif %}</td>
       <td data-col="n_reports_total">{{ r.n_reports_total }}</td>
-      <td data-col="first_seen" class="muted" style="font-size:0.8rem;">{{ (r.first_seen or '')[:19] }}</td>
-      <td data-col="last_active" class="muted" style="font-size:0.8rem;">{{ (r.last_active or '')[:19] }}</td>
+      <td data-col="first_seen" class="muted" style="font-size:0.8rem;">{{ r.first_seen|ts }}</td>
+      <td data-col="last_active" class="muted" style="font-size:0.8rem;">{{ r.last_active|ts }}</td>
       <td data-col="total_deliveries">{{ r.total_deliveries }}</td>
-      <td data-col="last_delivery_at" class="muted" style="font-size:0.8rem;">{{ (r.last_delivery_at or '')[:19] }}</td>
+      <td data-col="last_delivery_at" class="muted" style="font-size:0.8rem;">{{ r.last_delivery_at|ts }}</td>
     </tr>
     {% else %}
     <tr><td colspan="14" class="muted">결과 없음.</td></tr>

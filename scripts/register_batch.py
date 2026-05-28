@@ -277,6 +277,7 @@ def main(argv: list[str]) -> int:
         skipped = 0
         markers_cleared = 0
         considered = 0
+        enqueued_ids: list[int] = []
         for e in entries:
             if args.limit and considered >= args.limit:
                 break
@@ -322,6 +323,7 @@ def main(argv: list[str]) -> int:
             )
             if inserted:
                 enqueued += 1
+                enqueued_ids.append(int(job_id))
                 print(f"  [enq  ] #{job_id:<6} {name[:40]:<40} {url[:80]}")
             else:
                 skipped += 1
@@ -338,6 +340,15 @@ def main(argv: list[str]) -> int:
     print(f"\n[batch] catalogs=[{catalogs_label}] {urls_label} entries={len(entries)} "
           f"considered={considered} enqueued={enqueued} skipped={skipped} "
           f"markers_cleared={markers_cleared} mode={mode} dry_run={args.dry_run}")
+    # drain watcher pinning: 이 batch 의 job id 경계 명시. 동시 다른 batch 가 enqueue 해도
+    # `remote.py jobs --min-id X --max-id Y --wait` 로 *이* batch 만 추적 가능 (2026-05-28 박음).
+    if enqueued_ids:
+        ids_min = min(enqueued_ids)
+        ids_max = max(enqueued_ids)
+        # sparse 면 명시 list 도 같이 노출 (gap 있어도 `--ids` 로 정확 추적).
+        ids_csv = ",".join(str(i) for i in enqueued_ids)
+        print(f"[batch] enqueued_ids_min={ids_min} enqueued_ids_max={ids_max} count={len(enqueued_ids)}")
+        print(f"[batch] enqueued_ids={ids_csv}")
     return 0
 
 

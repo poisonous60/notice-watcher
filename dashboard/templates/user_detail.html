@@ -10,8 +10,8 @@
 </h2>
 <p class="muted" style="font-size:0.85rem;">
   sources: {{ user.sources | join(', ') or '—' }}  ·
-  first seen: <code>{{ (user.first_seen or '')[:19] }}</code>  ·
-  last active: <code>{{ (user.last_active or '')[:19] }}</code>  ·
+  first seen: <code>{{ user.first_seen|ts }}</code>  ·
+  last active: <code>{{ user.last_active|ts }}</code>  ·
   total deliveries: {{ user.total_deliveries }}
 </p>
 <button type="button" id="open-announce-user" class="primary" style="font-size:0.9rem;">📢 이 user 에게 공지</button>
@@ -31,7 +31,7 @@
         <span title="{{ s.url }}">{{ s.url }}</span>
       </td>
       <td class="muted" style="font-size:0.85rem;">{{ s.filter_prompt or '' }}</td>
-      <td class="muted" style="font-size:0.8rem;">{{ (s.created_at or '')[:19] }}</td>
+      <td class="muted" style="font-size:0.8rem;">{{ s.created_at|ts }}</td>
       <td class="action-cell">
         <button type="button" class="secondary outline"
                 hx-get="/users/{{ user.user_id }}/deliveries?slug={{ s.slug | urlencode }}"
@@ -87,7 +87,7 @@
       <td class="mono"><a href="/subs/{{ s.slug | urlencode }}">{{ s.slug }}</a></td>
       <td class="mono">{{ s.target_id }}</td>
       <td class="muted" style="font-size:0.85rem;">{{ s.filter_prompt or '' }}</td>
-      <td class="muted" style="font-size:0.8rem;">{{ (s.created_at or '')[:19] }}</td>
+      <td class="muted" style="font-size:0.8rem;">{{ s.created_at|ts }}</td>
       <td class="action-cell">
         <form data-confirm="이 slug 에 즉시 poll-now 실행? (M1: 사이트 새 글 검사 — 새 글 있으면 *모든* 구독자에게 발송됨)"
               hx-post="/users/{{ user.user_id }}/poll-now-slug"
@@ -123,7 +123,7 @@
 {% if user.feedback %}
 {% for f in user.feedback %}
 <article style="margin:0.3rem 0;padding:0.4rem 0.6rem;background:var(--pico-card-background-color,#f8f8f8);border-left:3px solid var(--pico-primary,#06c);">
-  <small class="muted">#{{ f.id }} · {{ (f.created_at or '')[:19] }} · {{ f.username or '<no name>' }}</small>
+  <small class="muted">#{{ f.id }} · {{ f.created_at|ts }} · {{ f.username or '<no name>' }}</small>
   <pre style="white-space:pre-wrap;margin:0.2rem 0;font-size:0.9rem;">{{ f.message }}</pre>
 </article>
 {% endfor %}
@@ -146,7 +146,7 @@
       </td>
       <td class="mono"><a href="/subs/{{ r.slug | urlencode }}">{{ r.slug }}</a></td>
       <td>{{ (r.issue or '')[:120] }}</td>
-      <td class="muted" style="font-size:0.8rem;">{{ (r.created_at or '')[:19] }}</td>
+      <td class="muted" style="font-size:0.8rem;">{{ r.created_at|ts }}</td>
     </tr>
     {% endfor %}
   </tbody>
@@ -168,7 +168,7 @@
       <td>{{ j.via or '' }}</td>
       <td class="mono">{{ j.slug }}</td>
       <td>{{ j.status }}</td>
-      <td class="muted" style="font-size:0.8rem;">{{ (j.created_at or '')[:19] }}</td>
+      <td class="muted" style="font-size:0.8rem;">{{ j.created_at|ts }}</td>
     </tr>
     {% endfor %}
   </tbody>
@@ -187,7 +187,7 @@
     <tr>
       <td class="mono">{{ d.slug }}</td>
       <td class="mono">{{ d.post_id }}</td>
-      <td class="muted" style="font-size:0.8rem;">{{ (d.sent_at or '')[:19] }}</td>
+      <td class="muted" style="font-size:0.8rem;">{{ d.sent_at|ts }}</td>
     </tr>
     {% endfor %}
   </tbody>

@@ -5,7 +5,7 @@
 <h1>🌐 {{ catalog_name }}</h1>
 <p class="muted">
   파일: <code>{{ catalog_path }}</code>
-  · snapshot: {{ snapshot_ts }}
+  · snapshot: {{ snapshot_ts|ts }}
   · 전체 entry: <strong>{{ total_all }}</strong>
 </p>
 
@@ -24,12 +24,23 @@
 {# ---------- Skill 프롬프트 — 새 세션에서 batch run + 진단·수정 자율 진행 ---------- #}
 <div class="prompt-card" style="margin:0.5rem 0">
   <div class="row" style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem">
-    <span class="label">⚡ batch 돌리고 결과 진단·수정 (Skill 프롬프트 — 새 세션용)</span>
+    <span class="label">⚡ batch 돌리고 결과 진단·수정 — codex 위임 모드 (새 세션용)</span>
     <button class="secondary" data-copy-target="#qp-cat-runfix">📋 복사</button>
   </div>
   <details>
     <summary>미리보기</summary>
     <pre id="qp-cat-runfix" style="white-space:pre-wrap;font-size:0.8rem">{{ run_and_fix_prompt }}</pre>
+  </details>
+</div>
+
+<div class="prompt-card" style="margin:0.5rem 0">
+  <div class="row" style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem">
+    <span class="label">🧠 batch 돌리고 결과 진단·수정 — claude 직접 모드 (codex quota 소진 시)</span>
+    <button class="secondary" data-copy-target="#qp-cat-runfix-claude">📋 복사</button>
+  </div>
+  <details>
+    <summary>미리보기 (codex 위임 X · Claude main thread 가 batch·진단·fix·배포 전부)</summary>
+    <pre id="qp-cat-runfix-claude" style="white-space:pre-wrap;font-size:0.8rem">{{ run_and_fix_prompt_claude }}</pre>
   </details>
 </div>
 
@@ -142,7 +153,7 @@
       <td>{{ r.name }}</td>
       <td title="{{ r.reason }}">{{ r.status_emoji }} <small>{{ r.status_label }}</small></td>
       <td><code>{{ r.subkind }}</code></td>
-      <td><small class="muted">{{ r.last_ts or '—' }}</small></td>
+      <td><small class="muted">{{ r.last_ts|ts }}</small></td>
       <td><small class="muted">{{ r.via or '—' }}</small></td>
       <td>
         {% if is_http_url(r.url) %}

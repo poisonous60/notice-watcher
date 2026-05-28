@@ -14,6 +14,46 @@ def run() -> list[tuple[str, bool, str]]:
 
     triage_prompt = prompts.hand_config_triage_queue(failed_slugs=["slug_a"])
     catalog_prompt = prompts.catalog_run_and_fix(catalog_name="sample", untried=3, failed=0, bug=0)
+    triage_claude = prompts.hand_config_triage_queue_claude(failed_slugs=["slug_a", "slug_b"])
+    catalog_claude = prompts.catalog_run_and_fix_claude(catalog_name="sample", untried=3, failed=0, bug=0)
+
+    # Claude 직접 모드: codex 위임 어휘 없어야 함
+    for name, text in (("triage_claude", triage_claude), ("catalog_claude", catalog_claude)):
+        cases.append((
+            f"{name}_no_codex_handoff",
+            "codex_handoff" not in text and "codex_watch" not in text,
+            text,
+        ))
+        cases.append((
+            f"{name}_no_codex_delegate_phrase",
+            "codex 위임 모드" not in text and "codex 보이는 창" not in text,
+            text,
+        ))
+        cases.append((
+            f"{name}_declares_claude_direct",
+            "claude 직접 모드" in text and "codex 위임 X" in text,
+            text,
+        ))
+        cases.append((
+            f"{name}_chunk_size_explicit",
+            "slug 1~3개" in text,
+            text,
+        ))
+        cases.append((
+            f"{name}_has_terminal_freeze",
+            "terminal action freeze" in text and "live 확인" in text,
+            text,
+        ))
+        cases.append((
+            f"{name}_has_terminal_state_obligation",
+            "registered" in text and "Later" in text and "gate-fail" in text and "REJECTED" in text,
+            text,
+        ))
+        cases.append((
+            f"{name}_mentions_subagent_optional",
+            "cavecrew-investigator" in text and "강제 X" in text,
+            text,
+        ))
 
     for name, text in (
         ("triage_queue", triage_prompt),

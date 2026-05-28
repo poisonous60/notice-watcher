@@ -115,7 +115,7 @@
       <td>{{ "[A] same-host" if e.kind == "same_host" else "[B] cross-host" }}</td>
       <td class="mono">{{ e.key }}</td>
       <td class="muted">{{ e.reason or "—" }}</td>
-      <td class="muted">{{ e.at }}</td>
+      <td class="muted">{{ e.at|ts('date') }}</td>
       <td>
         <form method="post" action="/clusters/dismiss" style="display:inline">
           <input type="hidden" name="action" value="remove">

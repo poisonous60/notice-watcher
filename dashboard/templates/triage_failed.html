@@ -46,7 +46,7 @@
           <a href="/subs/{{ it.slug | urlencode }}?from=triage">{{ it.slug }}</a>
           {% if it.url and is_http_url(it.url) %} <a href="{{ it.url }}" target="_blank" rel="noopener noreferrer" title="원본 URL 새 탭 열기">↗</a>{% endif %}
         </td>
-        <td style="white-space:nowrap;">{{ it.failed_at or '—' }}</td>
+        <td style="white-space:nowrap;">{{ it.failed_at|ts }}</td>
         {% if editable_memo %}
         <td class="memo-cell" style="max-width:22em;" onclick="nwMemoEdit(this)" title="클릭해 memo 편집">
           <span class="memo-text{{ '' if it.memo else ' is-empty' }}" title="{{ it.memo }}">{{ it.memo or '✎ memo…' }}</span>

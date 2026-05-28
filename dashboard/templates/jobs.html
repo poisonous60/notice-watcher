@@ -65,7 +65,7 @@
       <td class="mono" style="max-width:24em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
         <span title="{{ r.url or '' }}">{{ r.url or "" }}</span>
       </td>
-      <td style="white-space:nowrap;">{{ (r.finished_at or r.created_at or "")[:16] }}</td>
+      <td style="white-space:nowrap;">{{ (r.finished_at or r.created_at)|ts('short') }}</td>
     </tr>
     {% else %}
     <tr><td colspan="9" class="muted">검색 결과 없음.</td></tr>
@@ -96,7 +96,7 @@
   <tbody>
     {% for r in agentic_usage_rows %}
     <tr>
-      <td class="mono">{{ r.ts_kst }}</td>
+      <td class="mono">{{ r.ts_kst|ts }}</td>
       <td class="mono">
         {% if r.slug %}<a href="/subs/{{ r.slug | urlencode }}">{{ r.slug }}</a>{% else %}<span class="muted">—</span>{% endif %}
       </td>

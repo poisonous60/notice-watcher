@@ -34,7 +34,7 @@
   <tbody>
     {% for r in rows %}
     <tr id="bugs-row-{{ r.slug }}" class="cases-row">
-      <td class="mono nowrap"><time>{{ r.last_at_short }}</time></td>
+      <td class="mono nowrap">{{ r.last_at|ts }}</td>
       <td class="cases-slug-cell">
         <span class="cases-slug-text"><code>{{ r.slug }}</code></span>
         {% if r.url|is_http %}<a class="cases-slug-link" href="{{ r.url }}" target="_blank" rel="noopener noreferrer">↗</a>{% endif %}
@@ -42,8 +42,8 @@
           <div class="cases-pop-row"><b>slug</b> <code>{{ r.slug }}</code></div>
           <div class="cases-pop-row"><b>rc</b> {{ r.rc }}</div>
           <div class="cases-pop-row"><b>count</b> {{ r.count }}</div>
-          <div class="cases-pop-row"><b>first_at</b> <code>{{ r.first_at_short or '(없음)' }}</code></div>
-          <div class="cases-pop-row"><b>last_at</b> <code>{{ r.last_at_short or '(없음)' }}</code></div>
+          <div class="cases-pop-row"><b>first_at</b> {{ r.first_at|ts }}</div>
+          <div class="cases-pop-row"><b>last_at</b> {{ r.last_at|ts }}</div>
           {% if r.url %}
           <div class="cases-pop-row"><b>url</b>
             {% if r.url|is_http %}

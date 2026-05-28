@@ -15,7 +15,7 @@
 {% if broken %}
 <article class="failed-box">
   <strong>❗ BROKEN health sidecar (BROKEN.json) — polling 살아있음, hand-fix 큐 항목:</strong>
-  <p class="muted" style="margin:0.3rem 0;">cb={{ broken.consecutive_breakage }} · count={{ broken.count }} · last_status=<code>{{ broken.last_status or '—' }}</code> · last_at <code>{{ broken.last_at or '—' }}</code></p>
+  <p class="muted" style="margin:0.3rem 0;">cb={{ broken.consecutive_breakage }} · count={{ broken.count }} · last_status=<code>{{ broken.last_status or '—' }}</code> · last_at {{ broken.last_at|ts }}</p>
   <pre class="tail" style="font-size:0.82rem;white-space:pre-wrap;">{{ broken | tojson(indent=2) }}</pre>
   <a href="/triage/broken">→ BROKEN 큐</a>
 </article>
@@ -41,7 +41,7 @@
       <td class="mono">{{ s.target_kind }}/{{ s.target_id }}</td>
       <td>{{ s.filter_prompt or '—' }}</td>
       <td>{{ '✓' if s.notify_empty else '—' }}</td>
-      <td>{{ (s.created_at or '')[:10] }}</td>
+      <td>{{ s.created_at|ts('date') }}</td>
       <td class="mono" style="max-width:25em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
         <span title="{{ s.url or '' }}">{{ s.url or '' }}</span>
       </td>

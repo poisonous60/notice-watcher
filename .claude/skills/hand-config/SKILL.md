@@ -52,7 +52,7 @@ description: >-
 
 ### 0a-retry. batch retry 명령 매트릭스 (`--force` 함정 — 2026-05-27 박힘)
 
-`remote.py batch-register` 의 `--force` 는 **`--rc` filter 도 override** (catalog 전체 retry). `--rc 3,5 --force` 호출 시 의도 = "rc=3/5 만 retry" 인데 실제 = catalog 전체 100 enqueue (rc=0 done · rc=4 dead 도 다시 큐). 의도 아닌 항목 처리 + games/7 같은 사용자가 보존 명시한 슬롯도 덮어씀.
+`remote.py batch-register` 의 `--force` 는 **모든 scope filter (`--rc`/`--url`/`--failed`) override** (catalog 전체 retry + 마커 전체 clear). `--rc 3,5 --force` → catalog 전체 100 enqueue (rc=0 done · rc=4 dead 도 큐). `--url X --force` → catalog 전체 enqueue (URL 은 *추가*만, scope 아님). 의도 아닌 항목 처리 + 사용자가 보존 명시한 슬롯 덮어씀.
 
 | 의도 | 명령 | 비고 |
 |---|---|---|
@@ -61,9 +61,16 @@ description: >-
 | rc=1/-N (gen_fail) | `--catalog X --failed gen` | |
 | rc=5 (cap_blocked) | `--catalog X --failed blocked` | stealth/render 트랙 |
 | 특정 rc (예: rc=3) — 마커 reset 필요 | **N100 `.REJECTED.json` 손-clear 후** `--catalog X --rc 3` (force X) | force 와 rc 동시 사용 X — force 가 이김 |
-| 특정 URL list | `--url <u1> --url <u2> --force` | 명시 URL 만, 명확 |
+| 특정 URL 1~N 건 retry | **N100 마커 (FAILED/REJECTED/BUG) 손-clear 후** `--catalog X --url <u1> --url <u2>` (**force 없이**) | force 박으면 catalog 전체 폭발. `--url` 은 *추가* 만 하고 scope filter 아님 |
 
-**금지**: `--rc <list> --force` 동시 사용. force 가 rc filter 무시. cross-ref: [[feedback-batch-force-overrides-rc-filter]].
+**금지**: `--force` + 좁은 scope flag (`--rc`/`--url`/`--failed`) 동시 사용. force 는 *모든* scope filter 무시 → catalog 전체 re-enqueue + 마커 전체 clear. 2026-05-27 games-mods-hub (`--rc 3,5 --force` → rc=0 done 도 큐) + 2026-05-28 games-indie-news-05 (`--url X --force` → 95건 폭발, N100 jobs 강제 DELETE 로 수습) 박힘. cross-ref: [[feedback-batch-force-overrides-rc-filter]].
+
+**폭발 후 수습** (이미 큐 들어간 경우):
+```sh
+echo "DELETE FROM jobs WHERE status='pending' AND id BETWEEN <min> AND <max> AND id NOT IN (<keep_ids>);" \
+  | ssh $DEPLOY_HOST 'sqlite3 ~/notice-watcher/output/bot.sqlite3'
+# running 은 두기 — 곧 끝남. watcher 는 TaskStop 으로 멈춰.
+```
 
 ## 0b. preflight — 이미 고쳐졌나 / 옆 작업이 큐를 stale 화했나
 
@@ -154,19 +161,30 @@ gen_fail(rc=1) 큐로 *새는* false-negative 3종 (§0b-2 헤더의 P1·P2·P3)
 
 dashboard `/triage` 의 "FAILED 큐 codex 위임 처리" 프롬프트를 붙여넣어 들어온 경우 (또는 큐가 여러 건이라 Claude quota 절약이 필요할 때). ADR 0008 결정: *중간 orchestration* (probe 읽기·§1~§2 진단·fix 작성·probe_smoke) 은 **codex CLI 에 위임**, Claude 토큰 0. **진입·diff 검토·commit·배포는 Claude** (이 절차).
 
-### §0c-0 agentic-first / per-site codex 는 최후 수단 (2026-05-26 박힘)
+### §0c-0 agentic-first / per-site Track A 는 최후 수단 (2026-05-26 박힘, 2026-05-28 per-site Track B 분기 보강)
 
-**default `auto` 경로 = api_loop_once → codex agentic** 이므로 같은 batch 안에서 *여러 site 가 같은 fail 신호* 를 보이면 그 generic 해결은 **agentic 의 입력/프롬프트/휴리스틱** 자리에 박는다. per-site codex 위임으로 site 별 수동 config 6개 찍어내는 건 *cross-site 일반화 0인 잔여만의 최후 수단* — 패턴 보이는데 per-site 로 덮으면 다음 batch 에서 같은 패턴 다시 fail.
+**default `auto` 경로 = api_loop_once → codex agentic** 이므로 같은 batch 안에서 *여러 site 가 같은 fail 신호* 를 보이면 그 generic 해결은 **agentic 의 입력/프롬프트/휴리스틱** 자리에 박는다. per-site Track A (사이트별 수동 config 찍어내기) 는 *해당 site 의 Track B 6-layer 도 all miss 인 잔여만의 최후 수단* — 패턴 보이는데 per-site 로 덮으면 다음 batch 에서 같은 패턴 다시 fail.
+
+⚠ **"per-site codex" ≠ "Track A"**. 위임 작업이 *per-site* 라는 건 단지 chunk 단위가 site 별이라는 뜻이지 그 안에서 짤 결과물이 Track A 라는 뜻 X. **per-site 위임 안에서도 각 site 가 Track B 6-layer 부터 audit** — 특히:
+- **F-layer**: 그 site 의 platform recognizer 신설/확장 (XenForo Porta·Hugo article.news-card·Discourse 등 = 1-site 1-PR 이지만 같은 플랫폼의 다른 게시판 자동 처리 — handcrafted 이지만 Track B).
+- **C-layer**: 그 site 가 보여준 row/article 추출 휴리스틱 generalize (inline devlog·archive row penalty 등).
+- **A-layer**: classifier/system prompt 에 그 site 가 노출한 새 룰 1줄.
+- **F+A 동시**: post-LLM override + system 룰 paired.
+
+Track A (selector 한두 줄 단일 site config) 진입은 §2e: 6-layer all miss + ship evidence (4c).
 
 **fail 패턴이 보이면 위임 순서 (위에서부터)**:
 
-1. **agentic 입력/휴리스틱 개선** (C/B/A/F-layer 위임 1순위) — `prompts/config_writer.system.txt`·`probe/extract.py` heuristic·`failure_packet` builder·curated examples. 같은 batch 의 2+ sites 가 한 패턴(예: indie studio /news/ subpath, RSS feed 자동 detect, SPA shell row-count 분기) 이면 그 자리에 박아 *batch 재시도 시 agentic 이 자동 처리* 하게 만든다. 한 PR 에 박고 같은 batch 의 잔여 사이트 `register.py --reuse-probe` 로 회복 검증.
-2. **per-site codex (수동 config/recognizer)** — 위 1번이 진짜 일반화 불가능한 잔여만. 위임 시 **각 task 에 같은 batch 동료 sites 의 (URL, fail_reason) 목록 박기 의무** — codex 가 cross-site 패턴 발견 시 §0c-회피 게이트 2 (일반화 신호 punt) 발동해서 *case body 일반화 후보 섹션* 채우게 함. 동료 목록 없이 isolated brief 만 주면 codex 는 무조건 "이 사이트 전용" punt 함 (2026-05-26 games-indie batch 박힘).
+1. **cross-site agentic 자리 박기** (C/B/A/F-layer 위임 1순위) — `prompts/config_writer.system.txt`·`probe/extract.py` heuristic·`failure_packet` builder·curated examples. 같은 batch 의 2+ sites 가 한 패턴(예: indie studio /news/ subpath, RSS feed 자동 detect, SPA shell row-count 분기) 이면 그 자리에 박아 *batch 재시도 시 agentic 이 자동 처리* 하게 만든다. 한 PR 에 박고 같은 batch 의 잔여 사이트 `register.py --reuse-probe` 로 회복 검증.
+2. **per-site Track B** (각 site idiosyncratic 패턴이지만 그 site 만의 일반화 후보 있음) — site 마다 F-layer recognizer 신설/확장, C-layer 휴리스틱, A-layer 룰, 새 strategy. 1번 cross-site 한 PR 으로 못 묶지만 *각 site 가 자기 Track B 자리를 보임*. 위임 시 동료 brief 박아도 cross-site shortcut 은 없으므로 codex 가 site 별 Track B 6-layer audit 하고 가장 위 자리에 박는다.
+3. **per-site Track A (수동 config)** — 1, 2 둘 다 miss 인 잔여 + ship evidence. 위임 시 **각 task 에 같은 batch 동료 sites 의 (URL, fail_reason) 목록 박기 의무** — codex 가 cross-site 패턴 발견 시 §0c-회피 게이트 2 (일반화 신호 punt) 발동해서 *case body 일반화 후보 섹션* 채우게 함. 동료 목록 없이 isolated brief 만 주면 codex 는 무조건 "이 사이트 전용" punt 함 (2026-05-26 games-indie batch 박힘).
 
-**판정 rubric** — codex 위임 전 1분 점검:
-- "같은 fail_reason / 같은 신호 / 같은 fix layer 가 batch 내 2+ sites 에 보이나?" YES → §0c-0 1번 (agentic 자리 박기).
-- "각 site 가 진짜 idiosyncratic (다른 패턴) 인가?" YES → §0c-0 2번 (per-site codex, 단 동료 brief 포함).
-- 모호 → 1번 한 PR 박아보고 회복률 본 다음 잔여만 2번.
+**판정 rubric** — codex 위임 전 1분 점검 (3분기, 이전 2분기 X — 2026-05-28 박힘):
+- "같은 fail_reason / 같은 신호 / 같은 fix layer 가 batch 내 2+ sites 에 보이나?" YES → §0c-0 1번 (cross-site agentic 자리 박기).
+- "각 site 가 idiosyncratic (다른 패턴) 인가?" YES → **§0c-0 2번 (per-site Track B 먼저 — F-layer recognizer · C-layer 휴리스틱 · A-layer 룰 audit). Track A 직행 X**. 각 site 가 자기 6-layer all-miss 임을 case body 에 명시한 후에야 §0c-0 3번 (per-site Track A) 으로 내려간다.
+- 모호 → 1번 한 PR 박아보고 회복률 본 다음 잔여만 2번/3번.
+
+⚠ **"3 sites 다른 shape (XenForo plugin · inline devlog · Hugo article.news-card) → 바로 per-site Track A 위임" = 잘못된 reading** (2026-05-28 박힘). 각 shape 가 그 site 의 F-layer recognizer 후보 또는 C-layer 휴리스틱 후보. Track B audit 먼저 → all miss 확인 → 그 site 만 Track A.
 
 **역할 분담 — entry=Claude / middle=codex / exit=Claude**:
 - Claude: 큐 pull → 청크 분할 → codex 위임(보이는 창) → **각 청크 diff 검토** → 공유 인덱스·commit·push·N100 배포.
@@ -174,11 +192,16 @@ dashboard `/triage` 의 "FAILED 큐 codex 위임 처리" 프롬프트를 붙여�
 
 **병렬이 기본** (2026-05-21-fedi 검증, ADR 0008 §병렬 위임). 여러 codex 세션을 동시에 띄워 throughput 을 올린다. **기본 안전장치 = `--worktree` 격리** — 각 codex 가 분리 worktree+branch 에서 필요한 repo 파일을 자유롭게 수정하고, Claude 가 나중에 diff review + merge 로 수습한다. 파일 목록을 사전에 좁히면 Track B 후보를 봉쇄하므로 금지.
 
-**drain 모니터링** (batch enqueue 후 worker 큐 비기 기다릴 때): `python scripts/remote.py jobs --since <분> --min-id <batch 시작 id>` — `bot.sqlite3` jobs 상태 카운트 (status × n 표, total 포함). ⚠ **ad-hoc `ssh ... 'sqlite3 ... "SELECT ... WHERE kind=\"register\""'` 형태로 직접 쓰지 X** — SSH/PowerShell/Bash/SQL 4중 인용이 꼬여 SQL 이 `"register"` 를 *identifier(컬럼명)* 로 해석 → `Error: in prepare, no such column: "register"`. SQL 표준: `"..."`=식별자, `'...'`=문자열. helper 가 SQL/shell 인용을 다 박음.
+**drain 모니터링** (batch enqueue 후 worker 큐 비기 기다릴 때): `python scripts/remote.py jobs --since <분> --min-id <batch 시작 id> --max-id <batch 끝 id>` — `bot.sqlite3` jobs 상태 카운트 (status × n 표, total 포함). ⚠ **`--max-id` 또는 `--ids` 필수** (2026-05-28 박힘) — drain 중 다른 batch 가 enqueue 되면 그 새 id 가 `created_at` window + `id>=min_id` 둘 다 통과해 **흡수** → `pending+running` 영영 0 도달 X → 무한 polling (또는 `--max-wait` timeout fail). `register_batch.py` summary 가 `enqueued_ids_min=X enqueued_ids_max=Y count=N` + `enqueued_ids=<csv>` 박음 (2026-05-28 박힘) — 그 max 를 `--max-id` 에 그대로 박는다. sparse batch (filter 로 일부만 enqueue) 면 `--ids <csv>` 로 정확 pin (since/min/max 무시). ⚠ **ad-hoc `ssh ... 'sqlite3 ... "SELECT ... WHERE kind=\"register\""'` 형태로 직접 쓰지 X** — SSH/PowerShell/Bash/SQL 4중 인용이 꼬여 SQL 이 `"register"` 를 *identifier(컬럼명)* 로 해석 → `Error: in prepare, no such column: "register"`. SQL 표준: `"..."`=식별자, `'...'`=문자열. helper 가 SQL/shell 인용을 다 박음.
 
 Monitor (background polling) — **`remote.py jobs --wait` 내장 사용**:
 ```bash
-python scripts/remote.py jobs --since <분> --min-id <batch 시작 id> --wait --interval 60 --max-wait 3600
+# 일반 (이 batch 의 id 범위 pin)
+python scripts/remote.py jobs --since <분> --min-id <batch 시작 id> --max-id <batch 끝 id> --wait --interval 60 --max-wait 3600
+
+# sparse batch (filter 로 일부만 enqueue) 면 명시 id set
+python scripts/remote.py jobs --ids <csv 그대로 register_batch.py summary 에서 복사> --wait --interval 60 --max-wait 3600
+
 # pending+running=0 검출 시 exit 0 + 'DRAIN COMPLETE' 출력. max-wait 초과 시 exit 2.
 # harness 백그라운드(run_in_background=true)로 띄우면 완료 시 알림 옴.
 ```
@@ -228,6 +251,56 @@ Claude 직접 처리 예외 — *AND 조건 전부 만족* 일 때만:
 - 같은 청크 안에서 failure_keys 또는 fix surface 가 겹치는 slug 쌍 검색 — 일반화 후보 섹션 있는지 확인.
 - `no_change` case .md 의 audit: 6-layer (E/D/C/B/A/F) miss 이유 각각 1줄 적혔는지, park bucket 분기 (4d) 명시 됐는지, ship evidence 가 *있다면* §2e 진입 흔적 있는지. 없으면 `no_change` 정당화 불충분 (위 5번).
 - 위반 잡으면 발견 사실을 다음 chunk 의 task 입력 머리에 명시 (codex 가 두 번째에도 같은 punt 안 하게).
+
+---
+
+## 0d. claude 직접 모드 (codex 위임 X — codex quota 소진 또는 사용자 명시 시)
+
+dashboard `/` 의 "🧠 FAILED 큐 일괄 처리 — claude 직접 모드" 버튼 또는 `/candidates/<name>` 의 "🧠 batch 돌리고 결과 진단·수정 — claude 직접 모드" 버튼으로 들어온 경우. 또는 사용자가 "codex 말고", "claude 가 직접", "claude 모드", "이전처럼 claude 가 혼자" 등 명시. **Claude main thread 가 진입·진단·fix·검증·commit·배포 전부 한다** — codex_handoff / codex_watch / worktree codex 사용 X. §0c 와 평행 모드.
+
+### §0c 와 차이 (한 표)
+
+| 항목 | §0c codex 위임 | §0d claude 직접 |
+|---|---|---|
+| middle orchestration (진단/fix/probe_smoke) | codex 보이는 창 | Claude main thread |
+| 청크 분할 | 분석 응집 단위 (codex_batch.py plan 단서) | **slug 1~3개씩** (context 폭발 회피) |
+| 격리 | `codex_handoff.py --worktree` (격리 기본) | main working tree 직접. 동시 세션 있으면 `scripts/session_start.sh <tag>` worktree (CLAUDE.md §9.0) |
+| 완료 감지 | `codex_watch.py --loop` (백그라운드) | TodoWrite + chunk 끝마다 사용자 결과 보고 + 진행 의향 확인 |
+| diff review | `git diff main...codex-wt/<branch>` (three-dot) | 본인 작업이므로 self-audit (§0c-회피 게이트 4종 동일 적용) |
+| quota | codex 우위 | Claude 우위 |
+| 선택 기준 | codex quota 여유, 대량 청크 | codex quota 소진, 사용자 명시, 청크 작음(≤10), context 여유 |
+
+### 절차 (§0c step 1~7 의 codex 요소 제거판)
+
+1. `python scripts/triage.py pull --skip-later` — N100 → 로컬 (FAILED + probe).
+2. **청크 = slug 1~3개** — 같은 host/플랫폼/cohort 묶음 우선. 각 청크 끝나면 *반드시 사용자에게 결과 보고 + 다음 chunk 진행 의향 확인*. context 폭발 회피 + 사용자 도중 redirect 가능. TodoWrite 로 청크별 진행 추적.
+3. **§0b preflight + §0b-1 terminal action freeze + §0b-2 gen_fail screen-out** 그대로 적용. §0c 와 동일.
+4. **각 slug §2 분기 *전* 강제 인용 의무** (0 live / 1 last_feedback / 2 verdict / 3 근거 / 4a Track B 6-layer / 4b Track A 결정 / 4c context ship evidence / 4d park 분기 / 5 cases_index / 6 preflight). §0c 와 동일 게이트.
+5. **Track B 1순위** — canonical 6 자리 E/D/C/B/A/F audit. hit 면 그 자리 박음. **cross-site 패턴** (청크 안 2+ slug 같은 fail 신호) 보이면 per-site config 찍기 전에 *Track B 일반화 자리(C/B/A/F)* 박는다 — §0c-0 agentic-first 의 claude 직접 모드 mirror.
+6. **Track A optional** — Track B all miss + ship evidence (4b context 분기, §2 4c) 있을 때만. batch operator 흐름은 ship default=false.
+7. **(선택) subagent 활용 = context 절약 옵션** (강제 X — main thread 직접도 동등):
+   - 코드 위치 찾기 / map = `Agent(subagent_type='cavecrew-investigator')` — caveman 압축 출력, main context ~60% 절약. `where is X defined`, `what calls Y`, `list all uses of Z`, `map this directory` 류.
+   - 1-2 파일 surgical edit = `Agent(subagent_type='cavecrew-builder')` — typo fix, single-function rewrite, mechanical rename. 3+ 파일 / 새 feature / cross-file refactor 거부.
+   - 직전 diff self-review = `Agent(subagent_type='cavecrew-reviewer')` — pre-commit audit.
+   - **언제 subagent vs main thread**: context 여유 있으면 main 직접이 빠름 (subagent spawn 비용). context 압박 (긴 청크·여러 chunk 연쇄) 또는 read-only exploration 큰 경우 subagent 가 절약. quota 도 일종의 context — claude quota 여유 적으면 subagent (압축 출력).
+8. **§0c-회피 게이트 4종 self-audit** (codex review 용이지만 Claude 직접 모드도 동등 적용):
+   - probe artifact 없음 defer 위반: tar pull 시도 없이 `no_change` defer X.
+   - **일반화 신호 punt**: 청크 안 2+ slug 같은 패턴인데 case body 일반화 후보 섹션 비었거나 "사이트별 매핑이라 일반화 X" 1줄. claude 직접 모드는 본인이 청크 전체 보므로 *오히려 punt 안 할 책임 더 큼*.
+   - 처방-우선 task 추종: prompt 처방 그대로 실행 X — probe artifact·catalog 비교·Track B 6-layer audit 로 자기 판정.
+   - `no_change` 정당화 불충분: 6-layer miss 이유 각각 1줄 + park bucket 분기 4d 명시.
+9. `python scripts/probe_smoke.py --stage 3 --stage 5` PASS → `python scripts/cases_index.py --backfill-db output/cases.sqlite3` → **검토 통과 파일만 명시 stage** (`git add -A` 금지, CLAUDE.md §9b — 동시 세션 가능성 항상 있음) → `git commit` → `git push origin main` (pre-push hook = probe_smoke gate) → `ssh $DEPLOY_HOST 'bash ~/notice-watcher/scripts/n100_deploy.sh'` → `python scripts/case_log.py log` (commit 후) → `python scripts/triage.py prune-orphans --execute` (recognizer 추가 시).
+10. **모든 fail 의 종료 상태 박기 의무** (§0c step 6b 와 동일) — 보고 전 각 미등록 slug 가 `registered`/`Later`/`gate-fail park`/`REJECTED` 4종 중 하나. `.FAILED.json` 잔존 금지. dev box `triage_later.json` 만 박는 건 X (N100 봇 영향 0). 보고 시 종료 분포 명시.
+
+### 진입 trigger
+
+- dashboard `/` 의 "🧠 FAILED 큐 일괄 처리 — claude 직접 모드" 버튼 (`hand_config_triage_queue_claude` 프롬프트).
+- dashboard `/candidates/<name>` 의 "🧠 batch 돌리고 결과 진단·수정 — claude 직접 모드" 버튼 (`catalog_run_and_fix_claude` 프롬프트).
+- 사용자가 "codex 말고", "claude 직접", "claude 모드", "이전처럼 claude 가 혼자 처리" 등 명시.
+- codex quota 소진 / codex 다운 / `codex_handoff.py` rc≠0 반복.
+
+### default 는 여전히 §0c codex 위임
+
+§0c codex 위임이 default (quota 효율 + 청크 병렬). §0d claude 직접은 *codex quota < claude quota* 인 시점 또는 사용자 명시 시 active. 사용자 quota 분포는 변동 — 시점별 선택.
 
 ---
 

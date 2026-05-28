@@ -13,9 +13,9 @@
     {% else %}<span style="color:#dc322f;">💀 {{ run.status }} ({{ run.reap_reason or '' }})</span>
     {% endif %}
   </dd>
-  <dt>started_at</dt><dd>{{ run.started_at }}</dd>
-  <dt>ended_at</dt><dd>{{ run.ended_at or '—' }}</dd>
-  {% if run.reaped_at %}<dt>reaped_at</dt><dd>{{ run.reaped_at }} ({{ run.reap_reason }})</dd>{% endif %}
+  <dt>started_at</dt><dd>{{ run.started_at|ts }}</dd>
+  <dt>ended_at</dt><dd>{{ run.ended_at|ts }}</dd>
+  {% if run.reaped_at %}<dt>reaped_at</dt><dd>{{ run.reaped_at|ts }} ({{ run.reap_reason }})</dd>{% endif %}
   <dt>duration</dt><dd>{% if run.duration_ms %}{{ (run.duration_ms/1000) | round(1) }}s{% else %}—{% endif %}</dd>
   <dt>pid · host</dt><dd>{{ run.pid }} · {{ run.host }}</dd>
   <dt>HH:MM · day</dt><dd>{{ run.now_hhmm or '—' }} · {{ run.today_kst or '—' }}</dd>

@@ -99,7 +99,7 @@
 
 <dl class="kv" style="margin:0.8rem 0">
   <dt>slug</dt><dd><code>{{ detail.slug }}</code></dd>
-  <dt>HAR</dt><dd><code>{{ detail.har_name }}</code> <span class="muted">({{ detail.har_mtime }})</span></dd>
+  <dt>HAR</dt><dd><code>{{ detail.har_name }}</code> <span class="muted">({{ detail.har_mtime|ts }})</span></dd>
   <dt>probe URL</dt><dd>{% if detail.base_url|is_http %}<a href="{{ detail.base_url }}" target="_blank" rel="noopener">{{ detail.base_url }}</a>{% else %}{{ detail.base_url or '—' }}{% endif %}</dd>
   <dt>first article</dt><dd>{% if detail.first_article_url|is_http %}<a href="{{ detail.first_article_url }}" target="_blank" rel="noopener">{{ detail.first_article_url }}</a>{% else %}{{ detail.first_article_url or '—' }}{% endif %}</dd>
   <dt>verdict</dt><dd>{{ detail.diagnosis_verdict or '—' }}</dd>

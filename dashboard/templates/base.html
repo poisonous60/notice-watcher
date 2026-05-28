@@ -65,7 +65,7 @@
           {% if active == 'builder' %}
           <span class="muted" title="picker 페이지는 N100 snapshot 미사용 — 외부 사이트 직접 fetch">snapshot 미사용 (picker)</span>
           {% else %}
-          <span class="muted">snapshot:</span> <code>{{ snapshot_ts }}</code>
+          <span class="muted">snapshot:</span> <code>{{ snapshot_ts|ts }}</code>
           {% if pull_result %}
             {% if pull_result.ok %}
               {% set n_pulled = (pull_result.pulled or [])|length %}
@@ -95,5 +95,68 @@
   <div id="toast" class="toast" hidden></div>
 
   <script src="{{ request.url_for('static', path='app.js') }}"></script>
+  <script>
+  // nw.timeFormat: full(서버) | short | date | time | relative | iso-utc.
+  // 서버는 <time class="nw-ts" datetime="ISO" data-kind="full|short|date|time">label</time> 로 emit.
+  // 사용자 pref 가 full 이면 서버 label 그대로 둠, 그 외는 datetime 파싱해서 재포맷.
+  (function () {
+    var KEY = 'nw.timeFormat';
+    function pref() { try { return localStorage.getItem(KEY) || 'full'; } catch (e) { return 'full'; } }
+    function pad(n) { return n < 10 ? '0' + n : '' + n; }
+    function asKST(d) { return new Date(d.getTime() + 9 * 3600 * 1000); }
+    function fmtKind(d, kind) {
+      var k = asKST(d);
+      var y = k.getUTCFullYear(), mo = pad(k.getUTCMonth()+1), da = pad(k.getUTCDate());
+      var h = pad(k.getUTCHours()), mi = pad(k.getUTCMinutes()), s = pad(k.getUTCSeconds());
+      if (kind === 'short') return mo + '-' + da + ' ' + h + ':' + mi;
+      if (kind === 'date')  return y + '-' + mo + '-' + da;
+      if (kind === 'time')  return h + ':' + mi + ':' + s;
+      return y + '-' + mo + '-' + da + ' ' + h + ':' + mi + ':' + s;
+    }
+    function fmtRel(d) {
+      var diff = (Date.now() - d.getTime()) / 1000;
+      var abs = Math.abs(diff), suf = diff >= 0 ? '전' : '후';
+      if (abs < 60)         return Math.floor(abs) + '초 ' + suf;
+      if (abs < 3600)       return Math.floor(abs / 60) + '분 ' + suf;
+      if (abs < 86400)      return Math.floor(abs / 3600) + '시간 ' + suf;
+      if (abs < 86400*30)   return Math.floor(abs / 86400) + '일 ' + suf;
+      if (abs < 86400*365)  return Math.floor(abs / 86400 / 30) + '개월 ' + suf;
+      return Math.floor(abs / 86400 / 365) + '년 ' + suf;
+    }
+    function fmtIsoUtc(d) { return d.toISOString().replace(/\.\d+Z$/, 'Z'); }
+    function applyOne(el, mode) {
+      var iso = el.getAttribute('datetime');
+      var d = new Date(iso);
+      if (isNaN(d.getTime())) return;
+      if (!el.hasAttribute('title')) el.setAttribute('title', iso);
+      var kind = el.getAttribute('data-kind') || 'full';
+      var txt;
+      if (mode === 'relative')     txt = fmtRel(d);
+      else if (mode === 'iso-utc') txt = fmtIsoUtc(d);
+      else if (mode === 'full')    txt = fmtKind(d, kind);
+      else                         txt = fmtKind(d, mode);
+      el.textContent = txt;
+    }
+    function reformat(root) {
+      var mode = pref();
+      var scope = root || document;
+      // htmx outerHTML swap 시 root 자체가 <time.nw-ts> 일 수 있음 — querySelectorAll 은 descendants 만.
+      if (scope.matches && scope.matches('time.nw-ts[datetime]')) {
+        applyOne(scope, mode);
+      }
+      var nodes = scope.querySelectorAll ? scope.querySelectorAll('time.nw-ts[datetime]') : [];
+      nodes.forEach(function (el) { applyOne(el, mode); });
+    }
+    window.nwReformatTimes = reformat;
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', function () { reformat(); });
+    } else {
+      reformat();
+    }
+    document.addEventListener('htmx:afterSwap', function (ev) { reformat(ev.target); });
+    // 상대시간 = 현재시각 기준이라 1분마다 갱신.
+    setInterval(function () { if (pref() === 'relative') reformat(); }, 60000);
+  })();
+  </script>
 </body>
 </html>

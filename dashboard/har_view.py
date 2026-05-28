@@ -129,9 +129,10 @@ def list_probe_runs(*, probe_root: Path = PROBE_DIR, q: str = "", limit: int = 3
 
 
 def _mtime_str(path: Path) -> str:
-    from datetime import datetime
+    """mtime → UTC ISO. 템플릿이 `|ts` 로 KST 변환."""
+    from datetime import datetime, timezone
 
-    return datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+    return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).isoformat(timespec="seconds")
 
 
 def har_choices(slug: str, *, probe_root: Path = PROBE_DIR) -> list[str]:
