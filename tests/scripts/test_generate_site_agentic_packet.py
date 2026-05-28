@@ -20,8 +20,8 @@ def run() -> list[tuple[str, bool, str]]:
         "probe_url": "https://example.com/news/",
         "har_mtime": "2026-05-28T00:00:00+09:00",
         "verdict": "정적 HTTP로 충분",
-        "probe_host": "example.com / path hidden",
-        "article_host": "example.com / path hidden",
+        "probe_host": "https://example.com/news/",
+        "article_host": "https://example.com/news/1",
         "config_strategy": "httpx_html",
         "summary": {
             "entry_count": 12,
@@ -117,6 +117,7 @@ def run() -> list[tuple[str, bool, str]]:
         and "candidate.json" in html
         and "open raw packet" in html
         and "probe-agent-panel-0" in html
+        and "har-signal-list" in html
         and "Published config summary" in html,
         html[:500],
     ))

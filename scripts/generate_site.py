@@ -1030,15 +1030,8 @@ def _short_text(value: object, limit: int = 60) -> str:
     return s if len(s) <= limit else s[: limit - 1] + "…"
 
 
-_URL_RE = re.compile(r"https?://\S+")
-_HOST_SLUG_RE = re.compile(r"\bhost_[a-z0-9_]+_[0-9a-f]{8}\b")
-
-
 def _redact_public_text(value: object) -> str:
-    s = "" if value is None else str(value)
-    if _URL_RE.search(s):
-        s = _URL_RE.sub(lambda m: _host_mask(m.group(0)) or "host masked", s)
-    return _HOST_SLUG_RE.sub("host masked", s)
+    return "" if value is None else str(value)
 
 
 def svg_har_funnel() -> str:
@@ -1181,82 +1174,37 @@ _AGENTIC_PACKET_FLOW = [
     ("04", "Agent loop", "Codex reads only the staged packet, writes ./candidate.json, and runs ./run_validator.* inside the workdir."),
     ("05", "Parent publish", "The parent parses last.json, re-reads candidate.json, validates again, audits repo writes, then publishes configs/<slug>.json."),
 ]
-# Redaction keys — applied recursively when serialising raw JSON sample blobs.
-# Codex review of v4 §5 flagged Figure 1 parity as insufficient: internal API
-# endpoints, evidence URLs, and selectors are a new exposure surface, so we
-# replace any key whose name matches one of these with "[redacted]".
-_REDACT_KEYS = {
-    "url", "slug", "recommended_headers", "static_ok_request_headers",
-    "captured_headers", "sample_url", "evidence_url", "url_template",
-    "next_url", "request_url", "response_url", "selector", "css_selector",
-    "xpath", "request_headers", "response_headers", "headers", "cookies",
-    "set_cookie", "set-cookie", "cookie", "request_body", "request_body_text",
-    "body_text", "body", "sample", "snippet", "html", "list_html.html",
-    "article_sample.html", "source", "primary_feed_url", "first_article_url",
-    "href_pattern_guess", "row_data_attrs", "inline_js_data_candidates",
-    "clicked_resolved_url", "clicked_note", "body_path", "accept_lang",
-    "user_agent", "authorization", "auth_token", "session", "prompt",
-}
-
-
 def _host_mask(value: object) -> str:
-    """ADR 0010 §17 + codex review v4 §5 — emit host only, hide path/query.
-
-    Returns "" for non-URL input. For URLs, returns the registered host plus
-    a literal `/ path hidden` marker when the original had a path.
-    """
+    """Return a compact URL/path label for the public probe walkthrough."""
     if value is None:
         return ""
     s = str(value).strip()
     if not s:
         return ""
-    host = hostname_from_url(s)
-    if not host:
-        # not a URL — fall back to short text without revealing original
-        return _short_text(s, 60)
-    host = host.lower()
-    try:
-        parsed = urlparse(s)
-        has_path = bool(parsed.path and parsed.path not in ("", "/"))
-    except ValueError:
-        has_path = False
-    return f"{host}{ ' / path hidden' if has_path else '' }"
+    return _short_text(s, 180)
 
 
 def _redact_json(obj, depth: int = 0):
-    """Recursively redact private fields before raw-JSON dumping.
-
-    Keys in `_REDACT_KEYS` (case-insensitive) become `"[redacted]"`. Strings
-    that look like URLs are host-masked. Depth cap of 8 prevents runaway
-    recursion on cyclic-looking probe artifacts.
-    """
+    """Clip raw JSON samples for page weight while keeping probe values visible."""
     if depth > 8:
         return "[truncated]"
     if isinstance(obj, dict):
         out = {}
         for k, v in obj.items():
-            kl = str(k).lower()
-            if kl in _REDACT_KEYS or any(kl.endswith("_" + t) for t in _REDACT_KEYS):
-                out[k] = "[redacted]"
-            else:
-                out[k] = _redact_json(v, depth + 1)
+            out[k] = _redact_json(v, depth + 1)
         return out
     if isinstance(obj, list):
         return [_redact_json(x, depth + 1) for x in obj[:50]]
     if isinstance(obj, str):
-        s = obj
-        if _URL_RE.search(s):
-            s = _URL_RE.sub(lambda m: _host_mask(m.group(0)) or "host masked", s)
-        return s if len(s) <= 220 else s[:219] + "…"
+        return obj if len(obj) <= 700 else obj[:699] + "…"
     return obj
 
 
 def _agentic_public_json(obj, depth: int = 0):
     """Public preview for the agentic packet.
 
-    Unlike Figure 4's HAR raw dump, this keeps URLs/selectors visible because
-    the point is to show what the model actually reasons over. Values are not
-    redacted here; large strings are clipped for page weight.
+    Keep URLs/selectors visible because the point is to show what the model
+    actually reasons over. Large strings are clipped for page weight.
     """
     if depth > 8:
         return "[truncated]"
@@ -1544,7 +1492,7 @@ def _row_body(c: dict) -> dict:
             f"key={c.get('body_key') or '-'} · "
             f"path={_short_text(c.get('body_field_path'), 40)}"
         ),
-        "evidence": "[sample redacted — see dashboard /probe-har for raw]",
+        "evidence": "Article sample/body details are available in the raw view.",
     }
 
 
@@ -1564,7 +1512,8 @@ def _row_simple(c: dict, keys: list[str], signal_type: str, badge: str) -> dict:
             for k in keys
             if c.get(k) not in (None, "")
         ),
-        "evidence": "[evidence URL host-masked]" if (c.get("evidence_url") or c.get("evidence")) else "",
+        "evidence": _short_text(c.get("evidence_url") or c.get("evidence"), 180)
+                    if (c.get("evidence_url") or c.get("evidence")) else "",
     }
 
 
@@ -1644,10 +1593,9 @@ def _digest_signal_rows(*, slug: str, base_url: str, run_dir: Path) -> tuple[lis
 
 def build_har_detail(slug: str, har_path: Path) -> dict:
     """Mirror dashboard `har_view.build_har_detail` for one probe run with
-    public-site privacy filters applied (host-masked URLs, redacted raw
-    JSON, capped row counts). The `digest` artifact section is deferred
-    here because it requires `engine.digest.build_digest` which we keep
-    out of the static generator dependency surface."""
+    capped raw row counts. The `digest` artifact section is deferred here
+    because it requires `engine.digest.build_digest` which we keep out of the
+    static generator dependency surface."""
     run_dir = har_path.parent
     diagnosis = load_json(run_dir / "diagnosis.json")
     list_candidates = load_json(run_dir / "list_candidates.json")
@@ -1768,8 +1716,7 @@ def build_har_detail(slug: str, har_path: Path) -> dict:
                 "key": key,
                 "kind": type(value).__name__ if value is not None else "null",
                 "count": (str(len(value)) if isinstance(value, (list, dict, str)) else ""),
-                "preview": "[redacted]" if isinstance(value, (dict, list, str)) and str(key).lower() in _REDACT_KEYS
-                           else _short_text(json.dumps(_redact_json(value), ensure_ascii=False), 180),
+                "preview": _short_text(json.dumps(_redact_json(value), ensure_ascii=False), 180),
             })
 
     parsed_base = urlparse(base_url) if base_url else None
@@ -2212,18 +2159,18 @@ def _render_har_detail_panel(panel: dict, *, hidden: bool) -> str:
     else:
         site_dd = f'<code>{esc(site_display)}</code>'
     meta_dl = (
-        '<dl class="har-meta">'
-        f"<dt>site</dt><dd>{site_dd}</dd>"
-        f"<dt>HAR mtime</dt><dd><code>{esc(detail['har_mtime'] or '—')}</code></dd>"
-        f"<dt>verdict</dt><dd>{esc(detail['verdict'] or '—')}</dd>"
-        f"<dt>config strategy</dt><dd><code>{esc(detail['config_strategy'] or '—')}</code></dd>"
-        "</dl>"
+        '<div class="har-meta-grid">'
+        f'<div class="har-meta-item"><span>site</span><strong>{site_dd}</strong></div>'
+        f'<div class="har-meta-item"><span>HAR mtime</span><strong><code>{esc(detail["har_mtime"] or "—")}</code></strong></div>'
+        f'<div class="har-meta-item"><span>verdict</span><strong>{esc(detail["verdict"] or "—")}</strong></div>'
+        f'<div class="har-meta-item"><span>config strategy</span><strong><code>{esc(detail["config_strategy"] or "—")}</code></strong></div>'
+        "</div>"
         '<details class="har-meta-extra">'
         '<summary>more</summary>'
-        '<dl class="har-meta">'
-        f"<dt>probe host</dt><dd><code>{esc(detail['probe_host'] or '—')}</code></dd>"
-        f"<dt>first article host</dt><dd><code>{esc(detail['article_host'] or '—')}</code></dd>"
-        "</dl></details>"
+        '<div class="har-meta-grid compact">'
+        f'<div class="har-meta-item"><span>probe host</span><strong><code>{esc(detail["probe_host"] or "—")}</code></strong></div>'
+        f'<div class="har-meta-item"><span>first article host</span><strong><code>{esc(detail["article_host"] or "—")}</code></strong></div>'
+        "</div></details>"
     )
 
     cts = s.get("content_types") or []
@@ -2301,22 +2248,24 @@ def _render_har_detail_panel(panel: dict, *, hidden: bool) -> str:
             "meta": "list_candidates.json not stored for this probe.",
             "evidence": "—",
         })
-    body = (
-        '<table class="har-signals">'
-        "<thead><tr><th>signal type</th><th>host</th>"
-        "<th>meta</th><th>evidence</th></tr></thead><tbody>"
-    )
+    body = '<div class="har-signal-list" aria-label="HAR signals">'
     for item in signal_rows:
-        empty_cls = ' class="sig-empty"' if "sig-empty" in str(item.get("badge_class")) else ""
+        empty_cls = " sig-empty" if "sig-empty" in str(item.get("badge_class")) else ""
         body += (
-            f"<tr{empty_cls}>"
-            f'<td><span class="sig-badge {esc(item["badge_class"])}">{esc(item["badge"])}</span></td>'
-            f'<td class="mono">{esc(item.get("host") or "—")}</td>'
-            f"<td><small>{esc(item.get('meta') or '')}</small></td>"
-            f"<td><small class=\"muted\">{esc(item.get('evidence') or '')}</small></td>"
-            "</tr>"
+            f'<article class="har-signal-row{empty_cls}">'
+            '<div class="har-signal-kind">'
+            f'<span class="sig-badge {esc(item["badge_class"])}">{esc(item["badge"])}</span>'
+            f'<code>{esc(item.get("host") or "—")}</code>'
+            '</div>'
+            '<div class="har-signal-copy">'
+            '<div><span>Meta</span>'
+            f'<p>{esc(item.get("meta") or "")}</p></div>'
+            '<div><span>Evidence</span>'
+            f'<p class="muted">{esc(item.get("evidence") or "")}</p></div>'
+            '</div>'
+            '</article>'
         )
-    body += "</tbody></table>"
+    body += "</div>"
     raw_pre = json.dumps(raw_dump, ensure_ascii=False, indent=2) if raw_dump else "(empty)"
     raw_block = (
         '<div class="overlay-action-row">'
@@ -3080,14 +3029,12 @@ def render_html(
       line-height: 1.55;
     }}
     .har-kpis {{
-      display: flex;
-      flex-wrap: nowrap;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
       gap: 10px;
       margin: 0 0 16px;
-      overflow-x: auto;
     }}
     .har-kpis .kpi {{
-      flex: 1 0 120px;
       background: var(--paper);
       border: 1px solid var(--line);
       border-radius: 5px;
@@ -3106,16 +3053,35 @@ def render_html(
       color: var(--ink);
       margin-top: 4px;
     }}
-    .har-meta {{
-      display: flex;
-      gap: 1rem;
-      flex-wrap: nowrap;
-      overflow-x: auto;
+    .har-meta-grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+      gap: 10px;
       margin: 0 0 18px;
       font-size: 0.9rem;
     }}
-    .har-meta dt {{ color: var(--muted); text-transform: uppercase; font-size: 0.74rem; letter-spacing: 0.08em; padding-top: 4px; }}
-    .har-meta dd {{ margin: 0; word-break: break-all; }}
+    .har-meta-grid.compact {{ margin-top: 10px; }}
+    .har-meta-item {{
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: var(--paper);
+      padding: 8px 10px;
+      min-width: 0;
+    }}
+    .har-meta-item span {{
+      display: block;
+      color: var(--muted);
+      text-transform: uppercase;
+      font-size: 0.72rem;
+      letter-spacing: 0.08em;
+      margin-bottom: 4px;
+    }}
+    .har-meta-item strong {{
+      display: block;
+      font-weight: 500;
+      line-height: 1.4;
+      overflow-wrap: anywhere;
+    }}
     .har-picker {{
       display: inline-flex;
       align-items: center;
@@ -3133,13 +3099,15 @@ def render_html(
     }}
     .har-detail-panel {{ margin-top: 4px; }}
     .probe-agent-grid {{
-      display: grid;
-      grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.25fr);
-      gap: 18px;
-      align-items: start;
+      display: block;
     }}
     .probe-agent-column {{
       min-width: 0;
+    }}
+    .probe-agent-column + .probe-agent-column {{
+      margin-top: 26px;
+      padding-top: 20px;
+      border-top: 1px solid var(--line);
     }}
     .probe-agent-column > h4 {{
       margin: 0 0 10px;
@@ -3178,22 +3146,51 @@ def render_html(
     }}
     .har-section-table td {{ padding: 6px 8px; vertical-align: top; border-bottom: 1px solid var(--line); }}
     .har-section-table td.mono {{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; word-break: break-all; }}
-    .har-signals {{
-      width: 100%;
-      border-collapse: collapse;
+    .har-signal-list {{
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: var(--panel);
+      overflow: hidden;
       font-size: 0.88rem;
     }}
-    .har-signals th {{
-      text-align: left;
-      color: var(--muted);
-      font-size: 0.74rem;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      padding: 6px 8px;
+    .har-signal-row {{
+      display: grid;
+      grid-template-columns: minmax(180px, 0.32fr) minmax(0, 1fr);
+      gap: 14px;
+      padding: 10px 12px;
       border-bottom: 1px solid var(--line);
     }}
-    .har-signals td {{ padding: 6px 8px; vertical-align: top; border-bottom: 1px solid var(--line); }}
-    .har-signals td.mono {{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; word-break: break-all; }}
+    .har-signal-row:last-child {{ border-bottom: 0; }}
+    .har-signal-kind {{
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      flex-wrap: wrap;
+      min-width: 0;
+    }}
+    .har-signal-kind code {{
+      font-size: 0.78rem;
+      overflow-wrap: anywhere;
+    }}
+    .har-signal-copy {{
+      display: grid;
+      grid-template-columns: minmax(0, 0.45fr) minmax(0, 0.55fr);
+      gap: 16px;
+      min-width: 0;
+    }}
+    .har-signal-copy span {{
+      display: block;
+      color: var(--muted);
+      text-transform: uppercase;
+      font-size: 0.7rem;
+      letter-spacing: 0.08em;
+      margin-bottom: 3px;
+    }}
+    .har-signal-copy p {{
+      margin: 0;
+      line-height: 1.48;
+      overflow-wrap: anywhere;
+    }}
     .badge {{
       display: inline-block;
       padding: 1px 7px;
@@ -3244,7 +3241,7 @@ def render_html(
     .har-section-more {{ margin: 6px 0 0; font-size: 0.78rem; }}
     .packet-flow {{
       display: grid;
-      grid-template-columns: repeat(5, minmax(130px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
       gap: 10px;
       list-style: none;
       padding: 0;
@@ -3290,6 +3287,7 @@ def render_html(
       width: 100%;
       border-collapse: collapse;
       font-size: 0.86rem;
+      table-layout: fixed;
     }}
     .packet-field-table th,
     .packet-artifacts th {{
@@ -3303,6 +3301,14 @@ def render_html(
     }}
     .packet-field-table td,
     .packet-artifacts td {{ padding: 6px 8px; vertical-align: top; border-bottom: 1px solid var(--line); }}
+    .packet-field-table code {{
+      overflow-wrap: anywhere;
+      word-break: normal;
+    }}
+    .packet-field-table th:last-child,
+    .packet-field-table td:last-child {{
+      width: 86px;
+    }}
     .packet-file-grid {{
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -3468,10 +3474,11 @@ def render_html(
       main {{ padding-top: 34px; }}
       h1 {{ font-size: 2.1rem; }}
       .metrics {{ grid-template-columns: 1fr 1fr; }}
-      .probe-agent-grid {{ grid-template-columns: 1fr; }}
       .packet-flow {{ grid-template-columns: 1fr; }}
       .packet-file-grid {{ grid-template-columns: 1fr; }}
-      th:nth-child(1), td:nth-child(1) {{ display: none; }}
+      .har-signal-row,
+      .har-signal-copy {{ grid-template-columns: 1fr; }}
+      table {{ display: block; overflow-x: auto; }}
     }}
     @media (max-width: 480px) {{
       .metrics {{ grid-template-columns: 1fr; }}
@@ -3745,7 +3752,7 @@ def render_html(
     <figure id="probeAgenticFigure">
       <h3>Figure 4. From probe artifacts to the agentic config packet</h3>
       <p class="figure-lead">Pick a URL example to read the full path in one place:
-        probe/HAR signals on the left, the staged config-generation packet on the right.
+        probe/HAR signals first, then the staged config-generation packet below.
         Use <strong>view</strong> buttons for a full-screen explanation of each field plus
         the raw text that would be shown or derived for the model.</p>
       {probe_agentic_html}
