@@ -1166,6 +1166,21 @@ _HAR_DETAIL_MANIFEST_FILES = (
     "article_click.json",
 )
 _HAR_DETAIL_SECTION_ROW_CAP = 5
+_AGENTIC_MANIFEST_FILES = (
+    "generate/codex_agentic.py",
+    "prompts/register_agent_AGENTS.md",
+    "prompts/register_agent_user.txt",
+    "prompts/config_writer.system.txt",
+    "scripts/validate_config.py",
+    "schemas/register_agentic_result.json",
+)
+_AGENTIC_PACKET_FLOW = [
+    ("01", "Probe artifacts", "The probe leaves HTML, HAR, diagnosis, and list-candidate files under output/probe/<slug>/."),
+    ("02", "Digest build", "engine.digest folds those artifacts into digest.json, the compact evidence bundle the agent reads first."),
+    ("03", "Tmpdir staging", "generate/codex_agentic.py copies prompts, examples, validator wrappers, and optional failure feedback into a throwaway workdir."),
+    ("04", "Agent loop", "Codex reads only the staged packet, writes ./candidate.json, and runs ./run_validator.* inside the workdir."),
+    ("05", "Parent publish", "The parent parses last.json, re-reads candidate.json, validates again, audits repo writes, then publishes configs/<slug>.json."),
+]
 # Redaction keys — applied recursively when serialising raw JSON sample blobs.
 # Codex review of v4 §5 flagged Figure 1 parity as insufficient: internal API
 # endpoints, evidence URLs, and selectors are a new exposure surface, so we
@@ -1233,6 +1248,31 @@ def _redact_json(obj, depth: int = 0):
         if _URL_RE.search(s):
             s = _URL_RE.sub(lambda m: _host_mask(m.group(0)) or "host masked", s)
         return s if len(s) <= 220 else s[:219] + "…"
+    return obj
+
+
+def _agentic_public_json(obj, depth: int = 0):
+    """Public preview for the agentic packet.
+
+    Unlike Figure 4's HAR raw dump, this keeps URLs/selectors visible because
+    the point is to show what the model actually reasons over. Values are not
+    redacted here; large strings are clipped for page weight.
+    """
+    if depth > 8:
+        return "[truncated]"
+    if isinstance(obj, dict):
+        out = {}
+        for k, v in obj.items():
+            kl = str(k).lower()
+            if kl in {"html", "body", "body_text", "sample", "snippet"}:
+                out[k] = _short_text(v, 500)
+            else:
+                out[k] = _agentic_public_json(v, depth + 1)
+        return out
+    if isinstance(obj, list):
+        return [_agentic_public_json(x, depth + 1) for x in obj[:30]]
+    if isinstance(obj, str):
+        return obj if len(obj) <= 700 else obj[:699] + "…"
     return obj
 
 
@@ -1344,6 +1384,13 @@ def _manifest_for(run_dir: Path, slug: str) -> dict:
         if p.exists():
             try:
                 items.append((label, p.stat().st_size, p.stat().st_mtime_ns))
+            except OSError:
+                pass
+    for rel in _AGENTIC_MANIFEST_FILES:
+        p = ROOT / rel
+        if p.exists():
+            try:
+                items.append((f"__agentic__{rel}", p.stat().st_size, p.stat().st_mtime_ns))
             except OSError:
                 pass
     diag = load_json(run_dir / "diagnosis.json")
@@ -1752,6 +1799,223 @@ def build_har_detail(slug: str, har_path: Path) -> dict:
     }
 
 
+def _read_text_excerpt(path: Path, *, max_chars: int = 1600) -> str:
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return "(file unavailable)"
+    text = text.strip()
+    return text if len(text) <= max_chars else text[:max_chars].rstrip() + "\n..."
+
+
+def _json_excerpt(obj: object, *, max_chars: int = 1800) -> str:
+    text = json.dumps(_agentic_public_json(obj), ensure_ascii=False, indent=2)
+    return text if len(text) <= max_chars else text[:max_chars].rstrip() + "\n..."
+
+
+def _clip_text(text: str, *, max_chars: int) -> str:
+    return text if len(text) <= max_chars else text[:max_chars].rstrip() + "\n..."
+
+
+def _find_section(detail: dict, key: str) -> dict:
+    for sec in detail.get("sections") or []:
+        if sec.get("key") == key:
+            return sec
+    return {}
+
+
+def _render_agentic_user_prompt(slug: str, url: str) -> str:
+    prompt_path = ROOT / "prompts" / "register_agent_user.txt"
+    tpl = _read_text_excerpt(prompt_path, max_chars=1400)
+    return (tpl.replace("{{ slug }}", slug)
+               .replace("{{slug}}", slug)
+               .replace("{{ url }}", url)
+               .replace("{{url}}", url))
+
+
+def _published_config_summary(slug: str) -> tuple[dict, str]:
+    cfg_path = ROOT / "configs" / f"{slug}.json"
+    cfg = load_json(cfg_path)
+    if not cfg:
+        return {}, "(not published yet)"
+    interesting = {
+        "site": cfg.get("site") or cfg.get("url"),
+        "strategy": cfg.get("strategy"),
+        "recognizer": cfg.get("recognizer"),
+        "list": cfg.get("list"),
+        "article": cfg.get("article"),
+    }
+    return cfg, _json_excerpt({k: v for k, v in interesting.items() if v}, max_chars=1800)
+
+
+def build_agentic_packet(detail: dict, *, run_dir: Path | None = None) -> dict:
+    """Build the Figure 5 view-model from the selected probe artifact.
+
+    The packet mirrors `generate.codex_agentic._setup_workdir()` without
+    creating a real tmpdir. It is regenerated whenever the probe manifest or
+    prompt/source files change.
+    """
+    slug = str(detail.get("slug") or "")
+    probe_url = str(detail.get("probe_url") or "")
+    summary = detail.get("summary") or {}
+    digest_sec = _find_section(detail, "digest")
+    digest_raw = digest_sec.get("raw_redacted")
+    if digest_raw is None:
+        digest_raw = {
+            "list_candidates": {
+                row.get("key"): row.get("preview")
+                for row in ((detail.get("artifact_list_candidates") or {}).get("rows") or [])
+            },
+            "summary": summary,
+        }
+    config_json, config_preview = _published_config_summary(slug)
+    config_strategy = str(detail.get("config_strategy") or config_json.get("strategy") or "unknown")
+    signal_counts = {
+        "har_entries": summary.get("entry_count", 0),
+        "json_entries": summary.get("json_count", 0),
+        "xhr_fetch": summary.get("xhr_count", 0),
+        "traffic_api_candidates": (_find_section(detail, "traffic_api_candidates").get("total_rows") or 0),
+        "article_body_api_candidates": (_find_section(detail, "traffic_article_body_candidates").get("total_rows") or 0),
+        "rss_candidates": (_find_section(detail, "rss_feed_urls").get("total_rows") or 0),
+        "pagination_hints": (_find_section(detail, "pagination_hints").get("total_rows") or 0),
+    }
+    artifacts: list[dict[str, object]] = []
+    if run_dir is not None:
+        for name in _HAR_DETAIL_MANIFEST_FILES:
+            p = run_dir / name
+            if not p.exists():
+                continue
+            try:
+                st = p.stat()
+                size = st.st_size
+            except OSError:
+                size = 0
+            artifacts.append({
+                "path": f"output/probe/{slug}/{name}" if slug else f"output/probe/<slug>/{name}",
+                "size": size,
+                "role": "probe artifact",
+                "preview": _read_text_excerpt(p, max_chars=900) if p.suffix in {".json", ".txt"} else f"{size} bytes",
+            })
+
+    files = [
+        {
+            "phase": "Prompt",
+            "path": "AGENTS.md",
+            "source": "prompts/register_agent_AGENTS.md",
+            "role": "System-like local instructions: scope, reading order, self-veto, output contract.",
+            "preview": _read_text_excerpt(ROOT / "prompts" / "register_agent_AGENTS.md", max_chars=1800),
+        },
+        {
+            "phase": "Prompt",
+            "path": "stdin prompt",
+            "source": "prompts/register_agent_user.txt",
+            "role": "The actual task text passed to `codex exec` on stdin.",
+            "preview": _render_agentic_user_prompt(slug, probe_url),
+        },
+        {
+            "phase": "Evidence",
+            "path": "digest.json",
+            "source": "engine.digest.build_digest(...), compressed for prompt use",
+            "role": "Primary model evidence: strategy hint, list/article HTML samples, probe signals, and notes.",
+            "preview": _json_excerpt({"slug": slug, "url": probe_url, "signal_counts": signal_counts, "digest": digest_raw}, max_chars=6000),
+        },
+        {
+            "phase": "Evidence",
+            "path": "validator_digest.json",
+            "source": "same digest before HTML compression",
+            "role": "Validator-only evidence so probe-grounding checks use full HTML, not compressed prompt snippets.",
+            "preview": _json_excerpt({"same_keys_as": "digest.json", "html": "uncompressed in the real tmpdir", "signal_counts": signal_counts}),
+        },
+        {
+            "phase": "Evidence",
+            "path": "failure_packet.json",
+            "source": "scripts/register.py::_build_failure_packet(...)",
+            "role": "Optional: only present when auto mode first tried api_loop_once and escalated to agentic.",
+            "preview": _json_excerpt({
+                "source": "api_loop_once",
+                "attempt": 1,
+                "candidate_config": "previous failed config, if any",
+                "validation_feedback": "short validator failure text",
+                "error": "generation exception text, if any",
+            }),
+        },
+        {
+            "phase": "Examples",
+            "path": "examples/manifest.json + examples/*.json",
+            "source": "generate.codex_agentic._pick_examples(...)",
+            "role": "Two closest successful configs ranked by recognizer, host, and strategy similarity.",
+            "preview": _json_excerpt({
+                "selection_rule": "top 2 scored configs excluding the current slug",
+                "current_strategy": config_strategy,
+                "manifest_shape": [{"slug": "<example-slug>", "score": 0, "reason": "recognizer/host/strategy match"}],
+            }),
+        },
+        {
+            "phase": "Rules",
+            "path": "config_writer_rules.txt",
+            "source": "prompts/config_writer.system.txt",
+            "role": "Full config-authoring rules. The agent is told to skim it only when uncertain.",
+            "preview": _read_text_excerpt(ROOT / "prompts" / "config_writer.system.txt", max_chars=6000),
+        },
+        {
+            "phase": "Validator",
+            "path": "validate_config.py + run_validator.*",
+            "source": "scripts/validate_config.py copied with a platform launcher",
+            "role": "The agent runs this against ./candidate.json; the parent validates again after the agent exits.",
+            "preview": _json_excerpt({
+                "launcher": "run_validator.bat on Windows, run_validator.sh elsewhere",
+                "python_path": sys.executable,
+                "input": "./candidate.json",
+                "timing_log": "validate_timing/agentic_attempt__*.json",
+            }),
+        },
+        {
+            "phase": "Output",
+            "path": "candidate.json + last.json",
+            "source": "agent-written tmpdir files",
+            "role": "candidate.json holds the attempted config; last.json is the tiny final JSON message with ok/attempts/stop_reason.",
+            "preview": _json_excerpt({
+                "last_json": {
+                    "ok": True,
+                    "candidate_path": "./candidate.json",
+                    "config": {},
+                    "attempts": [{"i": 1, "validate_ok": True, "error": ""}],
+                    "stop_reason": "validate_pass",
+                },
+                "published_config_preview": {
+                    k: v for k, v in {
+                        "site": config_json.get("site") or config_json.get("url"),
+                        "strategy": config_json.get("strategy"),
+                        "recognizer": config_json.get("recognizer"),
+                    }.items() if v
+                } or config_preview,
+            }),
+        },
+    ]
+    raw_text = "\n\n".join(
+        [
+            "COMMAND",
+            f"codex exec -C <tmpdir> --json --output-last-message <tmpdir>/last.json",
+            "",
+            *[
+                f"===== {f['path']} =====\nsource: {f['source']}\n\n{f['preview']}"
+                for f in files
+            ],
+        ]
+    )
+    return {
+        "flow": _AGENTIC_PACKET_FLOW,
+        "artifacts": artifacts[:8],
+        "files": files,
+        "raw_text": _clip_text(raw_text, max_chars=45_000),
+        "result": {
+            "strategy": config_strategy,
+            "config_path": f"configs/{slug}.json" if slug else "configs/<slug>.json",
+            "preview": config_preview,
+        },
+    }
+
+
 def read_har_details(*, force_recompute: bool = False) -> dict:
     """Build or read the up-to-five Figure 4 panel payload."""
     picks = pick_har_showcases(top_n=5)
@@ -1768,8 +2032,10 @@ def read_har_details(*, force_recompute: bool = False) -> dict:
     panels = []
     for i, ((slug, har_path), manifest) in enumerate(zip(picks, manifests)):
         detail = build_har_detail(slug, har_path)
+        detail["agentic_packet"] = build_agentic_packet(detail, run_dir=har_path.parent)
         panels.append({
             "panel_id": f"har-panel-{i}",
+            "agentic_panel_id": f"agentic-panel-{i}",
             "host_label": detail.get("host_label") or "host masked",
             "manifest": manifest,
             "detail": detail,
@@ -1989,6 +2255,126 @@ def _render_har_detail_panel(panel: dict, *, hidden: bool) -> str:
     )
 
 
+def render_agentic_packet_html(payload: dict | None) -> str:
+    panels = (payload or {}).get("panels") or []
+    if not panels:
+        panels = [_placeholder_har_panel()]
+    multi = len(panels) > 1
+    options_parts: list[str] = []
+    for i, panel in enumerate(panels):
+        detail = panel.get("detail") or {}
+        host_label = panel.get("host_label") or "site"
+        path_label = detail.get("path_label") or ""
+        verdict = detail.get("verdict") or ""
+        bits = [f"{host_label}{path_label}" if path_label else host_label]
+        if multi:
+            bits.append(f"#{i + 1}")
+        if verdict:
+            bits.append(verdict if len(verdict) <= 28 else verdict[:27] + "…")
+        panel_id = panel.get("agentic_panel_id") or f"agentic-panel-{i}"
+        options_parts.append(
+            f'<option value="{esc(panel_id)}">{esc(" · ".join(bits))}</option>'
+        )
+    panel_html = "".join(
+        _render_agentic_packet_panel(panel, hidden=i != 0)
+        for i, panel in enumerate(panels)
+    )
+    return (
+        '<label class="har-picker">URL example '
+        f'<select id="agenticPacketPicker">{"".join(options_parts)}</select></label>'
+        f"{panel_html}"
+    )
+
+
+def _render_agentic_packet_panel(panel: dict, *, hidden: bool) -> str:
+    detail = panel.get("detail") or {}
+    packet = detail.get("agentic_packet") or {
+        "flow": _AGENTIC_PACKET_FLOW,
+        "artifacts": [],
+        "files": [],
+        "result": {"strategy": "—", "config_path": "configs/<slug>.json", "preview": "(no selected probe)"},
+    }
+    hidden_attr = " hidden" if hidden else ""
+    panel_id = panel.get("agentic_panel_id") or str(panel.get("panel_id") or "agentic-panel-0").replace("har-", "agentic-")
+    flow_html = "".join(
+        '<li>'
+        f'<span class="packet-step-num">{esc(n)}</span>'
+        '<div>'
+        f'<strong>{esc(title)}</strong>'
+        f'<p>{esc(body)}</p>'
+        '</div></li>'
+        for n, title, body in (packet.get("flow") or [])
+    )
+    artifact_rows = ""
+    for item in packet.get("artifacts") or []:
+        preview = str(item.get("preview") or "")
+        artifact_rows += (
+            "<tr>"
+            f'<td><code>{esc(item.get("path") or "")}</code></td>'
+            f'<td>{esc(item.get("size") or 0)} B</td>'
+            f'<td>{esc(item.get("role") or "")}</td>'
+            '<td><details><summary>preview</summary>'
+            f'<pre class="tail">{esc(preview)}</pre></details></td>'
+            "</tr>"
+        )
+    if not artifact_rows:
+        artifact_rows = '<tr><td colspan="4">No probe artifact selected.</td></tr>'
+
+    file_cards = ""
+    for f in packet.get("files") or []:
+        file_cards += (
+            '<article class="packet-file">'
+            '<header>'
+            f'<span class="packet-phase">{esc(f.get("phase") or "")}</span>'
+            f'<code>{esc(f.get("path") or "")}</code>'
+            '</header>'
+            f'<p>{esc(f.get("role") or "")}</p>'
+            f'<small>source: <code>{esc(f.get("source") or "")}</code></small>'
+            '<details>'
+            '<summary>show content preview</summary>'
+            f'<pre class="tail">{esc(f.get("preview") or "")}</pre>'
+            '</details>'
+            '</article>'
+        )
+    if not file_cards:
+        file_cards = '<p class="muted">No agentic packet available for this probe.</p>'
+
+    result = packet.get("result") or {}
+    result_preview = str(result.get("preview") or "")
+    raw_text = str(packet.get("raw_text") or "")
+    return (
+        f'<div class="agentic-packet-panel" id="{esc(panel_id)}"{hidden_attr}>'
+        '<ol class="packet-flow">'
+        f'{flow_html}'
+        '</ol>'
+        '<section class="packet-subsection">'
+        '<h4>Probe outputs for this URL</h4>'
+        '<table class="packet-artifacts">'
+        '<thead><tr><th>artifact</th><th>size</th><th>role</th><th>details</th></tr></thead>'
+        f'<tbody>{artifact_rows}</tbody></table>'
+        '</section>'
+        '<section class="packet-subsection">'
+        '<h4>Files staged for the model</h4>'
+        f'<div class="packet-file-grid">{file_cards}</div>'
+        '</section>'
+        '<section class="packet-subsection packet-raw">'
+        '<h4>Raw text view</h4>'
+        '<p>Open this to see the staged prompt/evidence text as one packet: command shape, stdin prompt, JSON evidence, rules, validator handoff, and expected output contract.</p>'
+        '<details><summary>show raw packet text</summary>'
+        f'<pre class="tail">{esc(raw_text)}</pre></details>'
+        '</section>'
+        '<section class="packet-subsection packet-result">'
+        '<h4>Result path</h4>'
+        f'<p>The agent writes <code>candidate.json</code>; the parent re-validates it and publishes '
+        f'<code>{esc(result.get("config_path") or "configs/<slug>.json")}</code>. '
+        f'Current published strategy: <code>{esc(result.get("strategy") or "—")}</code>.</p>'
+        '<details open><summary>published config summary</summary>'
+        f'<pre class="tail">{esc(result_preview)}</pre></details>'
+        '</section>'
+        '</div>'
+    )
+
+
 def metric(label: str, value: object, note: str = "") -> str:
     note_html = f"<span>{esc(note)}</span>" if note else ""
     return f'<div class="metric"><strong>{esc(value)}</strong><em>{esc(label)}</em>{note_html}</div>'
@@ -2058,6 +2444,7 @@ def render_html(
     har_funnel_svg = svg_har_funnel()
     har_stage_panels_html = render_stage_panels()
     har_detail_html = render_har_detail_html(har_detail)
+    agentic_packet_html = render_agentic_packet_html(har_detail)
 
     recent_rows = []
     for item in jobs["recent"]:
@@ -2477,6 +2864,7 @@ def render_html(
     #figures figure + figure {{ margin-top: var(--subsection-gap, 22px); }}
     #harDetailFigure {{ margin-top: var(--section-gap, 36px); }}
     #harDetailFigure .har-section + .har-section {{ margin-top: var(--subsection-gap, 22px); }}
+    #agenticPacketFigure {{ margin-top: var(--section-gap, 36px); }}
 
     .stage-panels {{ margin: 18px 0 6px; }}
     .stage-panel {{
@@ -2558,12 +2946,28 @@ def render_html(
       margin-left: 0;
       margin-right: 0;
     }}
-    #harDetailFigure > h3 {{
+    #agenticPacketFigure {{
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 18px 22px 14px;
+      margin-left: 0;
+      margin-right: 0;
+    }}
+    #harDetailFigure > h3,
+    #agenticPacketFigure > h3 {{
       margin: 0 0 12px;
       font-family: Georgia, "Times New Roman", serif;
       font-size: 1.2rem;
     }}
-    #harDetailFigure figcaption {{
+    .figure-lead {{
+      color: var(--muted);
+      font-size: 0.94rem;
+      line-height: 1.55;
+      margin: 0 0 14px;
+    }}
+    #harDetailFigure figcaption,
+    #agenticPacketFigure figcaption {{
       margin-top: 14px;
       color: var(--muted);
       font-size: 0.86rem;
@@ -2718,6 +3122,138 @@ def render_html(
       line-height: 1.5;
     }}
     .har-section-more {{ margin: 6px 0 0; font-size: 0.78rem; }}
+    .packet-flow {{
+      display: grid;
+      grid-template-columns: repeat(5, minmax(130px, 1fr));
+      gap: 10px;
+      list-style: none;
+      padding: 0;
+      margin: 4px 0 18px;
+    }}
+    .packet-flow li {{
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      padding: 10px;
+      min-width: 0;
+    }}
+    .packet-step-num {{
+      display: inline-block;
+      color: var(--accent);
+      font: 700 0.8rem Georgia, "Times New Roman", serif;
+      margin-bottom: 6px;
+    }}
+    .packet-flow strong {{
+      display: block;
+      color: var(--ink);
+      font-size: 0.92rem;
+      margin-bottom: 4px;
+    }}
+    .packet-flow p {{
+      color: var(--muted);
+      font-size: 0.78rem;
+      line-height: 1.35;
+      margin: 0;
+    }}
+    .packet-subsection {{
+      border-top: 1px solid var(--line);
+      padding-top: 14px;
+      margin-top: 14px;
+    }}
+    .packet-subsection h4 {{
+      margin: 0 0 10px;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 1rem;
+    }}
+    .packet-artifacts {{
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.86rem;
+    }}
+    .packet-artifacts th {{
+      text-align: left;
+      color: var(--muted);
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      padding: 6px 8px;
+      border-bottom: 1px solid var(--line);
+    }}
+    .packet-artifacts td {{ padding: 6px 8px; vertical-align: top; border-bottom: 1px solid var(--line); }}
+    .packet-file-grid {{
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }}
+    .packet-file {{
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      padding: 10px;
+      background: var(--paper);
+      min-width: 0;
+    }}
+    .packet-file header {{
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin: 0 0 6px;
+    }}
+    .packet-file code {{
+      word-break: break-all;
+      overflow-wrap: anywhere;
+      font-size: 0.78rem;
+    }}
+    .packet-phase {{
+      display: inline-block;
+      border: 1px solid var(--accent-2);
+      border-radius: 10px;
+      padding: 1px 7px;
+      color: var(--accent-2);
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }}
+    .packet-file p {{
+      color: var(--ink);
+      font-size: 0.84rem;
+      line-height: 1.45;
+      margin: 0 0 6px;
+    }}
+    .packet-file small {{
+      display: block;
+      color: var(--muted);
+      font-size: 0.76rem;
+      margin: 0 0 8px;
+    }}
+    .packet-file details summary,
+    .packet-artifacts details summary,
+    .packet-result details summary,
+    .packet-raw details summary {{
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 0.82rem;
+    }}
+    .packet-file pre,
+    .packet-artifacts pre,
+    .packet-result pre,
+    .packet-raw pre {{
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      padding: 8px 10px;
+      margin: 6px 0 0;
+      max-height: 300px;
+      overflow: auto;
+      font-size: 0.76rem;
+      line-height: 1.45;
+    }}
+    .packet-result p,
+    .packet-raw p {{
+      color: var(--muted);
+      font-size: 0.9rem;
+      line-height: 1.5;
+    }}
     table {{
       width: 100%;
       border-collapse: collapse;
@@ -2746,6 +3282,8 @@ def render_html(
       main {{ padding-top: 34px; }}
       h1 {{ font-size: 2.1rem; }}
       .metrics {{ grid-template-columns: 1fr 1fr; }}
+      .packet-flow {{ grid-template-columns: 1fr; }}
+      .packet-file-grid {{ grid-template-columns: 1fr; }}
       th:nth-child(1), td:nth-child(1) {{ display: none; }}
     }}
     @media (max-width: 480px) {{
@@ -3025,6 +3563,17 @@ def render_html(
         dashboard's <code>/probe-har</code> view, but URLs are host-masked, raw JSON is
         redacted, and each section caps at 5 visible rows (ADR 0010 §17).</figcaption>
     </figure>
+    <figure id="agenticPacketFigure">
+      <h3>Figure 5. What the config-generation agent receives</h3>
+      <p class="figure-lead">Pick the same URL examples to see how probe artifacts become a
+        temporary agent workdir: prompts, <code>digest.json</code>, optional failure feedback,
+        curated examples, validator scripts, and the final <code>candidate.json</code> handoff.</p>
+      {agentic_packet_html}
+      <figcaption>Generated from the selected probe run plus the current prompt/source files.
+        If probe output, config writer rules, agent prompt, validator wrapper, or
+        <code>generate/codex_agentic.py</code> changes, the site manifest changes and this
+        section is rebuilt on the next static-site generation cycle.</figcaption>
+    </figure>
     <script>
       (function () {{
         var funnel = document.getElementById('harFunnel');
@@ -3060,6 +3609,16 @@ def render_html(
           picker.addEventListener('change', function () {{
             var targetId = picker.value;
             detailPanels.forEach(function (el) {{
+              el.hidden = el.id !== targetId;
+            }});
+          }});
+        }}
+        var packetPicker = document.getElementById('agenticPacketPicker');
+        var packetPanels = document.querySelectorAll('.agentic-packet-panel');
+        if (packetPicker && packetPanels.length) {{
+          packetPicker.addEventListener('change', function () {{
+            var targetId = packetPicker.value;
+            packetPanels.forEach(function (el) {{
               el.hidden = el.id !== targetId;
             }});
           }});
