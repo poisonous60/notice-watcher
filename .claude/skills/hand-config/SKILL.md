@@ -273,7 +273,7 @@ dashboard `/` 의 "🧠 FAILED 큐 일괄 처리 — claude 직접 모드" 버�
 ### 절차 (§0c step 1~7 의 codex 요소 제거판)
 
 1. `python scripts/triage.py pull --skip-later` — N100 → 로컬 (FAILED + probe).
-2. **청크 = slug 1~3개** — 같은 host/플랫폼/cohort 묶음 우선. 각 청크 끝나면 *반드시 사용자에게 결과 보고 + 다음 chunk 진행 의향 확인*. context 폭발 회피 + 사용자 도중 redirect 가능. TodoWrite 로 청크별 진행 추적.
+2. **청크 = slug 1~3개** — 같은 host/플랫폼/catalog 묶음 우선. 각 청크 끝나면 *반드시 사용자에게 결과 보고 + 다음 chunk 진행 의향 확인*. context 폭발 회피 + 사용자 도중 redirect 가능. TodoWrite 로 청크별 진행 추적.
 3. **§0b preflight + §0b-1 terminal action freeze + §0b-2 gen_fail screen-out** 그대로 적용. §0c 와 동일.
 4. **각 slug §2 분기 *전* 강제 인용 의무** (0 live / 1 last_feedback / 2 verdict / 3 근거 / 4a Track B 6-layer / 4b Track A 결정 / 4c context ship evidence / 4d park 분기 / 5 cases_index / 6 preflight). §0c 와 동일 게이트.
 5. **Track B 1순위** — canonical 6 자리 E/D/C/B/A/F audit. hit 면 그 자리 박음. **cross-site 패턴** (청크 안 2+ slug 같은 fail 신호) 보이면 per-site config 찍기 전에 *Track B 일반화 자리(C/B/A/F)* 박는다 — §0c-0 agentic-first 의 claude 직접 모드 mirror.

@@ -12,6 +12,7 @@
 - 한국 공공/연구기관 CMS 계열 URL (`.es?mid=...&bid=...`, `/bbs/list.do`, `/selectNttList.do`, `?bbsId=...`) 은 제목·날짜·첨부/조회수 같은 row 가 1개만 보여도 게시판 목록(index)일 수 있다. 특히 `.es?mid=...&bid=...` gallery/board family 는 이미지 갤러리로 단정하지 말고, 항목이 공지·보도자료·입찰 같은 읽을 글이면 index 로 판단한다.
 - "구조 신호(probe)" 에 같은-호스트 반복 글-링크 행이 있거나 RSS/Atom 피드가 있으면 index 가능성이 높다 — *단 그 행/피드 항목이 글일 때*. 항목이 패키지·제품·이미지면 catalog.
 - **RSS 단독 신호로 index 판단 금지**: probe 가 같은-호스트 반복 글-링크 행을 *0종* 보고했고 첫 글 URL 도 못 잡았는데 *RSS/Atom 피드 후보만* 있으면 index 로 기울지 말고 본문/링크 구조를 본다. 회사 홈/제품 랜딩/카탈로그 페이지가 마케팅용 RSS 를 노출하는 경우가 흔하다(게임회사 홈, 제품 소개 사이트 등). 본문이 회사·게임·제품 소개 문구 중심이면 catalog 또는 content 다 — RSS 가 있어도 게시판이 아니다. 진짜 게시판이면 RSS 외에 *정적 HTML 에도* 글-링크 cluster 가 ≥1종 보인다.
+- **1인 창작자/아티스트 portfolio 거부**: `<title>`/`h1` 이 `It's <Name>!` / `I'm <Name>` / `<Name>'s site` 같은 자기소개이고, 본문이 `/anxiety/`·`/fireflies/` 처럼 날짜/글ID 없는 얕은 concept/project slug grid 이며, nav 에 `blog.<host>` 또는 `/blog/` 링크가 따로 있으면 그 root 는 single-artist portfolio 다. 같은-host grid 항목이 3개 이상이어도 최신 글 목록(index)이 아니라 작품/interactive catalog 또는 content 로 본다. 실제 폴링 후보는 따로 노출된 blog URL 이다.
 - 목록이어도 *항목이 글이 아니라 패키지/제품/이미지 등 아티팩트*면 index 가 아니라 catalog 다. "릴리스 노트 글"(프로젝트가 쓴 변경 발표 본문)은 index, "패키지가 publish 됨"(레지스트리의 아티팩트 레코드 — 이름+버전, 읽을 발표 본문 없음)은 catalog — 둘 다 '릴리스'라 불려도 다르다.
 - 항목이 인기·큐레이션·관련도 순으로 배열돼 *새 항목이 맨 위에 안 뜨면*(최신순 아님) 폴링이 새 글을 감지 못 한다 → catalog 쪽.
 - 본문 추출 결과가 거의 비어있는데 링크가 많은 페이지는 목록(index)일 수 있다 (SPA 라 본문이 정적 HTML 에 안 잡힌 경우). 단, 그 링크들이 nav/메뉴뿐이고 "not found"/"로그인" 안내가 핵심이면 not_found/login 이다.

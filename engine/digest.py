@@ -19,7 +19,7 @@ import re
 import sys
 from pathlib import Path
 from typing import Any, Optional
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 from bs4 import BeautifulSoup, Comment, Tag
 
@@ -534,6 +534,141 @@ def _host_label(host: str) -> str:
     return parts[0] if parts else ""
 
 
+_PORTFOLIO_TITLE_PATTERNS = (
+    re.compile(r"^\s*it'?s\s+.{2,60}!\s*$", re.I),
+    re.compile(r"^\s*i'?m\s+.{2,60}\s*$", re.I),
+    re.compile(r"^\s*.{2,60}'s\s+(site|website|homepage)\s*$", re.I),
+)
+_PORTFOLIO_NAV_SLUGS = {
+    "about", "archive", "blog", "board", "contact", "faq", "forum", "home",
+    "index", "latest", "news", "post", "posts", "rss", "tag", "tags",
+}
+_PORTFOLIO_DATE_RE = re.compile(r"(^\d{4}$|^\d{4}[-/]\d{1,2}|/\d{4}/|-\d{4,}$)")
+
+
+def _resolve_href(base_url: str, href: str) -> str:
+    href = (href or "").strip()
+    if not href:
+        return ""
+    if href.startswith("//"):
+        return "https:" + href
+    if re.match(r"^[A-Za-z][A-Za-z0-9+.-]*://", href):
+        return href
+    if re.match(r"^[A-Za-z0-9.-]+\.[A-Za-z]{2,}(/|$)", href):
+        return "https://" + href
+    return urljoin(base_url, href)
+
+
+def _portfolio_title_like(text: str) -> bool:
+    t = re.sub(r"\s+", " ", text or "").strip()
+    if not t:
+        return False
+    if any(p.match(t) for p in _PORTFOLIO_TITLE_PATTERNS):
+        return True
+    parts = [p.strip() for p in t.split("|")]
+    return len(parts) == 2 and parts[0] and parts[0].lower() == parts[1].lower()
+
+
+def _portfolio_concept_path(path: str) -> bool:
+    segs = [s for s in (path or "").split("/") if s]
+    if len(segs) != 1:
+        return False
+    slug = segs[0].lower().strip()
+    if not slug or slug in _PORTFOLIO_NAV_SLUGS:
+        return False
+    if "." in slug or _PORTFOLIO_DATE_RE.search(path):
+        return False
+    if sum(ch.isdigit() for ch in slug) > 1:
+        return False
+    return bool(re.match(r"^[a-z][a-z0-9-]{2,40}$", slug))
+
+
+def detect_single_artist_portfolio(
+    raw_html: Optional[str],
+    base_url: str,
+    list_candidates: Optional[dict] = None,
+) -> Optional[dict]:
+    """Detect a personal portfolio root whose real update stream is a blog link.
+
+    This is a digest signal, not an enforcement gate.  It gives the classifier
+    enough structure to reject project/explorable grids without hard-coding one
+    host.
+    """
+    if not raw_html or not base_url:
+        return None
+    try:
+        sp = urlsplit(base_url)
+    except ValueError:
+        return None
+    page_host = sp.netloc.lower().split(":", 1)[0]
+    page_host_nw = page_host[4:] if page_host.startswith("www.") else page_host
+    if not page_host_nw or (sp.path or "/") not in ("", "/"):
+        return None
+
+    try:
+        soup = BeautifulSoup(raw_html, "lxml")
+    except Exception:
+        return None
+
+    title_candidates = [
+        t.get_text(" ", strip=True)
+        for t in [soup.find("title"), soup.find("h1")]
+        if t is not None
+    ]
+    title_signal = next((t for t in title_candidates if _portfolio_title_like(t)), "")
+    if not title_signal:
+        return None
+
+    blog_link = ""
+    concept_urls: set[str] = set()
+    for a in soup.find_all("a", href=True):
+        href = _resolve_href(base_url, str(a.get("href") or ""))
+        if not href:
+            continue
+        try:
+            u = urlsplit(href)
+        except ValueError:
+            continue
+        h = u.netloc.lower().split(":", 1)[0]
+        h_nw = h[4:] if h.startswith("www.") else h
+        if h_nw == f"blog.{page_host_nw}" or (
+            h_nw == page_host_nw and (u.path == "/blog" or u.path.startswith("/blog/"))
+        ) or (h_nw.endswith("." + page_host_nw) and h_nw.split(".", 1)[0] == "blog"):
+            blog_link = href
+        if h_nw == page_host_nw and _portfolio_concept_path(u.path):
+            concept_urls.add(u.path.strip("/").lower())
+
+    if not blog_link or len(concept_urls) < 3:
+        return None
+
+    patterns = (list_candidates or {}).get("html_repeating_patterns") or []
+    repeating = 0
+    for p in patterns:
+        if not isinstance(p, dict):
+            continue
+        sample = p.get("sample_url") or p.get("href_pattern_guess") or ""
+        try:
+            sample_path = urlsplit(str(sample)).path
+        except ValueError:
+            sample_path = ""
+        if _portfolio_concept_path(sample_path):
+            try:
+                repeating = max(repeating, int(p.get("child_count") or 0))
+            except (TypeError, ValueError):
+                pass
+
+    return {
+        "detected": True,
+        "confidence": "high",
+        "kind": "single_artist_portfolio",
+        "grid_item_count": len(concept_urls),
+        "blog_link": blog_link,
+        "title_signal": title_signal[:120],
+        "repeating_child_count": repeating,
+        "reason": "personal intro title + shallow concept/project grid + canonical blog link",
+    }
+
+
 def _same_host(url: object, page_host: str) -> bool:
     if not isinstance(url, str) or not url.startswith(("http://", "https://")):
         return False
@@ -790,6 +925,11 @@ def build_digest(
         # 가능한 사이트 분류 signal. measurement-only — prompt 안 읽음. A 묶음 #5.
         "sitemap_only_fit_signal": _sitemap_only_fit_signal(
             (sitemap_disc.get("candidates") if isinstance(sitemap_disc, dict) else []) or []
+        ),
+        "single_artist_portfolio": detect_single_artist_portfolio(
+            raw_list_html,
+            diag.get("url") or url or "",
+            list_cands if isinstance(list_cands, dict) else {},
         ),
         "list_html": {
             "source": str(list_path) if list_path else None,
