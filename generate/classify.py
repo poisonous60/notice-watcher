@@ -169,6 +169,13 @@ def _struct_hint(digest: dict, url: str) -> str:
     feed = len(digest.get("feed_candidates") or [])
     if feed:
         parts.append(f"RSS/Atom 피드 {feed}건")
+    portfolio = digest.get("single_artist_portfolio") or {}
+    if isinstance(portfolio, dict) and portfolio.get("detected") is True:
+        parts.append(
+            "single-artist portfolio signal: "
+            f"personal intro title + concept/project grid {portfolio.get('grid_item_count')} items; "
+            f"canonical blog/update stream appears separate at {portfolio.get('blog_link')}"
+        )
     return "; ".join(parts)
 
 
