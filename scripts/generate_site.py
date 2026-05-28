@@ -936,24 +936,7 @@ def _short_text(value: object, limit: int = 40) -> str:
     return s if len(s) <= limit else s[: limit - 1] + "…"
 
 
-def _har_set_key() -> dict:
-    pdir = ROOT / "output" / "probe"
-    files: list[Path] = []
-    if pdir.exists():
-        for run in pdir.iterdir():
-            if not run.is_dir():
-                continue
-            files.extend(sorted(run.glob("traffic*.har")))
-    total_size = 0
-    max_mtime = 0
-    for f in files:
-        try:
-            st = f.stat()
-        except OSError:
-            continue
-        total_size += st.st_size
-        if st.st_mtime_ns > max_mtime:
-            max_mtime = st.st_mtime_ns
+def _extractor_fingerprint() -> tuple[int, str]:
     extract_mtime = 0
     extract_path = ROOT / "probe" / "extract.py"
     if extract_path.exists():
@@ -961,13 +944,24 @@ def _har_set_key() -> dict:
             extract_mtime = extract_path.stat().st_mtime_ns
         except OSError:
             pass
-    return {
-        "har_count": len(files),
-        "sum_size_bytes": total_size,
-        "max_mtime_ns": max_mtime,
-        "extractor_mtime_ns": extract_mtime,
-        "extractor_version": EXTRACTOR_VERSION,
-    }
+    return extract_mtime, EXTRACTOR_VERSION
+
+
+def _slug_har_fingerprint(run_dir: Path) -> list[list]:
+    """Per-slug fingerprint = list of [name, size, mtime_ns] for every traffic*.har.
+
+    Used to detect whether a single probe run's HAR set changed since the
+    last aggregate computation — keeps the per-slug cache valid even when
+    other slugs' HARs change.
+    """
+    out: list[list] = []
+    for p in sorted(run_dir.glob("traffic*.har")):
+        try:
+            st = p.stat()
+        except OSError:
+            continue
+        out.append([p.name, st.st_size, st.st_mtime_ns])
+    return out
 
 
 def _lazy_extract():
@@ -1009,15 +1003,66 @@ def _read_har_entries(path: Path, *, cap: int = 1000) -> list[dict]:
     return entries[:cap] if cap > 0 else entries
 
 
-def _compute_har_aggregate(*, budget_seconds: float = 35.0) -> dict:
-    """Walk probe artifacts to build the funnel stage counts.
+def _scan_slug_signals(run_dir: Path, fns) -> dict:
+    """Run signal extractors against a single probe directory. Returns the
+    per-slug record cached in ``_har_per_slug.json``. Expensive — only called
+    for slugs whose fingerprint changed since the last computation.
+    """
+    api_fn, _body_fn, rss_fn, pag_fn, plat_fn = fns
+    entries_total = 0
+    sig = {"api": False, "rss": False, "pagination": False, "platform": False, "article_body": False}
+    har_paths = sorted(run_dir.glob("traffic*.har"))
+    for hp in har_paths:
+        entries = _read_har_entries(hp, cap=2000)
+        entries_total += len(entries)
+        if not sig["api"]:
+            try:
+                if api_fn(hp):
+                    sig["api"] = True
+            except Exception:
+                pass
 
-    Time budget guard — large HAR sets (350+ files, 150 MB+) can take minutes
-    if every signal extractor runs on every file. We cap at ``budget_seconds``
-    of wall clock and mark the result truncated; cache still gets written so
-    subsequent cycles read instantly. ``traffic_article_body_candidates`` is
-    intentionally skipped here (it reads response bodies — by far the slowest
-    extractor) and lives only in the per-case sample.
+    list_html_path = run_dir / "list.html"
+    if list_html_path.exists():
+        try:
+            list_html_text = list_html_path.read_text(
+                encoding="utf-8", errors="replace"
+            )[:120_000]
+        except OSError:
+            list_html_text = ""
+        if list_html_text:
+            try:
+                if rss_fn(html=list_html_text, base_url="https://example.invalid/"):
+                    sig["rss"] = True
+            except Exception:
+                pass
+            try:
+                if pag_fn(list_html_text, "https://example.invalid/"):
+                    sig["pagination"] = True
+            except Exception:
+                pass
+            try:
+                if plat_fn(list_html_text, "https://example.invalid/"):
+                    sig["platform"] = True
+            except Exception:
+                pass
+    return {"entries": entries_total, "signals": sig}
+
+
+def _compute_har_aggregate(
+    *, budget_seconds: float = 35.0, cache_dir: Path | None = None
+) -> dict:
+    """Walk probe artifacts incrementally to build the funnel stage counts.
+
+    Strategy = **per-slug cache**. Each probe directory's HAR set has a
+    fingerprint of ``[(name, size, mtime_ns), …]``. We keep the previously
+    computed ``entries`` + ``signals`` per slug in ``_har_per_slug.json``.
+    On each call we re-walk the slug list and only re-run the (expensive)
+    signal extractors for slugs whose fingerprint changed since last time —
+    so a brand-new probe arriving on N100 between 10-minute cycles only
+    re-processes that one slug, not the whole 700-HAR set.
+
+    Time budget guard kicks in only when many slugs changed at once.
     """
     pdir = ROOT / "output" / "probe"
     stages = {
@@ -1029,71 +1074,86 @@ def _compute_har_aggregate(*, budget_seconds: float = 35.0) -> dict:
         "strategies_lane_B": {},
         "unmatched_configs": 0,
         "_truncated": False,
+        "_reused_slugs": 0,
+        "_rescanned_slugs": 0,
     }
     if not pdir.exists():
         return stages
     fns = _lazy_extract()
     if fns is None:
         return stages
-    api_fn, _body_fn, rss_fn, pag_fn, plat_fn = fns
 
-    deadline = time.monotonic() + budget_seconds
+    extractor_mt, extractor_ver = _extractor_fingerprint()
+    cache_root = cache_dir if cache_dir is not None else (ROOT / "output" / "site")
+    per_slug_cache_path = cache_root / "_har_per_slug.json"
+    prior: dict = {}
+    if per_slug_cache_path.exists():
+        cached_blob = load_json(per_slug_cache_path)
+        # Extractor change forces a full re-scan.
+        if (
+            cached_blob.get("extractor_version") == extractor_ver
+            and cached_blob.get("extractor_mtime_ns") == extractor_mt
+        ):
+            prior = cached_blob.get("per_slug") or {}
+
+    new_per_slug: dict[str, dict] = {}
     har_signal_slugs: dict[str, bool] = {}
+    deadline = time.monotonic() + budget_seconds
+
     for run_dir in sorted(pdir.iterdir()):
-        if time.monotonic() > deadline:
-            stages["_truncated"] = True
-            break
         if not run_dir.is_dir():
             continue
         stages["probe_runs"] += 1
-        har_paths = sorted(run_dir.glob("traffic*.har"))
-        if not har_paths:
+        slug = run_dir.name
+        fp = _slug_har_fingerprint(run_dir)
+        if not fp:
             continue
         stages["har_captured"] += 1
-        slug = run_dir.name
-        has_signal = False
 
-        # Cheap entries count + JSON-mime hint that avoids full extractor work.
-        for hp in har_paths:
-            entries = _read_har_entries(hp, cap=2000)
-            stages["entries_total"] += len(entries)
-            if not has_signal:
-                try:
-                    if api_fn(hp):
-                        stages["signals"]["api"] += 1
-                        has_signal = True
-                        break
-                except Exception:
+        # Try cache: if fingerprint unchanged, reuse last record.
+        cached_entry = prior.get(slug)
+        reuse = bool(cached_entry) and cached_entry.get("fp") == fp
+        if reuse:
+            entry_data = cached_entry
+            stages["_reused_slugs"] += 1
+        else:
+            if time.monotonic() > deadline:
+                stages["_truncated"] = True
+                # Preserve old data for slugs we did not rescan in time.
+                if cached_entry:
+                    entry_data = cached_entry
+                else:
+                    new_per_slug[slug] = {"fp": fp, "entries": 0,
+                                           "signals": {"api": False, "rss": False,
+                                                       "pagination": False,
+                                                       "platform": False,
+                                                       "article_body": False}}
                     continue
+            else:
+                scanned = _scan_slug_signals(run_dir, fns)
+                entry_data = {"fp": fp, **scanned}
+                stages["_rescanned_slugs"] += 1
+        new_per_slug[slug] = entry_data
+        stages["entries_total"] += int(entry_data.get("entries") or 0)
+        for k, v in (entry_data.get("signals") or {}).items():
+            if v and k in stages["signals"]:
+                stages["signals"][k] += 1
+        har_signal_slugs[slug] = any((entry_data.get("signals") or {}).values())
 
-        list_html_path = run_dir / "list.html"
-        if list_html_path.exists():
-            try:
-                list_html_text = list_html_path.read_text(
-                    encoding="utf-8", errors="replace"
-                )[:120_000]
-            except OSError:
-                list_html_text = ""
-            if list_html_text:
-                try:
-                    if rss_fn(html=list_html_text, base_url="https://example.invalid/"):
-                        stages["signals"]["rss"] += 1
-                        has_signal = True
-                except Exception:
-                    pass
-                try:
-                    if pag_fn(list_html_text, "https://example.invalid/"):
-                        stages["signals"]["pagination"] += 1
-                        has_signal = True
-                except Exception:
-                    pass
-                try:
-                    if plat_fn(list_html_text, "https://example.invalid/"):
-                        stages["signals"]["platform"] += 1
-                        has_signal = True
-                except Exception:
-                    pass
-        har_signal_slugs[slug] = has_signal
+    # Persist per-slug cache.
+    try:
+        cache_root.mkdir(parents=True, exist_ok=True)
+        blob = {
+            "computed_at": datetime.now(KST).isoformat(),
+            "extractor_version": extractor_ver,
+            "extractor_mtime_ns": extractor_mt,
+            "per_slug": new_per_slug,
+        }
+        tmp = per_slug_cache_path.with_suffix(per_slug_cache_path.suffix + ".tmp")
+        tmp.write_text(json.dumps(blob), encoding="utf-8")
+        os.replace(tmp, per_slug_cache_path)
+    except OSError:
+        pass
 
     cfg_dir = ROOT / "configs"
     if cfg_dir.exists():
@@ -1115,36 +1175,15 @@ def _compute_har_aggregate(*, budget_seconds: float = 35.0) -> dict:
 
 
 def read_har_aggregate(*, cache_dir: Path | None = None) -> dict:
-    """Return funnel stage counts. Cached at output/site/_har_aggregate.json
-    with content-key invalidation (har_count, sum_size, max_mtime, extractor mtime).
+    """Return funnel stage counts. Cache lives in ``_har_per_slug.json`` (per
+    probe directory) so new HARs only force a rescan of *their own* slug. The
+    aggregate is rebuilt every call but the per-slug work is incremental.
     """
-    cache_root = cache_dir if cache_dir is not None else (ROOT / "output" / "site")
-    cache_path = cache_root / "_har_aggregate.json"
-    current_key = _har_set_key()
-    if cache_path.exists():
-        cached = load_json(cache_path)
-        if cached.get("key") == current_key:
-            try:
-                computed = datetime.fromisoformat(cached.get("computed_at", ""))
-                age_days = (datetime.now(KST) - computed).total_seconds() / 86400
-                if age_days < 7:
-                    return cached
-            except (TypeError, ValueError):
-                pass
-    aggregate = _compute_har_aggregate()
-    payload = {
-        "key": current_key,
+    aggregate = _compute_har_aggregate(cache_dir=cache_dir)
+    return {
         "computed_at": datetime.now(KST).isoformat(),
         "stages": aggregate,
     }
-    try:
-        cache_root.mkdir(parents=True, exist_ok=True)
-        tmp = cache_path.with_suffix(cache_path.suffix + ".tmp")
-        tmp.write_text(json.dumps(payload), encoding="utf-8")
-        os.replace(tmp, cache_path)
-    except OSError:
-        pass
-    return payload
 
 
 def _entry_first_get(entries: list[dict]) -> dict:
