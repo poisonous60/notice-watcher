@@ -113,11 +113,13 @@ def run() -> list[tuple[str, bool, str]]:
     cases.append((
         "render_explains_agentic_flow",
         "probeAgentPicker" in html
-        and "Files staged for the model" in html
+        and "Model input packet" in html
+        and "packet-input-table" in html
+        and "data-tip-html" in html
         and "candidate.json" in html
         and "open raw packet" in html
         and "probe-agent-panel-0" in html
-        and "har-signal-list" in html
+        and "har-signal-table" in html
         and "Published config summary" in html,
         html[:500],
     ))

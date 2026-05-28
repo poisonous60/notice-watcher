@@ -2248,24 +2248,33 @@ def _render_har_detail_panel(panel: dict, *, hidden: bool) -> str:
             "meta": "list_candidates.json not stored for this probe.",
             "evidence": "—",
         })
-    body = '<div class="har-signal-list" aria-label="HAR signals">'
+    body = (
+        '<div class="packet-scroll har-signal-scroll">'
+        '<table class="har-signal-table"><thead>'
+        '<tr><th>key</th><th>type</th><th>count</th><th>preview</th></tr>'
+        '</thead><tbody>'
+    )
     for item in signal_rows:
         empty_cls = " sig-empty" if "sig-empty" in str(item.get("badge_class")) else ""
-        body += (
-            f'<article class="har-signal-row{empty_cls}">'
-            '<div class="har-signal-kind">'
-            f'<span class="sig-badge {esc(item["badge_class"])}">{esc(item["badge"])}</span>'
-            f'<code>{esc(item.get("host") or "—")}</code>'
-            '</div>'
-            '<div class="har-signal-copy">'
-            '<div><span>Meta</span>'
-            f'<p>{esc(item.get("meta") or "")}</p></div>'
-            '<div><span>Evidence</span>'
-            f'<p class="muted">{esc(item.get("evidence") or "")}</p></div>'
-            '</div>'
-            '</article>'
+        meta = str(item.get("meta") or "")
+        evidence = str(item.get("evidence") or "")
+        preview = " · ".join(x for x in (meta, evidence) if x and x != "—") or "—"
+        tip_html = (
+            f'<div class="packet-pop-row"><b>host</b><code>{esc(item.get("host") or "—")}</code></div>'
+            f'<div class="packet-pop-row"><b>meta</b>{esc(meta or "—")}</div>'
+            f'<div class="packet-pop-row"><b>evidence</b>{esc(evidence or "—")}</div>'
         )
-    body += "</div>"
+        body += (
+            f'<tr class="har-signal-row{empty_cls}" tabindex="0" data-tip-html="{esc(tip_html)}">'
+            '<td class="har-signal-key">'
+            f'<span class="sig-badge {esc(item["badge_class"])}">{esc(item["badge"])}</span>'
+            '</td>'
+            f'<td><code>{esc(item.get("host") or "—")}</code></td>'
+            f'<td>{esc(item.get("type") or "—")}</td>'
+            f'<td><small>{esc(_short_text(preview, 180))}</small></td>'
+            '</tr>'
+        )
+    body += "</tbody></table></div>"
     raw_pre = json.dumps(raw_dump, ensure_ascii=False, indent=2) if raw_dump else "(empty)"
     raw_block = (
         '<div class="overlay-action-row">'
@@ -2343,15 +2352,13 @@ def _render_agentic_packet_panel(panel: dict, *, hidden: bool) -> str:
     hidden_attr = " hidden" if hidden else ""
     panel_id = panel.get("agentic_panel_id") or str(panel.get("panel_id") or "agentic-panel-0").replace("har-", "agentic-")
     flow_html = "".join(
-        '<li>'
+        f'<li tabindex="0" data-tip-html="{esc(body)}">'
         f'<span class="packet-step-num">{esc(n)}</span>'
-        '<div>'
         f'<strong>{esc(title)}</strong>'
-        f'<p>{esc(body)}</p>'
-        '</div></li>'
+        '</li>'
         for n, title, body in (packet.get("flow") or [])
     )
-    artifact_rows = ""
+    input_rows = ""
     for item in packet.get("artifacts") or []:
         preview = str(item.get("preview") or "")
         overlay_text = (
@@ -2360,18 +2367,22 @@ def _render_agentic_packet_panel(panel: dict, *, hidden: bool) -> str:
             f"WHY IT MATTERS\n{item.get('why') or ''}\n\n"
             f"RAW / PREVIEW\n{preview}"
         )
-        artifact_rows += (
-            "<tr>"
-            f'<td><code>{esc(item.get("name") or item.get("path") or "")}</code></td>'
-            f'<td>{esc(item.get("role") or "")}</td>'
-            f'<td>{esc(item.get("why") or "")}</td>'
-            f'<td>{overlay_button(str(item.get("path") or "probe artifact"), overlay_text, label="view")}</td>'
+        key = str(item.get("name") or item.get("path") or "")
+        tip_html = (
+            f'<div class="packet-pop-row"><b>path</b><code>{esc(item.get("path") or "")}</code></div>'
+            f'<div class="packet-pop-row"><b>contains</b>{esc(item.get("role") or "")}</div>'
+            f'<div class="packet-pop-row"><b>used for</b>{esc(item.get("why") or "")}</div>'
+        )
+        input_rows += (
+            f'<tr class="packet-input-row" tabindex="0" data-tip-html="{esc(tip_html)}">'
+            '<td class="packet-key-cell">'
+            f'{overlay_button(str(item.get("path") or "probe artifact"), overlay_text, label=key)}'
+            '</td>'
+            '<td><span class="badge">probe</span></td>'
+            f'<td>{esc(str(item.get("size")) + " bytes" if item.get("size") else "—")}</td>'
+            f'<td><small>{esc(_short_text(preview, 180))}</small></td>'
             "</tr>"
         )
-    if not artifact_rows:
-        artifact_rows = '<tr><td colspan="4">No probe artifact selected.</td></tr>'
-
-    file_rows = ""
     for f in packet.get("files") or []:
         contains_text = ", ".join(str(x) for x in (f.get("contains") or []))
         overlay_text = (
@@ -2382,17 +2393,24 @@ def _render_agentic_packet_panel(panel: dict, *, hidden: bool) -> str:
             f"IMPORTANT SUBFIELDS\n{contains_text}\n\n"
             f"RAW / PREVIEW\n{f.get('preview') or ''}"
         )
-        file_rows += (
-            "<tr>"
+        preview = str(f.get("preview") or "")
+        tip_html = (
+            f'<div class="packet-pop-row"><b>source</b><code>{esc(f.get("source") or "")}</code></div>'
+            f'<div class="packet-pop-row"><b>contains</b>{esc(f.get("role") or "")}</div>'
+            f'<div class="packet-pop-row"><b>subfields</b>{esc(contains_text or "—")}</div>'
+        )
+        input_rows += (
+            f'<tr class="packet-input-row" tabindex="0" data-tip-html="{esc(tip_html)}">'
+            '<td class="packet-key-cell">'
+            f'{overlay_button(str(f.get("path") or "staged file"), overlay_text, label=str(f.get("path") or ""))}'
+            '</td>'
             f'<td><span class="packet-phase">{esc(f.get("phase") or "")}</span></td>'
-            f'<td><code>{esc(f.get("path") or "")}</code></td>'
-            f'<td>{esc(f.get("role") or "")}</td>'
-            f'<td><small>{esc(contains_text)}</small></td>'
-            f'<td>{overlay_button(str(f.get("path") or "staged file"), overlay_text, label="view")}</td>'
+            f'<td>{esc(len(f.get("contains") or []))}</td>'
+            f'<td><small>{esc(_short_text(preview, 180))}</small></td>'
             "</tr>"
         )
-    if not file_rows:
-        file_rows = '<tr><td colspan="5">No agentic packet available for this probe.</td></tr>'
+    if not input_rows:
+        input_rows = '<tr><td colspan="4">No probe artifact or agentic packet available for this probe.</td></tr>'
 
     result = packet.get("result") or {}
     result_preview = str(result.get("preview") or "")
@@ -2415,16 +2433,11 @@ def _render_agentic_packet_panel(panel: dict, *, hidden: bool) -> str:
         f'{flow_html}'
         '</ol>'
         '<section class="packet-subsection">'
-        '<h4>Probe outputs for this URL</h4>'
-        '<p class="packet-help">These files are the source material. The digest condenses them before Codex sees the task.</p>'
-        '<table class="packet-field-table"><thead><tr><th>field / file</th><th>contains</th><th>used for</th><th>details</th></tr></thead>'
-        f'<tbody>{artifact_rows}</tbody></table>'
-        '</section>'
-        '<section class="packet-subsection">'
-        '<h4>Files staged for the model</h4>'
-        '<p class="packet-help">Each row shows the staged field/file, the kind of content it carries, and the important subfields. Use details for the full-screen explanation and raw text.</p>'
-        '<table class="packet-field-table"><thead><tr><th>stage</th><th>field / file</th><th>contains</th><th>important subfields</th><th>details</th></tr></thead>'
-        f'<tbody>{file_rows}</tbody></table>'
+        '<h4>Model input packet</h4>'
+        '<p class="packet-help">Probe outputs and staged model files in dashboard-style rows. Hover a row for field meaning; click the key for the full raw view.</p>'
+        '<div class="packet-scroll packet-input-scroll">'
+        '<table class="packet-field-table packet-input-table"><thead><tr><th>key</th><th>type</th><th>count</th><th>preview</th></tr></thead>'
+        f'<tbody>{input_rows}</tbody></table></div>'
         '</section>'
         '<section class="packet-subsection packet-raw">'
         '<h4>Raw text view</h4>'
@@ -3146,50 +3159,45 @@ def render_html(
     }}
     .har-section-table td {{ padding: 6px 8px; vertical-align: top; border-bottom: 1px solid var(--line); }}
     .har-section-table td.mono {{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; word-break: break-all; }}
-    .har-signal-list {{
-      border: 1px solid var(--line);
-      border-radius: 5px;
-      background: var(--panel);
-      overflow: hidden;
+    .har-signal-table {{
+      width: 100%;
+      border-collapse: collapse;
       font-size: 0.88rem;
+      table-layout: fixed;
     }}
-    .har-signal-row {{
-      display: grid;
-      grid-template-columns: minmax(180px, 0.32fr) minmax(0, 1fr);
-      gap: 14px;
-      padding: 10px 12px;
+    .har-signal-table th,
+    .har-signal-table td {{
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      vertical-align: middle;
+      padding: 5px 8px;
       border-bottom: 1px solid var(--line);
     }}
-    .har-signal-row:last-child {{ border-bottom: 0; }}
-    .har-signal-kind {{
-      display: flex;
-      align-items: flex-start;
-      gap: 8px;
-      flex-wrap: wrap;
-      min-width: 0;
+    .har-signal-table th {{
+      text-align: left;
+      color: var(--muted);
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
     }}
-    .har-signal-kind code {{
+    .har-signal-table th:nth-child(1) {{ width: 22%; }}
+    .har-signal-table th:nth-child(2) {{ width: 28%; }}
+    .har-signal-table th:nth-child(3) {{ width: 12%; }}
+    .har-signal-table th:nth-child(4) {{ width: 38%; }}
+    .har-signal-key {{
+      position: relative;
+      overflow: visible !important;
+    }}
+    .har-signal-table code {{
       font-size: 0.78rem;
       overflow-wrap: anywhere;
     }}
-    .har-signal-copy {{
-      display: grid;
-      grid-template-columns: minmax(0, 0.45fr) minmax(0, 0.55fr);
-      gap: 16px;
-      min-width: 0;
-    }}
-    .har-signal-copy span {{
+    .har-signal-table small {{
       display: block;
-      color: var(--muted);
-      text-transform: uppercase;
-      font-size: 0.7rem;
-      letter-spacing: 0.08em;
-      margin-bottom: 3px;
-    }}
-    .har-signal-copy p {{
-      margin: 0;
-      line-height: 1.48;
-      overflow-wrap: anywhere;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }}
     .badge {{
       display: inline-block;
@@ -3240,38 +3248,40 @@ def render_html(
     }}
     .har-section-more {{ margin: 6px 0 0; font-size: 0.78rem; }}
     .packet-flow {{
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 10px;
+      display: block;
       list-style: none;
       padding: 0;
       margin: 4px 0 18px;
-    }}
-    .packet-flow li {{
-      background: var(--paper);
       border: 1px solid var(--line);
       border-radius: 5px;
-      padding: 10px;
+      background: var(--panel);
+    }}
+    .packet-flow li {{
+      position: relative;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 10px;
+      border-bottom: 1px solid var(--line);
+      min-height: 30px;
       min-width: 0;
     }}
+    .packet-flow li:last-child {{ border-bottom: 0; }}
+    .packet-flow li:hover {{ background: var(--paper); }}
     .packet-step-num {{
-      display: inline-block;
+      flex: 0 0 auto;
       color: var(--accent);
       font: 700 0.8rem Georgia, "Times New Roman", serif;
-      margin-bottom: 6px;
     }}
     .packet-flow strong {{
-      display: block;
+      min-width: 0;
       color: var(--ink);
       font-size: 0.92rem;
-      margin-bottom: 4px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }}
-    .packet-flow p {{
-      color: var(--muted);
-      font-size: 0.78rem;
-      line-height: 1.35;
-      margin: 0;
-    }}
+    .packet-flow li:focus {{ outline: 1px solid var(--accent); outline-offset: -1px; }}
     .packet-subsection {{
       border-top: 1px solid var(--line);
       padding-top: 14px;
@@ -3305,9 +3315,85 @@ def render_html(
       overflow-wrap: anywhere;
       word-break: normal;
     }}
-    .packet-field-table th:last-child,
-    .packet-field-table td:last-child {{
-      width: 86px;
+    .packet-scroll {{
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      overflow: auto;
+      background: var(--panel);
+    }}
+    .har-signal-scroll {{ max-height: 390px; }}
+    .packet-input-scroll {{ max-height: 430px; }}
+    .packet-scroll table {{
+      border: 0;
+    }}
+    .packet-scroll th {{
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: var(--panel);
+    }}
+    tr[data-tip-html]:focus {{ outline: 1px solid var(--accent); outline-offset: -1px; }}
+    .packet-input-table th,
+    .packet-input-table td {{
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      vertical-align: middle;
+      padding-top: 5px;
+      padding-bottom: 5px;
+    }}
+    .packet-input-table th:nth-child(1) {{ width: 34%; }}
+    .packet-input-table th:nth-child(2) {{ width: 12%; }}
+    .packet-input-table th:nth-child(3) {{ width: 10%; }}
+    .packet-input-table th:nth-child(4) {{ width: 44%; }}
+    .packet-key-cell {{
+      position: relative;
+      overflow: visible !important;
+    }}
+    .packet-key-cell .overlay-open {{
+      display: block;
+      width: 100%;
+      border: 0;
+      background: transparent;
+      color: var(--accent);
+      padding: 0;
+      text-align: left;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-weight: 500;
+    }}
+    .packet-key-cell .overlay-open:hover {{ background: transparent; text-decoration: underline; }}
+    .packet-hover-tip {{
+      position: fixed;
+      z-index: 900;
+      pointer-events: none;
+      min-width: 420px;
+      max-width: 760px;
+      padding: 8px 10px;
+      background: var(--ink);
+      color: var(--panel);
+      border-radius: 5px;
+      box-shadow: 0 10px 28px rgba(0,0,0,0.22);
+      font-size: 0.82rem;
+      line-height: 1.45;
+      word-break: break-word;
+    }}
+    .packet-hover-tip[hidden] {{ display: none; }}
+    .packet-hover-tip code {{ color: var(--panel); }}
+    .packet-hover-tip b {{ color: #d7e2e4; }}
+    .packet-hover-tip .packet-pop-row {{ margin: 2px 0; }}
+    .packet-hover-tip .packet-pop-row b {{
+      display: inline-block;
+      min-width: 68px;
+      margin-right: 6px;
+    }}
+    .packet-input-table small {{
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }}
     .packet-file-grid {{
       display: grid;
@@ -3476,8 +3562,6 @@ def render_html(
       .metrics {{ grid-template-columns: 1fr 1fr; }}
       .packet-flow {{ grid-template-columns: 1fr; }}
       .packet-file-grid {{ grid-template-columns: 1fr; }}
-      .har-signal-row,
-      .har-signal-copy {{ grid-template-columns: 1fr; }}
       table {{ display: block; overflow-x: auto; }}
     }}
     @media (max-width: 480px) {{
@@ -3772,6 +3856,7 @@ def render_html(
         <div id="contentOverlayBody" class="content-overlay-body"></div>
       </div>
     </div>
+    <div id="packetHoverTip" class="packet-hover-tip" hidden></div>
     <script>
       (function () {{
         var funnel = document.getElementById('harFunnel');
@@ -3814,6 +3899,48 @@ def render_html(
         var overlay = document.getElementById('contentOverlay');
         var overlayTitle = document.getElementById('contentOverlayTitle');
         var overlayBody = document.getElementById('contentOverlayBody');
+        var packetTip = document.getElementById('packetHoverTip');
+        function positionPacketTip(e) {{
+          if (!packetTip || packetTip.hidden) return;
+          var x = e.clientX + 14;
+          var y = e.clientY + 14;
+          var rect = packetTip.getBoundingClientRect();
+          if (x + rect.width > window.innerWidth - 12) x = Math.max(12, e.clientX - rect.width - 14);
+          if (y + rect.height > window.innerHeight - 12) y = Math.max(12, e.clientY - rect.height - 14);
+          packetTip.style.left = x + 'px';
+          packetTip.style.top = y + 'px';
+        }}
+        function showPacketTip(el, e) {{
+          if (!packetTip || !el) return;
+          var html = el.getAttribute('data-tip-html') || '';
+          if (!html) return;
+          packetTip.innerHTML = html;
+          packetTip.hidden = false;
+          positionPacketTip(e);
+        }}
+        function hidePacketTip() {{
+          if (packetTip) packetTip.hidden = true;
+        }}
+        document.addEventListener('mouseover', function (e) {{
+          var el = e.target.closest ? e.target.closest('[data-tip-html]') : null;
+          if (el) showPacketTip(el, e);
+        }});
+        document.addEventListener('mousemove', function (e) {{
+          positionPacketTip(e);
+        }});
+        document.addEventListener('mouseout', function (e) {{
+          var el = e.target.closest ? e.target.closest('[data-tip-html]') : null;
+          if (el && (!e.relatedTarget || !el.contains(e.relatedTarget))) hidePacketTip();
+        }});
+        document.addEventListener('focusin', function (e) {{
+          var el = e.target.closest ? e.target.closest('[data-tip-html]') : null;
+          if (!el || !packetTip) return;
+          packetTip.innerHTML = el.getAttribute('data-tip-html') || '';
+          packetTip.hidden = false;
+          var r = el.getBoundingClientRect();
+          positionPacketTip({{ clientX: r.left, clientY: r.bottom }});
+        }});
+        document.addEventListener('focusout', hidePacketTip);
         function closeOverlay() {{
           if (!overlay) return;
           overlay.hidden = true;
