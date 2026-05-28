@@ -1355,6 +1355,112 @@ def svg_watch_icicle(tree: dict, *, width: int = 920, row_h: int = 56,
 
 
 # ────────────────────────────────────────────────────────────────────────────
+# Figure 3b — legacy probe + register decide funnel (TEMP, to be removed once
+# the icicle absorbs probe/register internal stage detail). Drives `PROBE_PIPELINE`.
+# ────────────────────────────────────────────────────────────────────────────
+
+
+def svg_har_funnel() -> str:
+    """Legacy 5-step probe + register-decide funnel — kept as Figure 3b
+    while the new icicle is still missing per-stage probe/register detail."""
+    width = 920
+    height = 170
+    margin_x = 28
+    n = len(PROBE_PIPELINE)
+    col_w = (width - 2 * margin_x) / n
+    box_w = col_w - 16
+    box_h = 110
+    y_mid = height / 2
+
+    boxes: list[str] = []
+    arrows: list[str] = []
+    last_right = None
+    for i, stage in enumerate(PROBE_PIPELINE):
+        cx_box = margin_x + i * col_w + (col_w - box_w) / 2
+        by = y_mid - box_h / 2
+        active = " active" if i == 0 else ""
+        boxes.append(
+            f'<g class="funnel-stage{active}" data-stage-id="{esc(stage["id"])}" '
+            f'tabindex="0" role="button" '
+            f'aria-controls="har-panel-{esc(stage["id"])}" '
+            f'aria-expanded="{"true" if i == 0 else "false"}" '
+            f'aria-label="Stage {i + 1}: {esc(stage["title"])} — click to see files">'
+            f'<rect x="{cx_box:.1f}" y="{by:.1f}" width="{box_w:.1f}" height="{box_h}" '
+            f'rx="8" ry="8" class="funnel-box"></rect>'
+            f'<text class="funnel-step" x="{cx_box + box_w / 2:.1f}" y="{by + 22:.0f}" '
+            f'text-anchor="middle">Step {i + 1}</text>'
+            f'<text class="funnel-label" x="{cx_box + box_w / 2:.1f}" y="{by + 50:.0f}" '
+            f'text-anchor="middle">{esc(stage["title"])}</text>'
+            f'<text class="funnel-tagline" x="{cx_box + box_w / 2:.1f}" y="{by + 78:.0f}" '
+            f'text-anchor="middle">{esc(stage["tagline"])}</text>'
+            f"</g>"
+        )
+        if last_right is not None:
+            arrows.append(
+                f'<line class="funnel-arrow" x1="{last_right:.1f}" y1="{y_mid:.0f}" '
+                f'x2="{cx_box:.1f}" y2="{y_mid:.0f}" '
+                f'marker-end="url(#funnel-arrow-head)"></line>'
+            )
+        last_right = cx_box + box_w
+
+    arrow_marker = (
+        '<defs><marker id="funnel-arrow-head" viewBox="0 0 10 10" refX="9" refY="5" '
+        'markerWidth="6" markerHeight="6" orient="auto-start-reverse">'
+        '<path d="M0,0 L10,5 L0,10 z" fill="currentColor"></path>'
+        "</marker></defs>"
+    )
+
+    return (
+        f'<svg id="harFunnel" viewBox="0 0 {width} {height}" role="img" '
+        f'aria-label="Probe pipeline — 5 stages, click any stage for files">'
+        f'<rect class="scatter-bg" x="0" y="0" width="{width}" height="{height}"></rect>'
+        + arrow_marker
+        + "".join(arrows)
+        + "".join(boxes)
+        + "</svg>"
+    )
+
+
+def render_stage_flow_html(stage: dict) -> str:
+    steps = stage["steps"] or []
+    if not steps:
+        return '<p class="muted">No file steps recorded for this stage.</p>'
+    items = []
+    for i, (file_path, fn, role) in enumerate(steps):
+        items.append(
+            '<li class="step-row">'
+            f'<span class="step-num">{esc(i + 1)}</span>'
+            '<div class="step-body">'
+            f'<code class="step-file">{esc(file_path)}</code>'
+            '<span class="step-sep">&rarr;</span>'
+            f'<code class="step-fn">{esc(fn)}</code>'
+            f'<p class="step-role">{esc(role)}</p>'
+            '</div>'
+            "</li>"
+        )
+    return f'<ol class="stage-flow">{"".join(items)}</ol>'
+
+
+def render_stage_panels() -> str:
+    parts: list[str] = []
+    for i, stage in enumerate(PROBE_PIPELINE):
+        hidden_attr = "" if i == 0 else " hidden"
+        parts.append(
+            f'<section class="stage-panel" id="har-panel-{esc(stage["id"])}" '
+            f'data-stage-id="{esc(stage["id"])}"'
+            f'{hidden_attr} aria-labelledby="har-panel-{esc(stage["id"])}-title">'
+            f'<header class="stage-panel-head">'
+            f'<span class="stage-panel-num">Step {esc(i + 1)}</span>'
+            f'<h3 id="har-panel-{esc(stage["id"])}-title">{esc(stage["title"])}</h3>'
+            f'<p class="stage-panel-summary">{esc(stage["summary"])}</p>'
+            f"</header>"
+            f'{render_stage_flow_html(stage)}'
+            f"</section>"
+        )
+    return "".join(parts)
+
+
+# ────────────────────────────────────────────────────────────────────────────
 # Figure 4 — live HAR detail for one auto-selected probe (dashboard parity)
 # ────────────────────────────────────────────────────────────────────────────
 
@@ -3059,6 +3165,8 @@ def render_html(
     ) or '<li><button type="button" class="legend-toggle" disabled>No case history</button></li>'
 
     watch_icicle_svg = svg_watch_icicle(WATCH_CALL_TREE)
+    har_funnel_svg = svg_har_funnel()
+    har_stage_panels_html = render_stage_panels()
     probe_agentic_html = render_probe_agentic_html(har_detail)
 
     recent_rows = []
@@ -3482,6 +3590,49 @@ def render_html(
     .lane-swatch.lane-bot {{ background: #3d737f; }}
     .lane-swatch.lane-worker {{ background: #6f7f52; }}
     .lane-swatch.lane-subprocess {{ background: #8a6f4d; }}
+    /* Figure 3b — legacy probe + register decide funnel (TEMP, paired with icicle) */
+    .funnel-stage {{ cursor: pointer; color: var(--accent-2); }}
+    .funnel-stage:focus {{ outline: none; }}
+    .funnel-stage:focus-visible .funnel-box {{
+      outline: 2px solid var(--accent);
+      outline-offset: 3px;
+    }}
+    .funnel-box {{ fill: var(--panel); stroke: var(--accent); stroke-width: 1.2; transition: fill 100ms, stroke-width 100ms; }}
+    .funnel-stage:hover .funnel-box {{ fill: #eaf1f2; }}
+    .funnel-stage.active .funnel-box {{ fill: #d6e6e9; stroke-width: 2.4; }}
+    .funnel-step {{ fill: var(--muted); font: 600 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 0.08em; text-transform: uppercase; }}
+    .funnel-label {{ fill: var(--ink); font: 600 15px Georgia, "Times New Roman", serif; }}
+    .funnel-tagline {{ fill: var(--muted); font: italic 12px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
+    .funnel-arrow {{ stroke: var(--accent-2); stroke-width: 1.8; color: var(--accent-2); }}
+    .stage-panels {{ margin: 18px 0 6px; }}
+    .stage-panel {{
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 16px 18px 14px;
+      margin: 0 0 14px;
+    }}
+    .stage-panel-head {{ display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin: 0 0 12px; }}
+    .stage-panel-head h3 {{ margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 1.15rem; }}
+    .stage-panel-num {{
+      display: inline-block;
+      padding: 2px 9px;
+      background: var(--paper);
+      border-radius: 10px;
+      color: var(--accent);
+      font: 600 0.76rem -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }}
+    .stage-panel-summary {{ flex-basis: 100%; margin: 4px 0 0; color: var(--muted); font-size: 0.94rem; }}
+    .stage-flow {{ border-left: 1px solid var(--line); padding: 0 0 0 18px; margin: 0; list-style: none; }}
+    .step-row {{ display: flex; gap: 12px; margin: 0 0 14px; }}
+    .step-num {{ width: 24px; height: 24px; margin-left: -31px; border-radius: 50%; background: var(--panel); border: 1px solid var(--accent); text-align: center; line-height: 22px; font: 700 0.9rem Georgia, "Times New Roman", serif; color: var(--accent); flex: 0 0 24px; }}
+    .step-body {{ min-width: 0; flex: 1; }}
+    .step-file {{ display: inline; font: 600 0.82rem ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--ink); word-break: break-all; overflow-wrap: anywhere; }}
+    .step-sep {{ color: var(--muted); margin: 0 6px; }}
+    .step-fn {{ display: inline; font: 0.78rem ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--accent); word-break: break-all; overflow-wrap: anywhere; }}
+    .step-role {{ margin: 4px 0 0; font-size: 0.8rem; color: var(--muted); line-height: 1.4; }}
     /* Scoped section-gap tokens (codex v4 review §8 — global selector over-fires). */
     main > section + section {{ margin-top: var(--section-gap, 36px); }}
     #figures figure + figure {{ margin-top: var(--subsection-gap, 22px); }}
@@ -4332,6 +4483,16 @@ def render_html(
         Lane transitions mark async hand-off (bot &rarr; worker) and OS subprocess spawn (worker &rarr; register).
         On mobile, swipe horizontally if boxes get tight.</figcaption>
     </figure>
+    <figure id="harPipelineLegacy">
+      {har_funnel_svg}
+      <figcaption>Figure 3b (temporary). Probe + register-decide pipeline &mdash;
+        the 5-stage funnel that the icicle has not yet absorbed. Click any stage
+        to expand the file-flow detail below. This figure will be folded into
+        the icicle once it expresses the per-stage probe/register order inline.</figcaption>
+    </figure>
+    <div class="stage-panels" id="harStagePanels">
+      {har_stage_panels_html}
+    </div>
     <figure id="probeAgenticFigure">
       <h3>Figure 4. From probe artifacts to the agentic config packet</h3>
       <p class="figure-lead">Pick a URL example to read the full path in one place:
@@ -4358,6 +4519,33 @@ def render_html(
     <div id="packetHoverTip" class="packet-hover-tip" hidden></div>
     <script>
       (function () {{
+        var funnel = document.getElementById('harFunnel');
+        var panels = document.getElementById('harStagePanels');
+        if (funnel && panels) {{
+          function setActive(stageId) {{
+            funnel.querySelectorAll('.funnel-stage').forEach(function (g) {{
+              var match = g.getAttribute('data-stage-id') === stageId;
+              g.classList.toggle('active', match);
+              g.setAttribute('aria-expanded', match ? 'true' : 'false');
+            }});
+            panels.querySelectorAll('.stage-panel').forEach(function (p) {{
+              var match = p.getAttribute('data-stage-id') === stageId;
+              p.hidden = !match;
+            }});
+          }}
+          funnel.addEventListener('click', function (e) {{
+            var g = e.target.closest ? e.target.closest('.funnel-stage') : null;
+            if (!g) return;
+            setActive(g.getAttribute('data-stage-id') || '');
+          }});
+          funnel.addEventListener('keydown', function (e) {{
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            var g = e.target.closest ? e.target.closest('.funnel-stage') : null;
+            if (!g) return;
+            e.preventDefault();
+            setActive(g.getAttribute('data-stage-id') || '');
+          }});
+        }}
         var probeAgentPicker = document.getElementById('probeAgentPicker');
         var probeAgentSearch = document.getElementById('probeAgentSearch');
         var probeAgentOpenUrl = document.getElementById('probeAgentOpenUrl');
