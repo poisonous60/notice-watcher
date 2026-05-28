@@ -201,6 +201,12 @@ _ARTIFACTS: dict[str, ArtifactContract] = {
                                 "detect_wordpress_platform 산출. None=WordPress 아님. dict={is_wordpress, api_base, posts_endpoint}. "
                                 "scripts/register.py 가 is_wordpress=true 면 LLM 호출 *전* `engine/recognizers/wordpress.build_config` 로 "
                                 "`<api_base>/wp/v2/<post_type>` httpx_json config 등록을 시도한다."),
+            _ContractField("storyblok_platform", type_hint="dict|null", required=False,
+                           note="Storyblok/Nuxt marker(`storyblok__outline`, `data-blok-c`, Storyblok news-card signature) — "
+                                "detect_storyblok_platform 산출. None=Storyblok all-stories 후보 아님. "
+                                "dict={is_storyblok, base_url, story_data_url, board}. scripts/register.py 가 is_storyblok=true 면 "
+                                "LLM 호출 전 `engine/recognizers/storyblok.build_config` + StoryblokAllStoriesAdapter 로 "
+                                "`/story-data/all-stories.json` 등록을 시도한다. API 빈/404/차단이면 일반 파이프라인 폴백."),
             _ContractField("discourse_platform", type_hint="dict|null", required=False,
                            note="정적 HTML 의 `<meta name=generator content=Discourse>` 로 Discourse 포럼 판정 — detect_discourse_platform 산출. "
                                 "None=Discourse 아님. dict={is_discourse, base_url, version}. "

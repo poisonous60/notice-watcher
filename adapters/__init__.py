@@ -12,6 +12,7 @@ from .discourse import DiscourseAdapter
 from .commonwealth import CommonwealthAdapter
 from .lemmy import LemmyAdapter
 from .peertube import PeerTubeAdapter
+from .storyblok import StoryblokAllStoriesAdapter
 from .google_news_rss import GoogleNewsRssAdapter
 from .google_cloud_release_notes import GoogleCloudReleaseNotesAdapter
 from .posthog_changelog import PostHogChangelogAdapter
@@ -41,6 +42,7 @@ __all__ = [
     "CommonwealthAdapter",
     "LemmyAdapter",
     "PeerTubeAdapter",
+    "StoryblokAllStoriesAdapter",
     "GoogleNewsRssAdapter",
     "GoogleCloudReleaseNotesAdapter",
     "PostHogChangelogAdapter",

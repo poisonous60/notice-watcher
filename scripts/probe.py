@@ -41,6 +41,7 @@ from probe.extract import (
     traffic_api_candidates,
     write_list_candidates,
     detect_wordpress_platform,
+    detect_storyblok_platform,
     detect_discourse_platform,
     detect_common_platform,
     detect_xenforo_platform,
@@ -834,6 +835,7 @@ def _run(args: argparse.Namespace, url: str, slug: str) -> int:
             )
             meta_signals = article_meta_signals(html=page_html or "")
             wordpress_platform = detect_wordpress_platform(html=page_html or "", base_url=url)
+            storyblok_platform = detect_storyblok_platform(html=page_html or "", base_url=url)
             discourse_platform = detect_discourse_platform(html=page_html or "", base_url=url)
             common_platform = detect_common_platform(html=page_html or "", base_url=url)
             xenforo_platform = detect_xenforo_platform(html=page_html or "", base_url=url)
@@ -860,6 +862,7 @@ def _run(args: argparse.Namespace, url: str, slug: str) -> int:
                 nav_only_same_host=nav_only_same_host,
                 article_meta_signals=meta_signals,
                 wordpress_platform=wordpress_platform,
+                storyblok_platform=storyblok_platform,
                 discourse_platform=discourse_platform,
                 common_platform=common_platform,
                 xenforo_platform=xenforo_platform,
