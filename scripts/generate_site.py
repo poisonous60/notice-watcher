@@ -631,33 +631,76 @@ def _fix_layer_bucket(raw) -> str:
     return "no-change"
 
 
-def _read_case_rows_from_db(db_path: Path) -> list[tuple[str, object]]:
-    if not db_path.exists():
-        return []
-    try:
-        con = sqlite3.connect(str(db_path))
-        try:
-            rows = list(
-                con.execute(
-                    "SELECT substr(ts, 1, 10) AS day, fix_layer FROM case_runs ORDER BY ts"
-                )
-            )
-        finally:
-            con.close()
-    except sqlite3.Error:
-        return []
-    return [(str(r[0] or ""), r[1]) for r in rows if r[0]]
+def _safe_class(text: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9_-]", "-", text or "x")
 
 
-def _read_case_rows_from_frontmatter(cases_dir: Path) -> list[tuple[str, object]]:
-    """Fallback when output/cases.sqlite3 absent (N100 has no DB)."""
+def _first_body_paragraph(body: str, *, cap: int = 360) -> str:
+    """Pull the first content paragraph out of a case markdown body.
+
+    Skips headings, code fences, blank lines. Joins wrapped lines back into one
+    paragraph, caps length, no markdown decoration removed beyond simple
+    whitespace normalisation.
+    """
+    paragraphs: list[str] = []
+    cur: list[str] = []
+    in_fence = False
+    for line in body.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+            if cur:
+                paragraphs.append(" ".join(cur))
+                cur = []
+            continue
+        if in_fence:
+            continue
+        if not stripped:
+            if cur:
+                paragraphs.append(" ".join(cur))
+                cur = []
+            continue
+        if stripped.startswith("#") or stripped.startswith("|"):
+            if cur:
+                paragraphs.append(" ".join(cur))
+                cur = []
+            continue
+        cur.append(stripped)
+    if cur:
+        paragraphs.append(" ".join(cur))
+    for p in paragraphs:
+        if p:
+            return p if len(p) <= cap else p[: cap - 1] + "…"
+    return ""
+
+
+def _outcome_class(outcome: str) -> str:
+    """Map outcome to a *texture* class used by Figure 2 — bright = system got
+    smarter (improved), darker = hand patch (handcrafted/single-shot)."""
+    o = (outcome or "").lower()
+    if "improved" in o or "fixed" in o or "recovered" in o:
+        return "improved"
+    if "handcrafted" in o or "registered" == o or o.startswith("registered"):
+        return "handcrafted"
+    if "rejected" in o:
+        return "rejected"
+    return "neutral"
+
+
+def read_case_records() -> list[dict]:
+    """Read every ``docs/cases/*.md`` (including ``_*.md`` batch/bug/chunk files)
+    and return one record per file. Each record has the date, bucket, outcome,
+    status one-liner, slug (for the GitHub md link), URL when present, and the
+    first body paragraph. Sorted oldest→newest.
+    """
+    cases_dir = ROOT / "docs" / "cases"
     if not cases_dir.exists():
         return []
     try:
-        import yaml  # noqa: WPS433 — runtime opt; N100 venv has it via dashboard deps
+        import yaml  # noqa: WPS433 — runtime optional, N100 venv has it
     except ImportError:
         return []
-    out: list[tuple[str, object]] = []
+    out: list[dict] = []
     for path in sorted(cases_dir.glob("*.md")):
         if path.name == "INDEX.md":
             continue
@@ -678,225 +721,191 @@ def _read_case_rows_from_frontmatter(cases_dir: Path) -> list[tuple[str, object]
         date_s = str(date_v) if date_v is not None else ""
         if not date_s or len(date_s) < 10:
             continue
-        out.append((date_s[:10], fm.get("fix_layer")))
+        slug = str(fm.get("slug") or path.stem)
+        fix_raw = fm.get("fix_layer")
+        bucket = _fix_layer_bucket(fix_raw)
+        outcome = str(fm.get("outcome") or "")
+        body = text[m.end():]
+        first_para = _first_body_paragraph(body)
+        out.append({
+            "date": date_s[:10],
+            "slug": slug,
+            "filename": path.name,
+            "bucket": bucket,
+            "outcome": outcome,
+            "outcome_class": _outcome_class(outcome),
+            "status": str(fm.get("status") or ""),
+            "url": str(fm.get("url") or ""),
+            "fix_layer": "+".join(fix_raw) if isinstance(fix_raw, (list, tuple)) else (str(fix_raw) if fix_raw else ""),
+            "first_paragraph": first_para,
+        })
+    out.sort(key=lambda r: (r["date"], r["slug"]))
     return out
 
 
-def read_case_timeline() -> dict:
-    """Build the daily cumulative bucket counts that Figure 2 renders.
+GITHUB_CASES_BASE = "https://github.com/poisonous60/notice-watcher/blob/main/docs/cases/"
+# Sort key inside each day's column so the foundational "engine" lives at the
+# bottom and lighter patches pile on top — visually echoes the user's
+# "engine + scrap welded on" metaphor.
+_BUCKET_STACK_PRIORITY = {"F": 0, "C": 1, "A": 2, "B/D/E": 3, "no-change": 4}
 
-    Tries the dev-box-only `output/cases.sqlite3` first, falls back to parsing
-    `docs/cases/*.md` frontmatter (N100 has docs/ via git). Returns days as a
-    contiguous list filled across missing dates.
+
+def svg_case_blocks(records: list[dict], events: list[tuple[str, str, str]]) -> str:
+    """Block grid Figure 2 — every case is one small square. Days form columns
+    (x = date), cases stack upward within each column. Colour = fix-layer
+    bucket (no-change = light, F = solid teal etc). Each block is clickable to
+    open the case modal. Vertical dashed lines mark pipeline milestones.
     """
-    db_path = ROOT / "output" / "cases.sqlite3"
-    rows = _read_case_rows_from_db(db_path)
-    if not rows:
-        rows = _read_case_rows_from_frontmatter(ROOT / "docs" / "cases")
-    empty = {"days": [], "buckets_cum": {b: [] for b in BUCKET_ORDER}, "totals_per_day": []}
-    if not rows:
-        return empty
-
-    daily: dict[str, Counter] = {}
-    for day, raw in rows:
-        if not day:
-            continue
-        daily.setdefault(day, Counter())[_fix_layer_bucket(raw)] += 1
-
-    days_set = sorted(daily.keys())
-    if not days_set:
-        return empty
-    try:
-        start = _date.fromisoformat(days_set[0])
-        end = _date.fromisoformat(days_set[-1])
-    except ValueError:
-        return empty
-
-    full_days: list[str] = []
-    d = start
-    while d <= end:
-        full_days.append(d.isoformat())
-        d = _date.fromordinal(d.toordinal() + 1)
-
-    cum: dict[str, list[int]] = {b: [] for b in BUCKET_ORDER}
-    totals: list[int] = []
-    running = {b: 0 for b in BUCKET_ORDER}
-    for day in full_days:
-        cnt = daily.get(day, Counter())
-        for b in BUCKET_ORDER:
-            running[b] += cnt.get(b, 0)
-            cum[b].append(running[b])
-        totals.append(sum(running.values()))
-    return {"days": full_days, "buckets_cum": cum, "totals_per_day": totals}
-
-
-def _nice_round_up(n: int) -> int:
-    if n <= 4:
-        return 4
-    p = 10 ** int(math.log10(n))
-    for m in (1, 2, 5, 10):
-        if m * p >= n:
-            return m * p
-    return 10 * p
-
-
-def _safe_class(text: str) -> str:
-    return re.sub(r"[^a-zA-Z0-9_-]", "-", text or "x")
-
-
-def svg_case_timeline(timeline: dict, events: list[tuple[str, str, str]]) -> str:
-    """Two-panel cumulative stacked area. Top = all rows incl. no-change.
-    Bottom = fix-only (no-change excluded) so smaller bands stay readable."""
     width = 920
-    h_top = 240
-    h_mid_gap = 30
-    h_bot = 200
-    bottom_pad = 36
     title_pad = 38
-    height = title_pad + h_top + h_mid_gap + h_bot + bottom_pad
-    cx_left = 56
-    cx_right = width - 24
-    plot_w = cx_right - cx_left
+    axis_pad = 50
+    cx_left = 60
+    cx_right = width - 28
 
-    days = timeline.get("days") or []
-    if not days:
+    if not records:
+        height = 200
         return (
             f'<svg id="caseTimeline" viewBox="0 0 {width} {height}" role="img" '
-            f'aria-label="Case accumulation timeline">'
+            f'aria-label="Case block grid">'
             f'<rect class="scatter-bg" x="0" y="0" width="{width}" height="{height}"></rect>'
             f'<text class="svg-label" x="{width / 2:.0f}" y="{height / 2:.0f}" '
             f'text-anchor="middle">No case history available on this host yet</text>'
             f"</svg>"
         )
 
-    buckets_cum = timeline["buckets_cum"]
-    totals = timeline["totals_per_day"]
-    n = len(days)
+    days_sorted = sorted({r["date"] for r in records})
+    start = _date.fromisoformat(days_sorted[0])
+    end = _date.fromisoformat(days_sorted[-1])
+    all_days: list[str] = []
+    d = start
+    while d <= end:
+        all_days.append(d.isoformat())
+        d = _date.fromordinal(d.toordinal() + 1)
+    n_days = len(all_days)
+    day_to_idx = {d: i for i, d in enumerate(all_days)}
 
-    def x_of(i: int) -> float:
-        if n <= 1:
-            return cx_left
-        return cx_left + (i * plot_w) / (n - 1)
+    plot_w = cx_right - cx_left
+    day_slot = plot_w / n_days
 
-    top_y0 = title_pad
-    top_y1 = top_y0 + h_top
-    max_total = max(totals) if totals else 1
-    max_total_nice = max(_nice_round_up(max_total), 4)
+    block_size = 4
+    block_gap = 1
+    cell = block_size + block_gap
+    per_row = max(1, int((day_slot - 2) / cell))
 
-    def y_of_top(v: float) -> float:
-        return top_y1 - (v * h_top / max_total_nice)
+    by_day: dict[str, list[dict]] = {}
+    for r in records:
+        by_day.setdefault(r["date"], []).append(r)
+    for day, lst in by_day.items():
+        lst.sort(key=lambda r: (_BUCKET_STACK_PRIORITY.get(r["bucket"], 9), r["slug"]))
 
-    bot_y0 = top_y1 + h_mid_gap
-    bot_y1 = bot_y0 + h_bot
-    fix_only_max = 0
-    for i in range(n):
-        s = sum(buckets_cum[b][i] for b in BUCKET_ORDER if b != "no-change")
-        if s > fix_only_max:
-            fix_only_max = s
-    fix_max_nice = max(_nice_round_up(fix_only_max), 4)
+    max_count = max(len(by_day.get(d, ())) for d in all_days)
+    rows_needed = (max_count + per_row - 1) // per_row
+    grid_h = max(rows_needed * cell + 2, 60)
+    height = title_pad + grid_h + axis_pad
 
-    def y_of_bot(v: float) -> float:
-        return bot_y1 - (v * h_bot / fix_max_nice)
+    baseline_y = title_pad + grid_h
 
-    def stacked_polygons(y_func, *, include_no_change: bool) -> str:
-        order = [b for b in BUCKET_ORDER if include_no_change or b != "no-change"]
-        bottoms = [0] * n
-        parts = []
-        for b in order:
-            vals = buckets_cum[b]
-            tops = [bottoms[i] + vals[i] for i in range(n)]
-            pts_top = " ".join(f"{x_of(i):.1f},{y_func(tops[i]):.1f}" for i in range(n))
-            pts_bot = " ".join(
-                f"{x_of(i):.1f},{y_func(bottoms[i]):.1f}" for i in reversed(range(n))
+    blocks_parts: list[str] = []
+    for day, lst in by_day.items():
+        idx = day_to_idx[day]
+        col_x = cx_left + idx * day_slot + (day_slot - per_row * cell) / 2
+        for i, rec in enumerate(lst):
+            row = i // per_row
+            col = i % per_row
+            bx = col_x + col * cell
+            by = baseline_y - (row + 1) * cell
+            bucket = rec["bucket"]
+            blocks_parts.append(
+                f'<rect class="case-block bucket-{_safe_class(bucket)} '
+                f'outcome-{rec["outcome_class"]}" '
+                f'x="{bx:.1f}" y="{by:.1f}" '
+                f'width="{block_size}" height="{block_size}" rx="0.5" ry="0.5" '
+                f'data-slug="{esc(rec["slug"])}" '
+                f'data-bucket="{esc(bucket)}" '
+                f'tabindex="0" role="button" '
+                f'aria-label="{esc(rec["date"])} · {esc(rec["slug"])} · {esc(bucket)}"></rect>'
             )
-            color = BUCKET_COLORS[b]
-            parts.append(
-                f'<polygon class="band band-{_safe_class(b)}" '
-                f'data-bucket="{esc(b)}" '
-                f'fill="{color}" points="{pts_top} {pts_bot}"></polygon>'
-            )
-            bottoms = tops
-        return "".join(parts)
 
-    top_bands = stacked_polygons(y_of_top, include_no_change=True)
-    bot_bands = stacked_polygons(y_of_bot, include_no_change=False)
-
-    def y_ticks(y_func, max_nice: int) -> str:
-        out = []
-        count = 4
-        for k in range(count + 1):
-            v = max_nice * k // count
-            y = y_func(v)
-            out.append(
-                f'<line class="axis-grid" x1="{cx_left}" y1="{y:.1f}" '
-                f'x2="{cx_right}" y2="{y:.1f}"></line>'
-            )
-            out.append(
-                f'<text class="axis-tick" x="{cx_left - 6:.0f}" y="{y + 3:.1f}" '
-                f'text-anchor="end">{esc(v)}</text>'
-            )
-        return "".join(out)
-
-    y_ticks_top = y_ticks(y_of_top, max_total_nice)
-    y_ticks_bot = y_ticks(y_of_bot, fix_max_nice)
-
-    tick_step = max(1, n // 7)
-    x_ticks_parts = []
-    for i in range(0, n, tick_step):
-        xi = x_of(i)
-        label = days[i][5:]
-        x_ticks_parts.append(
-            f'<text class="axis-tick" x="{xi:.1f}" y="{top_y1 + 14:.0f}" '
-            f'text-anchor="middle">{esc(label)}</text>'
-        )
-        x_ticks_parts.append(
-            f'<text class="axis-tick" x="{xi:.1f}" y="{bot_y1 + 14:.0f}" '
-            f'text-anchor="middle">{esc(label)}</text>'
-        )
-
-    panel_titles = (
-        f'<text class="panel-title" x="{cx_left}" y="{top_y0 - 8:.0f}">'
-        f"All cases (cumulative)</text>"
-        f'<text class="panel-title" x="{cx_left}" y="{bot_y0 - 8:.0f}">'
-        f"Cases with a fix layer (cumulative — no-change excluded)</text>"
+    engine_line = (
+        f'<line class="engine-baseline" x1="{cx_left:.0f}" y1="{baseline_y:.1f}" '
+        f'x2="{cx_right:.0f}" y2="{baseline_y:.1f}"></line>'
     )
 
-    day_to_idx = {d: i for i, d in enumerate(days)}
-    annotation_parts = []
+    tick_parts: list[str] = []
+    tick_step = max(1, n_days // 8)
+    for i in range(0, n_days, tick_step):
+        xi = cx_left + i * day_slot + day_slot / 2
+        tick_parts.append(
+            f'<text class="axis-tick" x="{xi:.1f}" y="{baseline_y + 16:.0f}" '
+            f'text-anchor="middle">{esc(all_days[i][5:])}</text>'
+        )
+
+    title = (
+        f'<text class="panel-title" x="{cx_left:.0f}" y="{title_pad - 16:.0f}">'
+        f"Every case ({len(records)}) — click a block to read the markdown."
+        "</text>"
+        f'<text class="panel-sub" x="{cx_left:.0f}" y="{title_pad - 4:.0f}">'
+        "Columns = day. Each block = one case file in <code>docs/cases/</code>. "
+        "Colour = fix layer; solid border = improvement (system got smarter)."
+        "</text>"
+    )
+
+    annotation_parts: list[str] = []
     for iso, short, full_text in events:
         idx = day_to_idx.get(iso)
         if idx is None:
-            if iso < days[0] or iso > days[-1]:
+            if iso < all_days[0] or iso > all_days[-1]:
                 continue
-            for i, d in enumerate(days):
-                if d >= iso:
+            for i, dd in enumerate(all_days):
+                if dd >= iso:
                     idx = i
                     break
             if idx is None:
                 continue
-        xi = x_of(idx)
+        xi = cx_left + idx * day_slot + day_slot / 2
         annotation_parts.append(
             f'<g class="annot" data-date="{esc(iso)}" data-full="{esc(full_text)}">'
-            f'<line class="annot-line" x1="{xi:.1f}" y1="{top_y0:.0f}" '
-            f'x2="{xi:.1f}" y2="{bot_y1:.0f}"></line>'
-            f'<text class="annot-marker" x="{xi:.1f}" y="{top_y0 - 16:.0f}" '
+            f'<line class="annot-line" x1="{xi:.1f}" y1="{title_pad:.0f}" '
+            f'x2="{xi:.1f}" y2="{baseline_y:.1f}"></line>'
+            f'<text class="annot-marker" x="{xi:.1f}" y="{title_pad - 30:.0f}" '
             f'text-anchor="middle">{esc(short)}</text>'
             f"</g>"
         )
 
     return (
         f'<svg id="caseTimeline" viewBox="0 0 {width} {height}" role="img" '
-        f'aria-label="Case accumulation timeline">'
+        f'aria-label="Case block grid by day">'
         f'<rect class="scatter-bg" x="0" y="0" width="{width}" height="{height}"></rect>'
-        + panel_titles
-        + y_ticks_top
-        + y_ticks_bot
-        + top_bands
-        + bot_bands
-        + "".join(x_ticks_parts)
+        + title
         + "".join(annotation_parts)
+        + engine_line
+        + "".join(tick_parts)
+        + "".join(blocks_parts)
         + "</svg>"
     )
+
+
+def render_case_db(records: list[dict]) -> str:
+    """Hidden HTML store the modal JS reads when the user clicks a block.
+    One `<div class="case-record">` per case with frontmatter in data-* attrs
+    and the first paragraph as innerHTML.
+    """
+    parts: list[str] = []
+    for rec in records:
+        gh_url = GITHUB_CASES_BASE + rec["filename"]
+        parts.append(
+            f'<div class="case-record" data-slug="{esc(rec["slug"])}" '
+            f'data-date="{esc(rec["date"])}" '
+            f'data-bucket="{esc(rec["bucket"])}" '
+            f'data-fix-layer="{esc(rec["fix_layer"])}" '
+            f'data-outcome="{esc(rec["outcome"])}" '
+            f'data-status="{esc(rec["status"])}" '
+            f'data-url="{esc(rec["url"])}" '
+            f'data-gh="{esc(gh_url)}">'
+            f"{esc(rec['first_paragraph'])}"
+            f"</div>"
+        )
+    return f'<div id="caseDB" hidden>{"".join(parts)}</div>'
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -1578,7 +1587,7 @@ def render_html(
     jobs: dict,
     generated_at: datetime,
     *,
-    timeline: dict | None = None,
+    case_records: list[dict] | None = None,
     har_aggregate: dict | None = None,
     har_sample: dict | None = None,
 ) -> str:
@@ -1620,16 +1629,18 @@ def render_html(
         for key, color in color_map.items()
     ) or '<li>No watched sites yet</li>'
 
-    timeline = timeline or {"days": [], "buckets_cum": {b: [] for b in BUCKET_ORDER}, "totals_per_day": []}
-    timeline_svg = svg_case_timeline(timeline, EVENT_ANNOTATIONS)
+    case_records = case_records or []
+    timeline_svg = svg_case_blocks(case_records, EVENT_ANNOTATIONS)
+    case_db_html = render_case_db(case_records)
+    bucket_counts = Counter(r["bucket"] for r in case_records)
     timeline_legend_html = "".join(
         f'<li><button type="button" class="legend-toggle" data-bucket="{esc(b)}" '
         f'aria-pressed="true">'
         f'<span class="swatch" style="background:{BUCKET_COLORS[b]}"></span>'
         f"{esc(BUCKET_LABELS[b])}"
-        f'<b>{esc(timeline["buckets_cum"].get(b, [0])[-1] if timeline.get("days") else 0)}</b>'
+        f'<b>{esc(bucket_counts.get(b, 0))}</b>'
         f"</button></li>"
-        for b in reversed(BUCKET_ORDER)  # show top-of-stack first for readability
+        for b in reversed(BUCKET_ORDER)
     ) or '<li><button type="button" class="legend-toggle" disabled>No case history</button></li>'
 
     har_data = har_aggregate or {"stages": {}}
@@ -1939,10 +1950,83 @@ def render_html(
       font: 600 13px Georgia, "Times New Roman", serif;
       letter-spacing: 0.02em;
     }}
+    .panel-sub {{
+      fill: var(--muted);
+      font: 11.5px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }}
     .axis-grid {{ stroke: var(--line); stroke-width: 0.6; stroke-dasharray: 2 4; opacity: 0.6; }}
     .axis-tick {{ fill: var(--muted); font: 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
-    .band {{ opacity: 0.85; transition: opacity 120ms ease; }}
-    .band:hover {{ opacity: 1; }}
+    .engine-baseline {{ stroke: var(--ink); stroke-width: 1.4; opacity: 0.85; }}
+    .case-block {{ cursor: pointer; opacity: 0.92; transition: transform 80ms ease, opacity 80ms ease; stroke: rgba(31,37,40,0.0); stroke-width: 0.6; }}
+    .case-block:hover, .case-block:focus {{ opacity: 1; transform: translateY(-1px); outline: none; }}
+    .case-block.outcome-improved {{ stroke: rgba(31,37,40,0.85); stroke-width: 0.8; }}
+    .case-block.outcome-rejected {{ opacity: 0.55; }}
+    .bucket-F {{ fill: #3d737f; }}
+    .bucket-C {{ fill: #8a6f4d; }}
+    .bucket-A {{ fill: #7b5c8c; }}
+    .bucket-B-D-E {{ fill: #6f7f52; }}
+    .bucket-no-change {{ fill: #c8c0ad; }}
+    .modal {{
+      position: fixed;
+      inset: 0;
+      z-index: 60;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }}
+    .modal[hidden] {{ display: none; }}
+    .modal-backdrop {{
+      position: absolute;
+      inset: 0;
+      background: rgba(15, 18, 20, 0.55);
+    }}
+    .modal-inner {{
+      position: relative;
+      max-width: 640px;
+      width: calc(100% - 32px);
+      max-height: 80vh;
+      overflow-y: auto;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      padding: 22px 24px 18px;
+      box-shadow: 0 12px 40px rgba(15, 18, 20, 0.3);
+      border-radius: 4px;
+    }}
+    .modal-close {{
+      position: absolute;
+      top: 10px;
+      right: 14px;
+      background: none;
+      border: none;
+      font-size: 1.8rem;
+      line-height: 1;
+      color: var(--muted);
+      cursor: pointer;
+    }}
+    .modal-close:hover {{ color: var(--ink); }}
+    .modal-meta {{
+      color: var(--muted);
+      font-size: 0.84rem;
+      margin: 0 0 6px;
+    }}
+    .modal-title {{
+      font-family: Georgia, "Times New Roman", serif;
+      margin: 0 0 14px;
+      font-size: 1.2rem;
+      line-height: 1.35;
+    }}
+    .modal-body {{
+      color: var(--ink);
+      font-size: 0.97rem;
+      line-height: 1.55;
+      margin: 0 0 14px;
+    }}
+    .modal-link a {{
+      color: var(--accent);
+      text-decoration: none;
+      font-weight: 600;
+    }}
+    .modal-link a:hover {{ text-decoration: underline; }}
     .annot-line {{ stroke: #1f2528; stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.55; }}
     .annot:hover .annot-line {{ opacity: 1; }}
     .annot-marker {{
@@ -2144,41 +2228,79 @@ def render_html(
       {timeline_svg}
       <ul class="legend timeline-legend">{timeline_legend_html}</ul>
       <div id="timelineTip" class="dot-tip" hidden></div>
-      <figcaption>Figure 2. cases.sqlite3 (or <code>docs/cases/*.md</code> frontmatter) accumulated
-        per day. The top panel shows every case row; the bottom panel hides the dominant
-        no-change band so the smaller fix-layer drift stays readable. Colour = where in the pipeline
-        the fix landed — F (recognizer / platform), C (probe heuristic), A (prompt / agentic), or
-        B/D/E (engine, writer, validate). Dashed lines mark pipeline milestones. Hover a band for
-        the running total; click a legend chip to hide that band; hover a milestone marker for
-        the full description.</figcaption>
+      <figcaption>Figure 2. Every case file under <code>docs/cases/</code> shown as one small block
+        the day it landed — the bottom rail is the running engine, and each block is a piece bolted
+        on top of it on that day. Colour = where in the pipeline the fix landed: F (recognizer /
+        platform), C (probe heuristic), A (prompt / agentic), B/D/E (engine, writer, validate), or
+        no-change (terminal closure). Blocks with a solid border are <em>improvements</em> — the
+        moment the auto-solver got smarter for that pattern. Dashed verticals mark milestones.
+        <strong>Click any block</strong> to read its case note, or hover over a milestone marker
+        for what landed that day.</figcaption>
     </figure>
+    {case_db_html}
+    <div id="caseModal" class="modal" hidden role="dialog" aria-labelledby="caseModalTitle" aria-modal="true">
+      <div class="modal-backdrop" data-close="1"></div>
+      <div class="modal-inner">
+        <button type="button" class="modal-close" aria-label="Close" data-close="1">×</button>
+        <p class="modal-meta" id="caseModalMeta"></p>
+        <h3 class="modal-title" id="caseModalTitle"></h3>
+        <p class="modal-body" id="caseModalBody"></p>
+        <p class="modal-link"><a id="caseModalLink" href="#" target="_blank" rel="noopener noreferrer">Read full case on GitHub →</a></p>
+      </div>
+    </div>
     <script>
       (function () {{
         var svg = document.getElementById('caseTimeline');
         var tip = document.getElementById('timelineTip');
-        if (!svg || !tip) return;
-        var bandsByBucket = {{}};
-        svg.querySelectorAll('.band').forEach(function (b) {{
+        var modal = document.getElementById('caseModal');
+        if (!svg) return;
+        var blocksByBucket = {{}};
+        svg.querySelectorAll('.case-block').forEach(function (b) {{
           var bk = b.getAttribute('data-bucket');
           if (!bk) return;
-          (bandsByBucket[bk] = bandsByBucket[bk] || []).push(b);
+          (blocksByBucket[bk] = blocksByBucket[bk] || []).push(b);
         }});
         function showTip(html, e) {{
+          if (!tip) return;
           tip.innerHTML = html;
           tip.hidden = false;
           tip.style.left = (e.clientX + 14) + 'px';
           tip.style.top = (e.clientY + 14) + 'px';
         }}
+        function hideTip() {{ if (tip) tip.hidden = true; }}
+        function recordFor(slug) {{
+          return document.querySelector('#caseDB .case-record[data-slug="' + slug.replace(/"/g, '\\\\"') + '"]');
+        }}
+        function openCase(slug) {{
+          var rec = recordFor(slug);
+          if (!rec || !modal) return;
+          var status = rec.getAttribute('data-status') || slug;
+          var date = rec.getAttribute('data-date') || '';
+          var bucket = rec.getAttribute('data-bucket') || '';
+          var outcome = rec.getAttribute('data-outcome') || '';
+          var fix = rec.getAttribute('data-fix-layer') || '';
+          var gh = rec.getAttribute('data-gh') || '#';
+          document.getElementById('caseModalTitle').textContent = status;
+          document.getElementById('caseModalMeta').textContent =
+            date + ' · ' + bucket + ' · outcome: ' + (outcome || '—') +
+            (fix ? ' · fix_layer: ' + fix : '');
+          document.getElementById('caseModalBody').textContent = rec.textContent || '(no body excerpt)';
+          var link = document.getElementById('caseModalLink');
+          link.setAttribute('href', gh);
+          modal.hidden = false;
+        }}
+        function closeModal() {{ if (modal) modal.hidden = true; }}
         svg.addEventListener('mousemove', function (e) {{
-          if (tip.hidden) return;
+          if (!tip || tip.hidden) return;
           tip.style.left = (e.clientX + 14) + 'px';
           tip.style.top = (e.clientY + 14) + 'px';
         }});
         svg.addEventListener('mouseover', function (e) {{
-          var band = e.target.closest ? e.target.closest('.band') : null;
-          if (band) {{
-            var bk = band.getAttribute('data-bucket') || '';
-            showTip('<b>' + bk + '</b><span>cumulative band</span>', e);
+          var block = e.target.closest ? e.target.closest('.case-block') : null;
+          if (block) {{
+            var slug = block.getAttribute('data-slug') || '';
+            var bucket = block.getAttribute('data-bucket') || '';
+            showTip('<b>' + slug + '</b><span>' + bucket + ' · click to open</span>', e);
             return;
           }}
           var annot = e.target.closest ? e.target.closest('.annot') : null;
@@ -2188,10 +2310,33 @@ def render_html(
             showTip('<b>' + d + '</b><span>' + full + '</span>', e);
             return;
           }}
-          tip.hidden = true;
+          hideTip();
         }});
-        svg.addEventListener('mouseleave', function () {{ tip.hidden = true; }});
-        // Legend toggle (buttons outside svg for keyboard a11y)
+        svg.addEventListener('mouseleave', hideTip);
+        svg.addEventListener('click', function (e) {{
+          var block = e.target.closest ? e.target.closest('.case-block') : null;
+          if (block) {{
+            openCase(block.getAttribute('data-slug') || '');
+          }}
+        }});
+        svg.addEventListener('keydown', function (e) {{
+          if (e.key !== 'Enter' && e.key !== ' ') return;
+          var block = e.target.closest ? e.target.closest('.case-block') : null;
+          if (block) {{
+            e.preventDefault();
+            openCase(block.getAttribute('data-slug') || '');
+          }}
+        }});
+        if (modal) {{
+          modal.addEventListener('click', function (e) {{
+            if (e.target && e.target.getAttribute && e.target.getAttribute('data-close') === '1') {{
+              closeModal();
+            }}
+          }});
+          document.addEventListener('keydown', function (e) {{
+            if (e.key === 'Escape' && !modal.hidden) closeModal();
+          }});
+        }}
         document.querySelectorAll('.timeline-legend .legend-toggle').forEach(function (btn) {{
           btn.addEventListener('click', function () {{
             var bk = btn.getAttribute('data-bucket');
@@ -2199,7 +2344,7 @@ def render_html(
             var next = !visible;
             btn.setAttribute('aria-pressed', next ? 'true' : 'false');
             btn.classList.toggle('legend-off', !next);
-            (bandsByBucket[bk] || []).forEach(function (b) {{
+            (blocksByBucket[bk] || []).forEach(function (b) {{
               b.style.display = next ? '' : 'none';
             }});
           }});
@@ -2309,7 +2454,7 @@ def main(argv: list[str]) -> int:
     configs = read_configs()
     poll = read_poll_state()
     jobs = read_jobs()
-    timeline = read_case_timeline()
+    case_records = read_case_records()
     har_aggregate = read_har_aggregate(cache_dir=out_path.parent)
     har_sample = pick_case_sample()
     generated_at = datetime.now(KST)
@@ -2318,7 +2463,7 @@ def main(argv: list[str]) -> int:
         poll,
         jobs,
         generated_at,
-        timeline=timeline,
+        case_records=case_records,
         har_aggregate=har_aggregate,
         har_sample=har_sample,
     )
@@ -2334,7 +2479,7 @@ def main(argv: list[str]) -> int:
         "[generate_site] wrote "
         f"{out_path} ({len(configs['items'])} configs, {poll['total']} polling, "
         f"{len(jobs['recent'])} recent jobs, "
-        f"{len(timeline.get('days') or [])} timeline days, "
+        f"{len(case_records)} cases, "
         f"{har_stages.get('har_captured', 0)} HAR runs) "
         f"elapsed={elapsed:.2f}s"
     )
