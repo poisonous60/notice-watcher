@@ -4,10 +4,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Optional
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
+
+from bs4 import BeautifulSoup, Tag
 
 from .baseline import is_baseline_blocked
-from .extract import static_vs_headless_check
+from .extract import _best_row_href, _is_js_href, static_vs_headless_check
 from .types import Classification, Diagnosis, Result
 
 
@@ -103,6 +105,37 @@ def _static_row_evidence(static_like_ok: list[Result], list_payload: dict) -> Op
     if not isinstance(patterns, list):
         return None
 
+    def static_body_sample_url(item: dict) -> Optional[tuple[str, str]]:
+        selector = item.get("selector")
+        if not isinstance(selector, str) or not selector.strip():
+            return None
+        for r in static_like_ok:
+            if not r.body_path:
+                continue
+            body_path = Path(r.body_path)
+            if not body_path.exists():
+                continue
+            html = body_path.read_text(encoding="utf-8", errors="replace")
+            soup = BeautifulSoup(html, "lxml")
+            try:
+                nodes = soup.select(selector)
+            except Exception:
+                nodes = []
+            base_url = r.final_url or r.url
+            base_host = urlsplit(base_url or "").netloc
+            for node in nodes:
+                if not isinstance(node, Tag):
+                    continue
+                anchors = [node] if node.name == "a" and node.has_attr("href") else list(node.find_all("a", href=True))
+                anchors = [a for a in anchors if isinstance(a, Tag) and not _is_js_href(a.get("href"))]
+                if not anchors:
+                    continue
+                href = _best_row_href(anchors, base_url, base_host)
+                if _is_js_href(href):
+                    continue
+                return r.strategy, urljoin(base_url, href)
+        return None
+
     best: Optional[dict] = None
     for item in patterns:
         if not isinstance(item, dict):
@@ -111,17 +144,18 @@ def _static_row_evidence(static_like_ok: list[Result], list_payload: dict) -> Op
             child_count = int(item.get("child_count") or item.get("count") or 0)
         except (TypeError, ValueError):
             child_count = 0
-        sample_url = item.get("sample_url") or list_payload.get("first_article_url")
-        if child_count < 10 or not sample_url:
+        static_sample = static_body_sample_url(item)
+        if child_count < 10 or not static_sample:
             continue
+        strategy, sample_url = static_sample
         if best is None or child_count > int(best.get("child_count") or 0):
-            best = {**item, "child_count": child_count, "sample_url": sample_url}
+            best = {**item, "child_count": child_count, "sample_url": sample_url, "strategy": strategy}
 
     if not best:
         return None
 
     return {
-        "strategy": static_like_ok[0].strategy,
+        "strategy": best.get("strategy") or static_like_ok[0].strategy,
         "selector": best.get("selector") or "?",
         "child_count": best.get("child_count"),
         "sample_url": best.get("sample_url"),
