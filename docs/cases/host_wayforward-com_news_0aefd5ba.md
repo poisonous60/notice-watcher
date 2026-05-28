@@ -59,3 +59,11 @@ ship evidence: 사용자 명시 요청 "wayforward 는 글 board (selector 문�
 ## 운영 메모
 
 commit/push/N100 deploy 없음. `docs/cases/INDEX.md` 및 `output/cases.sqlite3` backfill 은 사용자 지시대로 이 세션에서 실행하지 않음.
+
+## Outcome update (2026-05-28 retry)
+
+`batch-register --failed` 재시도 결과:
+
+- probe Storyblok marker 검출 (`storyblok_platform.is_storyblok=True`, `story_data_url=https://wayforward.com/story-data/all-stories.json`).
+- `register.py` Storyblok positive detect path 진입 → `StoryblokAllStoriesAdapter` 직행, probe/gemini 생략.
+- baseline 30건 (sigma-star-saga-dx, shantae-advance, river-city-girls-2 등). registered ✓.

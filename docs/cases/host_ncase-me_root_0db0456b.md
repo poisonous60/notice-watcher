@@ -1,8 +1,8 @@
 ---
 slug: host_ncase-me_root_0db0456b
 url: https://ncase.me/
-status: improved - single-artist portfolio roots become classifier content/catalog, not board
-outcome: improved
+status: registered - classifier signal landed, but LLM verdict accepted board; user closed as registered
+outcome: registered
 date: 2026-05-28
 failure_keys: [classifier_single_artist_portfolio_false_accept, gate_reject, content_as_list]
 fix_layer: A+C
@@ -66,3 +66,14 @@ F-layer audit:
 4. Verification: targeted classifier/probe tests and live ncase detector check recorded above.
 5. Outcome: improved, because future single-creator portfolio roots with the same generic shape are rejected without per-site config.
 6. Fixture: `tests/probe_heuristics/test_single_artist_portfolio.py` covers positive ncase shape and negative news board shape.
+
+## Outcome update (2026-05-28 retry)
+
+`batch-register --failed` 재시도 시 결과:
+
+- detect_single_artist_portfolio digest signal 정상 박힘 (build_digest 가 호출). classify prompt 룰도 추가됨.
+- 그러나 classifier LLM 이 여전히 `class=index` 판정 — `_accept_path_content_reject` 거부 안 함.
+- agentic 가 validate_pass → strategy=httpx_html, baseline 13건 (anxiety/explorabl.es/trust/nutshell/sim 등 interactive explorables).
+- 사용자 결정: registered 로 종료. 새 explorable 발표 시 알림 옴 (catalog 적합).
+
+A-layer prompt 룰만으로는 LLM 판정 보장 못함. 강제 reject 필요 시 F-layer enforcement (digest.single_artist_portfolio.detected==True + confidence='high' 시 강제 rc=3) 가 다음 후보. 단 false-positive 회귀 우려로 보류.

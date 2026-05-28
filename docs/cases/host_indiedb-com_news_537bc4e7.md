@@ -87,3 +87,12 @@ The RSS summary keeps alerts useful even when Cloudflare blocks article body fet
 ## Park Branch
 
 Not applicable. This case has explicit ship evidence and a working RSS source.
+
+## Outcome update (2026-05-28 retry)
+
+`batch-register --failed` 재시도 결과:
+
+- recognizer `dbolical` 매칭 → `url_to_slug` 가 새 slug `dbolical_indiedb_news_537bc4e7` 산출. probe/gemini 생략하고 바로 등록 시도.
+- baseline 10건, first ids `articles347196`/`articles347192`/… (RSS 경로). config=`/home/aaaa/notice-watcher/configs/dbolical_indiedb_news_537bc4e7.json` (N100).
+- 옛 slug `host_indiedb-com_news_537bc4e7` 의 FAILED 마커 orphan → `triage.py prune-orphans --execute` 로 제거.
+- dev box `configs/host_indiedb-com_news_537bc4e7.json` (codex 가 만든 fallback Track A) 는 dead (recognizer 가 새 slug 로 우회). recognizer 끄거나 fallback 필요 시만 활성.
