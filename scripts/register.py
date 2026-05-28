@@ -2884,22 +2884,136 @@ def _commonwealth_community_id_from_domain(base_url: str) -> Optional[str]:
         return None
 
 
-def _register_built_config(cfg: dict, slug: str, url: str, *, out: Optional[str], force: bool) -> Optional[int]:
+def _validated_feed_candidate_for_url(digest: dict, feed_url: str) -> Optional[dict]:
+    for c in digest.get("feed_candidates") or []:
+        if not isinstance(c, dict):
+            continue
+        if c.get("validated") is not True:
+            continue
+        try:
+            item_count = int(c.get("item_count") or 0)
+        except (TypeError, ValueError):
+            item_count = 0
+        if item_count < 3:
+            continue
+        if str(c.get("url") or "").strip() == feed_url:
+            return c
+    return None
+
+
+def _build_rss_fallback_config(digest: dict) -> Optional[dict]:
+    sk = digest.get("site_kind") or {}
+    if not isinstance(sk, dict):
+        return None
+    kind = sk.get("kind")
+    if kind not in {"rss", "hybrid"}:
+        return None
+    feed_url = str(sk.get("primary_feed_url") or "").strip()
+    if not feed_url:
+        return None
+    cand = _validated_feed_candidate_for_url(digest, feed_url)
+    if cand is None:
+        return None
+    root_tag = str(cand.get("root_tag") or "").strip().lower()
+    if root_tag == "rss":
+        row_selector = "channel > item"
+        post_id = [
+            {"from": "css", "selector": "guid, id", "text": True,
+             "transform": [["strip"], ["regex_extract", "[?&]p=(\\d+)"]]},
+            {"from": "css", "selector": "guid, id", "text": True,
+             "transform": [["strip"], ["strip_query_fragment"], ["regex_extract", "^(?:https?://[^/]+/)?(.+?)/?$"]]},
+            {"from": "css", "selector": "link", "text": True,
+             "transform": [["strip"], ["regex_extract", "[?&]p=(\\d+)"]]},
+            {"from": "css", "selector": "link", "text": True,
+             "transform": [["strip"], ["strip_query_fragment"], ["regex_extract", "^(?:https?://[^/]+/)?(.+?)/?$"]]},
+        ]
+        link = [{"from": "css", "selector": "link", "text": True}]
+        published_selector = "pubDate, published, updated"
+        published_formats = [
+            "%a, %d %b %Y %H:%M:%S %z",
+            "%a, %d %b %Y %H:%M:%S %Z",
+            "%Y-%m-%dT%H:%M:%S%z",
+            "%Y-%m-%dT%H:%M:%S.%f%z",
+        ]
+        summary_selector = "description, summary"
+    elif root_tag == "feed":
+        row_selector = "feed > entry"
+        post_id = [{"from": "css", "selector": "id", "text": True, "transform": [["strip"]]}]
+        link = [{"from": "css", "selector": "link[href]", "attr": "href"}]
+        published_selector = "updated, published"
+        published_formats = [
+            "%Y-%m-%dT%H:%M:%S%z",
+            "%Y-%m-%dT%H:%M:%S.%f%z",
+            "%a, %d %b %Y %H:%M:%S %z",
+        ]
+        summary_selector = "summary, content"
+    else:
+        return None
+
+    host = urlsplit(feed_url).netloc or urlsplit(str(digest.get("url") or "")).netloc or "feed"
+    return {
+        "version": 1,
+        "site": host,
+        "board": "feed",
+        "strategy": "httpx_html",
+        "headers": {
+            "Accept": "application/rss+xml, application/atom+xml, application/xml;q=0.9, */*;q=0.8",
+        },
+        "list": {
+            "url_template": feed_url,
+            "pagination": {"kind": "none"},
+            "row_selector": row_selector,
+            "fields": {
+                "post_id": post_id,
+                "title": [{"from": "css", "selector": "title", "text": True, "transform": [["collapse_ws"]]}],
+                "url": link,
+                "published_at": [{
+                    "from": "css",
+                    "selector": published_selector,
+                    "text": True,
+                    "transform": [["collapse_ws"], ["iso8601", published_formats]],
+                }],
+                "summary": [{
+                    "from": "css",
+                    "selector": summary_selector,
+                    "text": True,
+                    "transform": [["html_unescape"], ["collapse_ws"]],
+                }],
+            },
+        },
+        "article": {
+            "fetch_kind": "html",
+            "content": [
+                {"from": "css", "selector": "div.entry-content, article, main", "html": True},
+            ],
+            "body_empty_acceptable": True,
+        },
+        "_source_url": feed_url,
+        "_note": (
+            "F-layer RSS-fallback override: gen_fail after LLM HTML attempts; "
+            f"site_kind={kind} + validated feed."
+        ),
+    }
+
+
+def _register_built_config(cfg: dict, slug: str, url: str, *, out: Optional[str], force: bool,
+                           label: Optional[str] = None, source_url: Optional[str] = None) -> Optional[int]:
     """이미 만들어진 platform cfg(recognizer 또는 probe-후 detect 신호 산출)를 등록.
     fetch_list 0건/예외/검증 실패면 None 반환 → 호출 측이 일반 파이프라인으로 폴백."""
-    name = cfg.get("_recognized_platform", "?")
+    name = cfg.get("_recognized_platform")
+    label_text = f"알려진 플랫폼({name})" if name else (label or "built config")
     out_path = Path(out) if out else (CONFIGS_DIR / f"{slug}.json")
     if out_path.exists() and not force:
-        print(f"[register] 알려진 플랫폼({name})으로 보이지만 {out_path} 이미 존재 — 인식 경로 건너뜀(덮어쓰려면 --force, 또는 일반 파이프라인으로 진행).")
+        print(f"[register] {label_text} 경로지만 {out_path} 이미 존재 — 건너뜀(덮어쓰려면 --force, 또는 일반 파이프라인으로 진행).")
         return None
-    cfg["_source_url"] = url  # 호출된 URL 로 통일 (slug 와 일치)
+    cfg["_source_url"] = source_url or url
     from engine import validate_config, make_adapter
     try:
         validate_config(cfg)
     except Exception as e:  # noqa: BLE001
-        print(f"[register] 알려진 플랫폼({name}) config 스키마 검증 실패 — 일반 파이프라인으로 폴백: {e}")
+        print(f"[register] {label_text} config 스키마 검증 실패 — 일반 파이프라인으로 폴백: {e}")
         return None
-    print(f"[register] 🔎 알려진 플랫폼 인식: {name} — probe/gemini 생략, 바로 등록 시도 "
+    print(f"[register] 🔎 {label_text} — probe/gemini 생략, 바로 등록 시도 "
           f"(strategy={cfg.get('strategy')}{', adapter=' + cfg['adapter'] if cfg.get('adapter') else ''})")
 
     async def _baseline():
@@ -2908,10 +3022,10 @@ def _register_built_config(cfg: dict, slug: str, url: str, *, out: Optional[str]
     try:
         posts = asyncio.run(_baseline())
     except Exception as e:  # noqa: BLE001
-        print(f"[register] 알려진 플랫폼({name}) fetch_list 실패 — 잘못 인식한 듯, 일반 파이프라인으로 폴백: {e!r}")
+        print(f"[register] {label_text} fetch_list 실패 — 일반 파이프라인으로 폴백: {e!r}")
         return None
     if not posts:
-        print(f"[register] 알려진 플랫폼({name})으로 인식했지만 글 0건 — 잘못 인식한 듯, 일반 파이프라인으로 폴백.")
+        print(f"[register] {label_text} 글 0건 — 일반 파이프라인으로 폴백.")
         return None
 
     # 목록 일관성 검증 — recognizer 가 사이드바/광고/추천 영역을 우연히 N건 잡았을 때 silent 통과 방지.
@@ -2923,11 +3037,11 @@ def _register_built_config(cfg: dict, slug: str, url: str, *, out: Optional[str]
         rep = asyncio.run(validate_built_config(cfg, digest=None, fetch_articles=0,
                                                   existing_posts=posts))
     except Exception as e:  # noqa: BLE001
-        print(f"[register] known({name}) 검증 중 예외 — 폴백: {type(e).__name__}: {e}")
+        print(f"[register] {label_text} 검증 중 예외 — 폴백: {type(e).__name__}: {e}")
         return None
     if not rep.ok:
         fails = "; ".join(f"{c.name}({c.detail})" for c in rep.hard_failures())
-        print(f"[register] known({name}) 인식했지만 목록 검증 실패 — 폴백: {fails}")
+        print(f"[register] {label_text} 목록 검증 실패 — 폴백: {fails}")
         return None
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2936,7 +3050,7 @@ def _register_built_config(cfg: dict, slug: str, url: str, *, out: Optional[str]
     body_empty = _check_body_at_baseline(cfg, posts)
     print("[PHASE] baseline", flush=True)
     sp = _save_state(slug, url, out_path, post_ids, body_empty_at_baseline=body_empty)
-    print(f"[register] ✅ 등록 완료 (알려진 플랫폼: {name}) — baseline {len(post_ids)}건  config={out_path}  state={sp}")
+    print(f"[register] ✅ 등록 완료 ({label_text}) — baseline {len(post_ids)}건  config={out_path}  state={sp}")
     if body_empty is True:
         print(f"[register] ⚠️ 본문 추출 안 됨 (등급/로그인 필요 가능) — 알림은 제목·URL 만 옵니다.")
     for pp in posts[:3]:
@@ -3630,6 +3744,25 @@ def _main_inner(argv) -> int:
             except Exception:  # noqa: BLE001
                 _gem_closed = True
             return _reject_rc
+        fallback_cfg = None if getattr(args, "gate_only", False) else _build_rss_fallback_config(digest)
+        if fallback_cfg is not None:
+            print("[register] RSS fallback override: validated primary feed found after gen_fail; trying feed config", flush=True)
+            fallback_rc = _register_built_config(
+                fallback_cfg,
+                slug,
+                url,
+                out=str(out_path),
+                force=args.force,
+                label="RSS fallback override",
+                source_url=fallback_cfg.get("_source_url"),
+            )
+            if fallback_rc == 0:
+                try:
+                    gem_span_cm.__exit__(None, None, None)
+                    _gem_closed = True
+                except Exception:  # noqa: BLE001
+                    _gem_closed = True
+                return 0
         if args.no_escalate:
             _ctx = "--no-escalate: preflight(글페이지 re-probe + probe 신호 hint) 생략, raw lite digest 로 생성한 상태"
         elif digest.get("escalation_hint") or article_url_hint:
