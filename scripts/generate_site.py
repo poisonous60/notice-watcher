@@ -1472,7 +1472,7 @@ def _row_api(c: dict) -> dict:
     keys = ", ".join(str(k) for k in (first.get("sample_keys") or [])[:6])
     return {
         "type": "api",
-        "badge": "API",
+        "badge": "List JSON API",
         "badge_class": "sig-api",
         "host": _host_mask(c.get("url")),
         "meta": (
@@ -1488,7 +1488,7 @@ def _row_api(c: dict) -> dict:
 def _row_body(c: dict) -> dict:
     return {
         "type": "body",
-        "badge": "BODY",
+        "badge": "Article body JSON",
         "badge_class": "sig-body",
         "host": _host_mask(c.get("url")),
         "meta": (
@@ -1545,7 +1545,7 @@ def _digest_signal_rows(*, slug: str, base_url: str, run_dir: Path) -> tuple[lis
     if primary_feed:
         rows.append({
             "type": "digest",
-            "badge": "DIGEST",
+            "badge": "Register digest",
             "badge_class": "sig-digest",
             "host": primary_feed,
             "meta": "site_kind/primary_feed",
@@ -1558,7 +1558,7 @@ def _digest_signal_rows(*, slug: str, base_url: str, run_dir: Path) -> tuple[lis
         if source:
             rows.append({
                 "type": "digest",
-                "badge": "DIGEST",
+                "badge": "Register digest",
                 "badge_class": "sig-digest",
                 "host": "—",
                 "meta": label,
@@ -1570,7 +1570,7 @@ def _digest_signal_rows(*, slug: str, base_url: str, run_dir: Path) -> tuple[lis
     pag_n = len(list_cands.get("pagination_hints") or [])
     rows.append({
         "type": "digest",
-        "badge": "DIGEST",
+        "badge": "Register digest",
         "badge_class": "sig-digest",
         "host": "—",
         "meta": f"api={api_n} rss={rss_n} pag={pag_n}",
@@ -1580,7 +1580,7 @@ def _digest_signal_rows(*, slug: str, base_url: str, run_dir: Path) -> tuple[lis
     if notes:
         rows.append({
             "type": "digest",
-            "badge": "DIGEST",
+            "badge": "Register digest",
             "badge_class": "sig-digest",
             "host": "—",
             "meta": "recommendation",
@@ -1682,7 +1682,7 @@ def build_har_detail(slug: str, har_path: Path) -> dict:
         "key": "audio_share_signal",
         "title": "Audio share / player signal",
         "source": "probe.extract.audio_share_signal(...)",
-        "rows": ([_row_simple(audio, ["host", "base_host", "confidence", "evidence", "sample_url"], "audio", "AUDIO")]
+        "rows": ([_row_simple(audio, ["host", "base_host", "confidence", "evidence", "sample_url"], "audio", "Audio share")]
                  if audio else []),
         "total_rows": 1 if audio else 0,
         "more": 0,
@@ -1696,10 +1696,10 @@ def build_har_detail(slug: str, har_path: Path) -> dict:
                  "probe.extract.traffic_article_body_candidates(har, article_url)", raw_body, _row_body),
         _section("rss_feed_urls", "RSS / Atom candidates",
                  "probe.extract.rss_feed_urls(html, base_url, har)", feeds,
-                 lambda c: _row_simple(c, ["url", "source", "type"], "rss", "RSS")),
+                 lambda c: _row_simple(c, ["url", "source", "type"], "rss", "RSS / Atom")),
         _section("pagination_hints", "Pagination candidates",
                  "probe.extract.pagination_hints(html, base_url, har)", page_hints,
-                 lambda c: _row_simple(c, ["kind", "param", "source", "url_template", "evidence_url"], "pag", "PAG")),
+                 lambda c: _row_simple(c, ["kind", "param", "source", "url_template", "evidence_url"], "pag", "Pagination")),
         audio_section,
     ]
     digest_rows, digest_raw = _digest_signal_rows(slug=slug, base_url=base_url, run_dir=run_dir)
@@ -1803,16 +1803,20 @@ def render_har_detail_html(payload: dict | None) -> str:
     panels = (payload or {}).get("panels") or []
     if not panels:
         panels = [_placeholder_har_panel()]
+    multi = len(panels) > 1
     options = "".join(
-        f'<option value="{esc(panel["panel_id"])}">{esc(panel["host_label"])}</option>'
-        for panel in panels
+        f'<option value="{esc(panel["panel_id"])}">'
+        f'{esc(panel["host_label"])}{(" #" + str(i + 1)) if multi else ""}'
+        f'{(" · " + (panel.get("detail") or {}).get("verdict")) if (panel.get("detail") or {}).get("verdict") else ""}'
+        '</option>'
+        for i, panel in enumerate(panels)
     )
     panel_html = "".join(
         _render_har_detail_panel(panel, hidden=i != 0)
         for i, panel in enumerate(panels)
     )
     return (
-        '<label class="har-picker">Probe host '
+        '<label class="har-picker">Probe site '
         f'<select id="harSlugPicker">{options}</select></label>'
         f"{panel_html}"
     )
@@ -1881,8 +1885,8 @@ def _render_har_detail_panel(panel: dict, *, hidden: bool) -> str:
             })
     present = {r.get("type") for r in signal_rows}
     for signal_type, badge in (
-        ("api", "API"), ("body", "BODY"), ("rss", "RSS"),
-        ("pag", "PAG"), ("audio", "AUDIO"),
+        ("api", "List JSON API"), ("body", "Article body JSON"),
+        ("rss", "RSS / Atom"), ("pag", "Pagination"), ("audio", "Audio share"),
     ):
         if signal_type not in present:
             signal_rows.append({
@@ -1896,10 +1900,32 @@ def _render_har_detail_panel(panel: dict, *, hidden: bool) -> str:
     if "digest" not in present:
         signal_rows.append({
             "type": "digest",
-            "badge": "DIGEST",
+            "badge": "Register digest",
             "badge_class": "sig-digest sig-empty",
             "host": "—",
             "meta": "Not detected for this probe.",
+            "evidence": "—",
+        })
+    artifact = detail.get("artifact_list_candidates") or {}
+    artifact_rows = artifact.get("rows") or []
+    if artifact_rows:
+        for row in artifact_rows:
+            signal_rows.append({
+                "type": "stored",
+                "badge": "Stored probe summary",
+                "badge_class": "sig-stored",
+                "host": "—",
+                "meta": f"{row.get('key', '')} · {row.get('kind', '')}"
+                        + (f" (n={row['count']})" if row.get('count') else ""),
+                "evidence": _short_text(row.get("preview"), 160),
+            })
+    else:
+        signal_rows.append({
+            "type": "stored",
+            "badge": "Stored probe summary",
+            "badge_class": "sig-stored sig-empty",
+            "host": "—",
+            "meta": "list_candidates.json not stored for this probe.",
             "evidence": "—",
         })
     body = (
@@ -2639,7 +2665,9 @@ def render_html(
     .sig-pag {{ border-color: #7b5c8c; }}
     .sig-audio {{ border-color: #9b6b6b; }}
     .sig-digest {{ border-color: #1f2528; }}
-    .sig-empty {{ color: var(--muted); opacity: 0.78; }}
+    .sig-stored {{ border-color: #5b6e80; }}
+    .sig-empty {{ color: var(--muted); opacity: 0.92; background: var(--paper); }}
+    tr.sig-empty td {{ color: var(--muted); }}
     .har-fold {{ margin: 8px 0 0; }}
     .har-fold summary {{
       cursor: pointer;
