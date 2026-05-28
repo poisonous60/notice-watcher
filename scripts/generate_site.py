@@ -9,10 +9,12 @@ import html
 import json
 import math
 import os
+import re
 import sqlite3
 import sys
+import time
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, date as _date
 from pathlib import Path
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
@@ -20,6 +22,38 @@ from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parent.parent
 KST = ZoneInfo("Asia/Seoul")
+
+# Bump when funnel/extraction logic changes — invalidates cached HAR aggregate.
+EXTRACTOR_VERSION = "v1-2026-05-28"
+
+# Figure 2 — fix-layer bucket vocabulary (CONTEXT.md "추론 개선" / fix-layer letters).
+# Priority for combos = F > C > A > B/D/E first-match. Legacy `config`/`adapter` → B/D/E.
+BUCKET_ORDER = ["no-change", "B/D/E", "A", "C", "F"]  # bottom→top stack order
+BUCKET_COLORS = {
+    "no-change": "#d4cdbc",
+    "B/D/E":     "#6f7f52",
+    "A":         "#7b5c8c",
+    "C":         "#8a6f4d",
+    "F":         "#3d737f",
+}
+BUCKET_LABELS = {
+    "no-change": "no fix layer (terminal closure)",
+    "B/D/E":     "B/D/E · engine · writer · validate",
+    "A":         "A · prompt / agentic",
+    "C":         "C · probe heuristic",
+    "F":         "F · recognizer / platform",
+}
+
+# Hand-maintained timeline milestones. Add new dated entry when a pipeline-level
+# capability lands (ADR, infra rollout, gate rule). Format: (iso_date, short_label, full_description).
+EVENT_ANNOTATIONS = [
+    ("2026-05-11", "Project start", "First case_runs row recorded — repo bootstrapped."),
+    ("2026-05-15", "Self-improvement v3", "Per-case memory + reviewer subagent + pre-push hook landed (commit 3bfebc6)."),
+    ("2026-05-19", "Permanent-gate rule", "CLAUDE.md §8a — favour permanent gate over one-shot bypass."),
+    ("2026-05-21", "5-batch parallel run", "244 cases in one day; academic / forums / fedi / blogcms / recognizer 승급."),
+    ("2026-05-24", "Worktree isolation", "ADR 0015 — parallel Codex sessions via git worktree."),
+    ("2026-05-26", "Agentic register", "ADR 0020 — register call-site switched to multi-turn agent (api_loop default)."),
+]
 
 PLATFORM_PREFIXES = (
     "discourse_",
@@ -565,12 +599,950 @@ def svg_grouped_scatter(sites: list[dict], color_map: dict) -> str:
     )
 
 
+# ────────────────────────────────────────────────────────────────────────────
+# Figure 2 — case-accumulation timeline
+# ────────────────────────────────────────────────────────────────────────────
+
+_FRONTMATTER_RE = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n", re.S)
+
+
+def _fix_layer_bucket(raw) -> str:
+    """Map a case_runs.fix_layer raw value to one of BUCKET_ORDER.
+
+    Combos like ``C+F`` go to first-match in priority F>C>A>B/D/E (rationale:
+    recognizer/F rollup is more event-shaped). Legacy spellings (`config`,
+    `adapter`) folded into B/D/E. Null/none/empty → ``no-change``.
+    """
+    if isinstance(raw, (list, tuple)):
+        raw = "+".join(str(x) for x in raw if x)
+    s = (raw or "").strip().upper()
+    if not s or s == "NONE":
+        return "no-change"
+    if s in ("CONFIG", "ADAPTER"):
+        return "B/D/E"
+    if "F" in s:
+        return "F"
+    if "C" in s:
+        return "C"
+    if "A" in s:
+        return "A"
+    if "B" in s or "D" in s or "E" in s:
+        return "B/D/E"
+    return "no-change"
+
+
+def _read_case_rows_from_db(db_path: Path) -> list[tuple[str, object]]:
+    if not db_path.exists():
+        return []
+    try:
+        con = sqlite3.connect(str(db_path))
+        try:
+            rows = list(
+                con.execute(
+                    "SELECT substr(ts, 1, 10) AS day, fix_layer FROM case_runs ORDER BY ts"
+                )
+            )
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return []
+    return [(str(r[0] or ""), r[1]) for r in rows if r[0]]
+
+
+def _read_case_rows_from_frontmatter(cases_dir: Path) -> list[tuple[str, object]]:
+    """Fallback when output/cases.sqlite3 absent (N100 has no DB)."""
+    if not cases_dir.exists():
+        return []
+    try:
+        import yaml  # noqa: WPS433 — runtime opt; N100 venv has it via dashboard deps
+    except ImportError:
+        return []
+    out: list[tuple[str, object]] = []
+    for path in sorted(cases_dir.glob("*.md")):
+        if path.name == "INDEX.md":
+            continue
+        try:
+            text = path.read_text(encoding="utf-8").lstrip("﻿")
+        except OSError:
+            continue
+        m = _FRONTMATTER_RE.match(text)
+        if not m:
+            continue
+        try:
+            fm = yaml.safe_load(m.group(1)) or {}
+        except yaml.YAMLError:
+            continue
+        if not isinstance(fm, dict):
+            continue
+        date_v = fm.get("date")
+        date_s = str(date_v) if date_v is not None else ""
+        if not date_s or len(date_s) < 10:
+            continue
+        out.append((date_s[:10], fm.get("fix_layer")))
+    return out
+
+
+def read_case_timeline() -> dict:
+    """Build the daily cumulative bucket counts that Figure 2 renders.
+
+    Tries the dev-box-only `output/cases.sqlite3` first, falls back to parsing
+    `docs/cases/*.md` frontmatter (N100 has docs/ via git). Returns days as a
+    contiguous list filled across missing dates.
+    """
+    db_path = ROOT / "output" / "cases.sqlite3"
+    rows = _read_case_rows_from_db(db_path)
+    if not rows:
+        rows = _read_case_rows_from_frontmatter(ROOT / "docs" / "cases")
+    empty = {"days": [], "buckets_cum": {b: [] for b in BUCKET_ORDER}, "totals_per_day": []}
+    if not rows:
+        return empty
+
+    daily: dict[str, Counter] = {}
+    for day, raw in rows:
+        if not day:
+            continue
+        daily.setdefault(day, Counter())[_fix_layer_bucket(raw)] += 1
+
+    days_set = sorted(daily.keys())
+    if not days_set:
+        return empty
+    try:
+        start = _date.fromisoformat(days_set[0])
+        end = _date.fromisoformat(days_set[-1])
+    except ValueError:
+        return empty
+
+    full_days: list[str] = []
+    d = start
+    while d <= end:
+        full_days.append(d.isoformat())
+        d = _date.fromordinal(d.toordinal() + 1)
+
+    cum: dict[str, list[int]] = {b: [] for b in BUCKET_ORDER}
+    totals: list[int] = []
+    running = {b: 0 for b in BUCKET_ORDER}
+    for day in full_days:
+        cnt = daily.get(day, Counter())
+        for b in BUCKET_ORDER:
+            running[b] += cnt.get(b, 0)
+            cum[b].append(running[b])
+        totals.append(sum(running.values()))
+    return {"days": full_days, "buckets_cum": cum, "totals_per_day": totals}
+
+
+def _nice_round_up(n: int) -> int:
+    if n <= 4:
+        return 4
+    p = 10 ** int(math.log10(n))
+    for m in (1, 2, 5, 10):
+        if m * p >= n:
+            return m * p
+    return 10 * p
+
+
+def _safe_class(text: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9_-]", "-", text or "x")
+
+
+def svg_case_timeline(timeline: dict, events: list[tuple[str, str, str]]) -> str:
+    """Two-panel cumulative stacked area. Top = all rows incl. no-change.
+    Bottom = fix-only (no-change excluded) so smaller bands stay readable."""
+    width = 920
+    h_top = 240
+    h_mid_gap = 30
+    h_bot = 200
+    bottom_pad = 36
+    title_pad = 38
+    height = title_pad + h_top + h_mid_gap + h_bot + bottom_pad
+    cx_left = 56
+    cx_right = width - 24
+    plot_w = cx_right - cx_left
+
+    days = timeline.get("days") or []
+    if not days:
+        return (
+            f'<svg id="caseTimeline" viewBox="0 0 {width} {height}" role="img" '
+            f'aria-label="Case accumulation timeline">'
+            f'<rect class="scatter-bg" x="0" y="0" width="{width}" height="{height}"></rect>'
+            f'<text class="svg-label" x="{width / 2:.0f}" y="{height / 2:.0f}" '
+            f'text-anchor="middle">No case history available on this host yet</text>'
+            f"</svg>"
+        )
+
+    buckets_cum = timeline["buckets_cum"]
+    totals = timeline["totals_per_day"]
+    n = len(days)
+
+    def x_of(i: int) -> float:
+        if n <= 1:
+            return cx_left
+        return cx_left + (i * plot_w) / (n - 1)
+
+    top_y0 = title_pad
+    top_y1 = top_y0 + h_top
+    max_total = max(totals) if totals else 1
+    max_total_nice = max(_nice_round_up(max_total), 4)
+
+    def y_of_top(v: float) -> float:
+        return top_y1 - (v * h_top / max_total_nice)
+
+    bot_y0 = top_y1 + h_mid_gap
+    bot_y1 = bot_y0 + h_bot
+    fix_only_max = 0
+    for i in range(n):
+        s = sum(buckets_cum[b][i] for b in BUCKET_ORDER if b != "no-change")
+        if s > fix_only_max:
+            fix_only_max = s
+    fix_max_nice = max(_nice_round_up(fix_only_max), 4)
+
+    def y_of_bot(v: float) -> float:
+        return bot_y1 - (v * h_bot / fix_max_nice)
+
+    def stacked_polygons(y_func, *, include_no_change: bool) -> str:
+        order = [b for b in BUCKET_ORDER if include_no_change or b != "no-change"]
+        bottoms = [0] * n
+        parts = []
+        for b in order:
+            vals = buckets_cum[b]
+            tops = [bottoms[i] + vals[i] for i in range(n)]
+            pts_top = " ".join(f"{x_of(i):.1f},{y_func(tops[i]):.1f}" for i in range(n))
+            pts_bot = " ".join(
+                f"{x_of(i):.1f},{y_func(bottoms[i]):.1f}" for i in reversed(range(n))
+            )
+            color = BUCKET_COLORS[b]
+            parts.append(
+                f'<polygon class="band band-{_safe_class(b)}" '
+                f'data-bucket="{esc(b)}" '
+                f'fill="{color}" points="{pts_top} {pts_bot}"></polygon>'
+            )
+            bottoms = tops
+        return "".join(parts)
+
+    top_bands = stacked_polygons(y_of_top, include_no_change=True)
+    bot_bands = stacked_polygons(y_of_bot, include_no_change=False)
+
+    def y_ticks(y_func, max_nice: int) -> str:
+        out = []
+        count = 4
+        for k in range(count + 1):
+            v = max_nice * k // count
+            y = y_func(v)
+            out.append(
+                f'<line class="axis-grid" x1="{cx_left}" y1="{y:.1f}" '
+                f'x2="{cx_right}" y2="{y:.1f}"></line>'
+            )
+            out.append(
+                f'<text class="axis-tick" x="{cx_left - 6:.0f}" y="{y + 3:.1f}" '
+                f'text-anchor="end">{esc(v)}</text>'
+            )
+        return "".join(out)
+
+    y_ticks_top = y_ticks(y_of_top, max_total_nice)
+    y_ticks_bot = y_ticks(y_of_bot, fix_max_nice)
+
+    tick_step = max(1, n // 7)
+    x_ticks_parts = []
+    for i in range(0, n, tick_step):
+        xi = x_of(i)
+        label = days[i][5:]
+        x_ticks_parts.append(
+            f'<text class="axis-tick" x="{xi:.1f}" y="{top_y1 + 14:.0f}" '
+            f'text-anchor="middle">{esc(label)}</text>'
+        )
+        x_ticks_parts.append(
+            f'<text class="axis-tick" x="{xi:.1f}" y="{bot_y1 + 14:.0f}" '
+            f'text-anchor="middle">{esc(label)}</text>'
+        )
+
+    panel_titles = (
+        f'<text class="panel-title" x="{cx_left}" y="{top_y0 - 8:.0f}">'
+        f"All cases (cumulative)</text>"
+        f'<text class="panel-title" x="{cx_left}" y="{bot_y0 - 8:.0f}">'
+        f"Cases with a fix layer (cumulative — no-change excluded)</text>"
+    )
+
+    day_to_idx = {d: i for i, d in enumerate(days)}
+    annotation_parts = []
+    for iso, short, full_text in events:
+        idx = day_to_idx.get(iso)
+        if idx is None:
+            if iso < days[0] or iso > days[-1]:
+                continue
+            for i, d in enumerate(days):
+                if d >= iso:
+                    idx = i
+                    break
+            if idx is None:
+                continue
+        xi = x_of(idx)
+        annotation_parts.append(
+            f'<g class="annot" data-date="{esc(iso)}" data-full="{esc(full_text)}">'
+            f'<line class="annot-line" x1="{xi:.1f}" y1="{top_y0:.0f}" '
+            f'x2="{xi:.1f}" y2="{bot_y1:.0f}"></line>'
+            f'<text class="annot-marker" x="{xi:.1f}" y="{top_y0 - 16:.0f}" '
+            f'text-anchor="middle">{esc(short)}</text>'
+            f"</g>"
+        )
+
+    return (
+        f'<svg id="caseTimeline" viewBox="0 0 {width} {height}" role="img" '
+        f'aria-label="Case accumulation timeline">'
+        f'<rect class="scatter-bg" x="0" y="0" width="{width}" height="{height}"></rect>'
+        + panel_titles
+        + y_ticks_top
+        + y_ticks_bot
+        + top_bands
+        + bot_bands
+        + "".join(x_ticks_parts)
+        + "".join(annotation_parts)
+        + "</svg>"
+    )
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# HAR section — aggregate funnel + row anatomy + dynamic case sample
+# ────────────────────────────────────────────────────────────────────────────
+
+
+def _short_host(value: object) -> str:
+    """ADR 0010 §17 whitelist helper — host only, no path/query/fragment.
+
+    Used everywhere the HAR section surfaces a URL-derived value to the public
+    page. Never emit `request.url` raw text; route through this.
+    """
+    host = hostname_from_url(value) if value is not None else ""
+    if not host:
+        return ""
+    host = host.lower()
+    return host if len(host) <= 60 else host[:57] + "…"
+
+
+def _fmt_bytes(n: object) -> str:
+    try:
+        v = int(n)
+    except (TypeError, ValueError):
+        return "—"
+    if v < 0:
+        return "—"
+    if v < 1024:
+        return f"{v} B"
+    if v < 1024 * 1024:
+        return f"{v / 1024:.1f} KB"
+    return f"{v / 1024 / 1024:.2f} MB"
+
+
+def _short_text(value: object, limit: int = 40) -> str:
+    s = "" if value is None else str(value)
+    return s if len(s) <= limit else s[: limit - 1] + "…"
+
+
+def _har_set_key() -> dict:
+    pdir = ROOT / "output" / "probe"
+    files: list[Path] = []
+    if pdir.exists():
+        for run in pdir.iterdir():
+            if not run.is_dir():
+                continue
+            files.extend(sorted(run.glob("traffic*.har")))
+    total_size = 0
+    max_mtime = 0
+    for f in files:
+        try:
+            st = f.stat()
+        except OSError:
+            continue
+        total_size += st.st_size
+        if st.st_mtime_ns > max_mtime:
+            max_mtime = st.st_mtime_ns
+    extract_mtime = 0
+    extract_path = ROOT / "probe" / "extract.py"
+    if extract_path.exists():
+        try:
+            extract_mtime = extract_path.stat().st_mtime_ns
+        except OSError:
+            pass
+    return {
+        "har_count": len(files),
+        "sum_size_bytes": total_size,
+        "max_mtime_ns": max_mtime,
+        "extractor_mtime_ns": extract_mtime,
+        "extractor_version": EXTRACTOR_VERSION,
+    }
+
+
+def _lazy_extract():
+    """Returns (api_fn, body_fn, rss_fn, pag_fn, plat_fn) or None on ImportError.
+
+    When this script is invoked as ``python scripts/generate_site.py``,
+    ``sys.path[0]`` is ``scripts/`` and `probe.extract` is unreachable. Inject
+    the repo root before the import so the lazy load works under both invocation
+    patterns.
+    """
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    try:
+        from probe.extract import (
+            traffic_api_candidates,
+            traffic_article_body_candidates,
+            rss_feed_urls,
+            pagination_hints,
+            detect_common_platform,
+        )
+    except ImportError:
+        return None
+    return (
+        traffic_api_candidates,
+        traffic_article_body_candidates,
+        rss_feed_urls,
+        pagination_hints,
+        detect_common_platform,
+    )
+
+
+def _read_har_entries(path: Path, *, cap: int = 1000) -> list[dict]:
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as f:
+            har = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return []
+    entries = (har.get("log") or {}).get("entries") or []
+    return entries[:cap] if cap > 0 else entries
+
+
+def _compute_har_aggregate(*, budget_seconds: float = 35.0) -> dict:
+    """Walk probe artifacts to build the funnel stage counts.
+
+    Time budget guard — large HAR sets (350+ files, 150 MB+) can take minutes
+    if every signal extractor runs on every file. We cap at ``budget_seconds``
+    of wall clock and mark the result truncated; cache still gets written so
+    subsequent cycles read instantly. ``traffic_article_body_candidates`` is
+    intentionally skipped here (it reads response bodies — by far the slowest
+    extractor) and lives only in the per-case sample.
+    """
+    pdir = ROOT / "output" / "probe"
+    stages = {
+        "probe_runs": 0,
+        "har_captured": 0,
+        "entries_total": 0,
+        "signals": {"api": 0, "rss": 0, "pagination": 0, "platform": 0, "article_body": 0},
+        "strategies_lane_A": {},
+        "strategies_lane_B": {},
+        "unmatched_configs": 0,
+        "_truncated": False,
+    }
+    if not pdir.exists():
+        return stages
+    fns = _lazy_extract()
+    if fns is None:
+        return stages
+    api_fn, _body_fn, rss_fn, pag_fn, plat_fn = fns
+
+    deadline = time.monotonic() + budget_seconds
+    har_signal_slugs: dict[str, bool] = {}
+    for run_dir in sorted(pdir.iterdir()):
+        if time.monotonic() > deadline:
+            stages["_truncated"] = True
+            break
+        if not run_dir.is_dir():
+            continue
+        stages["probe_runs"] += 1
+        har_paths = sorted(run_dir.glob("traffic*.har"))
+        if not har_paths:
+            continue
+        stages["har_captured"] += 1
+        slug = run_dir.name
+        has_signal = False
+
+        # Cheap entries count + JSON-mime hint that avoids full extractor work.
+        for hp in har_paths:
+            entries = _read_har_entries(hp, cap=2000)
+            stages["entries_total"] += len(entries)
+            if not has_signal:
+                try:
+                    if api_fn(hp):
+                        stages["signals"]["api"] += 1
+                        has_signal = True
+                        break
+                except Exception:
+                    continue
+
+        list_html_path = run_dir / "list.html"
+        if list_html_path.exists():
+            try:
+                list_html_text = list_html_path.read_text(
+                    encoding="utf-8", errors="replace"
+                )[:120_000]
+            except OSError:
+                list_html_text = ""
+            if list_html_text:
+                try:
+                    if rss_fn(html=list_html_text, base_url="https://example.invalid/"):
+                        stages["signals"]["rss"] += 1
+                        has_signal = True
+                except Exception:
+                    pass
+                try:
+                    if pag_fn(list_html_text, "https://example.invalid/"):
+                        stages["signals"]["pagination"] += 1
+                        has_signal = True
+                except Exception:
+                    pass
+                try:
+                    if plat_fn(list_html_text, "https://example.invalid/"):
+                        stages["signals"]["platform"] += 1
+                        has_signal = True
+                except Exception:
+                    pass
+        har_signal_slugs[slug] = has_signal
+
+    cfg_dir = ROOT / "configs"
+    if cfg_dir.exists():
+        for cfg_path in sorted(cfg_dir.glob("*.json")):
+            slug = cfg_path.stem
+            data = load_json(cfg_path)
+            strategy = str(data.get("strategy") or "unknown")
+            recognized = bool(data.get("_recognized_platform"))
+            has_har_signal = har_signal_slugs.get(slug, False)
+            if has_har_signal:
+                d = stages["strategies_lane_A"]
+                d[strategy] = d.get(strategy, 0) + 1
+            elif recognized:
+                d = stages["strategies_lane_B"]
+                d[strategy] = d.get(strategy, 0) + 1
+            else:
+                stages["unmatched_configs"] += 1
+    return stages
+
+
+def read_har_aggregate(*, cache_dir: Path | None = None) -> dict:
+    """Return funnel stage counts. Cached at output/site/_har_aggregate.json
+    with content-key invalidation (har_count, sum_size, max_mtime, extractor mtime).
+    """
+    cache_root = cache_dir if cache_dir is not None else (ROOT / "output" / "site")
+    cache_path = cache_root / "_har_aggregate.json"
+    current_key = _har_set_key()
+    if cache_path.exists():
+        cached = load_json(cache_path)
+        if cached.get("key") == current_key:
+            try:
+                computed = datetime.fromisoformat(cached.get("computed_at", ""))
+                age_days = (datetime.now(KST) - computed).total_seconds() / 86400
+                if age_days < 7:
+                    return cached
+            except (TypeError, ValueError):
+                pass
+    aggregate = _compute_har_aggregate()
+    payload = {
+        "key": current_key,
+        "computed_at": datetime.now(KST).isoformat(),
+        "stages": aggregate,
+    }
+    try:
+        cache_root.mkdir(parents=True, exist_ok=True)
+        tmp = cache_path.with_suffix(cache_path.suffix + ".tmp")
+        tmp.write_text(json.dumps(payload), encoding="utf-8")
+        os.replace(tmp, cache_path)
+    except OSError:
+        pass
+    return payload
+
+
+def _entry_first_get(entries: list[dict]) -> dict:
+    for e in entries:
+        req = e.get("request") or {}
+        if (req.get("method") or "").upper() != "GET":
+            continue
+        resp = e.get("response") or {}
+        mime = ((resp.get("content") or {}).get("mimeType") or "").lower()
+        if any(skip in mime for skip in ("image/", "font/", "css", "javascript", "video/", "audio/")):
+            continue
+        ct = ""
+        for h in resp.get("headers") or []:
+            if (h.get("name") or "").lower() == "content-type":
+                ct = h.get("value") or ""
+                break
+        return {
+            "host": _short_host(req.get("url")),
+            "method": req.get("method") or "",
+            "status": resp.get("status"),
+            "content_type": ct or mime or "—",
+            "size": (resp.get("content") or {}).get("size"),
+        }
+    return {}
+
+
+def pick_case_sample() -> dict:
+    """Score-based selection of one probe run to showcase in the HAR case-sample
+    panel. Returns dict with `slug, host, score, steps, row_anatomy_example,
+    strategy`. Empty dict when nothing qualifies.
+    """
+    pdir = ROOT / "output" / "probe"
+    if not pdir.exists():
+        return {}
+
+    recent_ok_urls: set[str] = set()
+    bot_db = ROOT / "output" / "bot.sqlite3"
+    if bot_db.exists():
+        try:
+            con = sqlite3.connect(str(bot_db))
+            with con:
+                for row in con.execute(
+                    "SELECT url FROM jobs WHERE result_rc = 0 AND finished_at IS NOT NULL"
+                ):
+                    u = str(row[0] or "")
+                    if u:
+                        recent_ok_urls.add(u)
+        except sqlite3.Error:
+            pass
+        finally:
+            try:
+                con.close()
+            except (sqlite3.Error, UnboundLocalError):
+                pass
+
+    candidates: list[tuple[int, str, Path, list[dict], int]] = []
+    for run_dir in pdir.iterdir():
+        if not run_dir.is_dir():
+            continue
+        primary = run_dir / "traffic.har"
+        if not primary.exists():
+            others = sorted(run_dir.glob("traffic*.har"))
+            primary = others[0] if others else None
+        if primary is None:
+            continue
+        entries_all = _read_har_entries(primary, cap=0)
+        n_entries = len(entries_all)
+        if n_entries < 30:
+            continue
+        score = 0
+        if n_entries >= 50:
+            score += 1
+        if n_entries >= 200:
+            score += 1
+        if 50 <= n_entries <= 3000:
+            score += 1
+        json_n = 0
+        for e in entries_all[:500]:
+            mime = ((e.get("response") or {}).get("content") or {}).get("mimeType") or ""
+            if "json" in mime.lower():
+                json_n += 1
+                if json_n >= 3:
+                    break
+        if json_n >= 3:
+            score += 2
+        feed_cand = run_dir / "feed_candidates.json"
+        if feed_cand.exists():
+            try:
+                if load_json(feed_cand):
+                    score += 1
+            except Exception:
+                pass
+        env_path = run_dir / "environment.json"
+        if env_path.exists():
+            env_data = load_json(env_path)
+            src_url = str(env_data.get("url") or env_data.get("source_url") or "")
+            if src_url and src_url in recent_ok_urls:
+                score += 1
+        candidates.append((score, run_dir.name, run_dir, entries_all, json_n))
+
+    candidates.sort(key=lambda c: (-c[0], c[1]))
+    if not candidates or candidates[0][0] < 4:
+        return {}
+    score, slug, run_dir, entries_all, json_n = candidates[0]
+
+    env_path = run_dir / "environment.json"
+    src_url = ""
+    if env_path.exists():
+        env_data = load_json(env_path)
+        src_url = str(env_data.get("url") or env_data.get("source_url") or "")
+    src_host = _short_host(src_url)
+    if not src_host:
+        # environment.json doesn't always store the source URL — fall back to the
+        # first GET entry's host (matches the probe's actual target).
+        first_anatomy = _entry_first_get(entries_all)
+        src_host = first_anatomy.get("host") or ""
+
+    filtered = 0
+    for e in entries_all:
+        req = e.get("request") or {}
+        if (req.get("method") or "").upper() != "GET":
+            continue
+        mime = ((e.get("response") or {}).get("content") or {}).get("mimeType") or ""
+        if any(s in mime.lower() for s in ("image/", "font/", "css", "javascript", "video/", "audio/")):
+            continue
+        filtered += 1
+
+    api_n = rss_n = pag_n = plat_n = body_n = 0
+    fns = _lazy_extract()
+    primary = run_dir / "traffic.har"
+    if not primary.exists():
+        others = sorted(run_dir.glob("traffic*.har"))
+        primary = others[0] if others else None
+    if fns and primary is not None and primary.exists():
+        api_fn, body_fn, rss_fn, pag_fn, plat_fn = fns
+        try:
+            api_n = len(api_fn(primary, page_url=src_url) or [])
+        except Exception:
+            pass
+        try:
+            body_n = len(body_fn(primary, article_url="") or [])
+        except Exception:
+            pass
+        list_html_p = run_dir / "list.html"
+        if list_html_p.exists():
+            try:
+                text = list_html_p.read_text(encoding="utf-8", errors="replace")[:200_000]
+                base = src_url or "https://example.invalid/"
+                try:
+                    rss_n = len(rss_fn(html=text, base_url=base) or [])
+                except Exception:
+                    pass
+                try:
+                    pag_n = len(pag_fn(text, base) or [])
+                except Exception:
+                    pass
+                try:
+                    plat_n = 1 if plat_fn(text, base) else 0
+                except Exception:
+                    pass
+            except OSError:
+                pass
+
+    strategy = ""
+    cfg_path = ROOT / "configs" / f"{slug}.json"
+    if cfg_path.exists():
+        cfg = load_json(cfg_path)
+        strategy = str(cfg.get("strategy") or "")
+
+    steps = [
+        {
+            "stage": 1,
+            "label": "Visit URL",
+            "count": None,
+            "detail": (
+                f"playwright drove a headless browser at host {src_host or '(unknown)'} "
+                f"and saved every network request to traffic.har."
+            ),
+        },
+        {
+            "stage": 2,
+            "label": "Entries inspected",
+            "count": len(entries_all),
+            "detail": "Raw HAR log[].entries — every request the page made.",
+        },
+        {
+            "stage": 3,
+            "label": "Filtered (GET + non-asset)",
+            "count": filtered,
+            "detail": "Drop non-GET and image/font/css/javascript/media MIME types.",
+        },
+        {
+            "stage": 4,
+            "label": "Signals matched",
+            "count": api_n + rss_n + pag_n + plat_n + body_n,
+            "detail": (
+                f"JSON API: {api_n} · RSS: {rss_n} · pagination: {pag_n} · "
+                f"platform: {plat_n} · article-body: {body_n}"
+            ),
+        },
+        {
+            "stage": 5,
+            "label": "Strategy chosen",
+            "count": None,
+            "detail": f"config strategy = {strategy or '(none)'}",
+        },
+    ]
+    return {
+        "slug": slug,
+        "host": src_host,
+        "score": score,
+        "steps": steps,
+        "row_anatomy_example": _entry_first_get(entries_all),
+        "strategy": strategy,
+    }
+
+
+def svg_har_funnel(stages: dict) -> str:
+    width = 920
+    height = 360
+    margin_x = 24
+    col_w = (width - 2 * margin_x) / 5
+
+    sig = stages.get("signals") or {}
+    laneA = stages.get("strategies_lane_A") or {}
+    laneB = stages.get("strategies_lane_B") or {}
+    unmatched = stages.get("unmatched_configs", 0)
+
+    cols = [
+        ("Probe runs", stages.get("probe_runs", 0), "Probe directories on disk."),
+        ("HAR captured", stages.get("har_captured", 0), "Runs with at least one traffic*.har file."),
+        (
+            "Entries scanned",
+            stages.get("entries_total", 0),
+            "HAR log[].entries summed (capped at 1000 per file).",
+        ),
+        (
+            "Signals matched",
+            sum(sig.values()),
+            (
+                f"API {sig.get('api', 0)} · RSS {sig.get('rss', 0)} · "
+                f"pagination {sig.get('pagination', 0)} · "
+                f"platform {sig.get('platform', 0)} · article-body {sig.get('article_body', 0)}"
+            ),
+        ),
+        (
+            "Strategy chosen",
+            sum(laneA.values()) + sum(laneB.values()),
+            (
+                f"Lane A (HAR-driven) {sum(laneA.values())} · "
+                f"Lane B (recognizer, no HAR) {sum(laneB.values())} · "
+                f"Unmatched configs {unmatched}"
+            ),
+        ),
+    ]
+
+    box_h = 80
+    y_mid = 130
+    boxes = []
+    arrows = []
+    last_x_right = None
+    for i, (label, value, detail) in enumerate(cols):
+        x = margin_x + i * col_w
+        bx = x + 4
+        bw = col_w - 8
+        by = y_mid - box_h / 2
+        boxes.append(
+            f'<g class="funnel-stage" data-label="{esc(label)}" data-detail="{esc(detail)}">'
+            f'<rect x="{bx:.1f}" y="{by:.1f}" width="{bw:.1f}" height="{box_h}" '
+            f'rx="6" ry="6" class="funnel-box"></rect>'
+            f'<text class="funnel-label" x="{bx + bw / 2:.1f}" y="{by + 26:.0f}" '
+            f'text-anchor="middle">{esc(label)}</text>'
+            f'<text class="funnel-value" x="{bx + bw / 2:.1f}" y="{by + 58:.0f}" '
+            f'text-anchor="middle">{esc(value)}</text>'
+            f"</g>"
+        )
+        if last_x_right is not None:
+            arrows.append(
+                f'<line class="funnel-arrow" x1="{last_x_right:.1f}" y1="{y_mid:.0f}" '
+                f'x2="{bx:.1f}" y2="{y_mid:.0f}"></line>'
+            )
+        last_x_right = bx + bw
+
+    lane_y = y_mid + box_h / 2 + 30
+    lane_x = margin_x + 4 * col_w + 4
+    lane_w = col_w - 8
+
+    def _lane_top5(d: dict) -> str:
+        if not d:
+            return "(none)"
+        items = sorted(d.items(), key=lambda kv: -kv[1])[:5]
+        return ", ".join(f"{esc(k)}: {esc(v)}" for k, v in items)
+
+    laneA_text = _lane_top5(laneA)
+    laneB_text = _lane_top5(laneB)
+
+    lanes_svg = (
+        f'<g class="funnel-lane" data-label="Lane A" '
+        f'data-detail="HAR-driven: configs whose probe HAR matched a signal.">'
+        f'<text class="funnel-sub" x="{lane_x:.1f}" y="{lane_y:.0f}">'
+        f"Lane A — HAR-driven</text>"
+        f'<text class="funnel-sub-detail" x="{lane_x:.1f}" y="{lane_y + 16:.0f}">{laneA_text}</text>'
+        f"</g>"
+        f'<g class="funnel-lane" data-label="Lane B" '
+        f'data-detail="Recognizer-only: configs issued by URL-pattern recognizers '
+        f'without needing HAR.">'
+        f'<text class="funnel-sub" x="{lane_x:.1f}" y="{lane_y + 48:.0f}">'
+        f"Lane B — Recognizer (no HAR)</text>"
+        f'<text class="funnel-sub-detail" x="{lane_x:.1f}" y="{lane_y + 64:.0f}">{laneB_text}</text>'
+        f"</g>"
+    )
+
+    note = ""
+    if unmatched > 0:
+        note = (
+            f'<text class="funnel-note" x="{margin_x:.0f}" y="{height - 14:.0f}">'
+            f"Side note · {esc(unmatched)} configs in this snapshot have neither a HAR signal "
+            f"nor a recognizer match (legacy or pre-HAR registrations)."
+            f"</text>"
+        )
+
+    return (
+        f'<svg id="harFunnel" viewBox="0 0 {width} {height}" role="img" '
+        f'aria-label="HAR analysis funnel">'
+        f'<rect class="scatter-bg" x="0" y="0" width="{width}" height="{height}"></rect>'
+        + "".join(arrows)
+        + "".join(boxes)
+        + lanes_svg
+        + note
+        + "</svg>"
+    )
+
+
+def render_har_anatomy(sample: dict) -> str:
+    ex = sample.get("row_anatomy_example") or {}
+    rows = [
+        ("request.url", "URL that the headless browser fetched", "Host filter (ad/tracker drop); cross-host API detection.", ex.get("host") or "—"),
+        ("request.method", "HTTP method", "Only GET considered for list extraction.", ex.get("method") or "—"),
+        ("response.status", "HTTP status code", "Drop non-2xx responses before signal extraction.", str(ex.get("status") or "—")),
+        ("response.headers.content-type", "MIME from response headers", "Route JSON candidates to API lane, HTML to platform/RSS lanes.", _short_text(ex.get("content_type") or "—", 38)),
+        ("response.content.size", "Response body size", "Drop empty / tracker pixels; rank list endpoints.", _fmt_bytes(ex.get("size"))),
+    ]
+    body = "".join(
+        '<tr><td><code>{f}</code></td><td>{w}</td><td>{y}</td><td><code>{v}</code></td></tr>'.format(
+            f=esc(field), w=esc(what), y=esc(why), v=esc(value)
+        )
+        for field, what, why, value in rows
+    )
+    return (
+        '<table class="har-anatomy">'
+        '<thead><tr><th>HAR field</th><th>What it is</th><th>Why probe cares</th>'
+        '<th>This case sample</th></tr></thead>'
+        f"<tbody>{body}</tbody></table>"
+    )
+
+
+def render_har_case_steps(sample: dict) -> str:
+    if not sample:
+        return (
+            '<p class="meta">No qualifying probe artifact for the case-sample panel '
+            "right now — it auto-fills once a recent run scores at least 4.</p>"
+        )
+    items = []
+    steps = sample.get("steps") or []
+    for i, step in enumerate(steps):
+        cnt_html = ""
+        if step.get("count") is not None:
+            cnt_html = f' <span class="step-count">{esc(step["count"])}</span>'
+        open_attr = " open" if i == 0 else ""
+        items.append(
+            f'<details class="case-step"{open_attr}>'
+            f"<summary>Step {esc(step['stage'])}. {esc(step['label'])}{cnt_html}</summary>"
+            f'<div class="step-detail">{esc(step["detail"])}</div>'
+            f"</details>"
+        )
+    return (
+        f'<p class="meta">Case sample host: <code>{esc(sample.get("host") or "(unknown)")}</code>'
+        f' · selection score <code>{esc(sample.get("score", "-"))}</code>'
+        f' · final strategy <code>{esc(sample.get("strategy") or "(none)")}</code></p>'
+        + "".join(items)
+    )
+
+
 def metric(label: str, value: object, note: str = "") -> str:
     note_html = f"<span>{esc(note)}</span>" if note else ""
     return f'<div class="metric"><strong>{esc(value)}</strong><em>{esc(label)}</em>{note_html}</div>'
 
 
-def render_html(configs: dict, poll: dict, jobs: dict, generated_at: datetime) -> str:
+def render_html(
+    configs: dict,
+    poll: dict,
+    jobs: dict,
+    generated_at: datetime,
+    *,
+    timeline: dict | None = None,
+    har_aggregate: dict | None = None,
+    har_sample: dict | None = None,
+) -> str:
     config_count = len(configs["items"])
     polling_count = poll["markers"].get("polling", 0)
     failed_count = poll["markers"].get("failed", 0)
@@ -608,6 +1580,31 @@ def render_html(configs: dict, poll: dict, jobs: dict, generated_at: datetime) -
         f'<li><span class="swatch" style="background:{color}"></span>{esc(key)}<b>{key_counts.get(key, 0)}</b></li>'
         for key, color in color_map.items()
     ) or '<li>No watched sites yet</li>'
+
+    timeline = timeline or {"days": [], "buckets_cum": {b: [] for b in BUCKET_ORDER}, "totals_per_day": []}
+    timeline_svg = svg_case_timeline(timeline, EVENT_ANNOTATIONS)
+    timeline_legend_html = "".join(
+        f'<li><button type="button" class="legend-toggle" data-bucket="{esc(b)}" '
+        f'aria-pressed="true">'
+        f'<span class="swatch" style="background:{BUCKET_COLORS[b]}"></span>'
+        f"{esc(BUCKET_LABELS[b])}"
+        f'<b>{esc(timeline["buckets_cum"].get(b, [0])[-1] if timeline.get("days") else 0)}</b>'
+        f"</button></li>"
+        for b in reversed(BUCKET_ORDER)  # show top-of-stack first for readability
+    ) or '<li><button type="button" class="legend-toggle" disabled>No case history</button></li>'
+
+    har_data = har_aggregate or {"stages": {}}
+    har_stages = har_data.get("stages") or {}
+    har_funnel_svg = svg_har_funnel(har_stages)
+    har_anatomy_html = render_har_anatomy(har_sample or {})
+    har_case_html = render_har_case_steps(har_sample or {})
+    har_extractor_ok = bool(har_stages.get("har_captured", 0)) or bool(har_stages.get("probe_runs", 0))
+    har_meta_line = (
+        f'Aggregate computed at {esc(har_data.get("computed_at", "—"))} '
+        f'· extractor {esc(EXTRACTOR_VERSION)}'
+        if har_extractor_ok
+        else "HAR extraction is unavailable on this host (probe artifacts or `probe.extract` module not reachable)."
+    )
 
     recent_rows = []
     for item in jobs["recent"]:
@@ -898,6 +1895,91 @@ def render_html(configs: dict, poll: dict, jobs: dict, generated_at: datetime) -
     .state-content {{ color: #5a4f3d; background: #efe9dc; }}
     .state-dead {{ color: #6a6253; background: #eee7d8; }}
     .state-bug {{ color: #7a4a4a; background: #f1dede; }}
+    .panel-title {{
+      fill: var(--ink);
+      font: 600 13px Georgia, "Times New Roman", serif;
+      letter-spacing: 0.02em;
+    }}
+    .axis-grid {{ stroke: var(--line); stroke-width: 0.6; stroke-dasharray: 2 4; opacity: 0.6; }}
+    .axis-tick {{ fill: var(--muted); font: 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
+    .band {{ opacity: 0.85; transition: opacity 120ms ease; }}
+    .band:hover {{ opacity: 1; }}
+    .annot-line {{ stroke: #1f2528; stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.55; }}
+    .annot:hover .annot-line {{ opacity: 1; }}
+    .annot-marker {{
+      fill: var(--ink);
+      font: 600 10.5px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0.02em;
+    }}
+    .timeline-legend {{ gap: 4px 12px; }}
+    .timeline-legend .legend-toggle {{
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      background: none;
+      border: 1px solid transparent;
+      padding: 3px 8px;
+      border-radius: 12px;
+      color: var(--muted);
+      font: inherit;
+      font-size: 0.86rem;
+      cursor: pointer;
+      transition: background 80ms, border-color 80ms, opacity 80ms;
+    }}
+    .timeline-legend .legend-toggle:hover {{ background: var(--paper); border-color: var(--line); }}
+    .timeline-legend .legend-toggle:focus-visible {{
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
+    }}
+    .timeline-legend .legend-off {{ opacity: 0.42; text-decoration: line-through; }}
+    .timeline-legend b {{ color: var(--ink); margin-left: 4px; }}
+    .funnel-box {{ fill: var(--panel); stroke: var(--accent); stroke-width: 1.4; transition: fill 100ms ease; }}
+    .funnel-stage:hover .funnel-box, .funnel-lane:hover {{ cursor: help; }}
+    .funnel-stage:hover .funnel-box {{ fill: #eaf1f2; }}
+    .funnel-label {{ fill: var(--ink); font: 600 13px Georgia, "Times New Roman", serif; }}
+    .funnel-value {{ fill: var(--accent); font: 700 22px Georgia, "Times New Roman", serif; }}
+    .funnel-arrow {{ stroke: var(--accent-2); stroke-width: 1.6; }}
+    .funnel-sub {{ fill: var(--ink); font: 700 12px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
+    .funnel-sub-detail {{ fill: var(--muted); font: 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
+    .funnel-note {{ fill: var(--muted); font: italic 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
+    .har-subheader {{
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 1.1rem;
+      margin: 26px 0 10px;
+    }}
+    .har-anatomy code {{
+      background: var(--paper);
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-size: 0.86rem;
+    }}
+    .case-step {{
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      margin: 6px 0;
+      padding: 0;
+    }}
+    .case-step summary {{
+      list-style: none;
+      cursor: pointer;
+      padding: 10px 14px;
+      font-weight: 600;
+      color: var(--ink);
+    }}
+    .case-step summary::-webkit-details-marker {{ display: none; }}
+    .case-step[open] summary {{ border-bottom: 1px solid var(--line); }}
+    .step-count {{
+      display: inline-block;
+      margin-left: 8px;
+      padding: 1px 8px;
+      background: var(--paper);
+      border-radius: 10px;
+      color: var(--accent);
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 0.96rem;
+    }}
+    .step-detail {{ padding: 10px 14px; color: var(--muted); font-size: 0.92rem; }}
     table {{
       width: 100%;
       border-collapse: collapse;
@@ -1019,6 +2101,72 @@ def render_html(configs: dict, poll: dict, jobs: dict, generated_at: datetime) -
         }});
       }})();
     </script>
+    <figure>
+      {timeline_svg}
+      <ul class="legend timeline-legend">{timeline_legend_html}</ul>
+      <div id="timelineTip" class="dot-tip" hidden></div>
+      <figcaption>Figure 2. cases.sqlite3 (or <code>docs/cases/*.md</code> frontmatter) accumulated
+        per day. The top panel shows every case row; the bottom panel hides the dominant
+        no-change band so the smaller fix-layer drift stays readable. Colour = where in the pipeline
+        the fix landed — F (recognizer / platform), C (probe heuristic), A (prompt / agentic), or
+        B/D/E (engine, writer, validate). Dashed lines mark pipeline milestones. Hover a band for
+        the running total; click a legend chip to hide that band; hover a milestone marker for
+        the full description.</figcaption>
+    </figure>
+    <script>
+      (function () {{
+        var svg = document.getElementById('caseTimeline');
+        var tip = document.getElementById('timelineTip');
+        if (!svg || !tip) return;
+        var bandsByBucket = {{}};
+        svg.querySelectorAll('.band').forEach(function (b) {{
+          var bk = b.getAttribute('data-bucket');
+          if (!bk) return;
+          (bandsByBucket[bk] = bandsByBucket[bk] || []).push(b);
+        }});
+        function showTip(html, e) {{
+          tip.innerHTML = html;
+          tip.hidden = false;
+          tip.style.left = (e.clientX + 14) + 'px';
+          tip.style.top = (e.clientY + 14) + 'px';
+        }}
+        svg.addEventListener('mousemove', function (e) {{
+          if (tip.hidden) return;
+          tip.style.left = (e.clientX + 14) + 'px';
+          tip.style.top = (e.clientY + 14) + 'px';
+        }});
+        svg.addEventListener('mouseover', function (e) {{
+          var band = e.target.closest ? e.target.closest('.band') : null;
+          if (band) {{
+            var bk = band.getAttribute('data-bucket') || '';
+            showTip('<b>' + bk + '</b><span>cumulative band</span>', e);
+            return;
+          }}
+          var annot = e.target.closest ? e.target.closest('.annot') : null;
+          if (annot) {{
+            var d = annot.getAttribute('data-date') || '';
+            var full = annot.getAttribute('data-full') || '';
+            showTip('<b>' + d + '</b><span>' + full + '</span>', e);
+            return;
+          }}
+          tip.hidden = true;
+        }});
+        svg.addEventListener('mouseleave', function () {{ tip.hidden = true; }});
+        // Legend toggle (buttons outside svg for keyboard a11y)
+        document.querySelectorAll('.timeline-legend .legend-toggle').forEach(function (btn) {{
+          btn.addEventListener('click', function () {{
+            var bk = btn.getAttribute('data-bucket');
+            var visible = btn.getAttribute('aria-pressed') !== 'false';
+            var next = !visible;
+            btn.setAttribute('aria-pressed', next ? 'true' : 'false');
+            btn.classList.toggle('legend-off', !next);
+            (bandsByBucket[bk] || []).forEach(function (b) {{
+              b.style.display = next ? '' : 'none';
+            }});
+          }});
+        }});
+      }})();
+    </script>
   </section>
 
   <section aria-labelledby="sources">
@@ -1049,6 +2197,54 @@ def render_html(configs: dict, poll: dict, jobs: dict, generated_at: datetime) -
     </table>
   </section>
 
+  <section aria-labelledby="har">
+    <h2 id="har">How the probe reads a site (HAR)</h2>
+    <p class="lead">When a new URL is offered, a headless browser visits it and records every
+      network request to a <code>traffic.har</code> file. The pipeline then asks five questions of
+      that file to decide how to fetch the site afterwards. The funnel below counts how many
+      probes traveled through each question this snapshot; below it, one live case sample shows the
+      same five questions answered for a real site.</p>
+    <p class="meta">{har_meta_line}</p>
+    <figure>
+      {har_funnel_svg}
+      <div id="harFunnelTip" class="dot-tip" hidden></div>
+      <figcaption>Figure 3. Stage counts roll up across every probe run with a <code>traffic*.har</code>
+        on disk. Lane A counts configs where a HAR signal directly triggered the strategy; Lane B
+        counts configs issued by URL-pattern recognizers that did not need HAR at all. Hover a
+        stage for the breakdown.</figcaption>
+    </figure>
+    <h3 class="har-subheader">What fields are read from each HAR entry</h3>
+    {har_anatomy_html}
+    <h3 class="har-subheader">A live case sample (auto-selected each cycle)</h3>
+    {har_case_html}
+    <script>
+      (function () {{
+        var svg = document.getElementById('harFunnel');
+        var tip = document.getElementById('harFunnelTip');
+        if (!svg || !tip) return;
+        function showTip(label, detail, e) {{
+          tip.innerHTML = '<b>' + label + '</b><span>' + detail + '</span>';
+          tip.hidden = false;
+          tip.style.left = (e.clientX + 14) + 'px';
+          tip.style.top = (e.clientY + 14) + 'px';
+        }}
+        svg.addEventListener('mousemove', function (e) {{
+          if (tip.hidden) return;
+          tip.style.left = (e.clientX + 14) + 'px';
+          tip.style.top = (e.clientY + 14) + 'px';
+        }});
+        svg.addEventListener('mouseover', function (e) {{
+          var stage = e.target.closest ? e.target.closest('.funnel-stage, .funnel-lane') : null;
+          if (!stage) {{ tip.hidden = true; return; }}
+          var label = stage.getAttribute('data-label') || '';
+          var detail = stage.getAttribute('data-detail') || '';
+          showTip(label, detail, e);
+        }});
+        svg.addEventListener('mouseleave', function () {{ tip.hidden = true; }});
+      }})();
+    </script>
+  </section>
+
   <footer>
     <p>Generated from local runtime snapshots on N100. The internal development interface remains separate from this public static artifact.</p>
   </footer>
@@ -1070,18 +2266,38 @@ def main(argv: list[str]) -> int:
     if not out_path.is_absolute():
         out_path = ROOT / out_path
 
+    t0 = time.monotonic()
     configs = read_configs()
     poll = read_poll_state()
     jobs = read_jobs()
+    timeline = read_case_timeline()
+    har_aggregate = read_har_aggregate(cache_dir=out_path.parent)
+    har_sample = pick_case_sample()
     generated_at = datetime.now(KST)
-    page = render_html(configs, poll, jobs, generated_at)
+    page = render_html(
+        configs,
+        poll,
+        jobs,
+        generated_at,
+        timeline=timeline,
+        har_aggregate=har_aggregate,
+        har_sample=har_sample,
+    )
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(page, encoding="utf-8")
+    tmp_path = out_path.with_suffix(out_path.suffix + ".tmp")
+    tmp_path.write_text(page, encoding="utf-8")
+    os.replace(tmp_path, out_path)
+
+    elapsed = time.monotonic() - t0
+    har_stages = (har_aggregate or {}).get("stages") or {}
     print(
         "[generate_site] wrote "
         f"{out_path} ({len(configs['items'])} configs, {poll['total']} polling, "
-        f"{len(jobs['recent'])} recent jobs)"
+        f"{len(jobs['recent'])} recent jobs, "
+        f"{len(timeline.get('days') or [])} timeline days, "
+        f"{har_stages.get('har_captured', 0)} HAR runs) "
+        f"elapsed={elapsed:.2f}s"
     )
     return 0
 
