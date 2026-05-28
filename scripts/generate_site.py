@@ -1725,9 +1725,17 @@ def build_har_detail(slug: str, har_path: Path) -> dict:
                            else _short_text(json.dumps(_redact_json(value), ensure_ascii=False), 180),
             })
 
+    parsed_base = urlparse(base_url) if base_url else None
+    path_label = ""
+    if parsed_base:
+        raw_path = (parsed_base.path or "").rstrip("/")
+        if raw_path:
+            path_label = raw_path if len(raw_path) <= 30 else raw_path[:29] + "…"
     return {
         "slug": slug,
         "host_label": _short_host(base_url) or "host masked",
+        "path_label": path_label,
+        "probe_url": base_url,
         "har_name": har_path.name,
         "har_mtime": mtime,
         "probe_host": _host_mask(base_url),
@@ -1786,6 +1794,8 @@ def _placeholder_har_panel() -> dict:
         "host_label": "No probe artifact",
         "detail": {
             "host_label": "No probe artifact",
+            "path_label": "",
+            "probe_url": "",
             "har_name": "—",
             "har_mtime": "",
             "verdict": "—",
@@ -1804,13 +1814,23 @@ def render_har_detail_html(payload: dict | None) -> str:
     if not panels:
         panels = [_placeholder_har_panel()]
     multi = len(panels) > 1
-    options = "".join(
-        f'<option value="{esc(panel["panel_id"])}">'
-        f'{esc(panel["host_label"])}{(" #" + str(i + 1)) if multi else ""}'
-        f'{(" · " + (panel.get("detail") or {}).get("verdict")) if (panel.get("detail") or {}).get("verdict") else ""}'
-        '</option>'
-        for i, panel in enumerate(panels)
-    )
+    options_parts: list[str] = []
+    for i, panel in enumerate(panels):
+        detail = panel.get("detail") or {}
+        host_label = panel.get("host_label") or "site"
+        path_label = detail.get("path_label") or ""
+        verdict = detail.get("verdict") or ""
+        bits = [host_label]
+        if path_label:
+            bits[-1] = f"{host_label}{path_label}"
+        if multi:
+            bits.append(f"#{i + 1}")
+        if verdict:
+            bits.append(verdict if len(verdict) <= 28 else verdict[:27] + "…")
+        options_parts.append(
+            f'<option value="{esc(panel["panel_id"])}">{esc(" · ".join(bits))}</option>'
+        )
+    options = "".join(options_parts)
     panel_html = "".join(
         _render_har_detail_panel(panel, hidden=i != 0)
         for i, panel in enumerate(panels)
@@ -1838,12 +1858,23 @@ def _render_har_detail_panel(panel: dict, *, hidden: bool) -> str:
         "</div>"
     )
 
+    probe_url = detail.get("probe_url") or ""
+    host_label = detail.get("host_label") or "host masked"
+    path_label = detail.get("path_label") or ""
+    site_display = f"{host_label}{path_label}" if path_label else host_label
+    if probe_url:
+        site_dd = (
+            f'<a href="{esc(probe_url)}" target="_blank" rel="noopener noreferrer">'
+            f'<code>{esc(site_display)}</code></a>'
+        )
+    else:
+        site_dd = f'<code>{esc(site_display)}</code>'
     meta_dl = (
         '<dl class="har-meta">'
+        f"<dt>site</dt><dd>{site_dd}</dd>"
         f"<dt>HAR mtime</dt><dd><code>{esc(detail['har_mtime'] or '—')}</code></dd>"
         f"<dt>verdict</dt><dd>{esc(detail['verdict'] or '—')}</dd>"
         f"<dt>config strategy</dt><dd><code>{esc(detail['config_strategy'] or '—')}</code></dd>"
-        f"<dt>host</dt><dd><code>{esc(detail['host_label'] or 'host masked')}</code></dd>"
         "</dl>"
         '<details class="har-meta-extra">'
         '<summary>more</summary>'
@@ -2118,7 +2149,7 @@ def render_html(
       font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }}
     main {{
-      max-width: 860px;
+      max-width: 1140px;
       margin: 0 auto;
       padding: 56px 20px 72px;
     }}
