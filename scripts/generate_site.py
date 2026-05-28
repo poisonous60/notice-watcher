@@ -1146,6 +1146,7 @@ def render_stage_panels() -> str:
 # ────────────────────────────────────────────────────────────────────────────
 
 _HAR_DETAIL_CACHE_PATH = ROOT / "output" / "site" / "_har_detail.json"
+_HAR_DETAIL_CACHE_VERSION = 2
 _HAR_DETAIL_MANIFEST_FILES = (
     "traffic.har",
     "list.html",
@@ -1312,16 +1313,16 @@ def _manifest_for(run_dir: Path, slug: str) -> dict:
         if p.exists():
             try:
                 st = p.stat()
-                items.append((name, st.st_size, st.st_mtime_ns))
+                items.append([name, st.st_size, st.st_mtime_ns])
             except OSError:
-                items.append((name, -1, -1))
+                items.append([name, -1, -1])
     cfg = ROOT / "configs" / f"{slug}.json"
     if cfg.exists():
         try:
             st = cfg.stat()
-            items.append(("__config__", st.st_size, st.st_mtime_ns))
+            items.append(["__config__", st.st_size, st.st_mtime_ns])
         except OSError:
-            items.append(("__config__", -1, -1))
+            items.append(["__config__", -1, -1])
     extract_path = ROOT / "probe" / "extract.py"
     for label, p in (
         ("__extract__", extract_path),
@@ -1332,14 +1333,16 @@ def _manifest_for(run_dir: Path, slug: str) -> dict:
     ):
         if p.exists():
             try:
-                items.append((label, p.stat().st_size, p.stat().st_mtime_ns))
+                st = p.stat()
+                items.append([label, st.st_size, st.st_mtime_ns])
             except OSError:
                 pass
     for rel in _AGENTIC_MANIFEST_FILES:
         p = ROOT / rel
         if p.exists():
             try:
-                items.append((f"__agentic__{rel}", p.stat().st_size, p.stat().st_mtime_ns))
+                st = p.stat()
+                items.append([f"__agentic__{rel}", st.st_size, st.st_mtime_ns])
             except OSError:
                 pass
     diag = load_json(run_dir / "diagnosis.json")
@@ -1353,10 +1356,57 @@ def _manifest_for(run_dir: Path, slug: str) -> dict:
         if p.exists():
             try:
                 st = p.stat()
-                items.append((f"__diag_body_{i}__", st.st_size, st.st_mtime_ns))
+                items.append([f"__diag_body_{i}__", st.st_size, st.st_mtime_ns])
             except OSError:
                 pass
     return {"slug": slug, "items": items}
+
+
+def _stat_item(label: str, path: Path) -> list[object]:
+    try:
+        st = path.stat()
+        return [label, st.st_size, st.st_mtime_ns]
+    except OSError:
+        return [label, -1, -1]
+
+
+def _har_selection_manifest() -> dict:
+    """Cheap cache key for the set of registered probe examples.
+
+    This intentionally uses filesystem stats only. The expensive HAR parsing
+    happens only when this key changes or the detail cache is missing.
+    """
+    items: list[list[object]] = []
+    slugs: list[str] = []
+    pdir = ROOT / "output" / "probe"
+    if pdir.exists():
+        for run_dir in sorted(p for p in pdir.iterdir() if p.is_dir()):
+            primary = run_dir / "traffic.har"
+            if not primary.exists():
+                others = sorted(run_dir.glob("traffic*.har"))
+                primary = others[0] if others else None
+            cfg_path = ROOT / "configs" / f"{run_dir.name}.json"
+            if primary is None or not cfg_path.exists():
+                continue
+            slugs.append(run_dir.name)
+            items.append(_stat_item(f"{run_dir.name}/traffic", primary))
+            items.append(_stat_item(f"{run_dir.name}/config", cfg_path))
+            for name in _HAR_DETAIL_MANIFEST_FILES:
+                p = run_dir / name
+                if p.exists():
+                    items.append(_stat_item(f"{run_dir.name}/{name}", p))
+    for rel in (
+        "probe/extract.py",
+        "engine/digest.py",
+        "engine/_mdr_candidates.py",
+        "probe/hydration.py",
+        "probe/paths.py",
+        *_AGENTIC_MANIFEST_FILES,
+    ):
+        p = ROOT / rel
+        if p.exists():
+            items.append(_stat_item(f"__source__/{rel}", p))
+    return {"version": _HAR_DETAIL_CACHE_VERSION, "slugs": slugs, "items": items}
 
 
 def pick_har_showcases(top_n: int | None = None) -> list[tuple[str, Path]]:
@@ -1389,7 +1439,7 @@ def pick_har_showcases(top_n: int | None = None) -> list[tuple[str, Path]]:
         if panels and isinstance(panels[0], dict):
             previous_panel_slug = str((panels[0].get("manifest") or {}).get("slug") or "")
 
-    eligible: list[tuple[int, int, int, str, Path]] = []
+    eligible: list[tuple[int, str, Path]] = []
     for run_dir in pdir.iterdir():
         if not run_dir.is_dir():
             continue
@@ -1402,65 +1452,28 @@ def pick_har_showcases(top_n: int | None = None) -> list[tuple[str, Path]]:
         cfg_path = ROOT / "configs" / f"{run_dir.name}.json"
         if not cfg_path.exists():
             continue
-        # Cheap eligibility floor.
-        try:
-            har = json.loads(primary.read_text(encoding="utf-8", errors="replace"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        entries = (har.get("log") or {}).get("entries") or []
-        n_entries = len(entries)
-        if n_entries < 50:
-            continue
-        # JSON-ish count in first 500 entries.
-        json_n = 0
-        for e in entries[:500]:
-            mime = ((e.get("response") or {}).get("content") or {}).get("mimeType") or ""
-            if "json" in mime.lower():
-                json_n += 1
-                if json_n >= 3:
-                    break
-        feed_cand = run_dir / "feed_candidates.json"
-        has_feed = feed_cand.exists() and bool(load_json(feed_cand))
-        if json_n < 3 and not has_feed:
-            continue
-        # Score (codex v4 §1).
-        score = 3  # configs/<slug>.json exists (floor already enforced)
-        if n_entries >= 50:
-            score += 1
-        if n_entries >= 200:
-            score += 1
-        if 50 <= n_entries <= 3000:
-            score += 1
-        if json_n >= 3:
-            score += 2
-        if has_feed:
-            score += 1
+        score = 0
         env_path = run_dir / "environment.json"
         if env_path.exists():
             env_data = load_json(env_path)
             src_url = str(env_data.get("url") or env_data.get("source_url") or "")
             if src_url and src_url in recent_ok_urls:
                 score += 1
-        # Tie-break primaries: entries band, json count.
-        band_bonus = 1 if 50 <= n_entries <= 3000 else 0
-        eligible.append((score, band_bonus, json_n, run_dir.name, primary))
+        eligible.append((score, run_dir.name, primary))
 
     if not eligible:
         return []
 
-    # Sticky: if previous slug still in eligible, prefer it as long as score
-    # is within 1 of the current max.
-    eligible.sort(key=lambda t: (-t[0], -t[1], -t[2], t[3]))
-    top_score = eligible[0][0]
+    eligible.sort(key=lambda t: (-t[0], t[1]))
     if previous_panel_slug:
-        for score, band, json_n, slug, primary in eligible:
-            if slug == previous_panel_slug and top_score - score <= 1:
-                eligible = [(score, band, json_n, slug, primary)] + [
-                    item for item in eligible if item[3] != slug
+        for score, slug, primary in eligible:
+            if slug == previous_panel_slug:
+                eligible = [(score, slug, primary)] + [
+                    item for item in eligible if item[1] != slug
                 ]
                 break
     picked = eligible if top_n is None else eligible[:top_n]
-    return [(slug, primary) for _, _, _, slug, primary in picked]
+    return [(slug, primary) for _, slug, primary in picked]
 
 
 def _row_api(c: dict) -> dict:
@@ -1839,6 +1852,15 @@ def _find_section(detail: dict, key: str) -> dict:
     return {}
 
 
+def _har_raw_dump(detail: dict) -> dict[str, object]:
+    raw_dump: dict[str, object] = {}
+    for sec in detail.get("sections") or []:
+        key = sec.get("key")
+        if key:
+            raw_dump[str(key)] = sec.get("raw_redacted")
+    return raw_dump
+
+
 def _render_agentic_user_prompt(slug: str, url: str) -> str:
     prompt_path = ROOT / "prompts" / "register_agent_user.txt"
     tpl = _read_text_excerpt(prompt_path, max_chars=1400)
@@ -2125,16 +2147,67 @@ def build_agentic_packet(detail: dict, *, run_dir: Path | None = None) -> dict:
 
 def read_har_details(*, force_recompute: bool = False) -> dict:
     """Build or read the registered Figure 4 panel payload."""
+    def _write_cache(payload: dict) -> None:
+        try:
+            _HAR_DETAIL_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            tmp = _HAR_DETAIL_CACHE_PATH.with_suffix(_HAR_DETAIL_CACHE_PATH.suffix + ".tmp")
+            tmp.write_text(json.dumps(payload), encoding="utf-8")
+            os.replace(tmp, _HAR_DETAIL_CACHE_PATH)
+        except OSError:
+            pass
+
+    selection_manifest = _har_selection_manifest()
+    cached = load_json(_HAR_DETAIL_CACHE_PATH)
+    if not force_recompute and isinstance(cached, dict):
+        if cached.get("selection_manifest") == selection_manifest:
+            return cached
+        panels = cached.get("panels") or []
+        # Upgrade the pre-v2 cache without reparsing every HAR. This keeps the
+        # first deploy after this change from paying the full HAR analysis cost.
+        if panels and not cached.get("selection_manifest"):
+            cached_slugs = [
+                str((p.get("manifest") or {}).get("slug") or "")
+                for p in panels if isinstance(p, dict)
+            ]
+            try:
+                current_by_slug = {
+                    slug: _manifest_for(ROOT / "output" / "probe" / slug, slug)
+                    for slug in cached_slugs if slug
+                }
+            except (OSError, TypeError):
+                current_by_slug = {}
+            cached_by_slug = {
+                str((p.get("manifest") or {}).get("slug") or ""): p.get("manifest")
+                for p in panels if isinstance(p, dict)
+            }
+            selection_slugs = [str(x) for x in (selection_manifest.get("slugs") or [])]
+            if (
+                current_by_slug
+                and sorted(cached_slugs) == sorted(selection_slugs)
+                and cached_by_slug == current_by_slug
+            ):
+                cached["cache_version"] = _HAR_DETAIL_CACHE_VERSION
+                cached["selection_manifest"] = selection_manifest
+                _write_cache(cached)
+                return cached
+
     picks = pick_har_showcases(top_n=None)
     if not picks:
-        return {"computed_at": datetime.now(KST).isoformat(), "panels": []}
+        return {
+            "cache_version": _HAR_DETAIL_CACHE_VERSION,
+            "selection_manifest": selection_manifest,
+            "computed_at": datetime.now(KST).isoformat(),
+            "panels": [],
+        }
     manifests = [_manifest_for(har_path.parent, slug) for slug, har_path in picks]
-    cached = load_json(_HAR_DETAIL_CACHE_PATH)
     if (
         not force_recompute
         and isinstance(cached, dict)
         and [p.get("manifest") for p in (cached.get("panels") or [])] == manifests
     ):
+        cached["cache_version"] = _HAR_DETAIL_CACHE_VERSION
+        cached["selection_manifest"] = selection_manifest
+        _write_cache(cached)
         return cached
     panels = []
     for i, ((slug, har_path), manifest) in enumerate(zip(picks, manifests)):
@@ -2148,23 +2221,34 @@ def read_har_details(*, force_recompute: bool = False) -> dict:
             "detail": detail,
         })
     payload = {
+        "cache_version": _HAR_DETAIL_CACHE_VERSION,
+        "selection_manifest": selection_manifest,
         "computed_at": datetime.now(KST).isoformat(),
         "panels": panels,
     }
-    try:
-        _HAR_DETAIL_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        tmp = _HAR_DETAIL_CACHE_PATH.with_suffix(_HAR_DETAIL_CACHE_PATH.suffix + ".tmp")
-        tmp.write_text(json.dumps(payload), encoding="utf-8")
-        os.replace(tmp, _HAR_DETAIL_CACHE_PATH)
-    except OSError:
-        pass
+    _write_cache(payload)
     return payload
 
 
 def write_probe_raw_assets(site_dir: Path, har_detail: dict | None) -> None:
     panels = (har_detail or {}).get("panels") or []
     raw_root = site_dir / "probe-raw"
-    manifest_items: list[dict[str, object]] = []
+    manifest = {
+        "cache_version": _HAR_DETAIL_CACHE_VERSION,
+        "panels": len(panels),
+        "items": [
+            {"slug": (panel.get("manifest") or {}).get("slug"), "panel": panel.get("manifest") or {}}
+            for panel in panels
+        ],
+    }
+    manifest_path = raw_root / "manifest.json"
+    try:
+        old_manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else None
+    except (OSError, json.JSONDecodeError):
+        old_manifest = None
+    if old_manifest == manifest:
+        return
+
     operations: list[tuple[str, str, Path | None, str | None]] = []
 
     def _write_text_if_changed(dst: Path, text: str) -> None:
@@ -2200,14 +2284,6 @@ def write_probe_raw_assets(site_dir: Path, har_detail: dict | None) -> None:
             return
         try:
             if src.exists():
-                st = src.stat()
-                manifest_items.append({
-                    "url": url,
-                    "kind": "copy",
-                    "source": str(src.relative_to(ROOT)) if src.is_relative_to(ROOT) else str(src),
-                    "size": st.st_size,
-                    "mtime_ns": st.st_mtime_ns,
-                })
                 operations.append(("copy", url, src, None))
                 return
         except OSError:
@@ -2217,13 +2293,6 @@ def write_probe_raw_assets(site_dir: Path, har_detail: dict | None) -> None:
     def _track_text(url: str, text: str) -> None:
         if not url:
             return
-        data = text.encode("utf-8")
-        manifest_items.append({
-            "url": url,
-            "kind": "text",
-            "sha256": hashlib.sha256(data).hexdigest(),
-            "size": len(data),
-        })
         operations.append(("text", url, None, text))
 
     for panel in panels:
@@ -2232,6 +2301,10 @@ def write_probe_raw_assets(site_dir: Path, har_detail: dict | None) -> None:
         if not slug:
             continue
         packet = detail.get("agentic_packet") or {}
+        _track_text(
+            f"probe-raw/{slug}/har_signals.json",
+            json.dumps(_har_raw_dump(detail), ensure_ascii=False, indent=2),
+        )
         for item in packet.get("artifacts") or []:
             raw_url = str(item.get("raw_url") or "")
             rel_path = str(item.get("path") or "")
@@ -2249,17 +2322,6 @@ def write_probe_raw_assets(site_dir: Path, har_detail: dict | None) -> None:
             str(result.get("raw") or result.get("preview") or ""),
         )
 
-    manifest = {
-        "panels": len(panels),
-        "items": sorted(manifest_items, key=lambda item: str(item.get("url") or "")),
-    }
-    manifest_path = raw_root / "manifest.json"
-    try:
-        old_manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else None
-    except (OSError, json.JSONDecodeError):
-        old_manifest = None
-    if old_manifest == manifest:
-        return
     try:
         raw_root.mkdir(parents=True, exist_ok=True)
     except OSError:
@@ -2271,6 +2333,53 @@ def write_probe_raw_assets(site_dir: Path, har_detail: dict | None) -> None:
         elif kind == "text":
             _write_text_if_changed(dst, text or "")
     _write_text_if_changed(manifest_path, json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2))
+
+
+def write_probe_panel_assets(site_dir: Path, har_detail: dict | None) -> None:
+    panels = (har_detail or {}).get("panels") or []
+    panel_root = site_dir / "probe-panels"
+    script_path = ROOT / "scripts" / "generate_site.py"
+    script_sig = _stat_item("__render__/scripts/generate_site.py", script_path)
+    manifest_items = [
+        {
+            "url": f"probe-panels/probe-agent-panel-{i}.html",
+            "panel": panel.get("manifest") or {},
+            "script": script_sig,
+        }
+        for i, panel in enumerate(panels)
+    ]
+    manifest = {"panels": len(panels), "items": manifest_items}
+    manifest_path = panel_root / "manifest.json"
+    try:
+        old_manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else None
+    except (OSError, json.JSONDecodeError):
+        old_manifest = None
+    if old_manifest == manifest:
+        return
+    try:
+        panel_root.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return
+    for i, panel in enumerate(panels):
+        html_fragment = _render_probe_agentic_panel(panel, panel_index=i, hidden=False)
+        dst = panel_root / f"probe-agent-panel-{i}.html"
+        data = html_fragment.encode("utf-8")
+        try:
+            if dst.exists():
+                st = dst.stat()
+                if st.st_size == len(data) and hashlib.sha256(dst.read_bytes()).digest() == hashlib.sha256(data).digest():
+                    continue
+            tmp = dst.with_suffix(dst.suffix + ".tmp")
+            tmp.write_bytes(data)
+            os.replace(tmp, dst)
+        except OSError:
+            pass
+    try:
+        tmp = manifest_path.with_suffix(manifest_path.suffix + ".tmp")
+        tmp.write_text(json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2), encoding="utf-8")
+        os.replace(tmp, manifest_path)
+    except OSError:
+        pass
 
 
 def _placeholder_har_panel() -> dict:
@@ -2500,9 +2609,11 @@ def _render_har_detail_panel(panel: dict, *, hidden: bool) -> str:
         )
     body += "</tbody></table></div>"
     raw_pre = json.dumps(raw_dump, ensure_ascii=False, indent=2) if raw_dump else "(empty)"
+    slug = str(detail.get("slug") or "")
+    raw_url = f"probe-raw/{slug}/har_signals.json" if slug else ""
     raw_block = (
         '<div class="overlay-action-row">'
-        f'{overlay_button("HAR signals raw JSON", raw_pre, label="open raw signals")}'
+        f'{overlay_button("HAR signals raw JSON", raw_pre, label="open raw signals", raw_url=raw_url)}'
         "</div>"
     )
     hidden_attr = " hidden" if hidden else ""
@@ -2536,12 +2647,10 @@ def render_probe_agentic_html(payload: dict | None) -> str:
         )
         options_parts.append(
             f'<option value="{esc(panel_id)}" data-url="{esc(probe_url)}" '
+            f'data-panel-url="probe-panels/{esc(panel_id)}.html" '
             f'data-search="{esc(search_text.lower())}">{esc(" · ".join(bits))}</option>'
         )
-    panel_html = "".join(
-        _render_probe_agentic_panel(panel, panel_index=i, hidden=i != 0)
-        for i, panel in enumerate(panels)
-    )
+    panel_html = _render_probe_agentic_panel(panels[0], panel_index=0, hidden=False)
     count_label = f"{len(panels)} registered probe examples"
     return (
         '<div class="har-picker probe-agent-picker">'
@@ -2552,7 +2661,7 @@ def render_probe_agentic_html(payload: dict | None) -> str:
         f'<a id="probeAgentOpenUrl" class="probe-agent-url" href="#" target="_blank" rel="noopener noreferrer">open URL</a>'
         f'<span id="probeAgentCount" class="probe-agent-count">{esc(count_label)}</span>'
         '</div>'
-        f"{panel_html}"
+        f'<div id="probeAgentPanelHost">{panel_html}</div>'
     )
 
 
@@ -4128,13 +4237,20 @@ def render_html(
         var probeAgentSearch = document.getElementById('probeAgentSearch');
         var probeAgentOpenUrl = document.getElementById('probeAgentOpenUrl');
         var probeAgentCount = document.getElementById('probeAgentCount');
-        var activeProbeAgentPanel = document.querySelector('.probe-agent-panel:not([hidden])');
+        var probeAgentPanelHost = document.getElementById('probeAgentPanelHost');
+        var activeProbeAgentPanelId = probeAgentPanelHost && probeAgentPanelHost.firstElementChild
+          ? probeAgentPanelHost.firstElementChild.id : '';
+        var loadedProbeAgentPanels = {{}};
+        if (probeAgentPanelHost && activeProbeAgentPanelId) {{
+          loadedProbeAgentPanels[activeProbeAgentPanelId] = probeAgentPanelHost.innerHTML;
+        }}
         var probeAgentOptions = probeAgentPicker ? Array.prototype.map.call(probeAgentPicker.options, function (opt) {{
           return {{
             option: opt,
             value: opt.value,
             text: opt.textContent || '',
             url: opt.getAttribute('data-url') || '',
+            panelUrl: opt.getAttribute('data-panel-url') || '',
             search: opt.getAttribute('data-search') || ''
           }};
         }}) : [];
@@ -4153,14 +4269,32 @@ def render_html(
           }}
         }}
         function setProbeAgentPanel(targetId) {{
-          if (activeProbeAgentPanel && activeProbeAgentPanel.id === targetId) {{
+          if (!probeAgentPanelHost) return;
+          if (activeProbeAgentPanelId === targetId) {{
             updateProbeAgentUrl();
             return;
           }}
-          if (activeProbeAgentPanel) activeProbeAgentPanel.hidden = true;
-          activeProbeAgentPanel = targetId ? document.getElementById(targetId) : null;
-          if (activeProbeAgentPanel) activeProbeAgentPanel.hidden = false;
+          activeProbeAgentPanelId = targetId;
           updateProbeAgentUrl();
+          if (!targetId) {{
+            probeAgentPanelHost.innerHTML = '<p class="meta">No matching example.</p>';
+            return;
+          }}
+          if (loadedProbeAgentPanels[targetId]) {{
+            probeAgentPanelHost.innerHTML = loadedProbeAgentPanels[targetId];
+            return;
+          }}
+          var match = probeAgentOptions.find(function (item) {{ return item.value === targetId; }});
+          if (!match || !match.panelUrl) return;
+          probeAgentPanelHost.innerHTML = '<p class="meta">Loading example...</p>';
+          loadText(match.panelUrl).then(function (html) {{
+            loadedProbeAgentPanels[targetId] = html;
+            if (activeProbeAgentPanelId === targetId) probeAgentPanelHost.innerHTML = html;
+          }}).catch(function (err) {{
+            if (activeProbeAgentPanelId === targetId) {{
+              probeAgentPanelHost.innerHTML = '<p class="meta">Failed to load example: ' + err.message + '</p>';
+            }}
+          }});
         }}
         function renderProbeAgentOptions(query) {{
           if (!probeAgentPicker) return;
@@ -4221,6 +4355,24 @@ def render_html(
         function hidePacketTip() {{
           if (packetTip) packetTip.hidden = true;
         }}
+        function loadText(url) {{
+          if (window.fetch) {{
+            return fetch(url).then(function (res) {{
+              if (!res.ok) throw new Error('HTTP ' + res.status);
+              return res.text();
+            }});
+          }}
+          return new Promise(function (resolve, reject) {{
+            var xhr = new XMLHttpRequest();
+            xhr.open('GET', url);
+            xhr.onload = function () {{
+              if (xhr.status >= 200 && xhr.status < 300) resolve(xhr.responseText || '');
+              else reject(new Error('HTTP ' + xhr.status));
+            }};
+            xhr.onerror = function () {{ reject(new Error('network error')); }};
+            xhr.send();
+          }});
+        }}
         document.addEventListener('mouseover', function (e) {{
           var el = e.target.closest ? e.target.closest('[data-tip-html]') : null;
           if (el) showPacketTip(el, e);
@@ -4257,10 +4409,7 @@ def render_html(
             overlay.hidden = false;
             if (rawUrl) {{
               overlayBody.innerHTML = '<pre>loading raw text...</pre>';
-              fetch(rawUrl).then(function (res) {{
-                if (!res.ok) throw new Error('HTTP ' + res.status);
-                return res.text();
-              }}).then(function (text) {{
+              loadText(rawUrl).then(function (text) {{
                 var pre = document.createElement('pre');
                 pre.textContent = text;
                 overlayBody.innerHTML = '';
@@ -4318,6 +4467,9 @@ def main(argv: list[str]) -> int:
     jobs = read_jobs()
     case_records = read_case_records()
     har_detail = read_har_details()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    write_probe_raw_assets(out_path.parent, har_detail)
+    write_probe_panel_assets(out_path.parent, har_detail)
     generated_at = datetime.now(KST)
     page = render_html(
         configs,
@@ -4328,8 +4480,6 @@ def main(argv: list[str]) -> int:
         har_detail=har_detail,
     )
 
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    write_probe_raw_assets(out_path.parent, har_detail)
     tmp_path = out_path.with_suffix(out_path.suffix + ".tmp")
     tmp_path.write_text(page, encoding="utf-8")
     os.replace(tmp_path, out_path)

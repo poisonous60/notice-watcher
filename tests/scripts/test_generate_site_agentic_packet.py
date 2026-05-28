@@ -135,6 +135,8 @@ def run() -> list[tuple[str, bool, str]]:
         and "candidate.json" in html
         and "open raw packet" in html
         and "probe-agent-panel-0" in html
+        and "probeAgentPanelHost" in html
+        and "data-panel-url=\"probe-panels/probe-agent-panel-0.html\"" in html
         and "har-signal-table" in html
         and "Published config summary" in html,
         html[:500],
@@ -160,6 +162,11 @@ def run() -> list[tuple[str, bool, str]]:
         and "__agentic__prompts/register_agent_AGENTS.md" in manifest_names
         and "__agentic__prompts/config_writer.system.txt" in manifest_names,
         f"manifest={sorted(manifest_names)}",
+    ))
+    cases.append((
+        "manifest_json_round_trips_for_cache_compare",
+        json.loads(json.dumps(manifest)) == manifest,
+        f"manifest={manifest}",
     ))
     return cases
 
