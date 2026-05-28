@@ -1,0 +1,79 @@
+{
+  "version": 1,
+  "site": "forums.terraria.org",
+  "board": "root",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "notice-watcher/1.0"
+  },
+  "list": {
+    "url_template": "https://forums.terraria.org/",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "div.porta-article-item",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "css",
+          "selector": "h2.block-header a[href*='threads/']",
+          "attr": "href",
+          "transform": [["regex_extract", "\\.(\\d+)/?$"]]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "h2.block-header a[href*='threads/']",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ],
+      "url": [
+        {
+          "from": "css",
+          "selector": "h2.block-header a[href*='threads/']",
+          "attr": "href",
+          "transform": [["urljoin", "https://forums.terraria.org/"]]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "time.u-dt",
+          "attr": "datetime",
+          "transform": [["iso8601", ["%Y-%m-%dT%H:%M:%S%z"]]]
+        }
+      ],
+      "author": [
+        {
+          "from": "css",
+          "selector": ".message-attribution-main a[href*='ewr-porta/authors']",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "div.bbWrapper",
+          "text": true,
+          "transform": [["collapse_ws"]]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "article.message div.bbWrapper",
+        "html": true
+      }
+    ]
+  },
+  "_source_url": "https://forums.terraria.org/",
+  "_note": "Terraria root is a XenForo Porta portal; portal article cards are the intended news surface, not the forum-wide RSS feed."
+}

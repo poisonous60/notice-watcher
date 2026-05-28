@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "site": "www.bay12games.com",
+  "board": "dwarves",
+  "strategy": "httpx_html",
+  "list": {
+    "url_template": "https://www.bay12games.com/dwarves/",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "li.dev_progress[id]",
+    "include_notices": true,
+    "fields": {
+      "post_id": [
+        {
+          "from": "css",
+          "selector": ":self",
+          "attr": "id",
+          "transform": [["strip"]]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": ":self",
+          "text": true,
+          "transform": [["collapse_ws"], ["regex_extract", "^\\d{2}/\\d{2}/\\d{4}\\s+(.+)$"]]
+        }
+      ],
+      "url": [
+        {
+          "from": "template",
+          "value": "https://www.bay12games.com/dwarves/#{post_id}"
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "span.date",
+          "text": true,
+          "transform": [["collapse_ws"], ["iso8601", ["%m/%d/%Y"], "+00:00"]]
+        }
+      ],
+      "author": [
+        {
+          "from": "css",
+          "selector": "img.author_img",
+          "attr": "title",
+          "transform": [["collapse_ws"]]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": ":self",
+          "text": true,
+          "transform": [["collapse_ws"], ["regex_extract", "^\\d{2}/\\d{2}/\\d{4}\\s+(.+)$"]]
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "content": [],
+    "body_empty_acceptable": true
+  },
+  "_source_url": "https://www.bay12games.com/dwarves/",
+  "_note": "Bay 12 Dwarf Fortress inline devlog: each li.dev_progress id is the stable date anchor; entries have no separate article page."
+}
