@@ -842,11 +842,10 @@ def svg_case_blocks(records: list[dict], events: list[tuple[str, str, str]]) -> 
 
     title = (
         f'<text class="panel-title" x="{cx_left:.0f}" y="{title_pad - 16:.0f}">'
-        f"Every case ({len(records)}) — click a block to read the markdown."
+        f"지금까지 처리한 case {len(records)}건 — 블록 클릭 시 글 열림"
         "</text>"
         f'<text class="panel-sub" x="{cx_left:.0f}" y="{title_pad - 4:.0f}">'
-        "Columns = day. Each block = one case file in <code>docs/cases/</code>. "
-        "Colour = fix layer; solid border = improvement (system got smarter)."
+        "열 = 날짜, 블록 1개 = case 1건. 색 = fix layer, 굵은 테두리 = 일반화 개선."
         "</text>"
     )
 
@@ -2228,14 +2227,16 @@ def render_html(
       {timeline_svg}
       <ul class="legend timeline-legend">{timeline_legend_html}</ul>
       <div id="timelineTip" class="dot-tip" hidden></div>
-      <figcaption>Figure 2. Every case file under <code>docs/cases/</code> shown as one small block
-        the day it landed — the bottom rail is the running engine, and each block is a piece bolted
-        on top of it on that day. Colour = where in the pipeline the fix landed: F (recognizer /
-        platform), C (probe heuristic), A (prompt / agentic), B/D/E (engine, writer, validate), or
-        no-change (terminal closure). Blocks with a solid border are <em>improvements</em> — the
-        moment the auto-solver got smarter for that pattern. Dashed verticals mark milestones.
-        <strong>Click any block</strong> to read its case note, or hover over a milestone marker
-        for what landed that day.</figcaption>
+      <figcaption><strong>Figure 2.</strong> 새 사이트를 자동으로 처리하지 못해 사람이 들여다본 사건이
+        한 건 생길 때마다 <code>docs/cases/</code> 에 글 하나가 쌓인다. 매 블록 = 그 글 1편. 굵은 가로선이
+        "지금 돌아가는 엔진"이고, 블록은 그 위에 그날 올라간 패치 조각. <strong>색</strong>은 손본 자리:
+        <span style="color:#3d737f">F</span> 인식기/플랫폼 코드 ·
+        <span style="color:#8a6f4d">C</span> probe 휴리스틱 ·
+        <span style="color:#7b5c8c">A</span> prompt/agentic ·
+        <span style="color:#6f7f52">B/D/E</span> 엔진·writer·validate ·
+        <span style="color:#888">no-change</span> 분류만 박은 종결.
+        <strong>굵은 테두리</strong>는 시스템이 그 패턴을 자동 처리하게 된 *일반화 개선*.
+        점선 vertical 은 인프라 마일스톤 (마커에 마우스 올리면 설명). 블록 클릭 = 글 본문 모달.</figcaption>
     </figure>
     {case_db_html}
     <div id="caseModal" class="modal" hidden role="dialog" aria-labelledby="caseModalTitle" aria-modal="true">
