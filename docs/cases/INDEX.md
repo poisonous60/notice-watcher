@@ -2,12 +2,14 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 368 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 370 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
+| [`host_wynncraft-com_news_f4c34845`](host_wynncraft-com_news_f4c34845.md) | 🔧 손 config (httpx_json) — Wynncraft public publisher API | 2026-05-28 | F | posts_nonempty | https://wynncraft.com/news/ |
 | [`host_wildrift-league_news_8313486f`](host_wildrift-league_news_8313486f.md) | ✅ 수동 config (Riot Next.js data-testid cards) | 2026-05-28 | F | posts_nonempty, schema_invalid_source | https://wildrift.leagueoflegends.com/news/ |
 | [`host_wayforward-com_news_0aefd5ba`](host_wayforward-com_news_0aefd5ba.md) | ✅ Track B 개선 (Tailwind selector grounding + Storyblok all-stories JSON path) | 2026-05-28 | F | selector_syntax, article_body_len | https://wayforward.com/news/ |
+| [`host_unknownworlds-c_subnautica_50bae217`](host_unknownworlds-c_subnautica_50bae217.md) | 🔧 손 config (httpx_html) — Unknown Worlds Subnautica SSR cards | 2026-05-28 | none | title_nonempty | https://unknownworlds.com/subnautica/news/ |
 | [`host_umamusume-com_news_074ee55a`](host_umamusume-com_news_074ee55a.md) | ✅ handcrafted | 2026-05-28 | none | svelte_spa_shell, session_gated_post_api, posts_nonempty_zero, schema_missing_root | https://umamusume.com/news/ |
 | [`host_swtor-com_info_9b40c5ef`](host_swtor-com_info_9b40c5ef.md) | improved — transform vocabulary rule made explicit | 2026-05-28 | A | unknown_regex_replace, missing_post_id, post_id_unique, drupal_news_rows | https://www.swtor.com/info/news/ |
 | [`host_store-epicgames_news_16cc8b8f`](host_store-epicgames_news_16cc8b8f.md) | ✅ handcrafted — Epic Store news list via Playwright, article via JSON API | 2026-05-28 | F | probe_grounding_list_row_selector, hashed_selector, article_json_api | https://store.epicgames.com/news/ |
@@ -397,12 +399,12 @@
 | D | 2 |
 | E | 6 |
 | E+A+C+D | 1 |
-| F | 107 |
+| F | 108 |
 | F+A | 1 |
 | F+C | 3 |
 | adapter | 1 |
 | config | 8 |
-| none | 161 |
+| none | 162 |
 
 ### config_strategy 분포
 
@@ -411,8 +413,8 @@
 | (미기재) | 56 |
 | auto | 5 |
 | handwritten | 32 |
-| httpx_html | 135 |
-| httpx_json | 27 |
+| httpx_html | 136 |
+| httpx_json | 28 |
 | httpx_json (미적용 — 콘텐츠 0) | 1 |
 | mixed | 1 |
 | n/a | 3 |
@@ -423,5 +425,5 @@
 
 ### 최근 90일 (≥ 2026-02-27)
 
-케이스 368 건.
+케이스 370 건.
 
