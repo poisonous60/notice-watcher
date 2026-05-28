@@ -12,10 +12,8 @@
 | **Figure 2** Case block grid + modal | `id="caseTimeline"` + `id="caseModal"` + `id="caseDB"` | `docs/cases/*.md` frontmatter + body | `read_case_records` · `svg_case_blocks` · `render_case_db` |
 | Public Source Domains | host search list | `read_configs().hosts` + sites | inline in `render_html` |
 | Recent Activity | table 20 row | `output/bot.sqlite3` jobs | `read_jobs` |
-| **Figure 3** Probe pipeline funnel + stage panels | `id="harFunnel"` + 5×`stage-panel` | `PROBE_PIPELINE` const | `svg_har_funnel` · `render_stage_panels` · `render_stage_flow_html` |
-| Lane summary | configs 카운트 | `configs/*.json` `_recognized_platform` 마커 | `read_har_lane_counts` · `render_lane_summary` |
-| **Figure 4** Live HAR analysis | `id="harDetailFigure"` | `output/probe/<slug>/` artifacts | `pick_har_showcase` · `build_har_detail` · `render_har_detail_html` |
-| HAR field anatomy | 5-row table | static doc | `render_har_anatomy_static` |
+| **Figure 3** Probe pipeline funnel + stage panels | `id="harPipeline"` + `id="harFunnel"` + `id="harStagePanels"` | `PROBE_PIPELINE` const | `svg_har_funnel` · `render_stage_panels` · `render_stage_flow_html` |
+| **Figure 4** Live HAR analysis | `id="harDetailFigure"` + `id="harSlugPicker"` + `.har-detail-panel` | `output/probe/<slug>/` artifacts | `pick_har_showcases` · `read_har_details` · `build_har_detail` · `render_har_detail_html` |
 | Footer | bottom | — | inline |
 
 ## 2. Figure 별 상세
@@ -62,53 +60,45 @@
   3. **Inspect entries** (data calls, not assets) — `json.loads(har)`, `_entry_resource_type`, `_AD_TRACKER_RE` filter
   4. **Match signals** (APIs · feeds · pages · platforms) — `traffic_api_candidates`, `traffic_article_body_candidates`, `rss_feed_urls`, `pagination_hints`, `detect_*_platform`
   5. **Choose path** (digest · recognizer · writer) — `_try_known_platform`, `build_digest`, probe-marker platform config, `auto: api_loop_once → agentic`, `_register_built_config`
-- stage panel 안 = `<ol class="stage-flow"><li class="step-card">` (flexbox `justify-content: center` + `flex: 0 1 200px` — orphan card 가운데 정렬 자동, codex v4 리뷰 §6 fix)
-- 화살표 사이 박스 없음 (codex v4 §7 — `:nth-child` 화살표 룰 wrap 깨짐)
+- stage panel 안 = `<ol class="stage-flow"><li class="step-row">` flat row. 왼쪽 rail + 숫자 dot 으로 순서를 표현한다.
+- 카드 border/background 제거. 화살표는 row 안의 `step-sep` 텍스트만 쓴다.
 - `PROBE_PIPELINE` const = 손-maintain (probe 코드 refactor 시 갱신 의무)
 - 코드 = `svg_har_funnel` ([scripts/generate_site.py:1071](../scripts/generate_site.py)), `PROBE_PIPELINE` ([:31](../scripts/generate_site.py)), `render_stage_panels` ([:1158](../scripts/generate_site.py)), `render_stage_flow_html` ([:1134](../scripts/generate_site.py))
 
 ### 2d. Figure 4 — Live HAR analysis (dashboard parity)
 
-- 자동 선택 1 probe artifact 의 실제 분석 (dashboard `/probe-har` 페이지와 같은 구조)
+- 자동 선택 최대 5 probe artifact 의 실제 분석 (dashboard `/probe-har` 페이지와 같은 신호를 공개용으로 축약)
 - 구성:
+  - **Picker** — option label 은 host-only. option value 는 `har-panel-N`. DOM 에 slug 를 노출하지 않는다.
   - **KPI strip** 4 셀 — entries / JSON-ish / xhr/fetch / HTTP 4xx/5xx
-  - **Meta dl** — slug · HAR file 이름 + mtime · probe host · first article host · diagnosis verdict · config strategy
+  - **Meta dl** — HAR mtime · verdict · config strategy · host label. probe host / first article host 는 `<details>` 안에 host-only 로 둔다.
   - **Content-type 분포** `<details>` (top 8)
-  - **5 signal section** (각각 title + 소스 함수명 + 표 + 접힌 raw JSON):
+  - **1 signal table** (`.har-signals`) — signal type / host / meta / evidence. 없는 raw signal type 은 `Not detected for this probe.` row 로 표시.
+  - **raw signals (redacted)** `<details>`:
     - traffic_api_candidates — List JSON API 후보
     - traffic_article_body_candidates — Article body JSON 후보
     - rss_feed_urls — RSS / Atom
     - pagination_hints — pagination
     - audio_share_signal — audio share/player
-  - **list_candidates artifact** — `output/probe/<slug>/list_candidates.json` 키 목록 (key/type/count/preview)
-- **선택 로직** (`pick_har_showcase`, codex v4 §1):
+    - digest allow-list summary — `engine.digest.build_digest(...)` 에서 공개 허용 row 만 추출
+- **선택 로직** (`pick_har_showcases`, v5.1):
   1. 자격 floor: `configs/<slug>.json` 존재 + entries ≥ 50 + (json_mime_count ≥ 3 OR feed_candidates 존재)
   2. Score 계산 (entries band + JSON 강도 + feed + recent register success)
   3. 이전 선택 slug 가 자격 + score 가 max 와 ±1 이내면 sticky (재선택 노이즈 방지)
   4. tie-break 결정: score desc → band desc → json desc → slug asc
-- **캐시** = `output/site/_har_detail.json` manifest 키 (codex v4 §2 fix). 키 = 7 파일 `{path,size,mtime_ns}`:
-  - `traffic.har`, `list.html`, `list_candidates.json`, `diagnosis.json`, `feed_candidates.json`, `environment.json`, `configs/<slug>.json`, `probe/extract.py`
+  5. 상위 5개를 `har-panel-0..4` 로 렌더
+- **캐시** = `output/site/_har_detail.json` panel manifest. 직접 artifact + 코드 fingerprint:
+  - `traffic.har`, `list.html`, `list_candidates.json`, `diagnosis.json`, `feed_candidates.json`, `environment.json`
+  - `robots.json`, `sitemap.json`, `list.captured_headers.json`, `article_candidates.json`, `article_click.json`
+  - `diagnosis.json.results[*].body_path` 파일
+  - `configs/<slug>.json`, `probe/extract.py`, `engine/digest.py`, `engine/_mdr_candidates.py`, `probe/hydration.py`, `probe/paths.py`
   - 어느 입력 1개라도 바뀌면 invalidate → 재계산
 - **Privacy** (ADR 0010 §17 + codex v4 §5, 강화):
   - 모든 URL → `_host_mask` (host 만 + `/ path hidden` 표시)
-  - raw JSON → `_redact_json` 재귀: keys `url / sample_url / evidence_url / url_template / selector / css_selector / xpath / headers / cookies / set-cookie / request_body_text / body / sample / html` 의 값 → `"[redacted]"`. URL string 패턴 → host-mask. 220 자 cap.
-  - 5 row cap per section + "+N more" 표시
-  - `digest` artifact 의도적 제외 (`engine.digest` 의존성 + recommended headers 노출 회피)
-- 코드 = `pick_har_showcase` ([scripts/generate_site.py:1421](../scripts/generate_site.py)), `build_har_detail` ([:1547](../scripts/generate_site.py)), `render_har_detail_html` ([:1701](../scripts/generate_site.py)), `_host_mask` · `_redact_json` ([:1240](../scripts/generate_site.py))
-
-### 2e. Lane summary
-
-- `<ul class="lane-rows"><li class="lane-row">` × 2 — `.lane-row` 클래스로 acceptance grep 모호성 제거 (codex v4 §10)
-- "No platform marker" / "Platform-marked" 분리, strategy chip pill
-- Footnote: marker = `_recognized_platform`. unmarked = HAR / static / RSS / manual / legacy 다 섞임 — provenance field 박혀야 정확히 분리 가능
-- "HAR-driven" 라벨 폐기 (codex v3 §7 — no-marker 269/306 의 대부분이 httpx_html static, HAR 유래 아님)
-- 코드 = `render_lane_summary` ([scripts/generate_site.py:1208](../scripts/generate_site.py)), `read_har_lane_counts` ([:1033](../scripts/generate_site.py))
-
-### 2f. HAR field anatomy (static)
-
-- 5 행 — `request.url` · `request.method` · `response.status` · `response.headers.content-type` · `response.content.size`
-- 라이브 샘플 값 없음 (ADR 0010 §17 — URL/header/body content 노출 회피)
-- 코드 = `render_har_anatomy_static` ([scripts/generate_site.py:1180](../scripts/generate_site.py))
+  - raw JSON → `_redact_json` 재귀: 민감 key 값 → `"[redacted]"`. 문자열 안 URL 패턴도 host-mask. 220 자 cap.
+  - 공개 HTML 에 slug / `data-slug` / raw URL / recommended headers / captured headers / raw HTML sample path 를 두지 않는다.
+  - digest 는 allow-list row 만 표에 올리고 raw dump 는 축약된 redacted subset 만 둔다.
+- 코드 = `pick_har_showcases`, `read_har_details`, `build_har_detail`, `render_har_detail_html`, `_host_mask` · `_redact_json` ([scripts/generate_site.py](../scripts/generate_site.py))
 
 ## 3. 데이터 소스 (요약)
 
@@ -117,8 +107,7 @@
 | Figure 1 | `output/poll_state/*.json` + `output/bot.sqlite3` jobs | — | ✓ |
 | Figure 2 | `docs/cases/*.md` frontmatter + body | — (DB 패스 폐기) | ✓ (git 추적) |
 | Figure 3 | `PROBE_PIPELINE` const (코드 박힘) | — | ✓ |
-| Figure 4 | `output/probe/<slug>/*` 7 file | placeholder | ✓ |
-| Lane summary | `configs/*.json` `_recognized_platform` | — | ✓ |
+| Figure 4 | `output/probe/<slug>/*` + code fingerprints | placeholder panel | ✓ |
 | Recent Activity | `output/bot.sqlite3` jobs | — | ✓ |
 
 ## 4. 인터랙션 일람
@@ -133,8 +122,9 @@
 | Figure 2 legend | click | bucket band on/off |
 | Figure 2 annotation marker | hover | tooltip — 그날 landed 인프라 변경 설명 |
 | Figure 3 funnel box | click / Enter / Space | stage panel 펼침 (다른 panel 접힘, aria-expanded toggle) |
+| Figure 4 picker | change | matching `.har-detail-panel` 1개만 visible |
 | Figure 4 content-type | click summary | 분포 표 펼침 |
-| Figure 4 raw JSON | click summary | redacted JSON dump 펼침 |
+| Figure 4 raw signals | click summary | redacted JSON dump 펼침 |
 | Domain search input | type | host list filter |
 
 ## 5. 성능
@@ -165,19 +155,18 @@
 | Plan v4 | `output/handoff/plan_har_v4.md` | Figure 4 (dashboard parity) + flexbox step-card + scoped section-gap |
 | codex v4 review | `output/handoff/plan_har_v4_review.md` | REVISE — cache key narrow / privacy parity 불충분 / grid 1fr orphan 안 가운데 / `section + section` global 너무 넓음 |
 | v4 ship | commit `fd695a8` | Figure 4 host-masked + manifest cache + flex card + scoped gap |
+| Plan v5.1 | `output/handoff/plan_har_v5.md` + review 반영 | Figure 3 flat rail, Figure 4 5-panel picker, digest allow-list, page-level privacy grep |
 
 ## 7. 미해결 / 후속
 
-- `_generation_source` 또는 `_har_signal` 마커를 config 작성 시점에 박으면 Lane A / B 정확히 분리 가능 (현재 "no platform marker" 모호함)
 - Figure 3 stage 타이틀 → 관련 docs 앵커 링크 (`docs/config 기반 엔진 가이드.md` 등)
-- `digest` artifact section 복원 가능 — `engine.digest.build_digest` 가벼운 imports 만 쓰도록 분리 후
-- 모바일 viewport — step-card / har-section-table / lane-chips 다 flex/grid 박혀 자동 wrap 가능하나 실제 디바이스 테스트 0
+- 모바일 viewport — stage rail / har-signals 는 responsive 하도록 짰지만 실제 디바이스 테스트 0
 
 ## 8. 변경 절차
 
 1. **dev 박스** 에서 `scripts/generate_site.py` 편집 (CLAUDE.md §1 — N100 에서 코드 편집 금지)
 2. 로컬 `python scripts/generate_site.py` 로 dry run + `output/site/index.html` 브라우저 검수
-3. ADR 0010 §17 grep — Figure 4 안 raw URL / header / cookie / selector / body 누출 0 확인
+3. ADR 0010 §17 grep — generated HTML 전체에서 raw URL / slug / header / cookie / selector / body 누출 0 확인
 4. `git add scripts/generate_site.py && git commit -m "..." && git push origin main`
 5. pre-push hook 이 `probe_smoke --stage 3 --stage 5` 자동 검증
 6. `ssh aaaa@n100-noticewatcher 'bash ~/notice-watcher/scripts/n100_deploy.sh'` (ADR 0018 — `notice-poll.timer` atomic stop/start wrapper)
