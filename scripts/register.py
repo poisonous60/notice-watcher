@@ -2148,16 +2148,112 @@ def _truncate_packet_text(text: object, *, limit: int = 2000) -> str:
     return s if len(s) <= limit else s[:limit] + "...(truncated)"
 
 
+_TAILWIND_DROP_CLASS_RE = re.compile(
+    r"^(?:"
+    r"(?:[mp][trblxy]?|gap|space-[xy]|grid-cols|col-span|row-span|w|h|min-w|min-h|max-w|max-h)-"
+    r"|relative$|absolute$|fixed$|sticky$|block$|inline-block$|flex$|inline-flex$|hidden$"
+    r"|items-|justify-|content-|self-|text-|font-|leading-|tracking-|bg-|border-|rounded|shadow"
+    r"|overflow-|object-|opacity-|z-|top-|right-|bottom-|left-|inset-"
+    r")",
+    re.I,
+)
+
+
+def _is_tailwind_utility_class_token(token: str) -> bool:
+    t = (token or "").strip()
+    if not t:
+        return False
+    if ":" in t or "/" in t or "[" in t or "]" in t:
+        return True
+    return bool(_TAILWIND_DROP_CLASS_RE.search(t))
+
+
+def _simplify_selector_compound(compound: str) -> str:
+    s = (compound or "").strip()
+    if not s or "." not in s or any(ch in s for ch in "[]#+~"):
+        return s
+    parts = s.split(".")
+    head = parts[0]
+    if any(ch in head for ch in ":[]#"):
+        return s
+    classes = [p for p in parts[1:] if p]
+    if not classes:
+        return s
+    kept = [c for c in classes if not _is_tailwind_utility_class_token(c)]
+    if not kept:
+        return head or s
+    return (head or "") + "".join(f".{c}" for c in kept)
+
+
+def _simplify_tailwind_row_selector(selector: object) -> object:
+    """Drop fragile Tailwind utility class tokens from a generated row selector.
+
+    This is a pre-validation recovery guard for probe candidates like
+    `div.grid.w-full.gap-6.md:grid-cols-2 > article.news-card`. The generated
+    selector should prefer a stable parent/child shape over escaped utility
+    classes when semantic row classes are already present.
+    """
+    if not isinstance(selector, str):
+        return selector
+    if not any(ch in selector for ch in (":", "/", "[")) and not _TAILWIND_DROP_CLASS_RE.search(selector):
+        return selector
+    # Keep the rewrite intentionally narrow: direct-child chains from probe
+    # repeating-pattern selectors. Complex selectors stay under schema feedback.
+    if "," in selector or " +" in selector or " ~" in selector:
+        return selector
+    parts = [p.strip() for p in selector.split(">")]
+    if len(parts) < 2 or any(not p for p in parts):
+        return selector
+    simplified = " > ".join(_simplify_selector_compound(p) for p in parts)
+    return simplified if simplified != selector else selector
+
+
+def _tailwind_escape_examples(selector: str) -> list[str]:
+    examples: list[str] = []
+    for tok in re.findall(r"\.([A-Za-z0-9_-]+:[A-Za-z0-9_:\-/\[\].]+)", selector or ""):
+        escaped = "." + tok.replace("\\", "\\\\").replace(":", r"\:").replace(".", r"\.")
+        examples.append(escaped)
+    return examples[:3]
+
+
+def _selector_recovery_hint(cfg: object, feedback: object) -> Optional[str]:
+    if not isinstance(cfg, dict):
+        return None
+    lst = cfg.get("list") or {}
+    row = lst.get("row_selector") if isinstance(lst, dict) else None
+    if not isinstance(row, str):
+        return None
+    hay = f"{row}\n{feedback or ''}"
+    if "CSS 선택자 컴파일 실패" not in hay and not any(ch in row for ch in (":", "/", "[")):
+        return None
+    simplified = _simplify_tailwind_row_selector(row)
+    examples = _tailwind_escape_examples(row)
+    bits = [
+        "row_selector contains Tailwind utility classes that can be parsed as pseudo-classes.",
+    ]
+    if isinstance(simplified, str) and simplified != row:
+        bits.append(f"Prefer a grounded stable selector: `{simplified}`.")
+    if examples:
+        bits.append("If a utility class is unavoidable, escape it, e.g. " + ", ".join(f"`{e}`" for e in examples) + ".")
+    bits.append("Do not copy the full probe utility chain when `tag.stable-class > article.news-card` matches the same rows.")
+    return " ".join(bits)
+
+
 def _build_failure_packet(exc: GenerationError) -> dict:
     """Compact, non-authoritative evidence from api_loop_once for agentic."""
     last_config = getattr(exc, "last_config", None)
-    return {
+    feedback = _truncate_packet_text(getattr(exc, "last_feedback", str(exc)))
+    packet = {
         "source": "api_loop_once",
         "attempt": 1,
         "candidate_config": last_config if isinstance(last_config, dict) else {},
-        "validation_feedback": _truncate_packet_text(getattr(exc, "last_feedback", str(exc))),
+        "validation_feedback": feedback,
         "error": _truncate_packet_text(str(exc), limit=500),
     }
+    hint = _selector_recovery_hint(last_config, feedback)
+    if hint:
+        packet["selector_recovery_hint"] = hint
+    return packet
 
 
 _STOP_REASON_RC = {
@@ -2309,8 +2405,24 @@ def _has_structural_audio_share(digest: dict) -> bool:
 
 def _make_cfg_post_processor(digest: dict) -> Callable[[dict], dict]:
     def _post_process(cfg: dict) -> dict:
+        cfg = _simplify_tailwind_selectors_in_config(cfg)
         return _enforce_site_kind_config(_enforce_audio_share_config(cfg, digest), digest)
     return _post_process
+
+
+def _simplify_tailwind_selectors_in_config(cfg: dict) -> dict:
+    if not isinstance(cfg, dict):
+        return cfg
+    lst = cfg.get("list")
+    if not isinstance(lst, dict):
+        return cfg
+    row = lst.get("row_selector")
+    simplified = _simplify_tailwind_row_selector(row)
+    if isinstance(simplified, str) and simplified != row:
+        out = copy.deepcopy(cfg)
+        out["list"]["row_selector"] = simplified
+        return out
+    return cfg
 
 
 def _enforce_site_kind_config(cfg: dict, digest: dict) -> dict:
@@ -3376,6 +3488,27 @@ def _main_inner(argv) -> int:
                 if rc is not None:
                     return rc
                 print("[register] WordPress REST 폴백 (API 빈/차단/검증 실패) — 일반 파이프라인 계속.")
+
+    # Storyblok 포지티브 검출 — probe 가 Storyblok/Nuxt marker 와 card list signature 를 확인.
+    # 목록 HTML 은 Tailwind utility class 가 많아 selector 생성이 흔들리고, 본문은 Storyblok JSON 쪽이 안정적이다.
+    if not args.gate_only:
+        sb = ((digest.get("list_candidates") or {}).get("storyblok_platform") or {})
+        if sb.get("is_storyblok") and sb.get("story_data_url"):
+            from engine.recognizers.storyblok import build_config as _storyblok_build
+            scfg = _storyblok_build(
+                sb.get("base_url") or url,
+                story_data_url=sb["story_data_url"],
+                board=sb.get("board"),
+            )
+            if scfg is not None:
+                scfg["_recognized_platform"] = "storyblok (probe marker -> all-stories JSON)"
+                print("[PHASE] storyblok_detect", flush=True)
+                print(f"[register] 🔎 Storyblok marker 검출 — all-stories JSON adapter 등록 시도 "
+                      f"(api={sb['story_data_url']})")
+                rc = _register_built_config(scfg, slug, url, out=args.out, force=args.force)
+                if rc is not None:
+                    return rc
+                print("[register] Storyblok all-stories 폴백 (API 빈/차단/검증 실패) — 일반 파이프라인 계속.")
 
     # Discourse 포지티브 검출 — probe 가 정적 HTML 의 generator meta 로 Discourse 판정 (detect_discourse_platform).
     # recognizer 는 URL `/latest` 폼만 매칭 — root 도메인(`https://forum.openwrt.org/`)은 URL 만으로 판정 불가라

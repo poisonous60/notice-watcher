@@ -433,6 +433,21 @@ def run() -> list[tuple[str, bool, str]]:
                   and "posts_nonempty" in packet["validation_feedback"],
                   f"calls={calls} packet={packet}"))
 
+    err_tailwind = GenerationError("schema failed")
+    err_tailwind.last_config = {
+        "strategy": "httpx_html",
+        "list": {
+            "row_selector": "div.grid.w-full.gap-6.md:grid-cols-2 > article.news-card",
+        },
+    }
+    err_tailwind.last_feedback = "config 검증 실패: list.row_selector CSS 선택자 컴파일 실패"
+    packet_tailwind = reg._build_failure_packet(err_tailwind)
+    cases.append(("failure_packet_tailwind_selector_hint",
+                  "selector_recovery_hint" in packet_tailwind
+                  and "div.grid > article.news-card" in packet_tailwind["selector_recovery_hint"]
+                  and r"md\:grid-cols-2" in packet_tailwind["selector_recovery_hint"],
+                  f"packet={packet_tailwind}"))
+
     # auto one-shot should not use the older heterogeneous-hub postmortem gate.
     # Non-decisive classifier means the hard case should still get agentic.
     calls.clear()

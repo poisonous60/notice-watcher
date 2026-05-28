@@ -1318,6 +1318,40 @@ def detect_wordpress_platform(html: str, base_url: str) -> Optional[dict]:
 
 
 @heuristic
+def detect_storyblok_platform(html: str, base_url: str) -> Optional[dict]:
+    """Storyblok/Nuxt static marker with a conventional all-stories payload.
+
+    This intentionally only emits a hint. register.py verifies the generated
+    adapter config by fetching `/story-data/all-stories.json`; if the endpoint
+    is absent or empty, normal generation continues.
+    """
+    if not html or not base_url:
+        return None
+    origin = _origin_from_url(base_url)
+    if not origin:
+        return None
+    low = html.lower()
+    marker_hits = sum(1 for hit in (
+        "storyblok__outline" in low,
+        "data-blok-c" in low,
+        "storyblok" in low and ("news-card" in low or "featured-news-card" in low),
+    ) if hit)
+    if marker_hits <= 0:
+        return None
+    try:
+        path = (urlsplit(base_url).path or "").strip("/")
+    except (ValueError, AttributeError):
+        path = ""
+    board = path.split("/", 1)[0].strip() or "news"
+    return {
+        "is_storyblok": True,
+        "base_url": origin,
+        "story_data_url": f"{origin}/story-data/all-stories.json",
+        "board": board,
+    }
+
+
+@heuristic
 def detect_discourse_platform(html: str, base_url: str) -> Optional[dict]:
     """정적 HTML 의 `<meta name="generator" content="Discourse ...">` 로 Discourse 포럼 판정.
 
@@ -2488,6 +2522,7 @@ def write_list_candidates(
     nav_only_same_host: Optional[dict] = None,
     article_meta_signals: Optional[dict] = None,
     wordpress_platform: Optional[dict] = None,
+    storyblok_platform: Optional[dict] = None,
     discourse_platform: Optional[dict] = None,
     common_platform: Optional[dict] = None,
     xenforo_platform: Optional[dict] = None,
@@ -2573,6 +2608,7 @@ def write_list_candidates(
         # dict={is_discourse, base_url, version}. register.py 가 이 신호 보면 LLM 전 DiscourseAdapter
         # config 만들어 등록 시도 (fetch_list 빈 목록이면 일반 파이프라인 폴백).
         "wordpress_platform": wordpress_platform,
+        "storyblok_platform": storyblok_platform,
         "discourse_platform": discourse_platform,
         "common_platform": common_platform,
         "xenforo_platform": xenforo_platform,
