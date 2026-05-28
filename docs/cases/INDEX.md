@@ -2,7 +2,7 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 355 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 356 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
@@ -20,6 +20,7 @@
 | [`host_bethesda-net_news_29303712`](host_bethesda-net_news_29303712.md) | ✅ handcrafted — Bethesda news config registered from rendered article links | 2026-05-28 | F | posts_nonempty, hashed_selector | https://www.bethesda.net/news/ |
 | [`host_bay12games-com_dwarves_230ae845`](host_bay12games-com_dwarves_230ae845.md) | ✅ handcrafted — Bay 12 inline devlog list | 2026-05-28 | none | posts_nonempty, post_id_stable_shape, inline_devlog | https://www.bay12games.com/dwarves/ |
 | [`host_annapurnaintera_root_105cae87`](host_annapurnaintera_root_105cae87.md) | ❌ REJECTED — root URL = games catalog/marketing landing, no news board | 2026-05-28 | none | no_board, root_catalog_only, posts_nonempty | https://annapurnainteractive.com/ |
+| [`host_adriancourreges_root_3a1e3b11`](host_adriancourreges_root_3a1e3b11.md) | improved - slash date transform fixed; validated Atom fallback registered baseline | 2026-05-28 | F | published_at_iso, date_only_to_iso_slash, validated_feed_available | https://adriancourreges.com/ |
 | [`host_zynga-com_news_3aca3b50`](host_zynga-com_news_3aca3b50.md) | 🚫 REJECTED — capability_blocked (WP API + browser anti-bot) | 2026-05-27 | none | gen_fail, capability_blocked, wordpress_api_502, anti_bot | https://www.zynga.com/news/ |
 | [`host_yo-star-com_news_8f81136f`](host_yo-star-com_news_8f81136f.md) | 🚫 REJECTED — agent self-veto(non_board) | 2026-05-27 | none | gen_fail, non_board_self_veto, spa_shell, host_mismatch | https://www.yo-star.com/news/ |
 | [`host_travian-com_international_993a586a`](host_travian-com_international_993a586a.md) | ✅ handcrafted: sitemap list + hydrated SPA article body | 2026-05-27 | none | agentic_fake_config, posts_nonempty_zero, spa_shell, sitemap_article_urls | https://www.travian.com/international/news/ |
@@ -382,7 +383,7 @@
 | D | 2 |
 | E | 6 |
 | E+A+C+D | 1 |
-| F | 101 |
+| F | 102 |
 | F+A | 1 |
 | F+C | 3 |
 | adapter | 1 |
@@ -395,7 +396,7 @@
 |---|---|
 | (미기재) | 56 |
 | handwritten | 31 |
-| httpx_html | 129 |
+| httpx_html | 130 |
 | httpx_json | 27 |
 | httpx_json (미적용 — 콘텐츠 0) | 1 |
 | mixed | 1 |
@@ -407,5 +408,5 @@
 
 ### 최근 90일 (≥ 2026-02-27)
 
-케이스 355 건.
+케이스 356 건.
 
