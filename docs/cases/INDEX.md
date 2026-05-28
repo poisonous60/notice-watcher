@@ -2,23 +2,27 @@
 
 > 자동 생성 — `python scripts/cases_index.py` 가 `docs/cases/*.md` 의 YAML frontmatter 를 모아 만든다. **직접 편집 X**.
 
-총 364 건. 각 슬러그를 클릭하면 상세 case 파일.
+총 368 건. 각 슬러그를 클릭하면 상세 case 파일.
 
 | slug | status | date | fix_layer | failure_keys | url |
 |---|---|---|---|---|---|
 | [`host_wildrift-league_news_8313486f`](host_wildrift-league_news_8313486f.md) | ✅ 수동 config (Riot Next.js data-testid cards) | 2026-05-28 | F | posts_nonempty, schema_invalid_source | https://wildrift.leagueoflegends.com/news/ |
 | [`host_wayforward-com_news_0aefd5ba`](host_wayforward-com_news_0aefd5ba.md) | ✅ Track B 개선 (Tailwind selector grounding + Storyblok all-stories JSON path) | 2026-05-28 | F | selector_syntax, article_body_len | https://wayforward.com/news/ |
 | [`host_umamusume-com_news_074ee55a`](host_umamusume-com_news_074ee55a.md) | ✅ handcrafted | 2026-05-28 | none | svelte_spa_shell, session_gated_post_api, posts_nonempty_zero, schema_missing_root | https://umamusume.com/news/ |
+| [`host_swtor-com_info_9b40c5ef`](host_swtor-com_info_9b40c5ef.md) | improved — transform vocabulary rule made explicit | 2026-05-28 | A | unknown_regex_replace, missing_post_id, post_id_unique, drupal_news_rows | https://www.swtor.com/info/news/ |
 | [`host_store-epicgames_news_16cc8b8f`](host_store-epicgames_news_16cc8b8f.md) | ✅ handcrafted — Epic Store news list via Playwright, article via JSON API | 2026-05-28 | F | probe_grounding_list_row_selector, hashed_selector, article_json_api | https://store.epicgames.com/news/ |
 | [`host_skullgirls-com_news_fb614856`](host_skullgirls-com_news_fb614856.md) | ✅ registered (re-probe 자동 회복) | 2026-05-28 |  | probe_grounding_list_row_selector, posts_nonempty | https://skullgirls.com/news/ |
 | [`host_randomascii-wor_root_f74fd8ea`](host_randomascii-wor_root_f74fd8ea.md) | improved — RSS fallback registered baseline 10 (WordPress.com hosted, /wp-json 404) | 2026-05-28 | F | posts_nonempty, probe_grounding_list_row_selector, post_id_unique, validated_feed_available | https://randomascii.wordpress.com/ |
 | [`host_pubg-com_news_17f4ebc1`](host_pubg-com_news_17f4ebc1.md) | ✅ improved — static placeholder no longer accepted as static row evidence | 2026-05-28 | C | fetch_list_0_url_mismatch, probe_grounding_article_content_selector | https://pubg.com/news/ |
 | [`host_priconne-redive_root_aed5ee66`](host_priconne-redive_root_aed5ee66.md) | ✅ improved | 2026-05-28 | none | wordpress_rest_404, llm_picked_wrong_row_selector, posts_nonempty_zero | https://priconne-redive.jp/ |
 | [`host_pokemongo-com_news_002609a9`](host_pokemongo-com_news_002609a9.md) | ✅ handcrafted | 2026-05-28 | none | css_module_hashed_class, unescaped_tailwind_colon, posts_nonempty_zero | https://pokemongo.com/news/ |
+| [`host_playstartrekonl_news_a414ca20`](host_playstartrekonl_news_a414ca20.md) | improved — agentic prompt now blocks SVG/path fake rows | 2026-05-28 | A+D | probe_grounding_list_row_selector, probe_grounding_list_wait_selector, svg_path_selector, nav_only_candidates | https://playstartrekonline.com/news/ |
+| [`host_oldschool-runes_root_2ff8b508`](host_oldschool-runes_root_2ff8b508.md) | no_change — true board but no new generic fix beyond existing DNS/selector guidance | 2026-05-28 | none | err_name_not_resolved, title_empty, cloudflare_rendered_board, nav_first_article | https://oldschool.runescape.com/ |
 | [`host_ncase-me_root_0db0456b`](host_ncase-me_root_0db0456b.md) | registered - classifier signal landed, but LLM verdict accepted board; user closed as registered | 2026-05-28 | A+C | classifier_single_artist_portfolio_false_accept, gate_reject, content_as_list | https://ncase.me/ |
 | [`host_megacrit-com_news_4cc63275`](host_megacrit-com_news_4cc63275.md) | ✅ handcrafted — Mega Crit Hugo news cards | 2026-05-28 | none | title_nonempty, article_card, hugo_news | https://megacrit.com/news/ |
 | [`host_leagueoflegends_news_b91e98e2`](host_leagueoflegends_news_b91e98e2.md) | ✅ improved — article cards outrank SVG decoration in probe row candidates | 2026-05-28 | C | posts_nonempty, probe_grounding_list_row_selector | https://leagueoflegends.com/news/ |
 | [`host_indiedb-com_news_537bc4e7`](host_indiedb-com_news_537bc4e7.md) | handcrafted - IndieDB news RSS config + DBolical recognizer | 2026-05-28 | F | cloudflare_challenge, rss_feed_available, agentic_max_cycles | https://indiedb.com/news/ |
+| [`host_halowaypoint-co_news_414e9d1d`](host_halowaypoint-co_news_414e9d1d.md) | improved — agentic retry guidance now rejects decorative SVG/path rows | 2026-05-28 | A+D | probe_grounding_list_row_selector, first_article_url_mismatch, svg_row_noise, hashed_selector | https://halowaypoint.com/news/ |
 | [`host_forums-terraria_root_02d8aba0`](host_forums-terraria_root_02d8aba0.md) | ✅ handcrafted — XenForo Porta portal news | 2026-05-28 | none | posts_nonempty, porta_article_item, xenforo_portal | https://forums.terraria.org/ |
 | [`host_epicgames-com_news_4655a152`](host_epicgames-com_news_4655a152.md) | ✅ handcrafted — Epic news config registered without hashed selectors | 2026-05-28 | F | probe_grounding_list_row_selector, hashed_selector, article_json_api | https://www.epicgames.com/news/ |
 | [`host_deadbydaylight-_news_7eed0155`](host_deadbydaylight-_news_7eed0155.md) | ✅ handcrafted — Dead by Daylight rendered list plus Gatsby article JSON | 2026-05-28 | F | article_body_len, article_fetch_kind, json_api | https://deadbydaylight.com/news/ |
@@ -378,7 +382,9 @@
 | layer | count |
 |---|---|
 | (미기재) | 39 |
+| A | 1 |
 | A+C | 2 |
+| A+D | 2 |
 | B | 1 |
 | C | 20 |
 | C+A | 1 |
@@ -396,26 +402,26 @@
 | F+C | 3 |
 | adapter | 1 |
 | config | 8 |
-| none | 160 |
+| none | 161 |
 
 ### config_strategy 분포
 
 | strategy | count |
 |---|---|
 | (미기재) | 56 |
-| auto | 2 |
+| auto | 5 |
 | handwritten | 32 |
 | httpx_html | 135 |
 | httpx_json | 27 |
 | httpx_json (미적용 — 콘텐츠 0) | 1 |
 | mixed | 1 |
 | n/a | 3 |
-| none | 44 |
+| none | 45 |
 | playwright_html | 61 |
 | rejected | 1 |
 | rss | 1 |
 
 ### 최근 90일 (≥ 2026-02-27)
 
-케이스 364 건.
+케이스 368 건.
 
