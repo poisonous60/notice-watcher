@@ -157,10 +157,27 @@ def html_repeating_patterns(html: str, base_url: str, *, min_children: int = 5) 
                 "detail_url_template": _match_js_detail_template(hrefs, js_detail_templates),
             })
 
-    # 같은 selector 중복 제거 + 큰 순
+    visual_tags = {"svg", "g", "path", "circle", "rect", "polygon", "use", "defs"}
+
+    def sort_key(item: dict) -> tuple[int, int, int, int, str]:
+        selector = str(item.get("selector") or "")
+        node_sig = selector.rsplit(" > ", 1)[-1]
+        node_name = node_sig.split(".", 1)[0].split("#", 1)[0].lower()
+        penalty = 0
+        if not item.get("sample_url"):
+            penalty += 1
+        if not str(item.get("first_text") or "").strip():
+            penalty += 1
+        if node_name in visual_tags:
+            penalty += 2
+        text_len = len(str(item.get("first_text") or "").strip())
+        has_sample = 1 if item.get("sample_url") else 0
+        return (penalty, -int(item.get("child_count") or 0), -has_sample, -text_len, selector)
+
+    # 같은 selector 중복 제거 + row evidence 품질순
     seen = set()
     deduped: list[dict] = []
-    for c in sorted(candidates, key=lambda x: -x["child_count"]):
+    for c in sorted(candidates, key=sort_key):
         if c["selector"] in seen:
             continue
         seen.add(c["selector"])

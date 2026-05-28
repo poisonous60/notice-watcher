@@ -125,4 +125,28 @@ def run() -> list[tuple[str, bool, str]]:
                   and out_vue[0]["href_pattern_guess"] == "/en/news/{n}",
                   f"got {out_vue[:2]!r}"))
 
+    # 10. SVG decoration can have a larger sibling count than real article cards.
+    #     It must not outrank rows that carry text and article href evidence.
+    html_svg_decoy = (
+        "<main>"
+        "<svg><g>"
+        + "".join(f"<path d='M{i} 0h1v1z'></path>" for i in range(15))
+        + "</g></svg>"
+        "<section class='news-grid'>"
+        + "".join(
+            f'''<a class="sc-card" data-testid="card" href="/ko-kr/news/{i}">
+                  <h2>Patch notes {i}</h2>
+                </a>'''
+            for i in range(12)
+        )
+        + "</section></main>"
+    )
+    out_svg_decoy = html_repeating_patterns(html_svg_decoy, "https://www.leagueoflegends.com/ko-kr/news/")
+    cases.append(("article_rows_outrank_svg_decoration",
+                  len(out_svg_decoy) >= 1
+                  and out_svg_decoy[0]["selector"] == "section.news-grid > a.sc-card"
+                  and out_svg_decoy[0]["child_count"] == 12
+                  and out_svg_decoy[0]["sample_url"] == "https://www.leagueoflegends.com/ko-kr/news/0",
+                  f"got {out_svg_decoy[:3]!r}"))
+
     return cases
