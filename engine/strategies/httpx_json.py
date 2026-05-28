@@ -81,6 +81,8 @@ async def fetch_list(adapter, *, page: int = 1, page_size: int = 30) -> list[Not
         raise RuntimeError(f"{adapter.site} list: {msg}")
 
     arr = navigate_json(payload, lst["list_path"])
+    if isinstance(arr, dict) and lst.get("list_values"):
+        arr = list(arr.values())
     if not isinstance(arr, list):
         return []
 

@@ -35,6 +35,7 @@ list:
   wait_selector : "..."           (playwright_html 전용; 이 요소가 나타날 때까지 대기)
   # --- httpx_json ---
   list_path    : ["data","list"]  (목록 배열까지의 JSON 경로)
+  list_values  : bool             (선택; list_path 결과가 dict 일 때 values() 를 목록으로 사용)
   item_path    : ["item"]         (선택; 각 엔트리 안에서 item dict 위치)
   type_field   : "type"           (선택)
   type_allow   : ["ARTICLE"]      (선택; type_field 값이 이 안에 있어야 채택)
@@ -103,6 +104,7 @@ CONFIG_JSON_SCHEMA: dict = {
                 "notice_class_absent": {"type": "string"},
                 "wait_selector": {"type": "string"},
                 "list_path": {"type": "array"},
+                "list_values": {"type": "boolean"},
                 "item_path": {"type": "array"},
                 "type_field": {"type": "string"},
                 "type_allow": {"type": "array"},

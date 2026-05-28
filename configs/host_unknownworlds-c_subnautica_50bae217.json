@@ -1,0 +1,105 @@
+{
+  "version": 1,
+  "site": "unknownworlds.com",
+  "board": "subnautica",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://unknownworlds.com/subnautica/news/"
+  },
+  "timeout": 20,
+  "list": {
+    "url_template": "https://unknownworlds.com/en/news/news",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "div[data-testid^=\"slide-\"]:has(a[href^=\"/news/\"])",
+    "fields": {
+      "post_id": [
+        {
+          "from": "attr",
+          "selector": "a[href^=\"/news/\"]",
+          "attr": "href",
+          "transform": [
+            [
+              "regex_extract",
+              "/news/([^/?#]+)"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "h1,h2,h3,h4,h5,h6",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "attr",
+          "selector": "a[href^=\"/news/\"]",
+          "attr": "href",
+          "transform": [
+            [
+              "urljoin",
+              "https://unknownworlds.com"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "[class*=\"ArticleCard_meta\"] > div:first-child",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "iso8601",
+              [
+                "%m.%d.%y"
+              ],
+              "Z"
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "p",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "article": {
+    "url_template": "https://unknownworlds.com/en/news/{post_id}",
+    "fetch_kind": "html",
+    "content": [
+      {
+        "from": "css",
+        "selector": "main article, main [class*=\"Article\"], main",
+        "html": true
+      }
+    ],
+    "body_empty_acceptable": true
+  },
+  "_source_url": "https://unknownworlds.com/subnautica/news/",
+  "_note": "The catalog URL redirects to /en/news/news. The SSR card image alt attributes are empty, so title comes from the heading inside each slide card and date from ArticleCard_meta."
+}
