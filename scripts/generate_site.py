@@ -1131,108 +1131,30 @@ def svg_har_funnel() -> str:
     )
 
 
-def _wrap_role(role: str, x: float, y: float, w: float) -> str:
-    """Naive 2-line wrap so the role text fits inside the step box."""
-    char_cap = max(20, int(w / 5.6))
-    words = role.split()
-    line_a: list[str] = []
-    line_b: list[str] = []
-    for word in words:
-        target = line_b if line_a and len(" ".join(line_a + [word])) > char_cap else line_a
-        if target is line_b:
-            if len(" ".join(line_b + [word])) > char_cap:
-                truncated = (" ".join(line_b + [word]))[: char_cap - 1] + "…"
-                line_b = truncated.split(" ")
-                break
-        target.append(word)
-    text_a = " ".join(line_a)
-    text_b = " ".join(line_b)
-    if not text_b and len(text_a) > char_cap:
-        text_a = text_a[: char_cap - 1] + "…"
-    out = (
-        f'<text class="step-box-role" x="{x + w / 2:.1f}" y="{y:.0f}" '
-        f'text-anchor="middle">{esc(text_a)}</text>'
-    )
-    if text_b:
-        out += (
-            f'<text class="step-box-role" x="{x + w / 2:.1f}" y="{y + 14:.0f}" '
-            f'text-anchor="middle">{esc(text_b)}</text>'
-        )
-    return out
+def render_stage_flow_html(stage: dict) -> str:
+    """Per-stage file flow as numbered HTML cards laid out by flexbox.
+    Codex review of v4 flagged the SVG version (mid-word truncation +
+    orphan-card alignment); HTML cards let text wrap naturally and let
+    the parent flex container center an orphan row.
 
-
-def svg_stage_flow(stage: dict) -> str:
-    """Per-stage horizontal flow diagram — one box per file/step with arrows.
-    Single row when boxes fit (5 × 168 + 4 × 14 = 896, fits within 920);
-    otherwise wraps."""
+    Sequence is carried by the numbered <ol> + step-num badges. We
+    deliberately do not render arrows between cards — `:nth-child` arrow
+    rules are fragile across wraps (codex review §7).
+    """
     steps = stage["steps"] or []
-    n = len(steps) or 1
-    box_w = 168
-    box_h = 132
-    gap_x = 14
-    gap_y = 24
-    width = 920
-    margin_x = 24
-
-    per_row_cap = max(1, (width - 2 * margin_x + gap_x) // (box_w + gap_x))
-    per_row = min(n, int(per_row_cap))
-    rows = (n + per_row - 1) // per_row
-    used_w = per_row * box_w + (per_row - 1) * gap_x
-    x0 = (width - used_w) / 2
-    height = rows * box_h + (rows - 1) * gap_y + 16
-
-    parts: list[str] = []
-    for idx, (file_path, fn, role) in enumerate(steps):
-        row = idx // per_row
-        col = idx % per_row
-        bx = x0 + col * (box_w + gap_x)
-        by = 8 + row * (box_h + gap_y)
-        parts.append(
-            f'<g class="step-box-g">'
-            f'<rect class="step-box" x="{bx:.1f}" y="{by:.1f}" '
-            f'width="{box_w}" height="{box_h}" rx="6" ry="6"></rect>'
-            f'<text class="step-box-index" x="{bx + 12:.1f}" y="{by + 22:.0f}">'
-            f"{esc(idx + 1)}</text>"
-            f'<text class="step-box-file" x="{bx + box_w / 2:.1f}" y="{by + 40:.0f}" '
-            f'text-anchor="middle">{esc(_short_text(file_path, 28))}</text>'
-            f'<text class="step-box-fn" x="{bx + box_w / 2:.1f}" y="{by + 64:.0f}" '
-            f'text-anchor="middle">{esc(_short_text(fn, 30))}</text>'
-            f'{_wrap_role(role, bx + 10, by + 88, box_w - 20)}'
-            f"</g>"
+    if not steps:
+        return '<p class="muted">No file steps recorded for this stage.</p>'
+    items = []
+    for i, (file_path, fn, role) in enumerate(steps):
+        items.append(
+            '<li class="step-card">'
+            f'<span class="step-num">{esc(i + 1)}</span>'
+            f'<code class="step-file">{esc(file_path)}</code>'
+            f'<code class="step-fn">{esc(fn)}</code>'
+            f'<p class="step-role">{esc(role)}</p>'
+            "</li>"
         )
-        if col < per_row - 1 and idx + 1 < n:
-            ax1 = bx + box_w
-            ax2 = bx + box_w + gap_x
-            ay = by + box_h / 2
-            parts.append(
-                f'<line class="step-arrow" x1="{ax1:.1f}" y1="{ay:.0f}" '
-                f'x2="{ax2:.1f}" y2="{ay:.0f}" '
-                f'marker-end="url(#step-arrow-head)"></line>'
-            )
-        elif col == per_row - 1 and idx + 1 < n:
-            ax = bx + box_w / 2
-            ay1 = by + box_h
-            ay2 = by + box_h + gap_y
-            parts.append(
-                f'<line class="step-arrow" x1="{ax:.1f}" y1="{ay1:.0f}" '
-                f'x2="{ax:.1f}" y2="{ay2:.0f}" '
-                f'marker-end="url(#step-arrow-head)"></line>'
-            )
-
-    arrow_marker = (
-        '<defs><marker id="step-arrow-head" viewBox="0 0 10 10" refX="9" refY="5" '
-        'markerWidth="5" markerHeight="5" orient="auto-start-reverse">'
-        '<path d="M0,0 L10,5 L0,10 z" fill="currentColor"></path>'
-        "</marker></defs>"
-    )
-
-    return (
-        f'<svg viewBox="0 0 {width} {height:.0f}" role="img" '
-        f'aria-label="{esc(stage["title"])} — file flow" class="stage-flow-svg">'
-        + arrow_marker
-        + "".join(parts)
-        + "</svg>"
-    )
+    return f'<ol class="stage-flow">{"".join(items)}</ol>'
 
 
 def render_stage_panels() -> str:
@@ -1251,7 +1173,7 @@ def render_stage_panels() -> str:
             f'<h3 id="har-panel-{esc(stage["id"])}-title">{esc(stage["title"])}</h3>'
             f'<p class="stage-panel-summary">{esc(stage["summary"])}</p>'
             f"</header>"
-            f'{svg_stage_flow(stage)}'
+            f'{render_stage_flow_html(stage)}'
             f"</section>"
         )
     return "".join(parts)
@@ -1284,36 +1206,683 @@ def render_har_anatomy_static() -> str:
 
 
 def render_lane_summary(counts: dict) -> str:
-    """Compact configs/ summary line. Labels reviewed by codex (plan v3 §7):
-    no "HAR-driven" claim for configs without `_recognized_platform`."""
+    """Configs lane summary as two structured rows of strategy chips.
+
+    Codex review of v4 (§10) flagged the v3 paragraph form because the
+    flat `<li>` count was ambiguous (chips and rows mixed). We use a
+    `.lane-row` class on the two top-level entries and nest the chips
+    inside their own `<ul class="lane-chips">`, so acceptance grep can
+    count direct rows without false positives from the chip list.
+    """
     no_marker = counts.get("no_marker") or {}
     platform_marked = counts.get("platform_marked") or {}
 
-    def _top(d: dict) -> str:
+    def _chips(d: dict) -> str:
         if not d:
-            return "(none)"
-        return " · ".join(
-            f"<code>{esc(k)}</code>: {esc(v)}"
+            return '<li class="lane-chip muted">(none)</li>'
+        return "".join(
+            f'<li class="lane-chip"><code>{esc(k)}</code>'
+            f'<span class="lane-chip-n">{esc(v)}</span></li>'
             for k, v in sorted(d.items(), key=lambda kv: -kv[1])[:5]
         )
 
     nm_total = sum(no_marker.values())
     pm_total = sum(platform_marked.values())
+    runs = counts.get("probe_runs", 0)
+    hars = counts.get("har_captured", 0)
 
     return (
-        '<p class="har-lane-summary">'
-        f'<strong>Configs without a platform marker</strong> ({esc(nm_total)} total) — '
-        f"{_top(no_marker)}. "
-        f'<strong>Platform-marked configs</strong> ({esc(pm_total)} total) — '
-        f"{_top(platform_marked)}. "
-        f'Probe artifacts on disk: {esc(counts.get("probe_runs", 0))} runs · '
-        f'{esc(counts.get("har_captured", 0))} with HAR.'
-        '<br><small class="muted">Platform marker = config carries '
-        "<code>_recognized_platform</code>. The unmarked group covers HAR-derived, "
-        "static-HTML, RSS, manual, and legacy paths — they cannot be cleanly "
-        "separated without a per-config provenance field.</small>"
-        "</p>"
+        '<div class="har-lane-summary">'
+        '<ul class="lane-rows">'
+        '<li class="lane-row">'
+        '<div class="lane-row-head">'
+        '<strong>No platform marker</strong>'
+        f'<span class="lane-total">{esc(nm_total)} total</span>'
+        '</div>'
+        f'<ul class="lane-chips">{_chips(no_marker)}</ul>'
+        '</li>'
+        '<li class="lane-row">'
+        '<div class="lane-row-head">'
+        '<strong>Platform-marked</strong>'
+        f'<span class="lane-total">{esc(pm_total)} total</span>'
+        '</div>'
+        f'<ul class="lane-chips">{_chips(platform_marked)}</ul>'
+        '</li>'
+        '</ul>'
+        f'<p class="lane-footnote">Probe artifacts on disk: {esc(runs)} runs · '
+        f'{esc(hars)} with HAR. <span class="muted">Platform marker = config '
+        "carries <code>_recognized_platform</code>. The unmarked group covers "
+        "HAR-derived, static-HTML, RSS, manual, and legacy paths — they cannot "
+        "be cleanly separated without a per-config provenance field.</span></p>"
+        "</div>"
     )
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Figure 4 — live HAR detail for one auto-selected probe (dashboard parity)
+# ────────────────────────────────────────────────────────────────────────────
+
+_HAR_DETAIL_CACHE_PATH = ROOT / "output" / "site" / "_har_detail.json"
+_HAR_DETAIL_MANIFEST_FILES = (
+    "traffic.har",
+    "list.html",
+    "list_candidates.json",
+    "diagnosis.json",
+    "feed_candidates.json",
+    "environment.json",
+)
+_HAR_DETAIL_SECTION_ROW_CAP = 5
+# Redaction keys — applied recursively when serialising raw JSON sample blobs.
+# Codex review of v4 §5 flagged Figure 1 parity as insufficient: internal API
+# endpoints, evidence URLs, and selectors are a new exposure surface, so we
+# replace any key whose name matches one of these with "[redacted]".
+_REDACT_KEYS = {
+    "url", "sample_url", "evidence_url", "url_template", "next_url",
+    "request_url", "response_url", "selector", "css_selector", "xpath",
+    "request_headers", "response_headers", "headers", "cookies",
+    "set_cookie", "set-cookie", "cookie", "request_body_text",
+    "body_text", "body", "sample", "snippet", "html",
+}
+
+
+def _host_mask(value: object) -> str:
+    """ADR 0010 §17 + codex review v4 §5 — emit host only, hide path/query.
+
+    Returns "" for non-URL input. For URLs, returns the registered host plus
+    a literal `/ path hidden` marker when the original had a path.
+    """
+    if value is None:
+        return ""
+    s = str(value).strip()
+    if not s:
+        return ""
+    host = hostname_from_url(s)
+    if not host:
+        # not a URL — fall back to short text without revealing original
+        return _short_text(s, 60)
+    host = host.lower()
+    try:
+        parsed = urlparse(s)
+        has_path = bool(parsed.path and parsed.path not in ("", "/"))
+    except ValueError:
+        has_path = False
+    return f"{host}{ ' / path hidden' if has_path else '' }"
+
+
+def _redact_json(obj, depth: int = 0):
+    """Recursively redact private fields before raw-JSON dumping.
+
+    Keys in `_REDACT_KEYS` (case-insensitive) become `"[redacted]"`. Strings
+    that look like URLs are host-masked. Depth cap of 8 prevents runaway
+    recursion on cyclic-looking probe artifacts.
+    """
+    if depth > 8:
+        return "[truncated]"
+    if isinstance(obj, dict):
+        out = {}
+        for k, v in obj.items():
+            kl = str(k).lower()
+            if kl in _REDACT_KEYS or any(kl.endswith("_" + t) for t in _REDACT_KEYS):
+                out[k] = "[redacted]"
+            else:
+                out[k] = _redact_json(v, depth + 1)
+        return out
+    if isinstance(obj, list):
+        return [_redact_json(x, depth + 1) for x in obj[:50]]
+    if isinstance(obj, str):
+        if obj.startswith(("http://", "https://", "//")):
+            return _host_mask(obj)
+        return obj if len(obj) <= 220 else obj[:219] + "…"
+    return obj
+
+
+def _resp_content_type(resp: dict) -> str:
+    for h in resp.get("headers") or []:
+        if str(h.get("name") or "").lower() == "content-type":
+            return str(h.get("value") or "")
+    return str((resp.get("content") or {}).get("mimeType") or "")
+
+
+def _har_load_safe(har_path: Path) -> dict:
+    try:
+        return json.loads(har_path.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _har_kpi_summary(har_path: Path) -> dict:
+    har = _har_load_safe(har_path)
+    if not isinstance(har, dict):
+        return {"entry_count": 0, "json_count": 0, "xhr_count": 0,
+                "status_error_count": 0, "content_types": []}
+    entries = (har.get("log") or {}).get("entries") or []
+    cts: Counter[str] = Counter()
+    json_count = 0
+    xhr_count = 0
+    status_error_count = 0
+    for entry in entries:
+        req = entry.get("request") or {}
+        resp = entry.get("response") or {}
+        rtype = str(entry.get("_resourceType")
+                    or entry.get("resourceType")
+                    or req.get("_resourceType") or "")
+        if rtype in ("xhr", "fetch"):
+            xhr_count += 1
+        try:
+            status = int(resp.get("status") or 0)
+        except (TypeError, ValueError):
+            status = 0
+        if status >= 400:
+            status_error_count += 1
+        ct = _resp_content_type(resp)
+        if ct:
+            cts[ct.split(";", 1)[0].strip().lower()] += 1
+        content = resp.get("content") or {}
+        if "json" in (ct.lower() + " " + str(content.get("mimeType") or "").lower()):
+            json_count += 1
+    return {
+        "entry_count": len(entries),
+        "json_count": json_count,
+        "xhr_count": xhr_count,
+        "status_error_count": status_error_count,
+        "content_types": cts.most_common(8),
+    }
+
+
+def _lazy_extract():
+    """Local import of probe.extract — lazy because the module imports bs4
+    + helpers we don't want to pay at site-generator startup. Codex v4 §3
+    confirmed no global Playwright / DB side effects."""
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    try:
+        from probe.extract import (
+            traffic_api_candidates,
+            traffic_article_body_candidates,
+            rss_feed_urls,
+            pagination_hints,
+            audio_share_signal,
+        )
+    except ImportError:
+        return None
+    return (
+        traffic_api_candidates,
+        traffic_article_body_candidates,
+        rss_feed_urls,
+        pagination_hints,
+        audio_share_signal,
+    )
+
+
+def _manifest_for(run_dir: Path, slug: str) -> dict:
+    """Codex review §2 — replace the v4 narrow cache key with a manifest
+    over every direct input that can affect Figure 4 output."""
+    items: list[tuple[str, int, int]] = []
+    for name in _HAR_DETAIL_MANIFEST_FILES:
+        p = run_dir / name
+        if p.exists():
+            try:
+                st = p.stat()
+                items.append((name, st.st_size, st.st_mtime_ns))
+            except OSError:
+                items.append((name, -1, -1))
+    cfg = ROOT / "configs" / f"{slug}.json"
+    if cfg.exists():
+        try:
+            st = cfg.stat()
+            items.append(("__config__", st.st_size, st.st_mtime_ns))
+        except OSError:
+            items.append(("__config__", -1, -1))
+    extract_path = ROOT / "probe" / "extract.py"
+    if extract_path.exists():
+        try:
+            items.append(("__extract__", extract_path.stat().st_size,
+                          extract_path.stat().st_mtime_ns))
+        except OSError:
+            pass
+    return {"slug": slug, "items": items}
+
+
+def pick_har_showcase() -> tuple[str, Path] | None:
+    """Pick the probe run we showcase in Figure 4. Codex review §1:
+    sticky to the previously-picked slug when it still qualifies, hard
+    eligibility floor, deterministic tie-break."""
+    pdir = ROOT / "output" / "probe"
+    if not pdir.exists():
+        return None
+
+    recent_ok_urls: set[str] = set()
+    bot_db = ROOT / "output" / "bot.sqlite3"
+    if bot_db.exists():
+        try:
+            con = sqlite3.connect(str(bot_db))
+            try:
+                for row in con.execute(
+                    "SELECT url FROM jobs WHERE result_rc = 0 AND finished_at IS NOT NULL"
+                ):
+                    u = str(row[0] or "")
+                    if u:
+                        recent_ok_urls.add(u)
+            finally:
+                con.close()
+        except sqlite3.Error:
+            pass
+
+    previous_slug = ""
+    cached = load_json(_HAR_DETAIL_CACHE_PATH)
+    if isinstance(cached, dict):
+        previous_slug = str((cached.get("key") or {}).get("slug") or "")
+
+    eligible: list[tuple[int, int, int, str, Path]] = []
+    for run_dir in pdir.iterdir():
+        if not run_dir.is_dir():
+            continue
+        primary = run_dir / "traffic.har"
+        if not primary.exists():
+            others = sorted(run_dir.glob("traffic*.har"))
+            primary = others[0] if others else None
+        if primary is None:
+            continue
+        cfg_path = ROOT / "configs" / f"{run_dir.name}.json"
+        if not cfg_path.exists():
+            continue
+        # Cheap eligibility floor.
+        try:
+            har = json.loads(primary.read_text(encoding="utf-8", errors="replace"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        entries = (har.get("log") or {}).get("entries") or []
+        n_entries = len(entries)
+        if n_entries < 50:
+            continue
+        # JSON-ish count in first 500 entries.
+        json_n = 0
+        for e in entries[:500]:
+            mime = ((e.get("response") or {}).get("content") or {}).get("mimeType") or ""
+            if "json" in mime.lower():
+                json_n += 1
+                if json_n >= 3:
+                    break
+        feed_cand = run_dir / "feed_candidates.json"
+        has_feed = feed_cand.exists() and bool(load_json(feed_cand))
+        if json_n < 3 and not has_feed:
+            continue
+        # Score (codex v4 §1).
+        score = 3  # configs/<slug>.json exists (floor already enforced)
+        if n_entries >= 50:
+            score += 1
+        if n_entries >= 200:
+            score += 1
+        if 50 <= n_entries <= 3000:
+            score += 1
+        if json_n >= 3:
+            score += 2
+        if has_feed:
+            score += 1
+        env_path = run_dir / "environment.json"
+        if env_path.exists():
+            env_data = load_json(env_path)
+            src_url = str(env_data.get("url") or env_data.get("source_url") or "")
+            if src_url and src_url in recent_ok_urls:
+                score += 1
+        # Tie-break primaries: entries band, json count.
+        band_bonus = 1 if 50 <= n_entries <= 3000 else 0
+        eligible.append((score, band_bonus, json_n, run_dir.name, primary))
+
+    if not eligible:
+        return None
+
+    # Sticky: if previous slug still in eligible, prefer it as long as score
+    # is within 1 of the current max.
+    eligible.sort(key=lambda t: (-t[0], -t[1], -t[2], t[3]))
+    top_score = eligible[0][0]
+    if previous_slug:
+        for score, _, _, slug, primary in eligible:
+            if slug == previous_slug and top_score - score <= 1:
+                return slug, primary
+    _, _, _, slug, primary = eligible[0]
+    return slug, primary
+
+
+def _row_api(c: dict) -> dict:
+    hits = c.get("list_hits") or []
+    first = hits[0] if hits else {}
+    keys = ", ".join(str(k) for k in (first.get("sample_keys") or [])[:6])
+    return {
+        "badge": f"score {c.get('relevance_score')}",
+        "main_host": _host_mask(c.get("url")),
+        "meta": (
+            f"{c.get('method') or '?'} {c.get('status') or '?'} · "
+            f"{c.get('resource_type') or '-'} · "
+            f"{_short_text(c.get('content_type'), 60)}"
+        ),
+        "evidence": f"list_hits={len(hits)} · best_count={first.get('count') or 0} · keys={keys}",
+    }
+
+
+def _row_body(c: dict) -> dict:
+    return {
+        "badge": f"len {c.get('body_len') or 0}",
+        "main_host": _host_mask(c.get("url")),
+        "meta": (
+            f"{c.get('method') or '?'} {c.get('status') or '?'} · "
+            f"key={c.get('body_key') or '-'} · "
+            f"path={_short_text(c.get('body_field_path'), 40)}"
+        ),
+        "evidence": "[sample redacted — see dashboard /probe-har for raw]",
+    }
+
+
+def _row_simple(c: dict, keys: list[str]) -> dict:
+    if not c:
+        return {"badge": "", "main_host": "", "meta": "", "evidence": ""}
+    return {
+        "badge": str(c.get(keys[0]) or keys[0]),
+        "main_host": _host_mask(
+            c.get("url") or c.get("sample_url") or c.get("url_template")
+        ),
+        "meta": " · ".join(
+            f"{k}={_short_text(c.get(k), 40)}"
+            for k in keys
+            if c.get(k) not in (None, "")
+        ),
+        "evidence": "[evidence URL host-masked]" if (c.get("evidence_url") or c.get("evidence")) else "",
+    }
+
+
+def build_har_detail(slug: str, har_path: Path) -> dict:
+    """Mirror dashboard `har_view.build_har_detail` for one probe run with
+    public-site privacy filters applied (host-masked URLs, redacted raw
+    JSON, capped row counts). The `digest` artifact section is deferred
+    here because it requires `engine.digest.build_digest` which we keep
+    out of the static generator dependency surface."""
+    run_dir = har_path.parent
+    diagnosis = load_json(run_dir / "diagnosis.json")
+    list_candidates = load_json(run_dir / "list_candidates.json")
+    base_url = str(diagnosis.get("url") or "")
+    first_article_url = str(list_candidates.get("first_article_url") or "")
+
+    page_html = ""
+    list_html_path = run_dir / "list.html"
+    if list_html_path.exists():
+        try:
+            page_html = list_html_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            page_html = ""
+
+    fns = _lazy_extract()
+    raw_api: list = []
+    raw_body: list = []
+    feeds: list = []
+    page_hints: list = []
+    audio = None
+    if fns is not None:
+        api_fn, body_fn, rss_fn, pag_fn, audio_fn = fns
+        try:
+            raw_api = list(api_fn(har_path, page_url=base_url) or [])
+        except Exception:
+            raw_api = []
+        try:
+            raw_body = list(body_fn(har_path, article_url=first_article_url) or [])
+        except Exception:
+            raw_body = []
+        if base_url and page_html:
+            try:
+                feeds = list(rss_fn(html=page_html, base_url=base_url, har_path=har_path) or [])
+            except Exception:
+                feeds = []
+            try:
+                page_hints = list(pag_fn(html=page_html, base_url=base_url, har_path=har_path) or [])
+            except Exception:
+                page_hints = []
+            try:
+                html_candidates = list_candidates.get("html_repeating_patterns") or []
+                if not isinstance(html_candidates, list):
+                    html_candidates = []
+                audio = audio_fn(
+                    base_url=base_url,
+                    first_article_url=first_article_url or None,
+                    html_candidates=html_candidates,
+                    feeds=feeds,
+                    har_path=har_path,
+                )
+            except Exception:
+                audio = None
+
+    summary = _har_kpi_summary(har_path)
+    try:
+        mtime = datetime.fromtimestamp(har_path.stat().st_mtime, tz=KST).isoformat(timespec="seconds")
+    except OSError:
+        mtime = ""
+
+    config_strategy = ""
+    cfg_path = ROOT / "configs" / f"{slug}.json"
+    if cfg_path.exists():
+        config_strategy = str(load_json(cfg_path).get("strategy") or "")
+
+    def _section(key: str, title: str, source: str, raw: list, row_fn) -> dict:
+        rows = [row_fn(c) for c in raw]
+        visible = rows[: _HAR_DETAIL_SECTION_ROW_CAP]
+        return {
+            "key": key,
+            "title": title,
+            "source": source,
+            "rows": visible,
+            "total_rows": len(rows),
+            "more": max(0, len(rows) - len(visible)),
+            "raw_redacted": _redact_json(raw),
+        }
+
+    audio_section = {
+        "key": "audio_share_signal",
+        "title": "Audio share / player signal",
+        "source": "probe.extract.audio_share_signal(...)",
+        "rows": ([_row_simple(audio, ["host", "base_host", "confidence", "evidence", "sample_url"])]
+                 if audio else []),
+        "total_rows": 1 if audio else 0,
+        "more": 0,
+        "raw_redacted": _redact_json(audio) if audio else None,
+    }
+
+    sections = [
+        _section("traffic_api_candidates", "List JSON API candidates",
+                 "probe.extract.traffic_api_candidates(har, page_url)", raw_api, _row_api),
+        _section("traffic_article_body_candidates", "Article body JSON candidates",
+                 "probe.extract.traffic_article_body_candidates(har, article_url)", raw_body, _row_body),
+        _section("rss_feed_urls", "RSS / Atom candidates",
+                 "probe.extract.rss_feed_urls(html, base_url, har)", feeds,
+                 lambda c: _row_simple(c, ["url", "source", "type"])),
+        _section("pagination_hints", "Pagination candidates",
+                 "probe.extract.pagination_hints(html, base_url, har)", page_hints,
+                 lambda c: _row_simple(c, ["kind", "param", "source", "url_template", "evidence_url"])),
+        audio_section,
+    ]
+
+    artifact_rows = []
+    if isinstance(list_candidates, dict):
+        for key in sorted(list_candidates.keys()):
+            value = list_candidates[key]
+            artifact_rows.append({
+                "key": key,
+                "kind": type(value).__name__ if value is not None else "null",
+                "count": (str(len(value)) if isinstance(value, (list, dict, str)) else ""),
+                "preview": "[redacted]" if isinstance(value, (dict, list, str)) and str(key).lower() in _REDACT_KEYS
+                           else _short_text(json.dumps(_redact_json(value), ensure_ascii=False), 180),
+            })
+
+    return {
+        "slug": slug,
+        "har_name": har_path.name,
+        "har_mtime": mtime,
+        "probe_host": _host_mask(base_url),
+        "article_host": _host_mask(first_article_url),
+        "verdict": str(diagnosis.get("verdict") or ""),
+        "config_strategy": config_strategy,
+        "summary": summary,
+        "sections": sections,
+        "artifact_list_candidates": {
+            "title": "Stored probe summary (list_candidates.json)",
+            "source": "list_candidates.json",
+            "rows": artifact_rows,
+        },
+    }
+
+
+def read_har_detail(*, force_recompute: bool = False) -> dict | None:
+    """Wrap `pick_har_showcase` + `build_har_detail` with a manifest-keyed
+    cache so an unchanged slug skips the extractor calls."""
+    pick = pick_har_showcase()
+    if pick is None:
+        return None
+    slug, har_path = pick
+    manifest = _manifest_for(har_path.parent, slug)
+    cached = load_json(_HAR_DETAIL_CACHE_PATH)
+    if (
+        not force_recompute
+        and isinstance(cached, dict)
+        and cached.get("key") == manifest
+        and isinstance(cached.get("detail"), dict)
+    ):
+        return cached["detail"]
+    detail = build_har_detail(slug, har_path)
+    payload = {
+        "key": manifest,
+        "computed_at": datetime.now(KST).isoformat(),
+        "detail": detail,
+    }
+    try:
+        _HAR_DETAIL_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = _HAR_DETAIL_CACHE_PATH.with_suffix(_HAR_DETAIL_CACHE_PATH.suffix + ".tmp")
+        tmp.write_text(json.dumps(payload), encoding="utf-8")
+        os.replace(tmp, _HAR_DETAIL_CACHE_PATH)
+    except OSError:
+        pass
+    return detail
+
+
+def render_har_detail_html(detail: dict | None) -> str:
+    if not detail:
+        return (
+            '<p class="meta">No qualifying probe artifact this cycle. Re-runs after the '
+            "next <code>/watch</code> will fill in the live HAR detail.</p>"
+        )
+    s = detail["summary"]
+    kpis = (
+        '<div class="har-kpis">'
+        f'<div class="kpi"><div class="kpi-label">entries</div>'
+        f'<div class="kpi-value">{esc(s["entry_count"])}</div></div>'
+        f'<div class="kpi"><div class="kpi-label">JSON-ish</div>'
+        f'<div class="kpi-value">{esc(s["json_count"])}</div></div>'
+        f'<div class="kpi"><div class="kpi-label">xhr/fetch</div>'
+        f'<div class="kpi-value">{esc(s["xhr_count"])}</div></div>'
+        f'<div class="kpi"><div class="kpi-label">HTTP 4xx/5xx</div>'
+        f'<div class="kpi-value">{esc(s["status_error_count"])}</div></div>'
+        "</div>"
+    )
+
+    meta_dl = (
+        '<dl class="har-meta">'
+        f"<dt>slug</dt><dd><code>{esc(detail['slug'])}</code></dd>"
+        f"<dt>HAR file</dt><dd><code>{esc(detail['har_name'])}</code>"
+        f" <span class=\"muted\">({esc(detail['har_mtime'] or '—')})</span></dd>"
+        f"<dt>probe host</dt><dd><code>{esc(detail['probe_host'] or '—')}</code></dd>"
+        f"<dt>first article</dt><dd><code>{esc(detail['article_host'] or '—')}</code></dd>"
+        f"<dt>diagnosis verdict</dt><dd>{esc(detail['verdict'] or '—')}</dd>"
+        f"<dt>config strategy</dt><dd><code>{esc(detail['config_strategy'] or '—')}</code></dd>"
+        "</dl>"
+    )
+
+    cts = s.get("content_types") or []
+    if cts:
+        ct_rows = "".join(
+            f"<tr><td><code>{esc(ct)}</code></td><td>{esc(n)}</td></tr>"
+            for ct, n in cts
+        )
+        ct_block = (
+            '<details class="har-fold">'
+            "<summary><strong>content-type distribution</strong></summary>"
+            '<table class="compact">'
+            "<thead><tr><th>content-type</th><th>count</th></tr></thead>"
+            f"<tbody>{ct_rows}</tbody></table>"
+            "</details>"
+        )
+    else:
+        ct_block = ""
+
+    sections_html = []
+    for sec in detail["sections"]:
+        rows = sec["rows"]
+        if rows:
+            body = (
+                '<table class="compact har-section-table">'
+                "<thead><tr><th>signal</th><th>host</th>"
+                "<th>meta</th><th>evidence</th></tr></thead><tbody>"
+            )
+            for item in rows:
+                body += (
+                    "<tr>"
+                    f'<td><span class="badge">{esc(item["badge"])}</span></td>'
+                    f'<td class="mono">{esc(item["main_host"] or "—")}</td>'
+                    f"<td><small>{esc(item['meta'])}</small></td>"
+                    f"<td><small class=\"muted\">{esc(item['evidence'])}</small></td>"
+                    "</tr>"
+                )
+            body += "</tbody></table>"
+            if sec["more"]:
+                body += (
+                    f'<p class="muted har-section-more">'
+                    f"+{esc(sec['more'])} more rows not shown (cap "
+                    f"{_HAR_DETAIL_SECTION_ROW_CAP})</p>"
+                )
+        else:
+            body = '<p class="muted">Not detected for this probe.</p>'
+        raw = sec["raw_redacted"]
+        raw_pre = (
+            json.dumps(raw, ensure_ascii=False, indent=2) if raw else "(empty)"
+        )
+        sections_html.append(
+            '<section class="har-section">'
+            '<div class="har-section-head">'
+            f'<h4>{esc(sec["title"])}</h4>'
+            f'<code class="muted">{esc(sec["source"])}</code>'
+            "</div>"
+            f"{body}"
+            '<details class="har-fold">'
+            "<summary>raw JSON (redacted)</summary>"
+            f'<pre class="tail">{esc(raw_pre)}</pre>'
+            "</details>"
+            "</section>"
+        )
+
+    artifact = detail.get("artifact_list_candidates") or {}
+    artifact_html = ""
+    if artifact.get("rows"):
+        body = (
+            '<table class="compact har-section-table">'
+            "<thead><tr><th>key</th><th>type</th><th>count</th><th>preview</th></tr></thead>"
+            "<tbody>"
+        )
+        for row in artifact["rows"]:
+            body += (
+                "<tr>"
+                f'<td class="mono">{esc(row["key"])}</td>'
+                f'<td><span class="badge">{esc(row["kind"])}</span></td>'
+                f'<td>{esc(row["count"]) or "—"}</td>'
+                f"<td><small>{esc(row['preview'])}</small></td>"
+                "</tr>"
+            )
+        body += "</tbody></table>"
+        artifact_html = (
+            '<section class="har-section">'
+            '<div class="har-section-head">'
+            f'<h4>{esc(artifact["title"])}</h4>'
+            f'<code class="muted">{esc(artifact["source"])}</code>'
+            "</div>"
+            f"{body}"
+            "</section>"
+        )
+
+    return kpis + meta_dl + ct_block + "".join(sections_html) + artifact_html
 
 
 def metric(label: str, value: object, note: str = "") -> str:
@@ -1329,6 +1898,7 @@ def render_html(
     *,
     case_records: list[dict] | None = None,
     har_lane: dict | None = None,
+    har_detail: dict | None = None,
 ) -> str:
     config_count = len(configs["items"])
     polling_count = poll["markers"].get("polling", 0)
@@ -1386,6 +1956,7 @@ def render_html(
     har_stage_panels_html = render_stage_panels()
     har_anatomy_html = render_har_anatomy_static()
     har_lane_html = render_lane_summary(har_lane or {})
+    har_detail_html = render_har_detail_html(har_detail)
 
     recent_rows = []
     for item in jobs["recent"]:
@@ -1800,15 +2371,21 @@ def render_html(
     .funnel-label {{ fill: var(--ink); font: 600 15px Georgia, "Times New Roman", serif; }}
     .funnel-tagline {{ fill: var(--muted); font: italic 12px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
     .funnel-arrow {{ stroke: var(--accent-2); stroke-width: 1.8; color: var(--accent-2); }}
+    /* Scoped section-gap tokens (codex v4 review §8 — global selector over-fires). */
+    main > section + section {{ margin-top: var(--section-gap, 36px); }}
+    #figures figure + figure {{ margin-top: var(--subsection-gap, 22px); }}
+    #harDetailFigure {{ margin-top: var(--section-gap, 36px); }}
+    #harDetailFigure .har-section + .har-section {{ margin-top: var(--subsection-gap, 22px); }}
+
     .stage-panels {{ margin: 18px 0 6px; }}
     .stage-panel {{
       background: var(--panel);
       border: 1px solid var(--line);
       border-radius: 6px;
-      padding: 16px 18px 12px;
+      padding: 16px 18px 14px;
       margin: 0 0 14px;
     }}
-    .stage-panel-head {{ display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin: 0 0 10px; }}
+    .stage-panel-head {{ display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin: 0 0 12px; }}
     .stage-panel-head h3 {{ margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 1.15rem; }}
     .stage-panel-num {{
       display: inline-block;
@@ -1821,27 +2398,242 @@ def render_html(
       text-transform: uppercase;
     }}
     .stage-panel-summary {{ flex-basis: 100%; margin: 4px 0 0; color: var(--muted); font-size: 0.94rem; }}
-    .stage-flow-svg {{ display: block; max-width: 100%; color: var(--accent-2); }}
-    .step-box {{ fill: var(--paper); stroke: var(--accent-2); stroke-width: 1.2; opacity: 0.96; }}
-    .step-box-g:hover .step-box {{ stroke-width: 1.8; opacity: 1; }}
-    .step-box-index {{ fill: var(--accent); font: 700 13px Georgia, "Times New Roman", serif; }}
-    .step-box-file {{ fill: var(--ink); font: 600 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }}
-    .step-box-fn {{ fill: var(--accent); font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }}
-    .step-box-role {{ fill: var(--muted); font: 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
-    .step-arrow {{ stroke: var(--accent-2); stroke-width: 1.4; color: var(--accent-2); }}
+    /* Figure 3 step cards — flexbox so the wrap row centres orphan cards. */
+    .stage-flow {{
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 14px;
+      padding: 0;
+      margin: 0;
+      list-style: none;
+    }}
+    .step-card {{
+      flex: 0 1 200px;
+      min-width: 0;
+      max-width: 240px;
+      min-height: 132px;
+      background: var(--paper);
+      border: 1px solid var(--accent-2);
+      border-radius: 6px;
+      padding: 10px 12px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      position: relative;
+      transition: border-width 80ms ease, box-shadow 80ms ease;
+    }}
+    .step-card:hover {{ box-shadow: 0 1px 4px rgba(31,37,40,0.18); }}
+    .step-num {{
+      position: absolute;
+      top: 6px;
+      left: 8px;
+      font: 700 0.9rem Georgia, "Times New Roman", serif;
+      color: var(--accent);
+    }}
+    .step-file {{
+      display: block;
+      margin-top: 14px;
+      font: 600 0.82rem ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: var(--ink);
+      word-break: break-all;
+      overflow-wrap: anywhere;
+    }}
+    .step-fn {{
+      display: block;
+      font: 0.78rem ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: var(--accent);
+      word-break: break-all;
+      overflow-wrap: anywhere;
+    }}
+    .step-role {{
+      margin: 4px 0 0;
+      font-size: 0.8rem;
+      color: var(--muted);
+      line-height: 1.4;
+    }}
     .har-lane-summary {{
       background: var(--panel);
       border-left: 3px solid var(--accent);
-      padding: 12px 16px;
+      padding: 14px 18px;
       margin: 6px 0 18px;
+    }}
+    .lane-rows {{
+      list-style: none;
+      padding: 0;
+      margin: 0 0 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }}
+    .lane-row {{ display: flex; flex-direction: column; gap: 6px; }}
+    .lane-row-head {{
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      font-size: 0.95rem;
+    }}
+    .lane-total {{
+      color: var(--muted);
+      font-size: 0.82rem;
+    }}
+    .lane-chips {{
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }}
+    .lane-chip {{
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 2px 9px;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      font: 0.82rem ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }}
+    .lane-chip code {{ background: none; padding: 0; }}
+    .lane-chip-n {{
+      color: var(--accent);
+      font-weight: 700;
+      font-family: Georgia, "Times New Roman", serif;
       font-size: 0.92rem;
+    }}
+    .lane-chip.muted {{ color: var(--muted); }}
+    .lane-footnote {{
+      margin: 0;
+      font-size: 0.84rem;
+      color: var(--ink);
+      line-height: 1.5;
+    }}
+    .lane-footnote code {{
+      background: var(--paper);
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-size: 0.82rem;
+    }}
+    /* Figure 4 — live HAR detail */
+    #harDetailFigure {{
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 18px 22px 14px;
+      margin-left: 0;
+      margin-right: 0;
+    }}
+    #harDetailFigure > h3 {{
+      margin: 0 0 12px;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 1.2rem;
+    }}
+    #harDetailFigure figcaption {{
+      margin-top: 14px;
+      color: var(--muted);
+      font-size: 0.86rem;
       line-height: 1.55;
     }}
+    .har-kpis {{
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin: 0 0 16px;
+    }}
+    .har-kpis .kpi {{
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      padding: 10px 12px;
+      text-align: center;
+    }}
+    .har-kpis .kpi-label {{
+      color: var(--muted);
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }}
+    .har-kpis .kpi-value {{
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 1.6rem;
+      color: var(--ink);
+      margin-top: 4px;
+    }}
+    .har-meta {{
+      display: grid;
+      grid-template-columns: max-content 1fr;
+      gap: 4px 16px;
+      margin: 0 0 18px;
+      font-size: 0.9rem;
+    }}
+    .har-meta dt {{ color: var(--muted); text-transform: uppercase; font-size: 0.74rem; letter-spacing: 0.08em; padding-top: 4px; }}
+    .har-meta dd {{ margin: 0; word-break: break-all; }}
+    .har-section {{
+      border-top: 1px solid var(--line);
+      padding-top: 14px;
+    }}
+    .har-section-head {{
+      display: flex;
+      align-items: baseline;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin: 0 0 10px;
+    }}
+    .har-section-head h4 {{ margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 1rem; }}
+    .har-section-head code {{
+      font-size: 0.78rem;
+    }}
+    .har-section-table {{
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.88rem;
+    }}
+    .har-section-table th {{
+      text-align: left;
+      color: var(--muted);
+      font-size: 0.74rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      padding: 6px 8px;
+      border-bottom: 1px solid var(--line);
+    }}
+    .har-section-table td {{ padding: 6px 8px; vertical-align: top; border-bottom: 1px solid var(--line); }}
+    .har-section-table td.mono {{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; word-break: break-all; }}
+    .badge {{
+      display: inline-block;
+      padding: 1px 7px;
+      border-radius: 10px;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      font-size: 0.74rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: var(--ink);
+    }}
+    .har-fold {{ margin: 8px 0 0; }}
+    .har-fold summary {{
+      cursor: pointer;
+      font-size: 0.86rem;
+      color: var(--muted);
+    }}
+    .har-fold[open] summary {{ color: var(--ink); }}
+    .har-fold pre {{
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      padding: 8px 10px;
+      margin: 6px 0 0;
+      max-height: 320px;
+      overflow: auto;
+      font-size: 0.78rem;
+      line-height: 1.5;
+    }}
+    .har-section-more {{ margin: 6px 0 0; font-size: 0.78rem; }}
     .har-lane-summary code {{
       background: var(--paper);
       padding: 1px 5px;
       border-radius: 3px;
-      font-size: 0.86rem;
+      font-size: 0.82rem;
     }}
     .har-subheader {{
       font-family: Georgia, "Times New Roman", serif;
@@ -2156,6 +2948,14 @@ def render_html(
       {har_stage_panels_html}
     </div>
     {har_lane_html}
+    <figure id="harDetailFigure">
+      <h3>Figure 4. Live HAR analysis for one auto-selected probe</h3>
+      {har_detail_html}
+      <figcaption>Auto-selected each cycle (score-based; sticky to the previous slug when it
+        still qualifies) from <code>output/probe/&lt;slug&gt;/</code>. Same shape as the dev
+        dashboard's <code>/probe-har</code> view, but URLs are host-masked, raw JSON is
+        redacted, and each section caps at 5 visible rows (ADR 0010 §17).</figcaption>
+    </figure>
     <h3 class="har-subheader">What fields are read from each HAR entry</h3>
     {har_anatomy_html}
     <script>
@@ -2221,6 +3021,7 @@ def main(argv: list[str]) -> int:
     jobs = read_jobs()
     case_records = read_case_records()
     har_lane = read_har_lane_counts()
+    har_detail = read_har_detail()
     generated_at = datetime.now(KST)
     page = render_html(
         configs,
@@ -2229,6 +3030,7 @@ def main(argv: list[str]) -> int:
         generated_at,
         case_records=case_records,
         har_lane=har_lane,
+        har_detail=har_detail,
     )
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
