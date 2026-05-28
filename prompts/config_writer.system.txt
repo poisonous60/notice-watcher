@@ -55,6 +55,7 @@ page_size_max: (선택) 서버가 페이지크기를 cap 하면 그 값.
 # httpx_html / playwright_html:
 row_selector          : 목록 한 행(= 글 하나)을 가리키는 CSS. digest 의 html_repeating_patterns[].selector 후보 중 *글 목록*인 걸 고른다(head>meta 같은 노이즈 말고).
 - ⚠ `html_repeating_patterns[0].selector` 를 그대로 복사하지 마라. `css-[a-z0-9]{5,}` / `jss\d+` / Material UI류 `Mui...-\d+` 또는 build-generated component class 는 다음 build 에서 바뀔 수 있다. 후보의 `href_common_prefix` / `sample_url` 을 보고 `a[href^="/blog/"]`, `a[href*="/article/"]`, `a[href^="/news/"]` 같은 href 기반 selector 를 우선하고, row 는 `li:has(a[href^=...])` / `article:has(a[href^=...])` 처럼 의미 있는 컨테이너만 써라.
+- ⚠ SVG/아이콘/장식 후보는 row 가 아니다. selector 가 `svg`, `g`, `path`, `circle`, `rect`, `use`, `#Layer_*`, `#Group_*` 이거나 `first_text`/`sample_url` 이 비어 있으면 글 목록 후보로 쓰지 마라. 그런 후보가 child_count 1등이어도 버리고, `sample_url` 이 실제 글 URL 이며 제목/날짜 텍스트가 있는 후보를 고른다. 그런 후보가 없으면 fake config 를 만들지 말고 확신 없다고 멈춰라.
 - ⚠ **class 가 `[`, `:`, `/` 포함하면 박지 마라** (tailwind arbitrary value `md:col-[3/-3]` / responsive variant 류 — CSS parser 가 attribute selector 로 해석해 malformed). 그 class 빼고 *짧고 stable* 한 class 1-2개 (예: `card-set-grid`, `vrow`, `feed-item`) + tag selector (`> li`) 만 사용. 정적 응답에 빈 shell 면 strategy=`playwright_html` + `wait_selector`.
 - Probe 후보가 `div.grid.w-full.relative.gap-6.md:grid-cols-2.xl:grid-cols-3.pt-5 > article.news-card` 처럼 Tailwind utility chain 을 길게 주면 그대로 복사하지 말고 `div.grid > article.news-card` 처럼 안정 class + 자식 tag/class 로 줄여라. `md:grid-cols-2`/`xl:px-4` 같은 responsive utility 를 꼭 써야 할 때만 `md\:grid-cols-2`/`xl\:px-4` 로 escape 한다.
 - Tailwind utility class 를 selector 로 써야 하면 class token 안의 점(`.`)과 colon(`:`)은 backslash escape 한다: `space-y-1.5` → `.space-y-1\.5`, `gap-2.5` → `.gap-2\.5`, `lg:flex` → `.lg\:flex`, `hover:bg-blue` → `.hover\:bg-blue`, 조합은 `.lg\:space-y-1\.5`.
@@ -95,6 +96,7 @@ fields : 글 한 건에서 뽑을 필드들. **post_id 와 title 은 필수**. (
 
 ## 쓸 수 있는 transform (이 목록 밖은 금지)
 {{transforms_doc}}
+`regex_replace` 는 지원하지 않는다. 정규식으로 일부만 뽑을 때는 `regex_extract`, 고정 문자열 치환은 `replace`, 접두/접미 제거는 `remove_prefix`/`strip` 을 써라.
 주요 용법:
 - ["urljoin","https://base"]              : 상대 URL → 절대.
 - ["regex_extract","[?&]no=(\\d+)"]       : 정규식 1번 그룹 추출(없으면 None).
