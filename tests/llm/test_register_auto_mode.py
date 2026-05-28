@@ -234,6 +234,85 @@ def test_generate_by_mode_revalidates_disable_stealth_after_agentic_dns_race():
     assert "disable_stealth" not in original_cfg
 
 
+def test_build_rss_fallback_config_uses_validated_rss_primary_feed():
+    reg = _load_register()
+
+    cfg = reg._build_rss_fallback_config({
+        "url": "https://randomascii.wordpress.com/",
+        "site_kind": {
+            "kind": "hybrid",
+            "confidence": "med",
+            "primary_feed_url": "https://randomascii.wordpress.com/feed/",
+        },
+        "feed_candidates": [{
+            "url": "https://randomascii.wordpress.com/feed/",
+            "validated": True,
+            "item_count": 10,
+            "root_tag": "rss",
+        }],
+    })
+
+    assert cfg is not None
+    assert cfg["strategy"] == "httpx_html"
+    assert cfg["list"]["url_template"] == "https://randomascii.wordpress.com/feed/"
+    assert cfg["list"]["row_selector"] == "channel > item"
+    assert cfg["list"]["fields"]["post_id"][0] == {
+        "from": "css",
+        "selector": "guid, id",
+        "text": True,
+        "transform": [["strip"], ["regex_extract", "[?&]p=(\\d+)"]],
+    }
+    assert cfg["list"]["fields"]["url"] == [{"from": "css", "selector": "link", "text": True}]
+
+
+def test_build_rss_fallback_config_uses_atom_link_href():
+    reg = _load_register()
+
+    cfg = reg._build_rss_fallback_config({
+        "url": "https://adriancourreges.com/",
+        "site_kind": {
+            "kind": "hybrid",
+            "confidence": "med",
+            "primary_feed_url": "https://adriancourreges.com/atom.xml",
+        },
+        "feed_candidates": [{
+            "url": "https://adriancourreges.com/atom.xml",
+            "validated": True,
+            "item_count": 20,
+            "root_tag": "feed",
+        }],
+    })
+
+    assert cfg is not None
+    assert cfg["list"]["row_selector"] == "feed > entry"
+    assert cfg["list"]["fields"]["post_id"][0]["selector"] == "id"
+    assert cfg["list"]["fields"]["url"] == [{"from": "css", "selector": "link[href]", "attr": "href"}]
+    assert cfg["list"]["fields"]["published_at"][0]["selector"] == "updated, published"
+
+
+def test_build_rss_fallback_config_requires_site_kind_and_item_count():
+    reg = _load_register()
+
+    assert reg._build_rss_fallback_config({
+        "site_kind": {"kind": "static_html", "primary_feed_url": "https://example.com/feed.xml"},
+        "feed_candidates": [{
+            "url": "https://example.com/feed.xml",
+            "validated": True,
+            "item_count": 10,
+            "root_tag": "rss",
+        }],
+    }) is None
+    assert reg._build_rss_fallback_config({
+        "site_kind": {"kind": "hybrid", "primary_feed_url": "https://example.com/feed.xml"},
+        "feed_candidates": [{
+            "url": "https://example.com/feed.xml",
+            "validated": True,
+            "item_count": 2,
+            "root_tag": "rss",
+        }],
+    }) is None
+
+
 def run() -> list[tuple[str, bool, str]]:
     reg = _load_register()
     cases: list[tuple[str, bool, str]] = []

@@ -122,7 +122,7 @@ def _iso8601(value: str, formats: list[str], tz: Optional[str] = None) -> Option
 
 def _date_only_to_iso(value: str, tz: str = "+09:00") -> str:
     """'YYYY-MM-DD' → 'YYYY-MM-DDT00:00:00+09:00'."""
-    d = value.strip()
+    d = value.strip().replace("/", "-")
     return f"{d}T00:00:00{tz}"
 
 
