@@ -18,8 +18,18 @@ def run() -> list[tuple[str, bool, str]]:
         "host_label": "example.com",
         "path_label": "/news",
         "probe_url": "https://example.com/news/",
+        "har_mtime": "2026-05-28T00:00:00+09:00",
+        "verdict": "정적 HTTP로 충분",
+        "probe_host": "example.com / path hidden",
+        "article_host": "example.com / path hidden",
         "config_strategy": "httpx_html",
-        "summary": {"entry_count": 12, "json_count": 3, "xhr_count": 2},
+        "summary": {
+            "entry_count": 12,
+            "json_count": 3,
+            "xhr_count": 2,
+            "status_error_count": 0,
+            "content_types": [("application/json", 3)],
+        },
         "sections": [
             {
                 "key": "traffic_api_candidates",
@@ -102,11 +112,12 @@ def run() -> list[tuple[str, bool, str]]:
     ))
     cases.append((
         "render_explains_agentic_flow",
-        "What the config-generation agent receives" not in html
+        "probeAgentPicker" in html
         and "Files staged for the model" in html
         and "candidate.json" in html
-        and "show raw packet text" in html
-        and "published config summary" in html,
+        and "open raw packet" in html
+        and "probe-agent-panel-0" in html
+        and "Published config summary" in html,
         html[:500],
     ))
     cases.append((
