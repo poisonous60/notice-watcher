@@ -1,0 +1,212 @@
+{
+  "version": 1,
+  "site": "indiedb.com",
+  "board": "news",
+  "strategy": "httpx_html",
+  "headers": {
+    "User-Agent": "notice-watcher/1.0 (+polite)",
+    "Accept": "application/rss+xml, application/xml;q=0.9, text/html;q=0.8, */*;q=0.7",
+    "Accept-Language": "en-US,en;q=0.9"
+  },
+  "timeout": 15,
+  "polite_sleep": {
+    "min": 5,
+    "max": 5
+  },
+  "list": {
+    "url_template": "https://rss.indiedb.com/news/feed/rss.xml",
+    "pagination": {
+      "kind": "none"
+    },
+    "row_selector": "channel > item",
+    "fields": {
+      "post_id": [
+        {
+          "from": "css",
+          "selector": "guid",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        },
+        {
+          "from": "css",
+          "selector": "link",
+          "text": true,
+          "transform": [
+            [
+              "strip_query_fragment"
+            ],
+            [
+              "regex_extract",
+              "/news/([^/?#]+)/?$"
+            ]
+          ]
+        }
+      ],
+      "title": [
+        {
+          "from": "css",
+          "selector": "title",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "url": [
+        {
+          "from": "css",
+          "selector": "link",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "strip_query_fragment"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "pubDate",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ],
+            [
+              "iso8601",
+              [
+                "%a, %d %b %Y %H:%M:%S %z"
+              ]
+            ]
+          ]
+        }
+      ],
+      "summary": [
+        {
+          "from": "css",
+          "selector": "media|description",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        },
+        {
+          "from": "css",
+          "selector": "description",
+          "text": true,
+          "transform": [
+            [
+              "html_unescape"
+            ],
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "cover_image": [
+        {
+          "from": "attr",
+          "selector": "enclosure[url]",
+          "attr": "url"
+        },
+        {
+          "from": "attr",
+          "selector": "media|thumbnail[url]",
+          "attr": "url"
+        }
+      ]
+    }
+  },
+  "article": {
+    "fetch_kind": "html",
+    "skip_status": [
+      403
+    ],
+    "body_empty_acceptable": true,
+    "content": [
+      {
+        "from": "css",
+        "selector": "div#articlecontent",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "article div.bodyarticle",
+        "html": true
+      },
+      {
+        "from": "css",
+        "selector": "div.bodyarticle",
+        "html": true
+      }
+    ],
+    "enrich": {
+      "title": [
+        {
+          "from": "css",
+          "selector": "span.heading[itemprop='headline']",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        },
+        {
+          "from": "css",
+          "selector": "h1",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ],
+      "published_at": [
+        {
+          "from": "css",
+          "selector": "time[itemprop='datePublished']",
+          "attr": "datetime",
+          "transform": [
+            [
+              "iso8601",
+              [
+                "%Y-%m-%dT%H:%M:%S%z",
+                "%Y-%m-%dT%H:%M:%S.%f%z",
+                "%b %d, %Y"
+              ]
+            ]
+          ]
+        }
+      ],
+      "author": [
+        {
+          "from": "css",
+          "selector": "span[itemprop='author'] span[itemprop='name'] a",
+          "text": true,
+          "transform": [
+            [
+              "collapse_ws"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "_source_url": "https://rss.indiedb.com/news/feed/rss.xml",
+  "_note": "IndieDB /news uses DBolical RSS as the polling source. The submitted HTML board https://indiedb.com/news/ is Cloudflare-sensitive, while https://rss.indiedb.com/news/feed/rss.xml returns current RSS items when fetched with a non-browser notice-watcher UA. Article bodies use DBolical selectors when accessible and skip 403 bodies; RSS summary/title/link/pubDate/enclosure remain available."
+}
