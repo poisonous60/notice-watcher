@@ -751,19 +751,19 @@ _BUCKET_STACK_PRIORITY = {"F": 0, "C": 1, "A": 2, "B/D/E": 3, "no-change": 4}
 
 
 def svg_case_blocks(records: list[dict], events: list[tuple[str, str, str]]) -> str:
-    """Block grid Figure 2 — every case is one small square. Days form columns
-    (x = date), cases stack upward within each column. Colour = fix-layer
-    bucket (no-change = light, F = solid teal etc). Each block is clickable to
-    open the case modal. Vertical dashed lines mark pipeline milestones.
+    """Block grid Figure 2 — every case is one square. Days form columns (x =
+    date), cases stack upward within each column. Colour = fix-layer bucket
+    (no-change = light, F = solid teal etc). Each block is clickable to open
+    the case modal. Vertical dashed lines mark pipeline milestones.
     """
     width = 920
-    title_pad = 38
-    axis_pad = 50
-    cx_left = 60
-    cx_right = width - 28
+    title_pad = 60
+    axis_pad = 56
+    cx_left = 56
+    cx_right = width - 24
 
     if not records:
-        height = 200
+        height = 260
         return (
             f'<svg id="caseTimeline" viewBox="0 0 {width} {height}" role="img" '
             f'aria-label="Case block grid">'
@@ -787,10 +787,10 @@ def svg_case_blocks(records: list[dict], events: list[tuple[str, str, str]]) -> 
     plot_w = cx_right - cx_left
     day_slot = plot_w / n_days
 
-    block_size = 4
-    block_gap = 1
+    block_size = 11
+    block_gap = 2
     cell = block_size + block_gap
-    per_row = max(1, int((day_slot - 2) / cell))
+    per_row = max(1, int((day_slot - 4) / cell))
 
     by_day: dict[str, list[dict]] = {}
     for r in records:
@@ -800,7 +800,7 @@ def svg_case_blocks(records: list[dict], events: list[tuple[str, str, str]]) -> 
 
     max_count = max(len(by_day.get(d, ())) for d in all_days)
     rows_needed = (max_count + per_row - 1) // per_row
-    grid_h = max(rows_needed * cell + 2, 60)
+    grid_h = max(rows_needed * cell + 4, 180)
     height = title_pad + grid_h + axis_pad
 
     baseline_y = title_pad + grid_h
@@ -841,11 +841,12 @@ def svg_case_blocks(records: list[dict], events: list[tuple[str, str, str]]) -> 
         )
 
     title = (
-        f'<text class="panel-title" x="{cx_left:.0f}" y="{title_pad - 16:.0f}">'
-        f"지금까지 처리한 case {len(records)}건 — 블록 클릭 시 글 열림"
+        f'<text class="panel-title" x="{cx_left:.0f}" y="{title_pad - 28:.0f}">'
+        f"{len(records)} cases bolted onto the engine — click a block to open the note"
         "</text>"
-        f'<text class="panel-sub" x="{cx_left:.0f}" y="{title_pad - 4:.0f}">'
-        "열 = 날짜, 블록 1개 = case 1건. 색 = fix layer, 굵은 테두리 = 일반화 개선."
+        f'<text class="panel-sub" x="{cx_left:.0f}" y="{title_pad - 12:.0f}">'
+        "Each square = one case file. Columns = day. Colour = fix layer; "
+        "solid border = improvement that generalised back into the solver."
         "</text>"
     )
 
@@ -866,7 +867,7 @@ def svg_case_blocks(records: list[dict], events: list[tuple[str, str, str]]) -> 
             f'<g class="annot" data-date="{esc(iso)}" data-full="{esc(full_text)}">'
             f'<line class="annot-line" x1="{xi:.1f}" y1="{title_pad:.0f}" '
             f'x2="{xi:.1f}" y2="{baseline_y:.1f}"></line>'
-            f'<text class="annot-marker" x="{xi:.1f}" y="{title_pad - 30:.0f}" '
+            f'<text class="annot-marker" x="{xi:.1f}" y="14" '
             f'text-anchor="middle">{esc(short)}</text>'
             f"</g>"
         )
@@ -2227,16 +2228,22 @@ def render_html(
       {timeline_svg}
       <ul class="legend timeline-legend">{timeline_legend_html}</ul>
       <div id="timelineTip" class="dot-tip" hidden></div>
-      <figcaption><strong>Figure 2.</strong> 새 사이트를 자동으로 처리하지 못해 사람이 들여다본 사건이
-        한 건 생길 때마다 <code>docs/cases/</code> 에 글 하나가 쌓인다. 매 블록 = 그 글 1편. 굵은 가로선이
-        "지금 돌아가는 엔진"이고, 블록은 그 위에 그날 올라간 패치 조각. <strong>색</strong>은 손본 자리:
-        <span style="color:#3d737f">F</span> 인식기/플랫폼 코드 ·
-        <span style="color:#8a6f4d">C</span> probe 휴리스틱 ·
-        <span style="color:#7b5c8c">A</span> prompt/agentic ·
-        <span style="color:#6f7f52">B/D/E</span> 엔진·writer·validate ·
-        <span style="color:#888">no-change</span> 분류만 박은 종결.
-        <strong>굵은 테두리</strong>는 시스템이 그 패턴을 자동 처리하게 된 *일반화 개선*.
-        점선 vertical 은 인프라 마일스톤 (마커에 마우스 올리면 설명). 블록 클릭 = 글 본문 모달.</figcaption>
+      <figcaption><strong>Figure 2.</strong> Every time the auto-solver fails on a new
+        site, a human reads through what happened and writes a short note in
+        <code>docs/cases/</code>. One block per note, stacked on the day it landed. The thick
+        baseline is "the engine that runs today"; each block above it is a piece of evidence that
+        the engine wasn't enough on its own that day. <strong>Tall columns</strong> are batch runs
+        (05-21 = 5 site batches in parallel = 118 notes). <strong>Colour</strong> marks the layer
+        that needed touching —
+        <span style="color:#3d737f">F</span> recognizer / platform code,
+        <span style="color:#8a6f4d">C</span> probe heuristic,
+        <span style="color:#7b5c8c">A</span> prompt / agentic,
+        <span style="color:#6f7f52">B/D/E</span> engine / writer / validate, or
+        <span style="color:#888">no-change</span> (we wrote a note but no code moved).
+        <strong>Solid borders</strong> mark the cases that became <em>improvements</em> — patterns
+        the solver now handles on its own next time. Dashed verticals are infra milestones
+        (hover for what shipped). <strong>Click any block</strong> to read its note inline, or
+        open the full markdown on GitHub from the modal footer.</figcaption>
     </figure>
     {case_db_html}
     <div id="caseModal" class="modal" hidden role="dialog" aria-labelledby="caseModalTitle" aria-modal="true">
