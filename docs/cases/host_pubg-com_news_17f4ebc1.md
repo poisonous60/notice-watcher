@@ -42,3 +42,9 @@ tags: [cross-site, spa, locale-redirect, static-evidence]
 ## probe artifact 확인
 
 `output/probe/host_pubg-com_news_17f4ebc1/` 는 이 worktree에 없어 artifact replay는 수행하지 못했다. fixture가 동일 failure mode를 고정한다.
+
+## 후속 (uncommitted): verdict hydration downgrade
+
+Fix B 이후에도 verdict flow가 `static_ok`를 유지해 `정적 HTTP로 충분`으로 떨어지는 문제가 남았다. 이번 C-layer 후속은 static body에 반복 placeholder selector가 있지만 rendered `first_article_url`의 anchor href가 정적 body에 없으면 `STATIC_INSUFFICIENT_HYDRATION_PREFIX` note를 남기고 Playwright 방향으로 downgrade한다.
+
+이 worktree에는 `output/probe/host_pubg-com_news_17f4ebc1/` artifact가 없어 replay는 defer했다. 대신 `tests/probe_heuristics/test_verdict_hydration_downgrade.py`가 PUBG-shaped placeholder와 SSR counterexample을 고정한다.

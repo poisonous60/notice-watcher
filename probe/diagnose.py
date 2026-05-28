@@ -45,6 +45,7 @@ _CERT_OR_DNS_ERROR_MARKERS = (
 # 이 prefix 만은 *그대로* 유지해야 register.py 의 _extra_signal_hints 가 잡는다.
 STATIC_INSUFFICIENT_SIZE_PREFIX = "정적 응답이 빈 shell"        # rule 1 = 강한 신호 (size + row-signal)
 STATIC_INSUFFICIENT_REPEAT_PREFIX = "정적 응답 vs Playwright DOM"  # rule 2 = 약한 신호 (selector-level repeat diff)
+STATIC_INSUFFICIENT_HYDRATION_PREFIX = "정적 응답이 hydration placeholder"  # rule 3 = static rows but no article href
 
 
 def _read_list_candidates(path: Path) -> dict:
@@ -96,6 +97,89 @@ def _cross_host_redirects(input_url: str, results: list[Result]) -> list[tuple[s
         if final_site and final_site != input_site:
             changed.append((r.url, r.final_url))
     return changed if len(changed) == len(ok_results) else []
+
+
+def _url_path_key(value: str) -> str:
+    path = urlsplit(value or "").path.rstrip("/")
+    return path or "/"
+
+
+def _static_body_has_article_url(static_like_ok: list[Result], candidate_url: str) -> bool:
+    candidate_path = _url_path_key(candidate_url)
+    if candidate_path == "/":
+        return False
+    for r in static_like_ok:
+        if not r.body_path:
+            continue
+        body_path = Path(r.body_path)
+        if not body_path.exists():
+            continue
+        html = body_path.read_text(encoding="utf-8", errors="replace")
+        soup = BeautifulSoup(html, "lxml")
+        base_url = r.final_url or r.url
+        for anchor in soup.find_all("a", href=True):
+            if not isinstance(anchor, Tag):
+                continue
+            href = anchor.get("href")
+            if _is_js_href(href):
+                continue
+            if _url_path_key(urljoin(base_url, str(href))) == candidate_path:
+                return True
+    return False
+
+
+def _static_hydration_placeholder_evidence(
+    static_like_ok: list[Result],
+    list_payload: dict,
+    static_row_evidence: Optional[dict],
+) -> Optional[dict]:
+    if static_row_evidence or not static_like_ok:
+        return None
+    first_article_url = list_payload.get("first_article_url")
+    if not isinstance(first_article_url, str) or not first_article_url.strip():
+        return None
+    if _static_body_has_article_url(static_like_ok, first_article_url):
+        return None
+
+    patterns = list_payload.get("html_repeating_patterns") or []
+    if not isinstance(patterns, list):
+        return None
+    best: Optional[dict] = None
+    for item in patterns:
+        if not isinstance(item, dict):
+            continue
+        selector = item.get("selector")
+        if not isinstance(selector, str) or not selector.strip():
+            continue
+        try:
+            child_count = int(item.get("child_count") or item.get("count") or 0)
+        except (TypeError, ValueError):
+            child_count = 0
+        if child_count < 10:
+            continue
+        for r in static_like_ok:
+            if not r.body_path:
+                continue
+            body_path = Path(r.body_path)
+            if not body_path.exists():
+                continue
+            html = body_path.read_text(encoding="utf-8", errors="replace")
+            soup = BeautifulSoup(html, "lxml")
+            try:
+                nodes = soup.select(selector)
+            except Exception:
+                nodes = []
+            static_count = len(nodes)
+            if static_count < 10:
+                continue
+            if best is None or static_count > int(best.get("child_count") or 0):
+                best = {
+                    "strategy": r.strategy,
+                    "selector": selector,
+                    "child_count": static_count,
+                    "missing_article_url": first_article_url,
+                }
+    return best
 
 
 def _static_row_evidence(static_like_ok: list[Result], list_payload: dict) -> Optional[dict]:
@@ -269,6 +353,26 @@ def diagnose(
                             "그렇다면 strategy=playwright_html + list.wait_selector. 단, 정적 응답 안에 직접 파싱 가능한 "
                             "JSON 이 있으면 httpx_html + inline_js_data_candidates 도 검토."
                         )
+    hydration_placeholder = _static_hydration_placeholder_evidence(
+        static_like_ok, list_payload, static_row_evidence
+    )
+    if (static_ok or captured_ok) and headless_ok and hydration_placeholder:
+        static_vs_headless = {
+            **(static_vs_headless or {}),
+            "static_insufficient": True,
+            "trigger_rule": "hydration_placeholder",
+            "placeholder_selector": hydration_placeholder.get("selector"),
+            "missing_article_url": hydration_placeholder.get("missing_article_url"),
+        }
+        static_ok = []
+        captured_ok = False
+        notes.append(
+            f"{STATIC_INSUFFICIENT_HYDRATION_PREFIX} — 정적 HTML row selector "
+            f"({hydration_placeholder.get('selector')}) cc={hydration_placeholder.get('child_count')} "
+            f"반복은 보이지만 첫 글 URL ({hydration_placeholder.get('missing_article_url')}) "
+            "anchor href가 정적 body에 없음 (JS hydration 전 placeholder). "
+            "strategy=playwright_html 권장."
+        )
 
     recommended_strategy: str
     recommended_headers_summary: str

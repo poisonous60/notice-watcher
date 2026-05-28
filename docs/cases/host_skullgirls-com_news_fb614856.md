@@ -34,7 +34,7 @@ tags: [batch-2026-05-28-games-indie-news-07, llm-flakiness, re-probe-recovery, w
 ## 회복 경로 (mechanism = improved, re-probe 회복 함정)
 dev box `python scripts/register.py --reuse-probe 'https://skullgirls.com/news/' --no-agentic` → `mode=api_loop` 시도 1 PASS (6건). config 박힘.
 
-→ AUTO 가 *재시도* 시 정상 selector 생성. 손-config 작성 X (refactor v3 §6.5 "re-probe 회복 함정": `--reuse-probe` 가 LLM 으로 자동 회복한 config = `improved` outcome, handcrafted 아님). fix_layer = none — probe/heuristic/prompt 코드 변경 X.
+→ AUTO 가 *재시도* 시 정상 selector 생성. 수동 config 작성 X (refactor v3 §6.5 "re-probe 회복 함정": `--reuse-probe` 가 LLM 으로 자동 회복한 config = `improved` outcome, handcrafted 아님). fix_layer = none — probe/heuristic/prompt 코드 변경 X.
 
 ## 일반화 후보 X
 batch 100건 중 단일 gen_fail. cross-site 패턴 X. cases_index `probe_grounding_list_row_selector` 4건은 *다른 root-cause* (cross-host redirect 등 기존 fix 처리). `posts_nonempty` 140 = generic high-volume, 본 case 의 specific signal 아님.

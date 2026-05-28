@@ -50,6 +50,7 @@ from probe.paths import output_dir, url_to_slug  # noqa: E402
 from probe.diagnose import (  # noqa: E402
     STATIC_INSUFFICIENT_SIZE_PREFIX as _BLANK_SHELL_NOTE_KW,
     STATIC_INSUFFICIENT_REPEAT_PREFIX as _JS_MOSAIC_NOTE_KW,
+    STATIC_INSUFFICIENT_HYDRATION_PREFIX as _HYDRATION_PLACEHOLDER_NOTE_KW,
 )
 from probe.extract import audio_share_signal, rss_feed_urls  # noqa: E402
 from engine.digest import build_digest, classify_site_kind, _validated_feed_candidates  # noqa: E402
@@ -2813,7 +2814,7 @@ def _extra_signal_hints(digest: dict) -> list[str]:
     notes = digest.get("notes") or []
     lc = digest.get("list_candidates") or {}
 
-    blank_shell = any(_BLANK_SHELL_NOTE_KW in n for n in notes)
+    blank_shell = any(_BLANK_SHELL_NOTE_KW in n or _HYDRATION_PLACEHOLDER_NOTE_KW in n for n in notes)
     js_mosaic = any(_JS_MOSAIC_NOTE_KW in n for n in notes)
     if blank_shell:
         if _has_json_api_candidates(digest):
