@@ -96,6 +96,12 @@ validator feedback.
 - Do not invent class names such as `.list-item__text` or CMS JSON endpoints
   unless digest evidence shows them. If the row itself contains title/date text,
   extract from `:self` with regex instead of inventing child selectors.
+- Do not use SVG/icon/decorative candidates as list rows. Selectors containing
+  `svg`, `g`, `path`, `circle`, `rect`, `use`, `#Layer_*`, or `#Group_*`, or
+  candidates with empty `first_text` and no `sample_url`, are not article rows
+  even when their `child_count` is high. Prefer a candidate whose `sample_url`
+  is an article URL and whose row text contains a title/date. If only nav,
+  footer, menu, or SVG candidates exist, stop instead of inventing a fake config.
 - Validator feedback named `probe_grounding_*` means the candidate contradicted
   concrete probe evidence before live crawling. Fix by choosing selectors/API
   URLs that match `digest.json` HTML or HAR/API candidates; do not retry the
