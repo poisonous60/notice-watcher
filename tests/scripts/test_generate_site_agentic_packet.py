@@ -70,6 +70,21 @@ def run() -> list[tuple[str, bool, str]]:
                     },
                     "list_html": {"source": "list.html", "html": "<article>Post</article>"},
                 },
+                # model_facing = digest AFTER the agent-feed compressor (the exact
+                # bytes codex reads). The packet must surface THIS, not raw_redacted.
+                "model_facing": {
+                    "list_candidates": {
+                        "first_article_url": "https://example.com/news/1",
+                        "html_repeating_patterns": [
+                            {"selector": "article.card", "sample_url": "https://example.com/news/1"}
+                        ],
+                    },
+                    "list_html": {
+                        "source": "list.html",
+                        "html": "<article>Post</article><!-- collapsed 9 similar <article.card> -->",
+                        "prompt_compressed": True,
+                    },
+                },
             },
         ],
         "artifact_list_candidates": {"rows": []},
@@ -104,9 +119,39 @@ def run() -> list[tuple[str, bool, str]]:
     cases.append((
         "packet_lists_model_inputs",
         {"AGENTS.md", "stdin prompt", "digest.json", "failure_packet.json",
-         "examples/manifest.json + examples/*.json", "config_writer_rules.txt",
-         "validate_config.py + run_validator.*", "candidate.json + last.json"}.issubset(files),
+         "examples/manifest.json", "examples/*.json (×2)", "config_writer_rules.txt",
+         "validator_digest.json", "validate_config.py + run_validator.*",
+         "candidate.json + last.json"}.issubset(files),
         f"files={sorted(files)}",
+    ))
+    expected_groups = {
+        "AGENTS.md": "direct",
+        "stdin prompt": "direct",
+        "digest.json": "direct",
+        "examples/manifest.json": "direct",
+        "examples/*.json (×2)": "on_demand",
+        "config_writer_rules.txt": "on_demand",
+        "failure_packet.json": "on_demand",
+        "validator_digest.json": "tooling",
+        "validate_config.py + run_validator.*": "tooling",
+        "candidate.json + last.json": "tooling",
+    }
+    group_mismatches = {
+        path: files[path].get("group")
+        for path, want in expected_groups.items()
+        if path in files and files[path].get("group") != want
+    }
+    cases.append((
+        "packet_classifies_inputs_into_buckets",
+        not group_mismatches,
+        f"mismatches={group_mismatches}",
+    ))
+    cases.append((
+        "digest_shows_model_facing_compressed_html",
+        # The packet must surface the post-compressor digest (model_facing),
+        # not the clean raw_redacted view. The collapse marker only exists there.
+        "collapsed 9 similar" in files["digest.json"].get("raw", ""),
+        files["digest.json"].get("raw", "")[:400],
     ))
     cases.append((
         "packet_includes_selected_probe_artifacts",
