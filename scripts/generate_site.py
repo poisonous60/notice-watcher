@@ -1465,7 +1465,7 @@ def render_stage_panels() -> str:
 # ────────────────────────────────────────────────────────────────────────────
 
 _HAR_DETAIL_CACHE_PATH = ROOT / "output" / "site" / "_har_detail.json"
-_HAR_DETAIL_CACHE_VERSION = 2
+_HAR_DETAIL_CACHE_VERSION = 3
 _HAR_DETAIL_MANIFEST_FILES = (
     "traffic.har",
     "list.html",
@@ -1870,14 +1870,28 @@ def _lazy_digest_build():
     return build_digest
 
 
-def _digest_signal_rows(*, slug: str, base_url: str, run_dir: Path) -> tuple[list[dict], object]:
+def _lazy_compress_digest_html():
+    """The agent-feed digest compressor, so the site can show the EXACT digest
+    codex reads (HTML repeat-sibling collapse + long-text/attr caps + 60K slice)
+    — not the clean_html build_digest output. Parity with
+    generate.codex_agentic._setup_workdir()."""
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    try:
+        from generate.codex_agentic import _compress_digest_html
+    except Exception:
+        return None
+    return _compress_digest_html
+
+
+def _digest_signal_rows(*, slug: str, base_url: str, run_dir: Path) -> tuple[list[dict], object, object]:
     build_digest = _lazy_digest_build()
     if build_digest is None:
-        return [], None
+        return [], None, None
     try:
         digest = build_digest(slug=slug, url=base_url, probe_dir=run_dir)
     except Exception:
-        return [], None
+        return [], None, None
     rows: list[dict] = []
     site_kind = digest.get("site_kind") or {}
     primary_feed = _host_mask(site_kind.get("primary_feed_url"))
@@ -1937,13 +1951,25 @@ def _digest_signal_rows(*, slug: str, base_url: str, run_dir: Path) -> tuple[lis
             "meta": "recommendation",
             "evidence": _redact_public_text(_short_text(notes[0], 160)),
         })
-    return rows[:_HAR_DETAIL_SECTION_ROW_CAP], _redact_json({
-        "site_kind": digest.get("site_kind"),
-        "list_html": digest.get("list_html"),
-        "article_sample": digest.get("article_sample"),
-        "list_candidates": digest.get("list_candidates"),
-        "feed_candidates": digest.get("feed_candidates"),
-    })
+    def _subset(d: dict) -> dict:
+        return {
+            "site_kind": d.get("site_kind"),
+            "list_html": d.get("list_html"),
+            "article_sample": d.get("article_sample"),
+            "list_candidates": d.get("list_candidates"),
+            "feed_candidates": d.get("feed_candidates"),
+        }
+    # Model-facing view = the digest AFTER the agent-feed compressor (HTML
+    # collapse + 60K cap), kept UNREDACTED so the raw overlay shows the exact
+    # bytes codex receives. Inline previews clip it separately for page weight.
+    compress = _lazy_compress_digest_html()
+    model_facing = None
+    if compress is not None:
+        try:
+            model_facing = _subset(compress(digest, max_html_chars=60_000))
+        except Exception:
+            model_facing = None
+    return rows[:_HAR_DETAIL_SECTION_ROW_CAP], _redact_json(_subset(digest)), model_facing
 
 
 def build_har_detail(slug: str, har_path: Path) -> dict:
@@ -2052,7 +2078,7 @@ def build_har_detail(slug: str, har_path: Path) -> dict:
                  lambda c: _row_simple(c, ["kind", "param", "source", "url_template", "evidence_url"], "pag", "Pagination")),
         audio_section,
     ]
-    digest_rows, digest_raw = _digest_signal_rows(slug=slug, base_url=base_url, run_dir=run_dir)
+    digest_rows, digest_raw, digest_model_facing = _digest_signal_rows(slug=slug, base_url=base_url, run_dir=run_dir)
     sections.append({
         "key": "digest",
         "title": "Digest allow-list summary",
@@ -2061,6 +2087,7 @@ def build_har_detail(slug: str, har_path: Path) -> dict:
         "total_rows": len(digest_rows),
         "more": 0,
         "raw_redacted": digest_raw,
+        "model_facing": digest_model_facing,
     })
 
     artifact_rows = []
@@ -2262,6 +2289,10 @@ def build_agentic_packet(detail: dict, *, run_dir: Path | None = None) -> dict:
     summary = detail.get("summary") or {}
     digest_sec = _find_section(detail, "digest")
     digest_raw = digest_sec.get("raw_redacted")
+    # model_facing = digest AFTER the agent-feed compressor (the exact bytes
+    # codex reads). Fall back to the clean redacted view if the compressor was
+    # unavailable at build time.
+    digest_model_facing = digest_sec.get("model_facing")
     if digest_raw is None:
         digest_raw = {
             "list_candidates": {
@@ -2270,6 +2301,8 @@ def build_agentic_packet(detail: dict, *, run_dir: Path | None = None) -> dict:
             },
             "summary": summary,
         }
+    if digest_model_facing is None:
+        digest_model_facing = digest_raw
     config_json, config_preview = _published_config_summary(slug)
     config_strategy = str(detail.get("config_strategy") or config_json.get("strategy") or "unknown")
     signal_counts = {
@@ -2305,7 +2338,7 @@ def build_agentic_packet(detail: dict, *, run_dir: Path | None = None) -> dict:
     agentic_agents = _read_text_full(ROOT / "prompts" / "register_agent_AGENTS.md")
     config_writer_rules = _read_text_full(ROOT / "prompts" / "config_writer.system.txt")
     user_prompt = _render_agentic_user_prompt(slug, probe_url)
-    digest_packet = {"slug": slug, "url": probe_url, "signal_counts": signal_counts, "digest": digest_raw}
+    digest_packet = {"slug": slug, "url": probe_url, "signal_counts": signal_counts, "digest": digest_model_facing}
     validator_digest_packet = {
         "same_keys_as": "digest.json",
         "html": "uncompressed in the real tmpdir",
@@ -2348,9 +2381,10 @@ def build_agentic_packet(detail: dict, *, run_dir: Path | None = None) -> dict:
     files = [
         {
             "phase": "Prompt",
+            "group": "direct",
             "path": "AGENTS.md",
             "source": "prompts/register_agent_AGENTS.md",
-            "role": "System-like local instructions: scope, reading order, self-veto, output contract.",
+            "role": "Read first, every run. System-like local instructions: scope, reading order, self-veto, output contract.",
             "contains": ["read order", "tmpdir-only scope", "self-veto rules", "final JSON contract"],
             "raw": agentic_agents,
             "raw_url": f"probe-raw/{slug}/agentic/AGENTS.md",
@@ -2358,9 +2392,10 @@ def build_agentic_packet(detail: dict, *, run_dir: Path | None = None) -> dict:
         },
         {
             "phase": "Prompt",
+            "group": "direct",
             "path": "stdin prompt",
             "source": "prompts/register_agent_user.txt",
-            "role": "The actual task text passed to `codex exec` on stdin.",
+            "role": "The actual task text passed to `codex exec` on stdin. Always fed.",
             "contains": ["target slug", "target URL", "short command recipe", "success/failure output shape"],
             "raw": user_prompt,
             "raw_url": f"probe-raw/{slug}/agentic/stdin_prompt.txt",
@@ -2368,59 +2403,79 @@ def build_agentic_packet(detail: dict, *, run_dir: Path | None = None) -> dict:
         },
         {
             "phase": "Evidence",
+            "group": "direct",
             "path": "digest.json",
-            "source": "engine.digest.build_digest(...), compressed for prompt use",
-            "role": "Primary model evidence: strategy hint, list/article HTML samples, probe signals, and notes.",
-            "contains": ["probe URL", "strategy hints", "list candidates", "article sample", "traffic/feed/pagination signals"],
+            "source": "engine.digest.build_digest(...) → generate.codex_agentic._compress_digest_html (the exact bytes codex reads)",
+            "role": "Read first, every run. Primary model evidence. list_html.html / article_sample.html are prompt-compressed (repeat-sibling collapse + long-text/attr caps) then capped at 60K chars each — identical to the agent's digest.json. Open the raw view to see the real compressed HTML.",
+            "contains": ["probe URL", "strategy hints", "list candidates", "article sample (compressed HTML ≤60K)", "traffic/feed/pagination signals"],
             "raw": _json_full(digest_packet),
             "raw_url": f"probe-raw/{slug}/agentic/digest.json",
             "preview": _json_excerpt(digest_packet, max_chars=6000),
         },
         {
-            "phase": "Evidence",
-            "path": "validator_digest.json",
-            "source": "same digest before HTML compression",
-            "role": "Validator-only evidence so probe-grounding checks use full HTML, not compressed prompt snippets.",
-            "contains": ["same keys as digest.json", "uncompressed HTML", "full grounding evidence for validator"],
-            "raw": _json_full(validator_digest_packet),
-            "raw_url": f"probe-raw/{slug}/agentic/validator_digest.json",
-            "preview": _json_excerpt(validator_digest_packet),
-        },
-        {
-            "phase": "Evidence",
-            "path": "failure_packet.json",
-            "source": "scripts/register.py::_build_failure_packet(...)",
-            "role": "Optional: only present when auto mode first tried api_loop_once and escalated to agentic.",
-            "contains": ["previous candidate_config", "validation_feedback", "api_loop_once error", "attempt number"],
-            "raw": _json_full(failure_packet),
-            "raw_url": f"probe-raw/{slug}/agentic/failure_packet.json",
-            "preview": _json_excerpt(failure_packet),
-        },
-        {
             "phase": "Examples",
-            "path": "examples/manifest.json + examples/*.json",
+            "group": "direct",
+            "path": "examples/manifest.json",
             "source": "generate.codex_agentic._pick_examples(...)",
-            "role": "Two closest successful configs ranked by recognizer, host, and strategy similarity.",
-            "contains": ["example slugs", "similarity score", "why each example was picked", "2 copied config JSON files"],
+            "role": "Read first to choose which examples to open: the 2 closest configs and why each was picked (recognizer/host/strategy score).",
+            "contains": ["example slugs", "similarity score", "why each example was picked"],
             "raw": _json_full(examples_packet),
             "raw_url": f"probe-raw/{slug}/agentic/examples_manifest.json",
             "preview": _json_excerpt(examples_packet),
         },
         {
+            "phase": "Examples",
+            "group": "on_demand",
+            "path": "examples/*.json (×2)",
+            "source": "2 copied prior configs (closest matches)",
+            "role": "Read on demand: the agent opens 1–2 of these (per manifest scores) when authoring the config — not guaranteed to read both.",
+            "contains": ["full config JSON of each picked example"],
+            "raw": _json_full({
+                "note": "the 2 closest successful configs are staged here; the agent opens 1–2 as needed",
+                "selection_rule": examples_packet.get("selection_rule"),
+            }),
+            "raw_url": f"probe-raw/{slug}/agentic/examples_configs.json",
+            "preview": "2 closest configs staged; agent opens 1–2 as needed",
+        },
+        {
             "phase": "Rules",
+            "group": "on_demand",
             "path": "config_writer_rules.txt",
             "source": "prompts/config_writer.system.txt",
-            "role": "Full config-authoring rules. The agent is told to skim it only when uncertain.",
+            "role": "Read on demand: full config-authoring rules (~25KB). The agent is told to skim it only when uncertain about a field.",
             "contains": ["allowed config schema vocabulary", "strategy-specific rules", "selector/API guidance", "retry constraints"],
             "raw": config_writer_rules,
             "raw_url": f"probe-raw/{slug}/agentic/config_writer_rules.txt",
             "preview": _clip_text(config_writer_rules, max_chars=6000),
         },
         {
+            "phase": "Evidence",
+            "group": "on_demand",
+            "path": "failure_packet.json",
+            "source": "scripts/register.py::_build_failure_packet(...)",
+            "role": "Conditional: present (and read) only when auto mode first tried api_loop_once and escalated to agentic.",
+            "contains": ["previous candidate_config", "validation_feedback", "api_loop_once error", "attempt number"],
+            "raw": _json_full(failure_packet),
+            "raw_url": f"probe-raw/{slug}/agentic/failure_packet.json",
+            "preview": _json_excerpt(failure_packet),
+        },
+        {
+            "phase": "Evidence",
+            "group": "tooling",
+            "path": "validator_digest.json",
+            "source": "same digest before HTML compression",
+            "role": "Validator-only — the agent never reads this. Holds full uncompressed HTML so probe-grounding checks use real bytes, not compressed prompt snippets.",
+            "contains": ["same keys as digest.json", "uncompressed HTML", "full grounding evidence for validator"],
+            "raw": _json_full(validator_digest_packet),
+            "raw_url": f"probe-raw/{slug}/agentic/validator_digest.json",
+            "preview": _json_excerpt(validator_digest_packet),
+        },
+        {
             "phase": "Validator",
+            "group": "tooling",
             "path": "validate_config.py + run_validator.*",
             "source": "scripts/validate_config.py copied with a platform launcher",
-            "role": "The agent runs this against ./candidate.json; the parent validates again after the agent exits.",
+            "role": "Executed, not read as content. The agent runs this against ./candidate.json; the parent validates again after the agent exits.",
             "contains": ["launcher command", "python interpreter path", "validator timing log path", "candidate input path"],
             "raw": _json_full(validator_packet),
             "raw_url": f"probe-raw/{slug}/agentic/validator_handoff.json",
@@ -2428,9 +2483,10 @@ def build_agentic_packet(detail: dict, *, run_dir: Path | None = None) -> dict:
         },
         {
             "phase": "Output",
+            "group": "tooling",
             "path": "candidate.json + last.json",
             "source": "agent-written tmpdir files",
-            "role": "candidate.json holds the attempted config; last.json is the tiny final JSON message with ok/attempts/stop_reason.",
+            "role": "Agent output, not input. candidate.json holds the attempted config; last.json is the tiny final JSON message with ok/attempts/stop_reason.",
             "contains": ["candidate config file", "ok flag", "attempt results", "stop_reason", "published config path"],
             "raw": _json_full(output_packet),
             "raw_url": f"probe-raw/{slug}/agentic/candidate_and_last.json",
@@ -2522,6 +2578,7 @@ def read_har_details(*, force_recompute: bool = False) -> dict:
     if (
         not force_recompute
         and isinstance(cached, dict)
+        and cached.get("cache_version") == _HAR_DETAIL_CACHE_VERSION
         and [p.get("manifest") for p in (cached.get("panels") or [])] == manifests
     ):
         cached["cache_version"] = _HAR_DETAIL_CACHE_VERSION
@@ -3023,8 +3080,14 @@ def _render_agentic_packet_panel(panel: dict, *, hidden: bool) -> str:
         '</li>'
         for n, title, body in (packet.get("flow") or [])
     )
+    def _group_head(label: str) -> str:
+        return f'<tr class="packet-group-head"><td colspan="4">{esc(label)}</td></tr>'
+
     input_rows = ""
-    for item in packet.get("artifacts") or []:
+    artifacts = packet.get("artifacts") or []
+    if artifacts:
+        input_rows += _group_head("프로브 산출물 — digest 로 접힘 (모델 직접 입력 아님)")
+    for item in artifacts:
         preview = str(item.get("preview") or "")
         raw_url = str(item.get("raw_url") or "")
         key = str(item.get("name") or item.get("path") or "")
@@ -3043,25 +3106,45 @@ def _render_agentic_packet_panel(panel: dict, *, hidden: bool) -> str:
             f'<td><small>{esc(_short_text(preview, 180))}</small></td>'
             "</tr>"
         )
-    for f in packet.get("files") or []:
-        contains_text = ", ".join(str(x) for x in (f.get("contains") or []))
-        raw_url = str(f.get("raw_url") or "")
-        preview = str(f.get("preview") or "")
-        tip_html = (
-            f'<div class="packet-pop-row"><b>source</b><code>{esc(f.get("source") or "")}</code></div>'
-            f'<div class="packet-pop-row"><b>contains</b>{esc(f.get("role") or "")}</div>'
-            f'<div class="packet-pop-row"><b>subfields</b>{esc(contains_text or "—")}</div>'
-        )
-        input_rows += (
-            f'<tr class="packet-input-row" tabindex="0" data-tip-html="{esc(tip_html)}">'
-            '<td class="packet-key-cell">'
-            f'{overlay_button(str(f.get("path") or "staged file"), label=str(f.get("path") or ""), raw_url=raw_url)}'
-            '</td>'
-            f'<td><span class="packet-phase">{esc(f.get("phase") or "")}</span></td>'
-            f'<td>{esc(len(f.get("contains") or []))}</td>'
-            f'<td><small>{esc(_short_text(preview, 180))}</small></td>'
-            "</tr>"
-        )
+
+    # Staged tmpdir files grouped by how the agent uses them (AGENTS.md WORKFLOW):
+    # direct = read first every run, on_demand = read only when needed/present,
+    # tooling = executed or written, never read by the model as content.
+    group_labels = [
+        ("direct", "① 직접 입력 — 항상 읽음 (every run)"),
+        ("on_demand", "② 필요할 때 조회 — 조건부 (on-demand)"),
+        ("tooling", "③ 도구·산출 — 모델이 콘텐츠로 안 읽음"),
+    ]
+    files = packet.get("files") or []
+    by_group: dict[str, list] = {}
+    for f in files:
+        by_group.setdefault(str(f.get("group") or "direct"), []).append(f)
+    ordered = [g for g, _ in group_labels] + [g for g in by_group if g not in dict(group_labels)]
+    label_map = dict(group_labels)
+    for g in ordered:
+        group_files = by_group.get(g)
+        if not group_files:
+            continue
+        input_rows += _group_head(label_map.get(g, g))
+        for f in group_files:
+            contains_text = ", ".join(str(x) for x in (f.get("contains") or []))
+            raw_url = str(f.get("raw_url") or "")
+            preview = str(f.get("preview") or "")
+            tip_html = (
+                f'<div class="packet-pop-row"><b>source</b><code>{esc(f.get("source") or "")}</code></div>'
+                f'<div class="packet-pop-row"><b>contains</b>{esc(f.get("role") or "")}</div>'
+                f'<div class="packet-pop-row"><b>subfields</b>{esc(contains_text or "—")}</div>'
+            )
+            input_rows += (
+                f'<tr class="packet-input-row" tabindex="0" data-tip-html="{esc(tip_html)}">'
+                '<td class="packet-key-cell">'
+                f'{overlay_button(str(f.get("path") or "staged file"), label=str(f.get("path") or ""), raw_url=raw_url)}'
+                '</td>'
+                f'<td><span class="packet-phase">{esc(f.get("phase") or "")}</span></td>'
+                f'<td>{esc(len(f.get("contains") or []))}</td>'
+                f'<td><small>{esc(_short_text(preview, 180))}</small></td>'
+                "</tr>"
+            )
     if not input_rows:
         input_rows = '<tr><td colspan="4">No probe artifact or agentic packet available for this probe.</td></tr>'
 
@@ -3077,7 +3160,7 @@ def _render_agentic_packet_panel(panel: dict, *, hidden: bool) -> str:
         '</ol>'
         '<section class="packet-subsection">'
         '<h4>Model input packet</h4>'
-        '<p class="packet-help">Probe outputs and staged model files in dashboard-style rows. Hover a row for field meaning; click the key for the full raw view.</p>'
+        '<p class="packet-help">에이전트 tmpdir 에 실제로 깔리는 파일. <b>①직접 입력</b>=매 run 먼저 읽음, <b>②필요할 때 조회</b>=조건부, <b>③도구·산출</b>=모델이 콘텐츠로 안 읽음. digest.json 의 HTML 은 모델이 받는 그대로 (compress + 60K). 행 hover=필드 의미, key 클릭=raw 전체.</p>'
         '<div class="packet-scroll packet-input-scroll">'
         '<table class="packet-field-table packet-input-table"><thead><tr><th>key</th><th>type</th><th>count</th><th>preview</th></tr></thead>'
         f'<tbody>{input_rows}</tbody></table></div>'
@@ -4074,6 +4157,16 @@ def render_html(
       font-size: 0.7rem;
       text-transform: uppercase;
       letter-spacing: 0.06em;
+    }}
+    .packet-group-head td {{
+      background: rgba(127, 127, 127, 0.10);
+      font-weight: 700;
+      font-size: 0.76rem;
+      letter-spacing: 0.01em;
+      color: var(--accent-2);
+      padding-top: 9px;
+      padding-bottom: 6px;
+      border-top: 2px solid var(--accent-2);
     }}
     .packet-file p {{
       color: var(--ink);
