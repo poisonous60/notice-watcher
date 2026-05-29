@@ -316,6 +316,30 @@ def run() -> list[tuple[str, bool, str]]:
     cases.append(("migration_accepts_new_error_status",
                   err_after is not None and err_after["status"] == "error",
                   f"got {dict(err_after) if err_after else None}"))
+    # ----- 9d-bis. reprobe_skipped_failed/rejected — FAILED/REJECTED 마커 사이트의 poll status.
+    # 회귀 (notify 정시 미발송 버그, 2026-05-29): 옛 CHECK 는 reprobe_skipped_bug 만 허용 →
+    # _failed/_rejected 가 IntegrityError 로 poll_site_runs row 누락 → poll_run child_count
+    # 부족 → _poll_run_children_terminal 영구 False → delivery barrier 영구 block.
+    for skip_status in ("reprobe_skipped_failed", "reprobe_skipped_rejected"):
+        db.poll_site_run_finish(conn_mig, run_id=rid_m, slug=f"sk_{skip_status}",
+                                 started_at="2026-05-25T00:00:00+00:00",
+                                 ended_at="2026-05-25T00:00:01+00:00",
+                                 status=skip_status)
+        got = conn_mig.execute(
+            "SELECT status FROM poll_site_runs WHERE slug=?", (f"sk_{skip_status}",)).fetchone()
+        cases.append((f"migration_accepts_{skip_status}",
+                      got is not None and got["status"] == skip_status,
+                      f"got {dict(got) if got else None}"))
+    # barrier 직접 — child 가 reprobe_skipped_failed 뿐이어도 row 기록되어 terminal 로 인정.
+    # 이전엔 row 자체가 없어 child_count(0) < n_sites(1) → 영구 non-terminal → deadlock.
+    rid_b = db.poll_run_start(conn_mig, run_label="barrier", pid=1, n_sites=1)
+    db.poll_site_run_finish(conn_mig, run_id=rid_b, slug="only_child",
+                             started_at="2026-05-25T00:00:00+00:00",
+                             ended_at="2026-05-25T00:00:01+00:00",
+                             status="reprobe_skipped_failed")
+    term, cc = db._poll_run_children_terminal(conn_mig, rid_b, 1)
+    cases.append(("barrier_releases_on_reprobe_skipped_failed",
+                  term is True and cc == 1, f"terminal={term} child_count={cc}"))
     nrid_m = db.notify_run_start(conn_mig, pid=1, n_due_targets=1)
     db.notify_target_run_finish(conn_mig, run_id=nrid_m, target_kind='dm', target_id='x',
                                  started_at='2026-05-25T00:00:00+00:00',

@@ -304,6 +304,7 @@ async def _process_poll_site(conn, job) -> None:
             note=tracking.get("note"),
         )
         ok = status in ("ok", "lurking", "enqueued", "reprobe_enqueued", "reprobe_skipped_bug",
+                        "reprobe_skipped_failed", "reprobe_skipped_rejected",
                         "reprobe_enqueue_failed", "body_empty_drift")
         db.mark_job_finished(conn, job_id, ok=ok, rc=0 if ok else -10, tail=status)
         db.poll_run_maybe_finalize(conn, run_id)
