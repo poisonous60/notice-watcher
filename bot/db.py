@@ -267,7 +267,8 @@ CREATE TABLE IF NOT EXISTS poll_site_runs (
     status      TEXT NOT NULL CHECK (status IN
                 ('ok','lurking','breakage','poll_timeout','task_exception',
                  'persist_mismatch','body_empty_drift','reprobe_enqueued',
-                 'reprobe_skipped_bug','reprobe_enqueue_failed','run_crashed','error',
+                 'reprobe_skipped_bug','reprobe_skipped_failed','reprobe_skipped_rejected',
+                 'reprobe_enqueue_failed','run_crashed','error',
                  'chromium_lock_timeout','skipped_test_target')),
     n_posts            INTEGER NOT NULL DEFAULT 0,
     n_new              INTEGER NOT NULL DEFAULT 0,
@@ -432,6 +433,13 @@ def _migrate(conn: sqlite3.Connection) -> None:
                          new_create=_POLL_SITE_RUNS_REBUILD)
     _migrate_check_enum(conn, "poll_site_runs", "skipped_test_target",
                          new_create=_POLL_SITE_RUNS_REBUILD)
+    # FAILED/REJECTED 마커 사이트의 reprobe-skip status (poll.py:489
+    # reprobe_skipped_{marker}). 옛 CHECK 는 reprobe_skipped_bug 만 허용 →
+    # _failed/_rejected 가 IntegrityError 로 poll_site_runs row 누락 → poll_run
+    # child_count 부족 → delivery barrier 영구 block. probe 토큰 = _failed 1개로
+    # 충분 (rebuild 템플릿이 _failed+_rejected 둘 다 박음).
+    _migrate_check_enum(conn, "poll_site_runs", "reprobe_skipped_failed",
+                         new_create=_POLL_SITE_RUNS_REBUILD)
     poll_site_cols = {r[1] for r in conn.execute("PRAGMA table_info(poll_site_runs)").fetchall()}
     if "job_id" not in poll_site_cols:
         conn.execute("ALTER TABLE poll_site_runs ADD COLUMN job_id INTEGER REFERENCES jobs(id)")
@@ -512,7 +520,8 @@ CREATE TABLE poll_site_runs_new (
     status      TEXT NOT NULL CHECK (status IN
                 ('ok','lurking','breakage','poll_timeout','task_exception',
                  'persist_mismatch','body_empty_drift','reprobe_enqueued',
-                 'reprobe_skipped_bug','reprobe_enqueue_failed','run_crashed','error',
+                 'reprobe_skipped_bug','reprobe_skipped_failed','reprobe_skipped_rejected',
+                 'reprobe_enqueue_failed','run_crashed','error',
                  'chromium_lock_timeout','skipped_test_target')),
     n_posts            INTEGER NOT NULL DEFAULT 0,
     n_new              INTEGER NOT NULL DEFAULT 0,
@@ -1750,6 +1759,8 @@ _POLL_SITE_TERMINAL_STATUSES = {
     "body_empty_drift",
     "reprobe_enqueued",
     "reprobe_skipped_bug",
+    "reprobe_skipped_failed",
+    "reprobe_skipped_rejected",
     "reprobe_enqueue_failed",
     "run_crashed",
     "error",
