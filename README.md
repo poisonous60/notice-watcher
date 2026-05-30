@@ -10,7 +10,7 @@ URL을 넣으면 새 글을 요약해서 알림을 보냅니다.
 ![Platforms](https://img.shields.io/badge/platforms-linux%20%7C%20windows-lightgrey)
 [![Live status](https://img.shields.io/website?url=https%3A%2F%2Fn100-noticewatcher.tail4a65b8.ts.net&label=live&up_message=up&down_message=down)](https://n100-noticewatcher.tail4a65b8.ts.net)
 
-📡 **[실시간 현황 보기](https://n100-noticewatcher.tail4a65b8.ts.net)** · 🤖 **[디스코드 봇 추가하기](https://discord.com/oauth2/authorize?client_id=1503367965880356984&permissions=2048&integration_type=0&scope=bot)**
+📡 **[실시간 현황 보기](https://n100-noticewatcher.tail4a65b8.ts.net)** · 🤖 **[디스코드 봇 추가하기](https://discord.com/oauth2/authorize?client_id=1503367965880356984&permissions=2048&integration_type=0&scope=bot)** · 🎬 **[소개 영상 보기](https://youtu.be/-VSbWdbN-FU)**
 
 <img src="docs/img/discord-notification.png" alt="새 글 알림 예시" width="640">
 
