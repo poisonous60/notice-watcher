@@ -681,11 +681,13 @@ async def subs_list(request: Request, q: Optional[str] = None,
         broken_marker = paths.state_dir / f"{s}.BROKEN.json"
         broken = 0
         last_status = ""
+        state_url = ""
         if st_path.exists():
             try:
                 d = json.loads(st_path.read_text(encoding="utf-8"))
                 broken = int(d.get("consecutive_breakage", 0) or 0)
                 last_status = str(d.get("last_status", "") or "")
+                state_url = str(d.get("url") or d.get("source_url") or d.get("_source_url") or "")
             except (OSError, json.JSONDecodeError):
                 pass
         # broken slug 의 reprobe 흐름 가시화 — Gate 3 (worker.py 의 reprobe_streak BUG 게이트 + poll.py
@@ -722,6 +724,8 @@ async def subs_list(request: Request, q: Optional[str] = None,
         if sample_url is None and failed_marker.exists():
             fp = state.failed_payload(s) or {}
             sample_url = fp.get("url")
+        if sample_url is None and state_url:  # lurking/구독자 0 — state 파일에서 URL 복구
+            sample_url = state_url
         rows.append({
             "slug": s,
             "n_subs": len(subs),

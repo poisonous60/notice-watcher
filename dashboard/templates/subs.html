@@ -76,7 +76,7 @@
         {% endif %}
       </td>
       <td class="mono" style="max-width:35em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
-        <span title="{{ r.sample_url or '' }}">{{ r.sample_url or '' }}</span>
+        {% if r.sample_url|is_http %}<a href="{{ r.sample_url }}" target="_blank" rel="noopener noreferrer" title="원본 URL 새 탭 열기">↗</a> {% endif %}<span title="{{ r.sample_url or '' }}">{{ r.sample_url or '' }}</span>
       </td>
     </tr>
     {% else %}
