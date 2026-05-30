@@ -3352,7 +3352,7 @@ def _diagram_atomic():
          _gd_box(334, 46, 140, 54, "Path.replace", "원자적 rename", "gd-box gd-accent"),
          _gd_arrow(474, 73, 496, 73),
          _gd_box(498, 46, 96, 54, "configs/…", "발행 완료", "gd-box gd-ok"),
-         _gd_text(300, 120, "폴링 워커가 반쯤 쓰인 config 를 보는 일이 없음")]
+         _gd_text(300, 120, "폴링 워커가 작성 중인 config 를 읽지 않음")]
     return _gd_svg("".join(s), 136)
 
 
@@ -3365,55 +3365,50 @@ GUARD_TECHNIQUES = [
         "id": "L0", "tag": "L0", "name": "임시폴더 격리", "sub": "sandbox", "tier": "core",
         "file": "generate/codex_agentic.py", "line": 590, "fn": "_setup_workdir",
         "svg": _diagram_tmpdir(),
-        "explain": "등록 1건마다 repo 밖에 임시 작업폴더를 새로 만든다. 부모가 그 안에 필요한 입력"
-                   "(probe 요약 <code>digest.json</code> · 비슷한 성공 예제 · 작성 규칙)만 깔아주고, "
-                   "에이전트는 그 폴더 안의 <code>candidate.json</code> 하나만 쓴다. 실제 "
-                   "<code>configs/</code> 에 발행하는 건 부모의 일이라서, 에이전트가 repo 에 직접 쓰려는 "
-                   "시도 자체가 위반 신호가 된다.",
+        "explain": "등록 1건마다 repo 밖에 임시 작업폴더를 만들고, 부모가 입력"
+                   "(probe 요약 <code>digest.json</code>, 비슷한 성공 예제, 작성 규칙)을 그 안에 둔다. "
+                   "에이전트는 폴더 안의 <code>candidate.json</code> 만 쓰고, <code>configs/</code> "
+                   "발행은 부모가 한다.",
     },
     {
         "id": "L2", "tag": "L2", "name": "SHA256 해시 감사", "sub": "변조 탐지", "tier": "core",
         "file": "generate/codex_agentic.py", "line": 237,
         "fn": "_audit_snapshot_paths · _audit_diff",
         "svg": _diagram_hash(),
-        "explain": "codex 실행 직전과 직후에 보호 파일들의 지문(SHA256 + 크기 + 수정시각)을 떠서 비교한다. "
-                   "임시폴더 밖에서 단 한 글자라도 바뀌면 지문이 달라져 잡힌다. OS 샌드박스는 실제로는 우회된다"
-                   "(루프 안의 검증기가 실제 네트워크를 써야 해서) — 그래서 이 OS 무관 해시 비교가 진짜 "
-                   "방어선이고, 몰래 한 수정도 해시라 걸린다.",
+        "explain": "codex 실행 직전·직후에 보호 파일들의 지문(SHA256, 크기, 수정시각)을 비교한다. "
+                   "임시폴더 밖 파일이 바뀌면 지문이 달라져 검출된다.",
     },
     {
         "id": "L4", "tag": "L4", "name": "부모 독립 재검증", "sub": "", "tier": "detail",
         "file": "generate/validate.py", "line": 380, "fn": "validate_built_config",
         "svg": _diagram_revalidate(),
-        "explain": "에이전트가 스스로 <code>ok=true</code> 라 해도 부모는 그 말을 안 믿는다. 부모가 "
-                   "<code>validate_built_config</code> 를 직접 다시 돌린다 — 사이트를 새로 fetch 하고, "
-                   "hard 검사(글이 실제로 ≥1건 잡히나 등)와 selector grounding 을 다시 한다. 에이전트의 "
-                   "자기검증은 압축된 HTML·잘린 응답 위에서 돌았을 수 있기 때문. 이게 “믿되 검증한다”의 "
-                   "<em>검증</em> 그 자체다.",
+        "explain": "에이전트가 <code>ok=true</code> 를 반환해도 부모가 "
+                   "<code>validate_built_config</code> 를 다시 실행한다. 사이트를 새로 fetch 해 "
+                   "hard 검사(글 ≥1건 추출 여부 등)와 selector grounding 을 수행한다.",
     },
     {
         "id": "L3", "tag": "L3", "name": "위반 = 보안 사고", "sub": "", "tier": "detail",
         "file": "generate/codex_agentic.py", "line": 197,
         "fn": "AuditFailError · register.py _save_bug",
         "svg": _diagram_incident(),
-        "explain": "임시폴더 밖으로의 쓰기가 감사(L2)에 걸리면, 이건 사이트 등록 실패가 아니라 신뢰 경계가 "
-                   "뚫린 <em>보안 사고</em> 로 다룬다. 반환코드 <code>rc=-4</code> + <code>.BUG.json</code> "
-                   "생성 + 소유자에게 DM → 자동 재시도가 아니라 사람이 직접 확인한다.",
+        "explain": "임시폴더 밖 쓰기가 감사(L2)에 검출되면 <code>rc=-4</code> 를 반환하고 "
+                   "<code>.BUG.json</code> 을 생성한 뒤 소유자에게 DM 한다. 등록 실패와 달리 자동 "
+                   "재시도하지 않는다.",
     },
     {
         "id": "L5", "tag": "L5", "name": "slug 단위 락", "sub": "", "tier": "detail",
         "file": "generate/codex_agentic.py", "line": 457, "fn": "_per_slug_lock",
         "svg": _diagram_lock(),
-        "explain": "같은 slug 를 동시에 두 번 등록하면 before/after 지문 스냅샷이 중간에 오염될 수 있다. "
-                   "그래서 생성 + 감사 구간 전체를 slug 별 flock 으로 직렬화한다 — 한 번에 하나만 돌게.",
+        "explain": "생성·감사 구간을 slug 별 flock 으로 직렬화한다. 같은 slug 를 동시 등록할 때 "
+                   "before/after 지문 스냅샷이 섞이는 것을 막는다.",
     },
     {
         "id": "L6", "tag": "L6", "name": "원자적 발행", "sub": "", "tier": "detail",
         "file": "scripts/register.py", "line": 3927, "fn": "tempfile + Path.replace",
         "svg": _diagram_atomic(),
-        "explain": "부모 재검증을 통과한 뒤에만 발행한다. 같은 디렉토리에 임시 파일로 먼저 쓰고 "
-                   "<code>Path.replace</code>(원자적 rename)로 바꿔치기 → 폴링 워커가 <em>반쯤 쓰인</em> "
-                   "config 를 보는 일이 절대 없다.",
+        "explain": "재검증을 통과하면 같은 디렉토리에 임시 파일로 쓴 뒤 "
+                   "<code>Path.replace</code>(원자적 rename)로 교체한다. 폴링 워커가 작성 중인 "
+                   "config 를 읽지 않는다.",
     },
 ]
 
