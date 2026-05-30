@@ -4636,7 +4636,7 @@ def render_html(
       font-size: 0.9rem;
     }}
     /* Agent guardrail explainer — see render_guardrail_html() */
-    .guard-section .lead {{ margin-bottom: 18px; word-break: keep-all; }}
+    .guard-section .lead {{ margin-bottom: 18px; max-width: none; word-break: keep-all; }}
     .guard-tier-label {{
       margin: 18px 0 8px;
       font-weight: 700;
@@ -4703,7 +4703,7 @@ def render_html(
       border-radius: 6px;
     }}
     .gd-svg {{ width: 100%; height: auto; max-width: 600px; display: block; margin: 0 auto; }}
-    .guard-explain {{ margin: 0 0 10px; font-size: 0.96rem; line-height: 1.65; max-width: 760px; word-break: keep-all; }}
+    .guard-explain {{ margin: 0 0 10px; font-size: 0.96rem; line-height: 1.65; word-break: keep-all; }}
     .guard-src {{ margin: 0; font-size: 0.8rem; }}
     .guard-src a {{
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
