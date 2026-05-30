@@ -3452,12 +3452,11 @@ def render_guardrail_html() -> str:
 
     return f"""  <section class="guard-section" aria-labelledby="guardrail">
     {_GD_DEFS}
-    <h2 id="guardrail">에이전트 가드레일 &mdash; 믿되, 검증한다</h2>
+    <h2 id="guardrail">Agent guardrail</h2>
     <p class="lead">config 자동 생성은 AI 에이전트가 한다 &mdash; 비결정적이고, 실제로 사이트에 네트워크
       요청을 보낸다. 그런 에이전트에게 production 스크래핑 config 를 쓰게 하되, 진짜 repo 는 절대 못
       건드리게 막는다. 에이전트는 일회용 임시폴더 안에서 <em>후보</em> 파일만 쓰고, 부모 프로세스가 그
       후보를 독립적으로 다시 검증한 뒤에야 발행한다. 무거운 일을 하는 건 두 기법이다.</p>
-    <p class="guard-tier-label">핵심 &mdash; 그림으로 보는 두 기법 <span>(카드를 누르세요)</span></p>
     <div class="guard-features">{core_cards}</div>
     <p class="guard-tier-label">이 둘을 받쳐주는 세부 4</p>
     <div class="guard-details">{detail_cards}</div>
