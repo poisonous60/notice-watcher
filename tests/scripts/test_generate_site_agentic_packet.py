@@ -187,6 +187,18 @@ def run() -> list[tuple[str, bool, str]]:
         html[:500],
     ))
     cases.append((
+        "packet_input_col3_is_self_describing",
+        # Col 3 of packet-input-table holds two metrics in separate bands:
+        # artifact rows = byte size, staged-file rows = subfield count. Both
+        # must carry their unit inline (not a bare number) and the header must
+        # name both metrics — see the size/count mix bug.
+        "<th>size / fields</th>" in html
+        and " fields</td>" in html
+        and " bytes</td>" in html
+        and "<th>count</th>" not in html.split("packet-input-table", 1)[-1].split("</table>", 1)[0],
+        html[html.find("packet-input-table"):html.find("packet-input-table") + 600],
+    ))
+    cases.append((
         "packet_has_clickable_raw_text_bundle",
         "COMMAND" in packet["raw_text"]
         and "===== AGENTS.md =====" in packet["raw_text"]

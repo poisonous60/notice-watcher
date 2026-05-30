@@ -3141,7 +3141,7 @@ def _render_agentic_packet_panel(panel: dict, *, hidden: bool) -> str:
                 f'{overlay_button(str(f.get("path") or "staged file"), label=str(f.get("path") or ""), raw_url=raw_url)}'
                 '</td>'
                 f'<td><span class="packet-phase">{esc(f.get("phase") or "")}</span></td>'
-                f'<td>{esc(len(f.get("contains") or []))}</td>'
+                f'<td>{esc(str(len(f.get("contains") or [])) + " fields")}</td>'
                 f'<td><small>{esc(_short_text(preview, 180))}</small></td>'
                 "</tr>"
             )
@@ -3162,7 +3162,7 @@ def _render_agentic_packet_panel(panel: dict, *, hidden: bool) -> str:
         '<h4>Model input packet</h4>'
         '<p class="packet-help">에이전트 tmpdir 에 실제로 깔리는 파일. <b>①직접 입력</b>=매 run 먼저 읽음, <b>②필요할 때 조회</b>=조건부, <b>③도구·산출</b>=모델이 콘텐츠로 안 읽음. digest.json 의 HTML 은 모델이 받는 그대로 (compress + 60K). 행 hover=필드 의미, key 클릭=raw 전체.</p>'
         '<div class="packet-scroll packet-input-scroll">'
-        '<table class="packet-field-table packet-input-table"><thead><tr><th>key</th><th>type</th><th>count</th><th>preview</th></tr></thead>'
+        '<table class="packet-field-table packet-input-table"><thead><tr><th>key</th><th>type</th><th>size / fields</th><th>preview</th></tr></thead>'
         f'<tbody>{input_rows}</tbody></table></div>'
         '</section>'
         '<section class="packet-subsection packet-raw">'
