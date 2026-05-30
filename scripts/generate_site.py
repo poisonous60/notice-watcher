@@ -3712,7 +3712,6 @@ def render_html(
     }}
     p {{ margin: 0 0 14px; }}
     .lead {{
-      max-width: 720px;
       color: #3e474d;
       font-size: 1.05rem;
     }}
@@ -4636,7 +4635,7 @@ def render_html(
       font-size: 0.9rem;
     }}
     /* Agent guardrail explainer — see render_guardrail_html() */
-    .guard-section .lead {{ margin-bottom: 18px; max-width: none; word-break: keep-all; }}
+    .guard-section .lead {{ margin-bottom: 18px; word-break: keep-all; }}
     .guard-tier-label {{
       margin: 18px 0 8px;
       font-weight: 700;
