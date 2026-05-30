@@ -3231,112 +3231,240 @@ def metric(label: str, value: object, note: str = "") -> str:
 # may never touch the repo: it writes a candidate in a tmpdir, the parent
 # re-validates, then publishes. Source line anchors are best-effort (same caveat
 # as GITHUB_BASE); update when codex_agentic.py / validate.py / register.py move.
-GUARDRAIL_FOLDS = [
-    ("Isolation",
-     "The agent runs in a repo-external temp folder, staged with only the inputs it "
-     "needs, and can write only <code>./candidate.json</code>. Publishing is the "
-     "parent's job &mdash; so any write into the repo is itself a violation signal."),
-    ("Tamper detection (hash)",
-     "The parent fingerprints every protected file (SHA256 + size + mtime) before and "
-     "after the run. Any change outside the temp folder is caught &mdash; a hash diff "
-     "catches even a silent edit, and it holds on any OS."),
-    ("Independent re-validation",
-     "The parent ignores the agent's own <code>ok=true</code> and re-runs the validator "
-     "itself: fresh fetch, hard checks, selector grounding. The agent is never the final "
-     "authority on its own output."),
-]
+# Shared SVG arrow marker for the guardrail diagrams. context-stroke makes the
+# arrowhead follow each line's own stroke colour, so one marker serves accent /
+# danger / muted edges. Defined once; every diagram references url(#gdArrow).
+_GD_DEFS = (
+    '<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">'
+    '<defs><marker id="gdArrow" markerWidth="9" markerHeight="9" refX="7" refY="4.5" '
+    'orient="auto"><path d="M1,1 L8,4.5 L1,8 Z" fill="context-stroke"/></marker></defs></svg>'
+)
 
-GUARDRAIL_LAYERS = [
+
+def _gd_box(x, y, w, h, title, sub="", cls="gd-box"):
+    cx = x + w / 2
+    if sub:
+        body = (f'<text x="{cx}" y="{y + h / 2 - 3}" class="gd-bt">{title}</text>'
+                f'<text x="{cx}" y="{y + h / 2 + 13}" class="gd-bs">{sub}</text>')
+    else:
+        body = f'<text x="{cx}" y="{y + h / 2 + 4}" class="gd-bt">{title}</text>'
+    return f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="6" class="{cls}"/>{body}'
+
+
+def _gd_arrow(x1, y1, x2, y2, cls="gd-edge"):
+    return (f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" class="{cls}" '
+            'marker-end="url(#gdArrow)"/>')
+
+
+def _gd_text(x, y, text, cls="gd-flab"):
+    return f'<text x="{x}" y="{y}" class="{cls}">{text}</text>'
+
+
+def _gd_svg(inner, h):
+    # Marker is defined once per section (see _GD_DEFS in render_guardrail_html),
+    # not per-svg — avoids duplicate ids and a dead ref when a panel is hidden.
+    return (f'<svg viewBox="0 0 600 {h}" class="gd-svg" role="img" '
+            f'preserveAspectRatio="xMidYMid meet">{inner}</svg>')
+
+
+def _diagram_tmpdir():
+    s = [
+        _gd_box(20, 78, 165, 120, "🔒 실제 repo", "configs/ · output/", "gd-box gd-locked"),
+        _gd_text(102, 214, "에이전트 쓰기 금지"),
+        '<rect x="300" y="20" width="285" height="215" rx="8" class="gd-zone"/>',
+        _gd_text(442, 38, "임시폴더 (tmpdir) — repo 밖", "gd-zlab"),
+        _gd_box(315, 52, 255, 38, "입력: digest · 예제 · 작성규칙", "부모가 깔아줌", "gd-chip"),
+        _gd_box(360, 108, 165, 42, "에이전트 (codex)", "", "gd-box gd-accent"),
+        _gd_box(360, 178, 165, 42, "candidate.json", "에이전트 출력", "gd-box gd-ok"),
+        _gd_arrow(442, 150, 442, 176),
+        _gd_text(500, 168, "쓰기 OK"),
+        _gd_arrow(358, 126, 188, 126, "gd-edge-danger"),
+        _gd_text(273, 117, "✗", "gd-mark"),
+        _gd_text(273, 142, "repo 직접 쓰기 = 위반"),
+    ]
+    return _gd_svg("".join(s), 248)
+
+
+def _diagram_hash():
+    s = [_gd_text(104, 36, "① 실행 전 지문", "gd-zlab"),
+         '<rect x="22" y="44" width="165" height="132" rx="6" class="gd-box"/>']
+    before = ["configs/… → a3f1", "prompts/… → 9c2e", "engine/…  → 4b8d", "보호 파일 N개"]
+    for i, r in enumerate(before):
+        s.append(_gd_text(34, 72 + i * 26, r, "gd-row"))
+    s.append(_gd_box(232, 90, 130, 46, "codex 실행", "config 생성", "gd-box gd-accent"))
+    s.append(_gd_text(496, 36, "② 실행 후 지문", "gd-zlab"))
+    s.append('<rect x="413" y="44" width="165" height="132" rx="6" class="gd-box"/>')
+    after = ["configs/… → a3f1", "prompts/… → 9c2e", "engine/…  → 4b8d", "다시 계산"]
+    for i, r in enumerate(after):
+        s.append(_gd_text(425, 72 + i * 26, r, "gd-row"))
+    s.append(_gd_arrow(187, 113, 230, 113))
+    s.append(_gd_arrow(362, 113, 411, 113))
+    s.append('<line x1="104" y1="176" x2="300" y2="204" class="gd-edge-thin"/>')
+    s.append('<line x1="496" y1="176" x2="300" y2="204" class="gd-edge-thin"/>')
+    s.append(_gd_box(232, 204, 136, 30, "전·후 해시 비교", "", "gd-box gd-accent"))
+    s.append(_gd_text(300, 256, "일치 → 통과 · 불일치(밖 변경) → 위반 (L3)", "gd-flab-strong"))
+    return _gd_svg("".join(s), 268)
+
+
+def _diagram_revalidate():
+    s = [_gd_box(18, 56, 205, 60, "에이전트: ok = true", "(부모는 안 믿음)", "gd-box gd-dashed"),
+         _gd_arrow(223, 86, 298, 86),
+         _gd_text(260, 78, "ok 무시"),
+         '<rect x="300" y="34" width="282" height="118" rx="6" class="gd-box gd-accent"/>',
+         _gd_text(441, 57, "부모가 직접 다시 검증", "gd-bt")]
+    for i, st in enumerate(["• 사이트 새로 fetch", "• hard 검사 (글 ≥1건 잡히나)",
+                            "• selector grounding", "→ 최종 판정"]):
+        s.append(_gd_text(316, 81 + i * 19, st, "gd-row"))
+    return _gd_svg("".join(s), 166)
+
+
+def _diagram_incident():
+    s = [_gd_box(8, 48, 138, 54, "tmpdir 밖 write 탐지", "", "gd-box gd-danger"),
+         _gd_arrow(146, 75, 174, 75, "gd-edge-danger"),
+         _gd_box(176, 48, 84, 54, "rc = -4", "", "gd-box gd-danger"),
+         _gd_arrow(260, 75, 288, 75, "gd-edge-danger"),
+         _gd_box(290, 48, 150, 54, ".BUG.json", "+ OWNER DM", "gd-box gd-danger"),
+         _gd_arrow(440, 75, 468, 75, "gd-edge-danger"),
+         _gd_box(470, 48, 122, 54, "사람이 확인", "(보안 사고)", "gd-box")]
+    return _gd_svg("".join(s), 128)
+
+
+def _diagram_lock():
+    s = [_gd_text(12, 60, "시도 A", "gd-row"),
+         _gd_box(70, 40, 70, 30, "락 획득", "", "gd-box gd-ok"),
+         _gd_box(145, 40, 150, 30, "생성 + 감사", "", "gd-box gd-accent"),
+         _gd_box(300, 40, 62, 30, "해제", "", "gd-box gd-ok"),
+         _gd_text(12, 116, "시도 B", "gd-row"),
+         _gd_text(12, 130, "(같은 slug)"),
+         _gd_box(145, 100, 150, 30, "대기…", "", "gd-box gd-dashed"),
+         _gd_box(372, 100, 150, 30, "A 끝난 뒤 진행", "", "gd-box gd-accent"),
+         '<line x1="362" y1="36" x2="362" y2="134" class="gd-edge-thin" stroke-dasharray="4 3"/>',
+         _gd_arrow(295, 115, 370, 115),
+         _gd_text(300, 162, "같은 slug 동시 등록을 직렬화 → 스냅샷 오염 방지")]
+    return _gd_svg("".join(s), 174)
+
+
+def _diagram_atomic():
+    s = [_gd_box(8, 46, 120, 54, "재검증 통과", "", "gd-box gd-ok"),
+         _gd_arrow(128, 73, 154, 73),
+         _gd_box(156, 46, 150, 54, "tmpfile 작성", "(같은 폴더)", "gd-box"),
+         _gd_arrow(306, 73, 332, 73),
+         _gd_box(334, 46, 140, 54, "Path.replace", "원자적 rename", "gd-box gd-accent"),
+         _gd_arrow(474, 73, 496, 73),
+         _gd_box(498, 46, 96, 54, "configs/…", "발행 완료", "gd-box gd-ok"),
+         _gd_text(300, 120, "폴링 워커가 반쯤 쓰인 config 를 보는 일이 없음")]
+    return _gd_svg("".join(s), 136)
+
+
+# Six guardrail techniques. tier="core" = the two worth a full diagram (isolation
+# + hash audit); tier="detail" = the four that support them. L4 (parent re-check)
+# is the "verify" half of the thesis, kept first among the details. Mirrors
+# docs/최종발표/2-3_자동생성_해부.md §2.8; line anchors are best-effort.
+GUARD_TECHNIQUES = [
     {
-        "tag": "L0", "name": "tmpdir sandbox",
-        "what": "Create a repo-external temp folder, stage only the needed inputs, and "
-                "let the agent write only <code>./candidate.json</code>.",
+        "id": "L0", "tag": "L0", "name": "임시폴더 격리", "sub": "sandbox", "tier": "core",
         "file": "generate/codex_agentic.py", "line": 590, "fn": "_setup_workdir",
-        "why": "Publishing belongs to the parent, so a write into the repo is read as a "
-               "breach, not a result.",
+        "svg": _diagram_tmpdir(),
+        "explain": "등록 1건마다 repo 밖에 임시 작업폴더를 새로 만든다. 부모가 그 안에 필요한 입력"
+                   "(probe 요약 <code>digest.json</code> · 비슷한 성공 예제 · 작성 규칙)만 깔아주고, "
+                   "에이전트는 그 폴더 안의 <code>candidate.json</code> 하나만 쓴다. 실제 "
+                   "<code>configs/</code> 에 발행하는 건 부모의 일이라서, 에이전트가 repo 에 직접 쓰려는 "
+                   "시도 자체가 위반 신호가 된다.",
     },
     {
-        "tag": "L2", "name": "SHA256 audit",
-        "what": "Diff SHA256 + size + mtime fingerprints of protected files taken before "
-                "and after the codex run.",
+        "id": "L2", "tag": "L2", "name": "SHA256 해시 감사", "sub": "변조 탐지", "tier": "core",
         "file": "generate/codex_agentic.py", "line": 237,
         "fn": "_audit_snapshot_paths · _audit_diff",
-        "why": "The real enforcement. The OS-level sandbox is bypassed (the in-loop "
-               "validator needs real network), so this OS-independent hash diff is the "
-               "actual trust boundary &mdash; and it catches even a silent edit.",
+        "svg": _diagram_hash(),
+        "explain": "codex 실행 직전과 직후에 보호 파일들의 지문(SHA256 + 크기 + 수정시각)을 떠서 비교한다. "
+                   "임시폴더 밖에서 단 한 글자라도 바뀌면 지문이 달라져 잡힌다. OS 샌드박스는 실제로는 우회된다"
+                   "(루프 안의 검증기가 실제 네트워크를 써야 해서) — 그래서 이 OS 무관 해시 비교가 진짜 "
+                   "방어선이고, 몰래 한 수정도 해시라 걸린다.",
     },
     {
-        "tag": "L3", "name": "AUDIT_FAIL = security incident",
-        "what": "An out-of-tree write returns <code>rc=-4</code>, writes a "
-                "<code>.BUG.json</code>, and DMs the owner.",
+        "id": "L4", "tag": "L4", "name": "부모 독립 재검증", "sub": "", "tier": "detail",
+        "file": "generate/validate.py", "line": 380, "fn": "validate_built_config",
+        "svg": _diagram_revalidate(),
+        "explain": "에이전트가 스스로 <code>ok=true</code> 라 해도 부모는 그 말을 안 믿는다. 부모가 "
+                   "<code>validate_built_config</code> 를 직접 다시 돌린다 — 사이트를 새로 fetch 하고, "
+                   "hard 검사(글이 실제로 ≥1건 잡히나 등)와 selector grounding 을 다시 한다. 에이전트의 "
+                   "자기검증은 압축된 HTML·잘린 응답 위에서 돌았을 수 있기 때문. 이게 “믿되 검증한다”의 "
+                   "<em>검증</em> 그 자체다.",
+    },
+    {
+        "id": "L3", "tag": "L3", "name": "위반 = 보안 사고", "sub": "", "tier": "detail",
         "file": "generate/codex_agentic.py", "line": 197,
         "fn": "AuditFailError · register.py _save_bug",
-        "why": "A breached trust boundary is a security incident &mdash; escalated to a "
-               "human, not retried as if the site merely failed.",
+        "svg": _diagram_incident(),
+        "explain": "임시폴더 밖으로의 쓰기가 감사(L2)에 걸리면, 이건 사이트 등록 실패가 아니라 신뢰 경계가 "
+                   "뚫린 <em>보안 사고</em> 로 다룬다. 반환코드 <code>rc=-4</code> + <code>.BUG.json</code> "
+                   "생성 + 소유자에게 DM → 자동 재시도가 아니라 사람이 직접 확인한다.",
     },
     {
-        "tag": "L4", "name": "parent re-validation",
-        "what": "Ignore the agent's <code>ok=true</code> and re-run "
-                "<code>validate_built_config</code> from scratch: fresh fetch, hard "
-                "checks, selector grounding.",
-        "file": "generate/validate.py", "line": 380, "fn": "validate_built_config",
-        "why": "The trust anchor. The agent's self-check may have run on compressed HTML "
-               "or a truncated response.",
-    },
-    {
-        "tag": "L5", "name": "per-slug lock",
-        "what": "Serialize the whole generate + audit window with a flock keyed on the "
-                "slug.",
+        "id": "L5", "tag": "L5", "name": "slug 단위 락", "sub": "", "tier": "detail",
         "file": "generate/codex_agentic.py", "line": 457, "fn": "_per_slug_lock",
-        "why": "The before/after snapshot only means something if nothing else touches "
-               "the files mid-run.",
+        "svg": _diagram_lock(),
+        "explain": "같은 slug 를 동시에 두 번 등록하면 before/after 지문 스냅샷이 중간에 오염될 수 있다. "
+                   "그래서 생성 + 감사 구간 전체를 slug 별 flock 으로 직렬화한다 — 한 번에 하나만 돌게.",
     },
     {
-        "tag": "L6", "name": "atomic publish",
-        "what": "Only after re-validation passes: write a tmpfile in the same directory, "
-                "then <code>Path.replace</code> (atomic rename).",
+        "id": "L6", "tag": "L6", "name": "원자적 발행", "sub": "", "tier": "detail",
         "file": "scripts/register.py", "line": 3927, "fn": "tempfile + Path.replace",
-        "why": "A polling worker can never observe a half-written config.",
+        "svg": _diagram_atomic(),
+        "explain": "부모 재검증을 통과한 뒤에만 발행한다. 같은 디렉토리에 임시 파일로 먼저 쓰고 "
+                   "<code>Path.replace</code>(원자적 rename)로 바꿔치기 → 폴링 워커가 <em>반쯤 쓰인</em> "
+                   "config 를 보는 일이 절대 없다.",
     },
 ]
 
 
 def render_guardrail_html() -> str:
-    folds = "".join(
-        f'<div class="guard-fold"><h3>{title}</h3><p>{body}</p></div>'
-        for title, body in GUARDRAIL_FOLDS
-    )
-    layers = []
-    for layer in GUARDRAIL_LAYERS:
-        href = f"{GITHUB_BASE}/{layer['file']}#L{layer['line']}"
-        ref = f"{layer['file']}:{layer['line']}"
-        layers.append(
-            '<li class="guard-layer">'
-            f'<span class="guard-tag">{layer["tag"]}</span>'
-            '<div class="guard-main">'
-            f'<p class="guard-name">{layer["name"]}</p>'
-            f'<p class="guard-what">{layer["what"]}</p>'
-            f'<p class="guard-ref"><a href="{href}" target="_blank" '
-            f'rel="noopener noreferrer">{ref}</a> '
-            f'<span class="guard-fn">{layer["fn"]}</span></p>'
-            f'<p class="guard-why">{layer["why"]}</p>'
-            "</div></li>"
-        )
-    layers_html = "".join(layers)
+    def card(t, *, mini, active):
+        cls = "guard-card mini" if mini else "guard-card feature"
+        if active:
+            cls += " active"
+        sub = "" if (mini or not t["sub"]) else f'<span class="gc-sub">{t["sub"]}</span>'
+        return (f'<button type="button" class="{cls}" data-guard="{t["id"]}" '
+                f'aria-pressed="{"true" if active else "false"}">'
+                f'<span class="gc-tag">{t["tag"]}</span>'
+                f'<span class="gc-text"><span class="gc-name">{t["name"]}</span>{sub}</span>'
+                "</button>")
+
+    def panel(t, active):
+        href = f"{GITHUB_BASE}/{t['file']}#L{t['line']}"
+        ref = f"{t['file']}:{t['line']}"
+        hidden = "" if active else " hidden"
+        return (f'<div class="guard-detail" data-guard="{t["id"]}"{hidden}>'
+                f'<div class="guard-detail-head"><span class="gc-tag">{t["tag"]}</span>'
+                f'<h3>{t["name"]}</h3></div>'
+                f'<div class="gd-diagram">{t["svg"]}</div>'
+                f'<p class="guard-explain">{t["explain"]}</p>'
+                f'<p class="guard-src"><a href="{href}" target="_blank" '
+                f'rel="noopener noreferrer">{ref}</a> '
+                f'<span class="gc-fn">{t["fn"]}</span></p></div>')
+
+    core = [t for t in GUARD_TECHNIQUES if t["tier"] == "core"]
+    detail = [t for t in GUARD_TECHNIQUES if t["tier"] == "detail"]
+    ordered = core + detail
+    core_cards = "".join(card(t, mini=False, active=(i == 0)) for i, t in enumerate(core))
+    detail_cards = "".join(card(t, mini=True, active=False) for t in detail)
+    panels = "".join(panel(t, i == 0) for i, t in enumerate(ordered))
+
     return f"""  <section class="guard-section" aria-labelledby="guardrail">
-    <h2 id="guardrail">Agent guardrail &mdash; trust, but verify</h2>
-    <p class="lead">The config generator is an AI agent: non-deterministic, and it makes
-      live network calls. We let it write production scraping config, yet it never touches
-      the real repo. It works inside a throwaway temp folder and writes only a
-      <em>candidate</em> file; the parent process then re-validates that candidate
-      independently before publishing. Three properties make that safe.</p>
-    <div class="guard-core">{folds}</div>
-    <ol class="guard-layers">{layers_html}</ol>
-    <p class="meta guard-model">Model <code>codex:gpt-5.4-mini</code> (reasoning effort
-      <code>low</code>), run in <code>auto</code> mode &mdash; a cheap 1-shot first,
-      escalated to the multi-turn agent only when it fails. The numbering keeps the
-      internal L0&ndash;L6 labels; L1 is the OS-level sandbox, folded into L2 above
-      because it is bypassed in practice.</p>
+    {_GD_DEFS}
+    <h2 id="guardrail">에이전트 가드레일 &mdash; 믿되, 검증한다</h2>
+    <p class="lead">config 자동 생성은 AI 에이전트가 한다 &mdash; 비결정적이고, 실제로 사이트에 네트워크
+      요청을 보낸다. 그런 에이전트에게 production 스크래핑 config 를 쓰게 하되, 진짜 repo 는 절대 못
+      건드리게 막는다. 에이전트는 일회용 임시폴더 안에서 <em>후보</em> 파일만 쓰고, 부모 프로세스가 그
+      후보를 독립적으로 다시 검증한 뒤에야 발행한다. 무거운 일을 하는 건 두 기법이다.</p>
+    <p class="guard-tier-label">핵심 &mdash; 그림으로 보는 두 기법 <span>(카드를 누르세요)</span></p>
+    <div class="guard-features">{core_cards}</div>
+    <p class="guard-tier-label">이 둘을 받쳐주는 세부 4</p>
+    <div class="guard-details">{detail_cards}</div>
+    <div id="guardDetailHost">{panels}</div>
+    <p class="meta guard-model">모델 <code>codex:gpt-5.4-mini</code> (reasoning effort
+      <code>low</code>), <code>auto</code> 모드 &mdash; 싼 1-shot 을 먼저 시도하고, 실패할 때만
+      멀티턴 에이전트로 올린다.</p>
   </section>
 """
 
@@ -4452,62 +4580,87 @@ def render_html(
       font-size: 0.9rem;
     }}
     /* Agent guardrail explainer — see render_guardrail_html() */
-    .guard-section .lead {{ margin-bottom: 4px; }}
-    .guard-core {{
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 12px;
-      margin: 22px 0 26px;
+    .guard-section .lead {{ margin-bottom: 18px; }}
+    .guard-tier-label {{
+      margin: 18px 0 8px;
+      font-weight: 700;
+      color: var(--ink);
+      font-size: 0.95rem;
     }}
-    .guard-fold {{
+    .guard-tier-label span {{ color: var(--muted); font-weight: 400; font-size: 0.85rem; }}
+    .guard-features {{
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }}
+    .guard-details {{ display: flex; flex-wrap: wrap; gap: 8px; }}
+    .guard-card {{
+      font: inherit;
+      color: var(--ink);
+      text-align: left;
+      cursor: pointer;
       background: var(--panel);
       border: 1px solid var(--line);
-      border-top: 3px solid var(--accent);
-      padding: 14px 15px 13px;
+      border-radius: 8px;
+      transition: border-color 90ms, background 90ms, box-shadow 90ms;
     }}
-    .guard-fold h3 {{
-      margin: 0 0 7px;
-      font-family: Georgia, "Times New Roman", serif;
-      font-size: 1.02rem;
+    .guard-card:hover {{ border-color: var(--accent); }}
+    .guard-card:focus-visible {{ outline: 2px solid var(--accent); outline-offset: 2px; }}
+    .guard-card.active {{
+      border-color: var(--accent);
+      background: #eaf1f2;
+      box-shadow: inset 0 0 0 1px var(--accent);
     }}
-    .guard-fold p {{ margin: 0; color: var(--muted); font-size: 0.88rem; line-height: 1.5; }}
-    .guard-layers {{ list-style: none; padding: 0; margin: 0; }}
-    .guard-layer {{
-      display: flex;
-      gap: 14px;
+    .guard-card.feature {{ display: flex; gap: 12px; align-items: flex-start; padding: 13px 15px; }}
+    .guard-card.mini {{ display: inline-flex; gap: 8px; align-items: center; padding: 7px 11px; }}
+    .gc-tag {{
+      flex: 0 0 auto;
+      padding: 2px 8px;
+      background: var(--paper);
+      border-radius: 9px;
+      color: var(--accent);
+      font: 700 0.76rem ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      letter-spacing: 0.03em;
+    }}
+    .guard-card.active .gc-tag {{ background: #fff; }}
+    .gc-name {{ font-weight: 700; }}
+    .gc-sub {{ display: block; color: var(--muted); font-size: 0.8rem; margin-top: 2px; }}
+    #guardDetailHost {{ margin-top: 14px; }}
+    .guard-detail {{
       background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px 18px 15px;
+    }}
+    .guard-detail[hidden] {{ display: none; }}
+    .guard-detail-head {{ display: flex; gap: 10px; align-items: baseline; margin: 0 0 8px; }}
+    .guard-detail-head h3 {{
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 1.18rem;
+    }}
+    .gd-diagram {{
+      margin: 4px 0 14px;
+      padding: 12px;
+      background: var(--paper);
       border: 1px solid var(--line);
       border-radius: 6px;
-      padding: 14px 16px;
-      margin: 0 0 10px;
     }}
-    .guard-tag {{
-      flex: 0 0 auto;
-      align-self: flex-start;
-      padding: 2px 9px;
-      background: var(--paper);
-      border-radius: 10px;
-      color: var(--accent);
-      font: 700 0.78rem ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      letter-spacing: 0.04em;
-    }}
-    .guard-main {{ min-width: 0; flex: 1; }}
-    .guard-name {{ margin: 0; font-weight: 700; color: var(--ink); }}
-    .guard-what {{ margin: 3px 0 0; font-size: 0.92rem; line-height: 1.5; }}
-    .guard-ref {{ margin: 6px 0 0; font-size: 0.8rem; }}
-    .guard-ref a {{
+    .gd-svg {{ width: 100%; height: auto; max-width: 600px; display: block; margin: 0 auto; }}
+    .guard-explain {{ margin: 0 0 10px; font-size: 0.96rem; line-height: 1.65; max-width: 760px; }}
+    .guard-src {{ margin: 0; font-size: 0.8rem; }}
+    .guard-src a {{
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       color: var(--accent);
       text-decoration: none;
       word-break: break-all;
     }}
-    .guard-ref a:hover {{ text-decoration: underline; }}
-    .guard-fn {{
+    .guard-src a:hover {{ text-decoration: underline; }}
+    .gc-fn {{
       color: var(--muted);
       font: 0.78rem ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       word-break: break-all;
     }}
-    .guard-why {{ margin: 6px 0 0; color: var(--muted); font-size: 0.82rem; line-height: 1.45; }}
     .guard-model {{ margin-top: 18px; }}
     .guard-section code {{
       font: 0.86em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -4516,11 +4669,30 @@ def render_html(
       padding: 0 4px;
       border-radius: 3px;
     }}
+    /* guardrail SVG diagram primitives */
+    .gd-box {{ fill: var(--panel); stroke: var(--line); stroke-width: 1.2; }}
+    .gd-accent {{ stroke: var(--accent); stroke-width: 1.6; }}
+    .gd-ok {{ fill: #eaf1f2; stroke: var(--accent); stroke-width: 1.3; }}
+    .gd-danger {{ fill: #f1dede; stroke: #a35145; stroke-width: 1.3; }}
+    .gd-dashed {{ fill: var(--panel); stroke: var(--muted); stroke-width: 1.2; stroke-dasharray: 4 3; }}
+    .gd-locked {{ fill: #efe9dc; stroke: var(--line); stroke-width: 1.2; }}
+    .gd-zone {{ fill: none; stroke: var(--muted); stroke-width: 1; stroke-dasharray: 5 4; }}
+    .gd-chip {{ fill: #f4f0e6; stroke: var(--line); stroke-width: 1; }}
+    .gd-bt {{ fill: var(--ink); font: 600 12px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-anchor: middle; }}
+    .gd-bs {{ fill: var(--muted); font: 10.5px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-anchor: middle; }}
+    .gd-zlab {{ fill: var(--muted); font: 600 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-anchor: middle; }}
+    .gd-row {{ fill: var(--ink); font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; text-anchor: start; }}
+    .gd-flab {{ fill: var(--muted); font: 10.5px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-anchor: middle; }}
+    .gd-flab-strong {{ fill: var(--ink); font: 600 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-anchor: middle; }}
+    .gd-mark {{ fill: #a35145; font: 700 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-anchor: middle; }}
+    .gd-edge {{ stroke: var(--accent); stroke-width: 1.6; fill: none; }}
+    .gd-edge-danger {{ stroke: #a35145; stroke-width: 1.5; stroke-dasharray: 4 3; fill: none; }}
+    .gd-edge-thin {{ stroke: var(--muted); stroke-width: 1; fill: none; }}
     @media (max-width: 720px) {{
       main {{ padding-top: 34px; }}
       h1 {{ font-size: 2.1rem; }}
       .metrics {{ grid-template-columns: 1fr 1fr; }}
-      .guard-core {{ grid-template-columns: 1fr; }}
+      .guard-features {{ grid-template-columns: 1fr; }}
       .packet-flow {{ grid-template-columns: 1fr; }}
       .packet-file-grid {{ grid-template-columns: 1fr; }}
       table {{ display: block; overflow-x: auto; }}
@@ -5073,6 +5245,27 @@ def render_html(
   </section>
 
 {guardrail_html}
+  <script>
+    (function () {{
+      var cards = document.querySelectorAll('.guard-card');
+      var host = document.getElementById('guardDetailHost');
+      if (!host || !cards.length) return;
+      function activate(id) {{
+        cards.forEach(function (c) {{
+          var on = c.getAttribute('data-guard') === id;
+          c.classList.toggle('active', on);
+          c.setAttribute('aria-pressed', on ? 'true' : 'false');
+        }});
+        host.querySelectorAll('.guard-detail').forEach(function (p) {{
+          p.hidden = p.getAttribute('data-guard') !== id;
+        }});
+      }}
+      cards.forEach(function (c) {{
+        c.addEventListener('click', function () {{ activate(c.getAttribute('data-guard')); }});
+      }});
+    }})();
+  </script>
+
   <footer>
     <p>Generated from local runtime snapshots on N100. The internal development interface remains separate from this public static artifact.</p>
   </footer>
