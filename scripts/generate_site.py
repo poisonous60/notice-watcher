@@ -3415,35 +3415,44 @@ def _diagram_atomic():
     return _gd_svg("".join(s), 136)
 
 
-# Six guardrail techniques. tier="core" = the two worth a full diagram (isolation
-# + hash audit); tier="detail" = the four that support them. L4 (parent re-check)
-# is the "verify" half of the thesis, kept first among the details. Mirrors
-# docs/최종발표/2-3_자동생성_해부.md §2.8; line anchors are best-effort.
+# Six layers, honestly framed (see docs/최종발표/Agent_가드레일_조사.md). The real
+# agent-safety core is L4 parent re-validation ("verify": parent distrusts the
+# agent's ok=true) + L0 privilege split (untrusted producer / trusted publisher).
+# L2/L3 are DETECTIVE — they catch an escape *after* the write, they don't prevent
+# it; major harnesses prevent with kernel/container sandboxes, but the deploy host
+# (Windows, single machine) has ~no OS sandbox, so we fall back to hash auditing.
+# L5/L6 are general concurrency/atomicity hygiene, NOT agent containment — grouped
+# under "support" so the count isn't inflated. tier="core" gets a full feature card;
+# detail+support get mini cards. Mirrors §2.8; line anchors are best-effort.
 GUARD_TECHNIQUES = [
     {
-        "id": "L0", "tag": "L0", "name": "임시폴더 격리", "sub": "sandbox", "tier": "core",
+        "id": "L4", "tag": "L4", "name": "부모 독립 재검증", "sub": "재검증", "tier": "core",
+        "file": "generate/validate.py", "line": 380, "fn": "validate_built_config",
+        "svg": _diagram_revalidate(),
+        "explain": "에이전트가 <code>ok=true</code> 를 반환해도 부모는 그대로 받아들이지 않고 "
+                   "<code>validate_built_config</code> 를 다시 실행한다. 사이트를 새로 fetch 해 "
+                   "hard 검사(글 ≥1건 추출 여부 등)와 selector grounding 을 거쳐 "
+                   "부모가 발행 여부를 정한다.",
+    },
+    {
+        "id": "L0", "tag": "L0", "name": "권한 분리", "sub": "tmpdir staging", "tier": "core",
         "file": "generate/codex_agentic.py", "line": 590, "fn": "_setup_workdir",
         "svg": _diagram_tmpdir(),
         "explain": "등록 1건마다 repo 밖에 임시 작업폴더를 만들고, 부모가 입력"
                    "(probe 요약 <code>digest.json</code>, 비슷한 성공 예제, 작성 규칙)을 그 안에 둔다. "
                    "에이전트는 폴더 안의 <code>candidate.json</code> 만 쓰고, <code>configs/</code> "
-                   "발행은 부모가 한다.",
+                   "발행은 부모가 한다. 임시폴더 격리는 OS 가 강제하는 것이 아니라 관례이며, "
+                   "<code>configs/</code> 쓰기는 부모만 한다.",
     },
     {
-        "id": "L2", "tag": "L2", "name": "SHA256 해시 감사", "sub": "변조 탐지", "tier": "core",
+        "id": "L2", "tag": "L2", "name": "SHA256 해시 감사", "sub": "탐지형", "tier": "detail",
         "file": "generate/codex_agentic.py", "line": 237,
         "fn": "_audit_snapshot_paths · _audit_diff",
         "svg": _diagram_hash(),
         "explain": "codex 실행 직전·직후에 보호 파일들의 지문(SHA256, 크기, 수정시각)을 비교한다. "
-                   "임시폴더 밖 파일이 바뀌면 지문이 달라져 검출된다.",
-    },
-    {
-        "id": "L4", "tag": "L4", "name": "부모 독립 재검증", "sub": "", "tier": "detail",
-        "file": "generate/validate.py", "line": 380, "fn": "validate_built_config",
-        "svg": _diagram_revalidate(),
-        "explain": "에이전트가 <code>ok=true</code> 를 반환해도 부모가 "
-                   "<code>validate_built_config</code> 를 다시 실행한다. 사이트를 새로 fetch 해 "
-                   "hard 검사(글 ≥1건 추출 여부 등)와 selector grounding 을 수행한다.",
+                   "임시폴더 밖 파일이 바뀌면 지문이 달라져 검출된다. 쓰기를 막지 않고 "
+                   "실행 후에 검출하는 방식이다. 운영 환경(Windows 단일 머신)에 "
+                   "OS 강제 샌드박스가 없어 이 감사로 대체한다.",
     },
     {
         "id": "L3", "tag": "L3", "name": "위반 = 보안 사고", "sub": "", "tier": "detail",
@@ -3451,18 +3460,18 @@ GUARD_TECHNIQUES = [
         "fn": "AuditFailError · register.py _save_bug",
         "svg": _diagram_incident(),
         "explain": "임시폴더 밖 쓰기가 감사(L2)에 검출되면 <code>rc=-4</code> 를 반환하고 "
-                   "<code>.BUG.json</code> 을 생성한 뒤 소유자에게 DM 한다. 등록 실패와 달리 자동 "
-                   "재시도하지 않는다.",
+                   "<code>.BUG.json</code> 을 생성한 뒤 소유자에게 DM 한다. 등록 실패와 달리 "
+                   "자동 재시도하지 않는다.",
     },
     {
-        "id": "L5", "tag": "L5", "name": "slug 단위 락", "sub": "", "tier": "detail",
+        "id": "L5", "tag": "L5", "name": "slug 단위 락", "sub": "", "tier": "support",
         "file": "generate/codex_agentic.py", "line": 457, "fn": "_per_slug_lock",
         "svg": _diagram_lock(),
         "explain": "생성·감사 구간을 slug 별 flock 으로 직렬화한다. 같은 slug 를 동시 등록할 때 "
                    "before/after 지문 스냅샷이 섞이는 것을 막는다.",
     },
     {
-        "id": "L6", "tag": "L6", "name": "원자적 발행", "sub": "", "tier": "detail",
+        "id": "L6", "tag": "L6", "name": "원자적 발행", "sub": "", "tier": "support",
         "file": "scripts/register.py", "line": 3927, "fn": "tempfile + Path.replace",
         "svg": _diagram_atomic(),
         "explain": "재검증을 통과하면 같은 디렉토리에 임시 파일로 쓴 뒤 "
@@ -3499,20 +3508,26 @@ def render_guardrail_html() -> str:
 
     core = [t for t in GUARD_TECHNIQUES if t["tier"] == "core"]
     detail = [t for t in GUARD_TECHNIQUES if t["tier"] == "detail"]
-    ordered = core + detail
+    support = [t for t in GUARD_TECHNIQUES if t["tier"] == "support"]
+    ordered = core + detail + support
     core_cards = "".join(card(t, mini=False, active=(i == 0)) for i, t in enumerate(core))
     detail_cards = "".join(card(t, mini=True, active=False) for t in detail)
+    support_cards = "".join(card(t, mini=True, active=False) for t in support)
     panels = "".join(panel(t, i == 0) for i, t in enumerate(ordered))
 
     return f"""  <section class="guard-section" aria-labelledby="guardrail">
     {_GD_DEFS}
     <h2 id="guardrail">Agent guardrail</h2>
-    <p class="lead">config 자동 생성은 codex 에이전트가 한다. 에이전트는 repo 밖 임시폴더에서 후보
-      config 만 쓰고, 부모 프로세스가 이를 다시 검증한 뒤 <code>configs/</code> 에 발행한다. 핵심
-      기법은 임시폴더 격리와 해시 감사 둘이다.</p>
+    <p class="lead">config 자동 생성은 codex 에이전트가 한다. 에이전트는 repo 밖 임시폴더에 후보
+      config 만 쓰고, 부모는 <code>ok=true</code> 자기보고를 그대로 받아들이지 않고 사이트를 다시
+      받아 재검증한 뒤 <code>configs/</code> 에 발행한다. 임시폴더 격리는 OS 가 강제하지 않는
+      관례이며, 운영 환경(Windows 단일 머신)에 OS 강제 샌드박스가 없어 임시폴더 밖 변경은 해시
+      무결성 감사로 실행 후 검출한다.</p>
     <div class="guard-features">{core_cards}</div>
-    <p class="guard-tier-label">이 둘을 받쳐주는 세부 4</p>
+    <p class="guard-tier-label">탐지·대응 (실행 후 검출)</p>
     <div class="guard-details">{detail_cards}</div>
+    <p class="guard-tier-label">지원 (동시성·원자성)</p>
+    <div class="guard-details">{support_cards}</div>
     <div id="guardDetailHost">{panels}</div>
     <p class="meta guard-model">모델 <code>codex:gpt-5.4-mini</code> (reasoning effort
       <code>low</code>), <code>auto</code> 모드 &mdash; 싼 1-shot 을 먼저 시도하고, 실패할 때만
