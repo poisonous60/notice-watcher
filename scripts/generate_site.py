@@ -3226,6 +3226,121 @@ def metric(label: str, value: object, note: str = "") -> str:
     return f'<div class="metric"><strong>{esc(value)}</strong><em>{esc(label)}</em>{note_html}</div>'
 
 
+# Public-facing "trust but verify" guardrail explainer — mirrors
+# docs/최종발표/2-3_자동생성_해부.md §2.8. The config generator is an AI agent that
+# may never touch the repo: it writes a candidate in a tmpdir, the parent
+# re-validates, then publishes. Source line anchors are best-effort (same caveat
+# as GITHUB_BASE); update when codex_agentic.py / validate.py / register.py move.
+GUARDRAIL_FOLDS = [
+    ("Isolation",
+     "The agent runs in a repo-external temp folder, staged with only the inputs it "
+     "needs, and can write only <code>./candidate.json</code>. Publishing is the "
+     "parent's job &mdash; so any write into the repo is itself a violation signal."),
+    ("Tamper detection (hash)",
+     "The parent fingerprints every protected file (SHA256 + size + mtime) before and "
+     "after the run. Any change outside the temp folder is caught &mdash; a hash diff "
+     "catches even a silent edit, and it holds on any OS."),
+    ("Independent re-validation",
+     "The parent ignores the agent's own <code>ok=true</code> and re-runs the validator "
+     "itself: fresh fetch, hard checks, selector grounding. The agent is never the final "
+     "authority on its own output."),
+]
+
+GUARDRAIL_LAYERS = [
+    {
+        "tag": "L0", "name": "tmpdir sandbox",
+        "what": "Create a repo-external temp folder, stage only the needed inputs, and "
+                "let the agent write only <code>./candidate.json</code>.",
+        "file": "generate/codex_agentic.py", "line": 590, "fn": "_setup_workdir",
+        "why": "Publishing belongs to the parent, so a write into the repo is read as a "
+               "breach, not a result.",
+    },
+    {
+        "tag": "L2", "name": "SHA256 audit",
+        "what": "Diff SHA256 + size + mtime fingerprints of protected files taken before "
+                "and after the codex run.",
+        "file": "generate/codex_agentic.py", "line": 237,
+        "fn": "_audit_snapshot_paths · _audit_diff",
+        "why": "The real enforcement. The OS-level sandbox is bypassed (the in-loop "
+               "validator needs real network), so this OS-independent hash diff is the "
+               "actual trust boundary &mdash; and it catches even a silent edit.",
+    },
+    {
+        "tag": "L3", "name": "AUDIT_FAIL = security incident",
+        "what": "An out-of-tree write returns <code>rc=-4</code>, writes a "
+                "<code>.BUG.json</code>, and DMs the owner.",
+        "file": "generate/codex_agentic.py", "line": 197,
+        "fn": "AuditFailError · register.py _save_bug",
+        "why": "A breached trust boundary is a security incident &mdash; escalated to a "
+               "human, not retried as if the site merely failed.",
+    },
+    {
+        "tag": "L4", "name": "parent re-validation",
+        "what": "Ignore the agent's <code>ok=true</code> and re-run "
+                "<code>validate_built_config</code> from scratch: fresh fetch, hard "
+                "checks, selector grounding.",
+        "file": "generate/validate.py", "line": 380, "fn": "validate_built_config",
+        "why": "The trust anchor. The agent's self-check may have run on compressed HTML "
+               "or a truncated response.",
+    },
+    {
+        "tag": "L5", "name": "per-slug lock",
+        "what": "Serialize the whole generate + audit window with a flock keyed on the "
+                "slug.",
+        "file": "generate/codex_agentic.py", "line": 457, "fn": "_per_slug_lock",
+        "why": "The before/after snapshot only means something if nothing else touches "
+               "the files mid-run.",
+    },
+    {
+        "tag": "L6", "name": "atomic publish",
+        "what": "Only after re-validation passes: write a tmpfile in the same directory, "
+                "then <code>Path.replace</code> (atomic rename).",
+        "file": "scripts/register.py", "line": 3927, "fn": "tempfile + Path.replace",
+        "why": "A polling worker can never observe a half-written config.",
+    },
+]
+
+
+def render_guardrail_html() -> str:
+    folds = "".join(
+        f'<div class="guard-fold"><h3>{title}</h3><p>{body}</p></div>'
+        for title, body in GUARDRAIL_FOLDS
+    )
+    layers = []
+    for layer in GUARDRAIL_LAYERS:
+        href = f"{GITHUB_BASE}/{layer['file']}#L{layer['line']}"
+        ref = f"{layer['file']}:{layer['line']}"
+        layers.append(
+            '<li class="guard-layer">'
+            f'<span class="guard-tag">{layer["tag"]}</span>'
+            '<div class="guard-main">'
+            f'<p class="guard-name">{layer["name"]}</p>'
+            f'<p class="guard-what">{layer["what"]}</p>'
+            f'<p class="guard-ref"><a href="{href}" target="_blank" '
+            f'rel="noopener noreferrer">{ref}</a> '
+            f'<span class="guard-fn">{layer["fn"]}</span></p>'
+            f'<p class="guard-why">{layer["why"]}</p>'
+            "</div></li>"
+        )
+    layers_html = "".join(layers)
+    return f"""  <section class="guard-section" aria-labelledby="guardrail">
+    <h2 id="guardrail">Agent guardrail &mdash; trust, but verify</h2>
+    <p class="lead">The config generator is an AI agent: non-deterministic, and it makes
+      live network calls. We let it write production scraping config, yet it never touches
+      the real repo. It works inside a throwaway temp folder and writes only a
+      <em>candidate</em> file; the parent process then re-validates that candidate
+      independently before publishing. Three properties make that safe.</p>
+    <div class="guard-core">{folds}</div>
+    <ol class="guard-layers">{layers_html}</ol>
+    <p class="meta guard-model">Model <code>codex:gpt-5.4-mini</code> (reasoning effort
+      <code>low</code>), run in <code>auto</code> mode &mdash; a cheap 1-shot first,
+      escalated to the multi-turn agent only when it fails. The numbering keeps the
+      internal L0&ndash;L6 labels; L1 is the OS-level sandbox, folded into L2 above
+      because it is bypassed in practice.</p>
+  </section>
+"""
+
+
 def render_html(
     configs: dict,
     poll: dict,
@@ -3291,6 +3406,7 @@ def render_html(
     har_funnel_svg = svg_har_funnel()
     har_stage_panels_html = render_stage_panels()
     probe_agentic_html = render_probe_agentic_html(har_detail)
+    guardrail_html = render_guardrail_html()
 
     recent_rows = []
     for item in jobs["recent"]:
@@ -4335,10 +4451,76 @@ def render_html(
       padding-top: 18px;
       font-size: 0.9rem;
     }}
+    /* Agent guardrail explainer — see render_guardrail_html() */
+    .guard-section .lead {{ margin-bottom: 4px; }}
+    .guard-core {{
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin: 22px 0 26px;
+    }}
+    .guard-fold {{
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-top: 3px solid var(--accent);
+      padding: 14px 15px 13px;
+    }}
+    .guard-fold h3 {{
+      margin: 0 0 7px;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 1.02rem;
+    }}
+    .guard-fold p {{ margin: 0; color: var(--muted); font-size: 0.88rem; line-height: 1.5; }}
+    .guard-layers {{ list-style: none; padding: 0; margin: 0; }}
+    .guard-layer {{
+      display: flex;
+      gap: 14px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 14px 16px;
+      margin: 0 0 10px;
+    }}
+    .guard-tag {{
+      flex: 0 0 auto;
+      align-self: flex-start;
+      padding: 2px 9px;
+      background: var(--paper);
+      border-radius: 10px;
+      color: var(--accent);
+      font: 700 0.78rem ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      letter-spacing: 0.04em;
+    }}
+    .guard-main {{ min-width: 0; flex: 1; }}
+    .guard-name {{ margin: 0; font-weight: 700; color: var(--ink); }}
+    .guard-what {{ margin: 3px 0 0; font-size: 0.92rem; line-height: 1.5; }}
+    .guard-ref {{ margin: 6px 0 0; font-size: 0.8rem; }}
+    .guard-ref a {{
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: var(--accent);
+      text-decoration: none;
+      word-break: break-all;
+    }}
+    .guard-ref a:hover {{ text-decoration: underline; }}
+    .guard-fn {{
+      color: var(--muted);
+      font: 0.78rem ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      word-break: break-all;
+    }}
+    .guard-why {{ margin: 6px 0 0; color: var(--muted); font-size: 0.82rem; line-height: 1.45; }}
+    .guard-model {{ margin-top: 18px; }}
+    .guard-section code {{
+      font: 0.86em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      padding: 0 4px;
+      border-radius: 3px;
+    }}
     @media (max-width: 720px) {{
       main {{ padding-top: 34px; }}
       h1 {{ font-size: 2.1rem; }}
       .metrics {{ grid-template-columns: 1fr 1fr; }}
+      .guard-core {{ grid-template-columns: 1fr; }}
       .packet-flow {{ grid-template-columns: 1fr; }}
       .packet-file-grid {{ grid-template-columns: 1fr; }}
       table {{ display: block; overflow-x: auto; }}
@@ -4890,6 +5072,7 @@ def render_html(
     </script>
   </section>
 
+{guardrail_html}
   <footer>
     <p>Generated from local runtime snapshots on N100. The internal development interface remains separate from this public static artifact.</p>
   </footer>
