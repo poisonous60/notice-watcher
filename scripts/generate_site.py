@@ -2970,20 +2970,21 @@ def _render_har_detail_panel(panel: dict, *, hidden: bool) -> str:
     else:
         ct_block = ""
 
-    signal_rows: list[dict] = []
     raw_dump: dict[str, object] = {}
+    signal_groups: list[dict] = []
     for sec in detail.get("sections") or []:
         section_key = sec["key"]
         raw_dump[section_key] = sec.get("raw_redacted")
+        rows: list[dict] = []
         for idx, row in enumerate(sec.get("rows") or []):
             item = dict(row)
             if section_key != "digest":
                 item["key"] = f"{section_key}[{idx}]"
             item.setdefault("kind", item.get("badge") or sec.get("title") or section_key)
             item.setdefault("count", item.get("total_rows") or item.get("count") or 1)
-            signal_rows.append(item)
+            rows.append(item)
         if sec.get("more"):
-            signal_rows.append({
+            rows.append({
                 "key": section_key,
                 "kind": sec["title"],
                 "count": sec["more"],
@@ -2993,40 +2994,30 @@ def _render_har_detail_panel(panel: dict, *, hidden: bool) -> str:
                 "meta": sec["title"],
                 "evidence": f"+{sec['more']} more rows not shown",
             })
-    present = {r.get("type") for r in signal_rows}
-    for signal_type, badge in (
-        ("api", "List JSON API"), ("body", "Article body JSON"),
-        ("rss", "RSS / Atom"), ("pag", "Pagination"), ("audio", "Audio share"),
-    ):
-        if signal_type not in present:
-            signal_rows.append({
-                "key": signal_type,
-                "kind": badge,
+        if not rows:
+            title = sec.get("title") or section_key
+            rows.append({
+                "key": section_key,
+                "kind": title,
                 "count": 0,
-                "type": signal_type,
-                "badge": badge,
-                "badge_class": f"sig-{signal_type} sig-empty",
+                "badge": title,
+                "badge_class": "sig-empty",
                 "host": "—",
                 "meta": "Not detected for this probe.",
                 "evidence": "—",
             })
-    if "digest" not in present:
-        signal_rows.append({
-            "key": "digest",
-            "kind": "Register digest",
-            "count": 0,
-            "type": "digest",
-            "badge": "Register digest",
-            "badge_class": "sig-digest sig-empty",
-            "host": "—",
-            "meta": "Not detected for this probe.",
-            "evidence": "—",
+        signal_groups.append({
+            "label": sec.get("title") or section_key,
+            "source": sec.get("source") or "",
+            "rows": rows,
         })
+
     artifact = detail.get("artifact_list_candidates") or {}
     artifact_rows = artifact.get("rows") or []
+    stored_rows: list[dict] = []
     if artifact_rows:
         for row in artifact_rows:
-            signal_rows.append({
+            stored_rows.append({
                 "key": row.get("key", ""),
                 "kind": row.get("kind", "stored"),
                 "count": row.get("count") or "—",
@@ -3039,7 +3030,7 @@ def _render_har_detail_panel(panel: dict, *, hidden: bool) -> str:
                 "evidence": _short_text(row.get("preview"), 160),
             })
     else:
-        signal_rows.append({
+        stored_rows.append({
             "key": "list_candidates.json",
             "kind": "Stored probe summary",
             "count": 0,
@@ -3050,38 +3041,55 @@ def _render_har_detail_panel(panel: dict, *, hidden: bool) -> str:
             "meta": "list_candidates.json not stored for this probe.",
             "evidence": "—",
         })
+    signal_groups.append({
+        "label": artifact.get("title") or "Stored probe summary (list_candidates.json)",
+        "source": artifact.get("source") or "list_candidates.json",
+        "note": "type 컬럼 = 저장 필드 값의 자료형 (str / list / dict / null) — 위 signal 종류와 의미 다름",
+        "rows": stored_rows,
+    })
+
+    def _sig_group_head(label: str, source: str = "", note: str = "") -> str:
+        cell = f"<strong>{esc(label)}</strong>"
+        if source:
+            cell += f' <small>{esc(source)}</small>'
+        if note:
+            cell += f'<small class="har-group-note">{esc(note)}</small>'
+        return f'<tr class="packet-group-head"><td colspan="4">{cell}</td></tr>'
+
     body = (
         '<div class="packet-scroll har-signal-scroll">'
         '<table class="har-signal-table"><thead>'
         '<tr><th>key</th><th>type</th><th>count</th><th>preview</th></tr>'
         '</thead><tbody>'
     )
-    for item in signal_rows:
-        empty_cls = " sig-empty" if "sig-empty" in str(item.get("badge_class")) else ""
-        meta = str(item.get("meta") or "")
-        evidence = str(item.get("evidence") or "")
-        key = str(item.get("key") or item.get("host") or item.get("badge") or "—")
-        kind = str(item.get("kind") or item.get("badge") or item.get("type") or "—")
-        count = str(item.get("count") if item.get("count") not in (None, "") else "—")
-        preview = " · ".join(x for x in (meta, evidence) if x and x != "—") or "—"
-        tip_html = (
-            f'<div class="packet-pop-row"><b>key</b><code>{esc(key)}</code></div>'
-            f'<div class="packet-pop-row"><b>type</b>{esc(kind)}</div>'
-            f'<div class="packet-pop-row"><b>count</b>{esc(count)}</div>'
-            f'<div class="packet-pop-row"><b>host</b><code>{esc(item.get("host") or "—")}</code></div>'
-            f'<div class="packet-pop-row"><b>meta</b>{esc(meta or "—")}</div>'
-            f'<div class="packet-pop-row"><b>evidence</b>{esc(evidence or "—")}</div>'
-        )
-        body += (
-            f'<tr class="har-signal-row{empty_cls}" tabindex="0" data-tip-html="{esc(tip_html)}">'
-            '<td class="har-signal-key">'
-            f'<code>{esc(key)}</code>'
-            '</td>'
-            f'<td><span class="sig-badge {esc(item["badge_class"])}">{esc(kind)}</span></td>'
-            f'<td>{esc(count)}</td>'
-            f'<td><small>{esc(_short_text(preview, 180))}</small></td>'
-            '</tr>'
-        )
+    for group in signal_groups:
+        body += _sig_group_head(group["label"], group.get("source", ""), group.get("note", ""))
+        for item in group["rows"]:
+            empty_cls = " sig-empty" if "sig-empty" in str(item.get("badge_class")) else ""
+            meta = str(item.get("meta") or "")
+            evidence = str(item.get("evidence") or "")
+            key = str(item.get("key") or item.get("host") or item.get("badge") or "—")
+            kind = str(item.get("kind") or item.get("badge") or item.get("type") or "—")
+            count = str(item.get("count") if item.get("count") not in (None, "") else "—")
+            preview = " · ".join(x for x in (meta, evidence) if x and x != "—") or "—"
+            tip_html = (
+                f'<div class="packet-pop-row"><b>key</b><code>{esc(key)}</code></div>'
+                f'<div class="packet-pop-row"><b>type</b>{esc(kind)}</div>'
+                f'<div class="packet-pop-row"><b>count</b>{esc(count)}</div>'
+                f'<div class="packet-pop-row"><b>host</b><code>{esc(item.get("host") or "—")}</code></div>'
+                f'<div class="packet-pop-row"><b>meta</b>{esc(meta or "—")}</div>'
+                f'<div class="packet-pop-row"><b>evidence</b>{esc(evidence or "—")}</div>'
+            )
+            body += (
+                f'<tr class="har-signal-row{empty_cls}" tabindex="0" data-tip-html="{esc(tip_html)}">'
+                '<td class="har-signal-key">'
+                f'<code>{esc(key)}</code>'
+                '</td>'
+                f'<td><span class="sig-badge {esc(item["badge_class"])}">{esc(kind)}</span></td>'
+                f'<td>{esc(count)}</td>'
+                f'<td><small>{esc(_short_text(preview, 180))}</small></td>'
+                '</tr>'
+            )
     body += "</tbody></table></div>"
     raw_pre = json.dumps(raw_dump, ensure_ascii=False, indent=2) if raw_dump else "(empty)"
     slug = str(detail.get("slug") or "")
@@ -4340,6 +4348,8 @@ def render_html(
     .sig-stored {{ border-color: #5b6e80; }}
     .sig-empty {{ color: var(--muted); opacity: 0.92; background: var(--paper); }}
     tr.sig-empty td {{ color: var(--muted); }}
+    .har-signal-table .packet-group-head td {{ white-space: normal; }}
+    .har-group-note {{ font-weight: 400; color: var(--muted); letter-spacing: 0; }}
     .har-fold {{ margin: 8px 0 0; }}
     .har-fold summary {{
       cursor: pointer;

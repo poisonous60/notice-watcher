@@ -74,7 +74,7 @@
   - **KPI strip** 4 셀 — entries / JSON-ish / xhr/fetch / HTTP 4xx/5xx
   - **Meta dl** — HAR mtime · verdict · config strategy · host label. probe host / first article host 는 `<details>` 안에 host-only 로 둔다.
   - **Content-type 분포** `<details>` (top 8)
-  - **1 signal table** (`.har-signals`) — signal type / host / meta / evidence. 없는 raw signal type 은 `Not detected for this probe.` row 로 표시.
+  - **Signal table** (`.har-signal-table`, 단일 `packet-scroll` 창) — key / type / count / preview. Model input packet 과 같은 패턴: 별도 `<table>` 안 쓰고 `packet-group-head` row 로 source 별 section 분할 (List JSON API · Article body JSON · RSS/Atom · Pagination · Audio share · Register digest · Stored probe summary). 각 group head 에 source 함수 라벨. 빈 section 은 `Not detected for this probe.` row. Stored probe summary section 의 `type` 컬럼은 signal 종류가 아니라 `list_candidates.json` 필드 값의 자료형(str/list/dict/null) — group-head note 로 명시.
   - **raw signals (redacted)** `<details>`:
     - traffic_api_candidates — List JSON API 후보
     - traffic_article_body_candidates — Article body JSON 후보
