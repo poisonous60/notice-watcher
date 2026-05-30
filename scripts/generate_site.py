@@ -892,7 +892,7 @@ def svg_case_blocks(records: list[dict], events: list[tuple[str, str, str]]) -> 
     the case modal. Vertical dashed lines mark pipeline milestones.
     """
     width = 920
-    title_pad = 60
+    title_pad = 78  # headroom for up to two staggered annotation-marker rows
     axis_pad = 56
     cx_left = 56
     cx_right = width - 24
@@ -1024,7 +1024,9 @@ def svg_case_blocks(records: list[dict], events: list[tuple[str, str, str]]) -> 
         "</text>"
     )
 
-    annotation_parts: list[str] = []
+    # Resolve each milestone to an x first, then stagger labels across two rows
+    # so neighbouring dates (e.g. 05-19 / 05-21) don't overprint each other.
+    annot_resolved: list[tuple[str, str, str, float]] = []
     for iso, short, full_text in events:
         idx = day_to_idx.get(iso)
         if idx is None:
@@ -1037,11 +1039,27 @@ def svg_case_blocks(records: list[dict], events: list[tuple[str, str, str]]) -> 
             if idx is None:
                 continue
         xi = cx_left + idx * day_slot + day_slot / 2
+        annot_resolved.append((iso, short, full_text, xi))
+
+    annot_resolved.sort(key=lambda a: a[3])
+    row_right = [-1e9, -1e9]  # rightmost label edge placed on each row
+    annotation_parts: list[str] = []
+    for iso, short, full_text, xi in annot_resolved:
+        half = len(short) * 3.4 + 4  # ~6.8px/char marker font, anchored middle
+        left, right = xi - half, xi + half
+        if row_right[0] <= left:
+            row = 0
+        elif row_right[1] <= left:
+            row = 1
+        else:  # both rows would clash — pick whichever frees up sooner
+            row = 0 if row_right[0] <= row_right[1] else 1
+        row_right[row] = right
+        marker_y = 14 + row * 15
         annotation_parts.append(
             f'<g class="annot" data-date="{esc(iso)}" data-full="{esc(full_text)}">'
             f'<line class="annot-line" x1="{xi:.1f}" y1="{title_pad:.0f}" '
             f'x2="{xi:.1f}" y2="{baseline_y + grid_h_down:.1f}"></line>'
-            f'<text class="annot-marker" x="{xi:.1f}" y="14" '
+            f'<text class="annot-marker" x="{xi:.1f}" y="{marker_y}" '
             f'text-anchor="middle">{esc(short)}</text>'
             f"</g>"
         )
@@ -4618,7 +4636,7 @@ def render_html(
       font-size: 0.9rem;
     }}
     /* Agent guardrail explainer — see render_guardrail_html() */
-    .guard-section .lead {{ margin-bottom: 18px; }}
+    .guard-section .lead {{ margin-bottom: 18px; word-break: keep-all; }}
     .guard-tier-label {{
       margin: 18px 0 8px;
       font-weight: 700;
@@ -4685,7 +4703,7 @@ def render_html(
       border-radius: 6px;
     }}
     .gd-svg {{ width: 100%; height: auto; max-width: 600px; display: block; margin: 0 auto; }}
-    .guard-explain {{ margin: 0 0 10px; font-size: 0.96rem; line-height: 1.65; max-width: 760px; }}
+    .guard-explain {{ margin: 0 0 10px; font-size: 0.96rem; line-height: 1.65; max-width: 760px; word-break: keep-all; }}
     .guard-src {{ margin: 0; font-size: 0.8rem; }}
     .guard-src a {{
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
