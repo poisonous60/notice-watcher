@@ -927,39 +927,78 @@ def svg_case_blocks(records: list[dict], events: list[tuple[str, str, str]]) -> 
     cell = block_size + block_gap
     per_row = max(1, int((day_slot - 4) / cell))
 
-    by_day: dict[str, list[dict]] = {}
+    # Macro split (coarser than the fix-layer colour): cases whose outcome
+    # generalised back into the solver ("improved") stack *upward* from the
+    # engine baseline — they built the engine up; every other case (handcrafted
+    # one-off, no-change, rejected) hangs *downward* below it as bolted scrap.
+    up_by_day: dict[str, list[dict]] = {}
+    down_by_day: dict[str, list[dict]] = {}
     for r in records:
-        by_day.setdefault(r["date"], []).append(r)
-    for day, lst in by_day.items():
-        lst.sort(key=lambda r: (_BUCKET_STACK_PRIORITY.get(r["bucket"], 9), r["slug"]))
+        target = up_by_day if r.get("outcome_class") == "improved" else down_by_day
+        target.setdefault(r["date"], []).append(r)
+    for bmap in (up_by_day, down_by_day):
+        for lst in bmap.values():
+            lst.sort(key=lambda r: (_BUCKET_STACK_PRIORITY.get(r["bucket"], 9), r["slug"]))
 
-    max_count = max(len(by_day.get(d, ())) for d in all_days)
-    rows_needed = (max_count + per_row - 1) // per_row
-    grid_h = max(rows_needed * cell + 4, 180)
-    height = title_pad + grid_h + axis_pad
+    def _band_rows(bmap: dict[str, list[dict]]) -> int:
+        mx = max((len(bmap.get(d, ())) for d in all_days), default=0)
+        return (mx + per_row - 1) // per_row
 
-    baseline_y = title_pad + grid_h
+    rows_up = _band_rows(up_by_day)
+    rows_down = _band_rows(down_by_day)
+    grid_h_up = max(rows_up * cell + 4, 30)
+    grid_h_down = max(rows_down * cell + 4, 30)
+    height = title_pad + grid_h_up + grid_h_down + axis_pad
+
+    baseline_y = title_pad + grid_h_up
 
     blocks_parts: list[str] = []
-    for day, lst in by_day.items():
-        idx = day_to_idx[day]
-        col_x = cx_left + idx * day_slot + (day_slot - per_row * cell) / 2
-        for i, rec in enumerate(lst):
-            row = i // per_row
-            col = i % per_row
-            bx = col_x + col * cell
-            by = baseline_y - (row + 1) * cell
-            bucket = rec["bucket"]
-            blocks_parts.append(
-                f'<rect class="case-block bucket-{_safe_class(bucket)} '
-                f'outcome-{rec["outcome_class"]}" '
-                f'x="{bx:.1f}" y="{by:.1f}" '
-                f'width="{block_size}" height="{block_size}" rx="0.5" ry="0.5" '
-                f'data-slug="{esc(rec["slug"])}" '
-                f'data-bucket="{esc(bucket)}" '
-                f'tabindex="0" role="button" '
-                f'aria-label="{esc(rec["date"])} · {esc(rec["slug"])} · {esc(bucket)}"></rect>'
-            )
+
+    def _emit_band(bmap: dict[str, list[dict]], *, upward: bool) -> None:
+        for day, lst in bmap.items():
+            idx = day_to_idx[day]
+            col_x = cx_left + idx * day_slot + (day_slot - per_row * cell) / 2
+            for i, rec in enumerate(lst):
+                row = i // per_row
+                col = i % per_row
+                bx = col_x + col * cell
+                if upward:
+                    by = baseline_y - (row + 1) * cell
+                else:
+                    by = baseline_y + block_gap + row * cell
+                bucket = rec["bucket"]
+                blocks_parts.append(
+                    f'<rect class="case-block bucket-{_safe_class(bucket)} '
+                    f'outcome-{rec["outcome_class"]}" '
+                    f'x="{bx:.1f}" y="{by:.1f}" '
+                    f'width="{block_size}" height="{block_size}" rx="0.5" ry="0.5" '
+                    f'data-slug="{esc(rec["slug"])}" '
+                    f'data-bucket="{esc(bucket)}" '
+                    f'tabindex="0" role="button" '
+                    f'aria-label="{esc(rec["date"])} · {esc(rec["slug"])} · {esc(bucket)}"></rect>'
+                )
+
+    _emit_band(up_by_day, upward=True)
+    _emit_band(down_by_day, upward=False)
+
+    # Faint band backgrounds + left-margin labels make the improved/other macro
+    # split readable on top of the per-bucket colours.
+    band_up_y = title_pad
+    band_dn_y = baseline_y
+    band_bg = (
+        f'<rect class="case-band band-improved" x="{cx_left:.0f}" y="{band_up_y:.0f}" '
+        f'width="{plot_w:.0f}" height="{grid_h_up:.0f}"></rect>'
+        f'<rect class="case-band band-other" x="{cx_left:.0f}" y="{band_dn_y:.0f}" '
+        f'width="{plot_w:.0f}" height="{grid_h_down:.0f}"></rect>'
+    )
+    yu = band_up_y + grid_h_up / 2
+    yl = band_dn_y + grid_h_down / 2
+    band_labels = (
+        f'<text class="band-label" transform="rotate(-90 16 {yu:.0f})" x="16" '
+        f'y="{yu:.0f}" text-anchor="middle">improved ↑</text>'
+        f'<text class="band-label" transform="rotate(-90 16 {yl:.0f})" x="16" '
+        f'y="{yl:.0f}" text-anchor="middle">other ↓</text>'
+    )
 
     engine_line = (
         f'<line class="engine-baseline" x1="{cx_left:.0f}" y1="{baseline_y:.1f}" '
@@ -971,7 +1010,7 @@ def svg_case_blocks(records: list[dict], events: list[tuple[str, str, str]]) -> 
     for i in range(0, n_days, tick_step):
         xi = cx_left + i * day_slot + day_slot / 2
         tick_parts.append(
-            f'<text class="axis-tick" x="{xi:.1f}" y="{baseline_y + 16:.0f}" '
+            f'<text class="axis-tick" x="{xi:.1f}" y="{baseline_y + grid_h_down + 16:.0f}" '
             f'text-anchor="middle">{esc(all_days[i][5:])}</text>'
         )
 
@@ -981,7 +1020,7 @@ def svg_case_blocks(records: list[dict], events: list[tuple[str, str, str]]) -> 
         "</text>"
         f'<text class="panel-sub" x="{cx_left:.0f}" y="{title_pad - 12:.0f}">'
         "Each square = one case file. Columns = day. Colour = fix layer; "
-        "solid border = improvement that generalised back into the solver."
+        "above the baseline = improvements that generalised, below = one-off / no-change."
         "</text>"
     )
 
@@ -1001,7 +1040,7 @@ def svg_case_blocks(records: list[dict], events: list[tuple[str, str, str]]) -> 
         annotation_parts.append(
             f'<g class="annot" data-date="{esc(iso)}" data-full="{esc(full_text)}">'
             f'<line class="annot-line" x1="{xi:.1f}" y1="{title_pad:.0f}" '
-            f'x2="{xi:.1f}" y2="{baseline_y:.1f}"></line>'
+            f'x2="{xi:.1f}" y2="{baseline_y + grid_h_down:.1f}"></line>'
             f'<text class="annot-marker" x="{xi:.1f}" y="14" '
             f'text-anchor="middle">{esc(short)}</text>'
             f"</g>"
@@ -1011,11 +1050,13 @@ def svg_case_blocks(records: list[dict], events: list[tuple[str, str, str]]) -> 
         f'<svg id="caseTimeline" viewBox="0 0 {width} {height}" role="img" '
         f'aria-label="Case block grid by day">'
         f'<rect class="scatter-bg" x="0" y="0" width="{width}" height="{height}"></rect>'
+        + band_bg
         + title
         + "".join(annotation_parts)
         + engine_line
         + "".join(tick_parts)
         + "".join(blocks_parts)
+        + band_labels
         + "</svg>"
     )
 
@@ -3448,10 +3489,9 @@ def render_guardrail_html() -> str:
     return f"""  <section class="guard-section" aria-labelledby="guardrail">
     {_GD_DEFS}
     <h2 id="guardrail">Agent guardrail</h2>
-    <p class="lead">config 자동 생성은 AI 에이전트가 한다 &mdash; 비결정적이고, 실제로 사이트에 네트워크
-      요청을 보낸다. 그런 에이전트에게 production 스크래핑 config 를 쓰게 하되, 진짜 repo 는 절대 못
-      건드리게 막는다. 에이전트는 일회용 임시폴더 안에서 <em>후보</em> 파일만 쓰고, 부모 프로세스가 그
-      후보를 독립적으로 다시 검증한 뒤에야 발행한다. 무거운 일을 하는 건 두 기법이다.</p>
+    <p class="lead">config 자동 생성은 codex 에이전트가 한다. 에이전트는 repo 밖 임시폴더에서 후보
+      config 만 쓰고, 부모 프로세스가 이를 다시 검증한 뒤 <code>configs/</code> 에 발행한다. 핵심
+      기법은 임시폴더 격리와 해시 감사 둘이다.</p>
     <div class="guard-features">{core_cards}</div>
     <p class="guard-tier-label">이 둘을 받쳐주는 세부 4</p>
     <div class="guard-details">{detail_cards}</div>
@@ -3831,6 +3871,10 @@ def render_html(
     .axis-grid {{ stroke: var(--line); stroke-width: 0.6; stroke-dasharray: 2 4; opacity: 0.6; }}
     .axis-tick {{ fill: var(--muted); font: 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
     .engine-baseline {{ stroke: var(--ink); stroke-width: 1.4; opacity: 0.85; }}
+    .case-band {{ stroke: none; }}
+    .case-band.band-improved {{ fill: rgba(61,115,127,0.07); }}
+    .case-band.band-other {{ fill: rgba(31,37,40,0.035); }}
+    .band-label {{ fill: var(--muted); font: 600 9.5px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 0.04em; text-transform: uppercase; }}
     .case-block {{ cursor: pointer; opacity: 0.92; transition: transform 80ms ease, opacity 80ms ease; stroke: rgba(31,37,40,0.0); stroke-width: 0.6; }}
     .case-block:hover, .case-block:focus {{ opacity: 1; transform: translateY(-1px); outline: none; }}
     .case-block.outcome-improved {{ stroke: rgba(31,37,40,0.85); stroke-width: 0.8; }}
@@ -4798,8 +4842,11 @@ def render_html(
         <span style="color:#7b5c8c">A</span> prompt / agentic,
         <span style="color:#6f7f52">B/D/E</span> engine / writer / validate, or
         <span style="color:#888">no-change</span> (we wrote a note but no code moved).
-        <strong>Solid borders</strong> mark the cases that became <em>improvements</em> — patterns
-        the solver now handles on its own next time. Dashed verticals are infra milestones
+        On top of that colour, the grid splits in two around the baseline:
+        blocks <strong>above</strong> are the cases that became <em>improvements</em> — patterns
+        the solver now handles on its own next time — while blocks <strong>below</strong> are
+        everything else (one-off hand patches, no-change notes, rejections) bolted on without
+        generalising. Dashed verticals are infra milestones
         (hover for what shipped). <strong>Click any block</strong> to read its note inline, or
         open the full markdown on GitHub from the modal footer.</figcaption>
     </figure>
