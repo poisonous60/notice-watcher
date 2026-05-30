@@ -2647,6 +2647,10 @@ def write_probe_raw_assets(site_dir: Path, har_detail: dict | None) -> None:
     raw_root = site_dir / "probe-raw"
     manifest = {
         "cache_version": _HAR_DETAIL_CACHE_VERSION,
+        # Include the renderer signature so raw assets regenerate when the
+        # script that builds their content changes — not only when the probe
+        # artifacts change. Mirrors write_probe_panel_assets.
+        "script": _stat_item("__render__/scripts/generate_site.py", ROOT / "scripts" / "generate_site.py"),
         "panels": len(panels),
         "items": [
             {"slug": (panel.get("manifest") or {}).get("slug"), "panel": panel.get("manifest") or {}}
@@ -4799,7 +4803,10 @@ def render_html(
         }}
         function loadText(url) {{
           if (window.fetch) {{
-            return fetch(url).then(function (res) {{
+            // no-cache: always revalidate with the server (conditional GET,
+            // 304 when unchanged). Raw assets are served without Cache-Control,
+            // so a plain fetch would heuristic-cache stale content after regen.
+            return fetch(url, {{ cache: 'no-cache' }}).then(function (res) {{
               if (!res.ok) throw new Error('HTTP ' + res.status);
               return res.text();
             }});
@@ -4807,6 +4814,7 @@ def render_html(
           return new Promise(function (resolve, reject) {{
             var xhr = new XMLHttpRequest();
             xhr.open('GET', url);
+            xhr.setRequestHeader('Cache-Control', 'no-cache');
             xhr.onload = function () {{
               if (xhr.status >= 200 && xhr.status < 300) resolve(xhr.responseText || '');
               else reject(new Error('HTTP ' + xhr.status));
