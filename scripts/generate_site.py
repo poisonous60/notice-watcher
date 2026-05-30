@@ -3783,6 +3783,20 @@ def render_html(
       content-visibility: auto;
       contain-intrinsic-size: auto 500px;
     }}
+    /* The off-screen cull above is not enough: the 1–2 figures actually in the
+       viewport still re-rasterise their ~950-node / ~410-node vector SVGs on
+       EVERY continuous-resize frame, and a trace showed that on-screen RasterTask
+       is the residual multi-second freeze while dragging the window edge. So while
+       a resize is in flight we blank the heavy figures outright — content-visibility
+       :hidden skips their layout+paint+raster but keeps the reserved box — and let
+       them re-rasterise ONCE when the drag settles. The body.resizing class is
+       toggled by a 180ms idle-debounced resize handler (see end of <body>). */
+    body.resizing #figures figure,
+    body.resizing #harPipeline,
+    body.resizing #harPipelineLegacy,
+    body.resizing #probeAgenticFigure {{
+      content-visibility: hidden;
+    }}
     .svg-title {{
       fill: var(--ink);
       font: 600 18px Georgia, "Times New Roman", serif;
@@ -5336,6 +5350,21 @@ def render_html(
       cards.forEach(function (c) {{
         c.addEventListener('click', function () {{ activate(c.getAttribute('data-guard')); }});
       }});
+    }})();
+  </script>
+
+  <script>
+    /* Resize de-jank — blank heavy figures while the window edge is being
+       dragged, restore them 180ms after the drag settles. Without this the
+       on-screen figure re-rasterises every frame and the tab locks. */
+    (function () {{
+      var timer, active = false;
+      function settle() {{ active = false; document.body.classList.remove('resizing'); }}
+      window.addEventListener('resize', function () {{
+        if (!active) {{ active = true; document.body.classList.add('resizing'); }}
+        clearTimeout(timer);
+        timer = setTimeout(settle, 180);
+      }}, {{ passive: true }});
     }})();
   </script>
 
