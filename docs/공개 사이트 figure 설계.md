@@ -74,7 +74,7 @@
   - **KPI strip** 4 셀 — entries / JSON-ish / xhr/fetch / HTTP 4xx/5xx
   - **Meta dl** — HAR mtime · verdict · config strategy · host label. probe host / first article host 는 `<details>` 안에 host-only 로 둔다.
   - **Content-type 분포** `<details>` (top 8)
-  - **Signal table** (`.har-signal-table`, 단일 `packet-scroll` 창) — key / type / count / preview. Model input packet 과 같은 패턴: 별도 `<table>` 안 쓰고 `packet-group-head` row 로 source 별 section 분할 (List JSON API · Article body JSON · RSS/Atom · Pagination · Audio share · Register digest · Stored probe summary). 각 group head 에 source 함수 라벨. 빈 section 은 `Not detected for this probe.` row. Stored probe summary section 의 `type` 컬럼은 signal 종류가 아니라 `list_candidates.json` 필드 값의 자료형(str/list/dict/null) — group-head note 로 명시.
+  - **Signal table** (`.har-signal-table`, 단일 `packet-scroll` 창) — key / type / count / preview. Model input packet 과 같은 패턴: 별도 `<table>` 안 쓰고 `packet-group-head` row 로 source 별 section 분할 (List JSON API · Article body JSON · RSS/Atom · Pagination · Audio share · Register digest · Stored probe summary). 각 group head 에 source 함수 라벨. 빈 section 은 `Not detected for this probe.` row. Stored probe summary section 의 `type` 컬럼은 signal 종류가 아니라 `list_candidates.json` 필드 값의 자료형(str/list/dict/null) — group-head note 로 명시. **행 hover** = 그 signal/필드의 *역할* 설명 (`_HAR_SIGNAL_ROLES`(section 별) / `_HAR_FIELD_ROLES`(필드 별), 출처 = `probe/extract.py` docstring + 소비하는 register gate). key/type/count 반복 대신 역할을 헤드라인으로 — `probe/extract.py` 의 신호 정의 이동 시 best-effort 동기화.
   - **raw signals (redacted)** `<details>`:
     - traffic_api_candidates — List JSON API 후보
     - traffic_article_body_candidates — Article body JSON 후보

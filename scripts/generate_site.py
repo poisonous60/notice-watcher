@@ -2878,6 +2878,49 @@ def _placeholder_har_panel() -> dict:
     }
 
 
+# Per-field role explanations for the Figure 4 signal-table hover. Sourced from
+# the docstrings / inline comments in probe/extract.py where each signal is
+# produced, plus the register.py gate that consumes it. Keep in sync when those
+# move (best-effort, same caveat as WATCH_CALL_TREE). Signal-section roles are
+# keyed by section key; stored-summary roles by the list_candidates.json field.
+_HAR_SIGNAL_ROLES = {
+    "traffic_api_candidates": "traffic.har 의 JSON 응답 중 글 목록처럼 생긴 API endpoint 후보. config writer 가 list.url_template 으로 이 endpoint 를 쓰면 정적 HTML 파싱 없이 목록을 뽑는다.",
+    "traffic_article_body_candidates": "글 본문을 JSON 으로 돌려주는 API 후보. article.body 추출을 HTML 대신 이 endpoint 로 돌릴 수 있다.",
+    "rss_feed_urls": "RSS/Atom feed URL 후보. feed 가 있으면 config 는 list 를 feed 로 잡는다 (가장 안정적인 목록 소스).",
+    "pagination_hints": "?page=N 류 URL pagination 단서. list.pagination 설정 + ?page 없으면 카드 안 그리는 SPA 봉합.",
+    "audio_share_signal": "RSS link 가 오디오 플레이어 host(share.transistor.fm 등)를 가리키는 podcast feed. 본문 fetch 면제(body_empty_acceptable).",
+    "digest": "register agent(codex)가 실제로 받는 증거 묶음 — site_kind/feed/list_html/추천 노트. config 생성의 직접 입력.",
+}
+_HAR_FIELD_ROLES = {
+    "html_repeating_patterns": "같은 부모 안에서 동일 시그니처(태그+클래스) 자식이 N개↑ 인 노드 = 게시글 행 후보. board list selector 추출의 핵심.",
+    "traffic_json_api_candidates": "HAR JSON 응답 중 글 목록처럼 생긴 API endpoint 후보. 정적 HTML 없이 list 추출.",
+    "hydration_list_candidates": "__NEXT_DATA__ / window.__NUXT__ 등 SSR hydration JSON 안의 목록 후보.",
+    "inline_js_data_candidates": "인라인 JS/JSON(articles.push({...}) 등) 안의 목록 후보 — 다음카페 모바일류.",
+    "runtime_id_candidates": "HTML 에 고정값으로 박힌 ID/슬러그(cafe_id/board_id 등) — URL 에는 없는 식별자.",
+    "first_article_url": "list 의 첫 글 URL — article fetch 검증 대상.",
+    "row_external_host": "list row 의 sample_url host 가 base host 와 다른 비율 — 검색결과/aggregator 검출(external_ratio).",
+    "row_interactive_action": "list row 텍스트의 액션 UI 키워드 매칭 — 게임 디렉토리/투표/SPA 검출.",
+    "body_empty_likely": "본문이 본질적으로 없는 사이트 summary. LLM 이 이 키 하나로 article.body_empty_acceptable=true 를 박는다.",
+    "nav_only_same_host": "same-host 반복 패턴이 전부 nav/aside/header/footer 안 = 단일 article 신호. register `_single_article_nav_only_check` 가 board_shape 게이트 전에 거부.",
+    "article_meta_signals": "og:type=article + schema.org NewsArticle 등 페이지가 스스로 단일 article 임을 선언한 meta 신호. register `_meta_article_diverging_check` 가 first_article 의 path-prefix 가 다르면 거부.",
+    "root_marketing_homepage": "root 도메인 마케팅 랜딩/허브 검출(board 정의 아님). register `_root_marketing_homepage_check` 가 LLM 호출 전 REJECT + 섹션 URL 권장.",
+    "audio_share_host_detected": "RSS item link 가 오디오 플레이어 host 를 가리키는 podcast feed. 본문 HTML fetch 대상 아님 → body_empty_acceptable 완화.",
+    "wordpress_platform": "WordPress 플랫폼 검출(generator meta). null = WordPress 아님.",
+    "storyblok_platform": "Storyblok CMS 검출. null = 아님.",
+    "discourse_platform": "Discourse 포럼 검출(generator meta). register 가 DiscourseAdapter config 를 만들어 등록 시도. null = 아님.",
+    "common_platform": "Common/Commonwealth governance forum SPA 검출(app shell + trpc API). null = 아님.",
+    "xenforo_platform": "XenForo 포럼 검출. null = 아님.",
+    "medium_custom_domain": "Medium 을 custom domain 으로 쓰는 블로그 검출. null = 아님.",
+    "lemmy_platform": "Lemmy(fediverse) 검출. null = 아님.",
+    "mastodon_platform": "Mastodon(fediverse) 검출. null = 아님.",
+    "misskey_platform": "Misskey(fediverse) 검출. null = 아님.",
+    "pixelfed_platform": "Pixelfed(fediverse) 검출. null = 아님.",
+    "peertube_platform": "PeerTube(fediverse) 검출. null = 아님.",
+    "mbin_platform": "Mbin(fediverse) 검출. null = 아님.",
+    "soft_404": "HTTP 200 이지만 본문이 not-found 인 soft-404 신호. (옛 regex 분기; 현재는 LLM 분류기 not_found 가 최종 판정.)",
+}
+
+
 def render_har_detail_html(payload: dict | None) -> str:
     panels = (payload or {}).get("panels") or []
     if not panels:
@@ -3009,6 +3052,7 @@ def _render_har_detail_panel(panel: dict, *, hidden: bool) -> str:
         signal_groups.append({
             "label": sec.get("title") or section_key,
             "source": sec.get("source") or "",
+            "role": _HAR_SIGNAL_ROLES.get(section_key, ""),
             "rows": rows,
         })
 
@@ -3044,7 +3088,8 @@ def _render_har_detail_panel(panel: dict, *, hidden: bool) -> str:
     signal_groups.append({
         "label": artifact.get("title") or "Stored probe summary (list_candidates.json)",
         "source": artifact.get("source") or "list_candidates.json",
-        "note": "type 컬럼 = 저장 필드 값의 자료형 (str / list / dict / null) — 위 signal 종류와 의미 다름",
+        "note": "type 컬럼 = 저장 필드 값의 자료형 (str / list / dict / null) — 위 signal 종류와 의미 다름. 각 필드 역할은 행 hover.",
+        "is_stored": True,
         "rows": stored_rows,
     })
 
@@ -3064,6 +3109,8 @@ def _render_har_detail_panel(panel: dict, *, hidden: bool) -> str:
     )
     for group in signal_groups:
         body += _sig_group_head(group["label"], group.get("source", ""), group.get("note", ""))
+        is_stored = bool(group.get("is_stored"))
+        group_role = str(group.get("role") or "")
         for item in group["rows"]:
             empty_cls = " sig-empty" if "sig-empty" in str(item.get("badge_class")) else ""
             meta = str(item.get("meta") or "")
@@ -3072,14 +3119,26 @@ def _render_har_detail_panel(panel: dict, *, hidden: bool) -> str:
             kind = str(item.get("kind") or item.get("badge") or item.get("type") or "—")
             count = str(item.get("count") if item.get("count") not in (None, "") else "—")
             preview = " · ".join(x for x in (meta, evidence) if x and x != "—") or "—"
-            tip_html = (
-                f'<div class="packet-pop-row"><b>key</b><code>{esc(key)}</code></div>'
-                f'<div class="packet-pop-row"><b>type</b>{esc(kind)}</div>'
-                f'<div class="packet-pop-row"><b>count</b>{esc(count)}</div>'
-                f'<div class="packet-pop-row"><b>host</b><code>{esc(item.get("host") or "—")}</code></div>'
-                f'<div class="packet-pop-row"><b>meta</b>{esc(meta or "—")}</div>'
-                f'<div class="packet-pop-row"><b>evidence</b>{esc(evidence or "—")}</div>'
-            )
+            # Hover leads with the field's ROLE (what it is / which register gate
+            # eats it), sourced from _HAR_*_ROLES — not a useless repeat of the
+            # visible key/type/count cells. Stored fields look up per-field; signal
+            # rows share their section role.
+            if is_stored:
+                row_role = _HAR_FIELD_ROLES.get(key, "")
+            else:
+                row_role = group_role
+            host = str(item.get("host") or "—")
+            tip_parts = []
+            if row_role:
+                tip_parts.append(f'<div class="packet-pop-title">{esc(row_role)}</div>')
+            tip_parts.append(f'<div class="packet-pop-row"><b>field</b><code>{esc(key)}</code></div>')
+            if host and host != "—":
+                tip_parts.append(f'<div class="packet-pop-row"><b>host</b><code>{esc(host)}</code></div>')
+            if meta and meta != "—":
+                tip_parts.append(f'<div class="packet-pop-row"><b>detail</b>{esc(meta)}</div>')
+            if evidence and evidence != "—":
+                tip_parts.append(f'<div class="packet-pop-row"><b>evidence</b>{esc(evidence)}</div>')
+            tip_html = "".join(tip_parts)
             body += (
                 f'<tr class="har-signal-row{empty_cls}" tabindex="0" data-tip-html="{esc(tip_html)}">'
                 '<td class="har-signal-key">'
@@ -4506,6 +4565,14 @@ def render_html(
     .packet-hover-tip code {{ color: var(--panel); }}
     .packet-hover-tip b {{ color: #d7e2e4; }}
     .packet-hover-tip .packet-pop-row {{ margin: 2px 0; }}
+    .packet-hover-tip .packet-pop-title {{
+      color: #fff;
+      font-weight: 700;
+      margin: 0 0 5px;
+      padding-bottom: 4px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.18);
+      line-height: 1.4;
+    }}
     .packet-hover-tip .packet-pop-row b {{
       display: inline-block;
       min-width: 68px;
