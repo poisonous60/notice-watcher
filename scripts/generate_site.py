@@ -3768,6 +3768,21 @@ def render_html(
       max-width: 100%;
       overflow: visible;
     }}
+    /* Resize/scroll perf — the radial scatter (~950 SVG nodes) and case grid
+       (~410 rects) re-rasterise on every continuous-resize frame; without this
+       the whole page (≈10k nodes, 11 inline SVGs) reflows + repaints each frame
+       and the tab locks while dragging the window width. content-visibility lets
+       the browser skip layout+paint for any figure not in the viewport, so a drag
+       only repaints the 1–2 visible figures. (Hover tooltips live OUTSIDE these
+       figures — see Figures 1/2 markup — so the implied paint containment can't
+       clip or mis-position them.) */
+    #figures figure,
+    #harPipeline,
+    #harPipelineLegacy,
+    #probeAgenticFigure {{
+      content-visibility: auto;
+      contain-intrinsic-size: auto 500px;
+    }}
     .svg-title {{
       fill: var(--ink);
       font: 600 18px Georgia, "Times New Roman", serif;
@@ -4780,7 +4795,6 @@ def render_html(
     <figure>
       {scatter_chart}
       <ul class="legend">{legend_html}</ul>
-      <div id="dotTip" class="dot-tip" hidden></div>
       <figcaption>Figure 1. Every URL we evaluated, arranged from the centre outward by outcome. The inner
         disc is the set of boards we actively watch — each dot's colour shows how we read it (static
         HTML, JSON API, headless browser, or a custom adapter; see legend), and the spiral layout has no
@@ -4788,6 +4802,7 @@ def render_html(
         single content pages, anti-bot blocks, and dead or broken URLs. Hover a dot to highlight the
         same fetch method and see the domain; click to open the URL in a new tab.</figcaption>
     </figure>
+    <div id="dotTip" class="dot-tip" hidden></div>
     <script>
       (function () {{
         var svg = document.getElementById('siteScatter');
@@ -4846,7 +4861,6 @@ def render_html(
     <figure>
       {timeline_svg}
       <ul class="legend timeline-legend">{timeline_legend_html}</ul>
-      <div id="timelineTip" class="dot-tip" hidden></div>
       <figcaption><strong>Figure 2.</strong> Every time the auto-solver fails on a new
         site, a human reads through what happened and writes a short note in
         <code>docs/cases/</code>. One block per note, stacked on the day it landed. The thick
@@ -4867,6 +4881,7 @@ def render_html(
         (hover for what shipped). <strong>Click any block</strong> to read its note inline, or
         open the full markdown on GitHub from the modal footer.</figcaption>
     </figure>
+    <div id="timelineTip" class="dot-tip" hidden></div>
     {case_db_html}
     <div id="caseModal" class="modal" hidden role="dialog" aria-labelledby="caseModalTitle" aria-modal="true">
       <div class="modal-backdrop" data-close="1"></div>
