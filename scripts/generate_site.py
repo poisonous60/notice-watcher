@@ -1465,7 +1465,7 @@ def render_stage_panels() -> str:
 # ────────────────────────────────────────────────────────────────────────────
 
 _HAR_DETAIL_CACHE_PATH = ROOT / "output" / "site" / "_har_detail.json"
-_HAR_DETAIL_CACHE_VERSION = 3
+_HAR_DETAIL_CACHE_VERSION = 4
 _HAR_DETAIL_MANIFEST_FILES = (
     "traffic.har",
     "list.html",
@@ -2305,6 +2305,39 @@ def build_agentic_packet(detail: dict, *, run_dir: Path | None = None) -> dict:
         digest_model_facing = digest_raw
     config_json, config_preview = _published_config_summary(slug)
     config_strategy = str(detail.get("config_strategy") or config_json.get("strategy") or "unknown")
+    # Reproduce the real example picks. _pick_examples is deterministic and
+    # pure (scores existing configs/ by recognizer/host/strategy, excludes this
+    # slug) — same routine register-time uses. Lazy + guarded so the stdlib-only
+    # site path still imports when generate.codex_agentic is unavailable.
+    picked_manifest: list[dict] = []
+    picked_configs: dict[str, object] = {}
+    try:
+        from generate.codex_agentic import (  # noqa: PLC0415
+            _pick_examples as _ca_pick,
+            _score_example as _ca_score,
+            _example_reason as _ca_reason,
+        )
+        score_digest = {
+            "url": probe_url,
+            "recognizer_hint": {"name": config_json.get("recognizer") or ""},
+            "strategy_hint": {"strategy": config_strategy},
+        }
+        for ex_path in _ca_pick(score_digest, ROOT, slug, n=2):
+            try:
+                ex_cfg = json.loads(ex_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if not isinstance(ex_cfg, dict):
+                continue
+            picked_manifest.append({
+                "slug": ex_path.stem,
+                "score": _ca_score(ex_cfg, score_digest),
+                "reason": _ca_reason(ex_cfg, score_digest),
+            })
+            picked_configs[ex_path.name] = ex_cfg
+    except Exception:
+        picked_manifest = []
+        picked_configs = {}
     signal_counts = {
         "har_entries": summary.get("entry_count", 0),
         "json_entries": summary.get("json_count", 0),
@@ -2354,7 +2387,9 @@ def build_agentic_packet(detail: dict, *, run_dir: Path | None = None) -> dict:
     examples_packet = {
         "selection_rule": "top 2 scored configs excluding the current slug",
         "current_strategy": config_strategy,
-        "manifest_shape": [{"slug": "<example-slug>", "score": 0, "reason": "recognizer/host/strategy match"}],
+        "manifest": picked_manifest or [
+            {"note": "no config scored > 0 — no recognizer/host/strategy match in configs/"}
+        ],
     }
     validator_packet = {
         "launcher": "run_validator.bat on Windows, run_validator.sh elsewhere",
@@ -2429,13 +2464,14 @@ def build_agentic_packet(detail: dict, *, run_dir: Path | None = None) -> dict:
             "path": "examples/*.json (×2)",
             "source": "2 copied prior configs (closest matches)",
             "role": "Read on demand: the agent opens 1–2 of these (per manifest scores) when authoring the config — not guaranteed to read both.",
-            "contains": ["full config JSON of each picked example"],
-            "raw": _json_full({
-                "note": "the 2 closest successful configs are staged here; the agent opens 1–2 as needed",
-                "selection_rule": examples_packet.get("selection_rule"),
+            "contains": [f"{name} (full config JSON)" for name in picked_configs]
+            or ["no example scored > 0 for this site"],
+            "raw": _json_full(picked_configs or {
+                "note": "no config scored > 0 — no recognizer/host/strategy match in configs/"
             }),
             "raw_url": f"probe-raw/{slug}/agentic/examples_configs.json",
-            "preview": "2 closest configs staged; agent opens 1–2 as needed",
+            "preview": _json_excerpt(picked_configs, max_chars=6000) if picked_configs
+            else "no matching example configs (none scored > 0)",
         },
         {
             "phase": "Rules",

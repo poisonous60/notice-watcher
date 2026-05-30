@@ -198,6 +198,18 @@ def run() -> list[tuple[str, bool, str]]:
         html[html.find("packet-input-table"):html.find("packet-input-table") + 600],
     ))
     cases.append((
+        "packet_examples_show_real_picks_not_placeholder",
+        # examples/manifest.json + examples/*.json must surface the ACTUAL
+        # picked configs (reproduced via _pick_examples), not the old hardcoded
+        # shape/stub. The placeholder slug, the manifest_shape key, and the
+        # static "2 closest configs staged" stub note must all be gone.
+        "<example-slug>" not in html
+        and "manifest_shape" not in html
+        and "the 2 closest successful configs are staged here" not in html
+        and '"selection_rule": "top 2 scored configs excluding the current slug"' in packet["raw_text"],
+        next((f["raw"] for f in packet["files"] if f["path"] == "examples/manifest.json"), "")[:400],
+    ))
+    cases.append((
         "packet_has_clickable_raw_text_bundle",
         "COMMAND" in packet["raw_text"]
         and "===== AGENTS.md =====" in packet["raw_text"]
