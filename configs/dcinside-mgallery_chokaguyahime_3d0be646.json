@@ -10,10 +10,6 @@
     "Referer": "https://gall.dcinside.com/"
   },
   "timeout": 15.0,
-  "polite_sleep": {
-    "min": 30.0,
-    "max": 35.0
-  },
   "list": {
     "url_template": "https://gall.dcinside.com/mgallery/board/lists/?id={board}&sort_type=N&exception_mode=recommend&search_head=100",
     "pagination": {
