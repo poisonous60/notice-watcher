@@ -81,6 +81,46 @@ _CHROMIUM_HANDWRITTEN = {"ArcaLiveAdapter", "IdxPressReleaseAdapter"}
 # 나머지 사이트는 그대로 진행 — 1개 hang 으로 1000개 폴링 결과 lost 막음.
 POLL_SITE_TIMEOUT_S = 180
 
+# 본문 fetch 1건당 예상 작업 headroom (실제는 ≪; 단발 hang 은 httpx per-req timeout 이 잡음)
+# + list fetch/parse/state I/O 고정 overhead. _site_wall_timeout 의 예산 계산에 쓰임.
+_ARTICLE_FETCH_BUDGET_S = 8.0
+_WALL_OVERHEAD_S = 30.0
+
+
+def _polite_sleep_max(state: dict) -> float:
+    """이 사이트가 본문 fetch 사이 *최대* 기다리는 초. config 의 polite_sleep 에 엔진 floor
+    (config_adapter._DEFAULT_SLEEP_MAX) 적용한 상한 — ConfigAdapter 가 실제 쓰는 값과 동일.
+    config 못 읽으면 엔진 기본 상한."""
+    from engine.config_adapter import _DEFAULT_SLEEP_MAX, _DEFAULT_SLEEP_MIN
+    cp = state.get("config_path")
+    if not cp:
+        return _DEFAULT_SLEEP_MAX
+    try:
+        cfg = json.loads(Path(cp).read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return _DEFAULT_SLEEP_MAX
+    ps = cfg.get("polite_sleep") or {}
+    pmin = max(_DEFAULT_SLEEP_MIN, float(ps.get("min", _DEFAULT_SLEEP_MIN)))
+    return max(_DEFAULT_SLEEP_MAX, float(ps.get("max", _DEFAULT_SLEEP_MAX)), pmin)
+
+
+def _site_wall_timeout(state: dict, *, base: float, max_new_articles: int) -> float:
+    """사이트별 wall cap = max(base, 본문 fetch 예상 작업시간).
+
+    버그 봉합 (2026-05-31): polite_sleep × max_new_articles 가 고정 cap(base 180s) 을 넘는
+    *느리지만 정상* 사이트(예 robots Crawl-Delay 30s 준수) 는 매 폴 wall timeout 으로 죽고,
+    seen state 는 _process_site 완료 후에만 갱신(:306)되므로 동결 → backlog 안 줄어 영구
+    poll_timeout deadlock. deterministic polite_sleep 작업이 base 를 넘으면 그만큼 예산을 키워
+    deadlock 방지. fast 사이트는 base 그대로 (hung-site detector 의미 유지 — cap 은 max 라
+    절대 줄지 않음 → 기존 사이트 regression 0).
+
+    적용 범위 = inline(httpx) 사이트의 `asyncio.wait_for` path 뿐. chromium 사이트는
+    `_site_with_timeout` 가 worker 로 enqueue 하고 일찍 return 하므로 이 값은 안 쓰임
+    (worker 의 poll_site 처리 timeout 은 별도 — 같은 deadlock 가능성은 후속 과제)."""
+    n = max(1, int(max_new_articles))
+    required = (n - 1) * _polite_sleep_max(state) + n * _ARTICLE_FETCH_BUDGET_S + _WALL_OVERHEAD_S
+    return max(float(base), required)
+
 
 def _config_meta(state: dict) -> tuple[str, str]:
     """(strategy, adapter_name) 반환. 둘 다 빈 문자열 가능. 실패 시 ('', '')."""
@@ -595,7 +635,7 @@ async def _process_site(st: dict, *, page_size: int, max_new_articles: int,
     if "_new_seen" in res:
         res.pop("_new_seen", None)
     st_path.write_text(
-        json.dumps({k: v for k, v in st.items() if k != "_state_path"}, ensure_ascii=False, indent=2),
+        json.dumps({k: v for k, v in st.items() if k not in ("_state_path", "_wall_timeout_s")}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
     row = (slug, st["last_status"], res["n_posts"], res["n_new"], res["note"])
@@ -755,7 +795,7 @@ async def _site_with_timeout(st: dict, *, timeout: float,
                     if sp:
                         try:
                             Path(sp).write_text(
-                                json.dumps({k: v for k, v in st.items() if k != "_state_path"},
+                                json.dumps({k: v for k, v in st.items() if k not in ("_state_path", "_wall_timeout_s")},
                                            ensure_ascii=False, indent=2),
                                 encoding="utf-8")
                         except Exception:  # noqa: BLE001
@@ -891,9 +931,14 @@ async def _run_inner(args) -> int:
     )
     t_run = time.perf_counter()
 
+    # ADR 0016 보강 (2026-05-31) — wall cap 을 사이트별로. polite_sleep × max_new_articles 가
+    # 큰 사이트는 base 를 넘는 예산을 줘 deadlock(seen 동결) 방지. CLI --site-timeout 가 base.
+    for st in states:
+        st["_wall_timeout_s"] = _site_wall_timeout(
+            st, base=timeout_s, max_new_articles=args.max_new_articles)
     tasks = [
         asyncio.create_task(_site_with_timeout(
-            st, timeout=timeout_s,
+            st, timeout=st["_wall_timeout_s"],
             page_size=args.page_size, max_new_articles=args.max_new_articles,
             lurking=(not args.all) and (st["slug"] not in subscribed),
             no_reprobe=args.no_reprobe, run_dir=run_dir,
@@ -926,7 +971,8 @@ async def _run_inner(args) -> int:
             # _process_site 본문 안에서 처리 못한 예외 또는 wall timeout. state 파일에 fallback 업데이트.
             slug = st.get("slug", "?")
             is_to = isinstance(res, asyncio.TimeoutError)
-            note = f"{type(res).__name__}: {res}" if not is_to else f"poll_timeout > {int(effective_timeout)}s"
+            site_to = float(st.get("_wall_timeout_s", effective_timeout))
+            note = f"{type(res).__name__}: {res}" if not is_to else f"poll_timeout > {int(site_to)}s"
             print(f"\n=== {slug} ===")
             print(f"  ⚠ {'wall timeout' if is_to else 'task 예외'}: {note}")
             st["last_poll_at"] = _now_iso()
@@ -942,7 +988,7 @@ async def _run_inner(args) -> int:
             if sp:
                 try:
                     Path(sp).write_text(
-                        json.dumps({k: v for k, v in st.items() if k != "_state_path"},
+                        json.dumps({k: v for k, v in st.items() if k not in ("_state_path", "_wall_timeout_s")},
                                    ensure_ascii=False, indent=2),
                         encoding="utf-8",
                     )

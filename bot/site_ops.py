@@ -233,6 +233,55 @@ def _clear_broken_after_reprobe(slug: str) -> None:
             log.warning("_clear_broken_after_reprobe .BROKEN.json unlink 실패 — slug=%s err=%r", slug, e)
 
 
+# ── owner 알림 dedup (deliver_due 가 BROKEN 사이트를 owner DM 으로 1회 통보) ──────────────
+# 2026-05-31 — dcinside chokaguyahime 가 5일간 매일 poll_timeout 였는데 owner 알림 0건이라
+# 사용자가 "알림 안 와" 눈치챌 때까지 silent 였음. BROKEN sidecar 는 사용자 digest 에만 노출됐고
+# (notify_empty=1 구독만), owner 운영 알림 경로가 없었음. episode 식별 = (slug, BROKEN.first_at)
+# — _save_broken 이 first_at 을 episode 내내 유지하므로 같은 episode 는 1회만 알림. 복구
+# (BROKEN unlink) 후 재발하면 new first_at → 재알림.
+_OWNER_ALERT_STATE = STATE_DIR / "_owner_broken_alerts.json"
+
+
+def _load_owner_alert_state() -> dict:
+    if not _OWNER_ALERT_STATE.exists():
+        return {}
+    try:
+        d = json.loads(_OWNER_ALERT_STATE.read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def unalerted_broken() -> list[dict]:
+    """현재 BROKEN sidecar 중 owner 에게 *이 episode* 로 아직 안 알린 것들의 broken_info dump.
+    read-only — 실제 마킹은 발송 성공 후 `mark_broken_alerted` 가. (slug, first_at) 키로 dedup."""
+    state = _load_owner_alert_state()
+    out: list[dict] = []
+    for slug in broken_slugs():
+        info = broken_info(slug)
+        if not info:
+            continue
+        if state.get(slug) != info.get("first_at"):
+            out.append(info)
+    return out
+
+
+def mark_broken_alerted(infos: list[dict]) -> None:
+    """`infos`(unalerted_broken 반환분) 를 알림 완료로 마킹 + 복구된 slug 정리. write 실패 swallow."""
+    state = _load_owner_alert_state()
+    live = set(broken_slugs())
+    state = {k: v for k, v in state.items() if k in live}  # 복구(unlink) 된 slug 제거
+    for info in infos:
+        slug = info.get("slug")
+        if slug:
+            state[slug] = info.get("first_at")
+    try:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        _OWNER_ALERT_STATE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:  # noqa: BLE001
+        log.warning("mark_broken_alerted state write 실패 — err=%r", e)
+
+
 # reason 끝 ` (...)` triage/디버그 hint — 사용자에 안 보이고 owner 운영용. 사용자 향 메시지에 쓸 때만 strip.
 _INTERNAL_HINT_TAIL_RE = re.compile(r"\s*\([^()]+\)\s*$")
 

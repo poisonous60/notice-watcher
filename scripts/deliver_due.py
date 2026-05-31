@@ -47,8 +47,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from bot import db  # noqa: E402
 from bot.config import bot_token, owner_user_id  # noqa: E402
 from bot.runtime_config import settings  # noqa: E402
-from bot.discord_rest import deliver, CannotDeliver, DiscordRestError  # noqa: E402
-from bot.site_ops import is_broken, broken_info  # noqa: E402
+from bot.discord_rest import deliver, send_dm, CannotDeliver, DiscordRestError  # noqa: E402
+from bot.site_ops import is_broken, broken_info, unalerted_broken, mark_broken_alerted  # noqa: E402
 from engine.tracing import start_trace, current_trace  # noqa: E402
 from generate import client_for  # noqa: E402
 
@@ -362,6 +362,49 @@ def _parse_test_targets() -> tuple[bool, set[str]]:
     return True, out
 
 
+# owner DM 한 건 길이 가드 (Discord 2000자, send_dm 이 1900 에서 truncate). 10줄×~145자 +
+# header + footer ≈ 1.5k < 1900 — footer(/triage/broken) 가 안 잘리게 줄수·note 길이 보수적.
+_OWNER_ALERT_MAX_LINES = 10
+
+
+def _alert_owner_broken(tok: Optional[str], owner: str, *, dry: bool) -> None:
+    """BROKEN sidecar 가 *이 episode* 로 새로 박힌 사이트를 owner 에게 DM 1회 통보 (운영 알림).
+
+    2026-05-31 — dcinside chokaguyahime 가 5일간 매일 poll_timeout 였는데 owner 알림 0건.
+    BROKEN 은 사용자 digest(notify_empty=1) 에만 노출됐고 owner 운영 경로가 없어 사용자가
+    "알림 안 와" 눈치챌 때까지 silent. deliver_due 매 tick 호출 — due target 0건 early-return
+    *전* 에 돈다. dedup 은 (slug, first_at) 키. 발송 성공 후에만 마킹 → 실패 시 다음 tick 재시도.
+    dry(또는 test-skip) 면 출력만, 마킹 X (실발송 때 재알림). owner = 호출측이 1회 resolve 해 전달."""
+    pending = unalerted_broken()
+    if not pending:
+        return
+    if not owner:
+        print("  ⚠ owner-broken-alert skip — OWNER_USER_ID 미설정 "
+              "(설정 전엔 깨진 사이트가 owner 에게 영영 안 알림)", file=sys.stderr)
+        return
+    shown = pending[:_OWNER_ALERT_MAX_LINES]
+    lines = [f"❗ 폴링이 깨진 사이트 {len(pending)}건이 있어요 (운영 알림)."]
+    for info in shown:
+        slug = info.get("slug", "?")
+        cb = info.get("consecutive_breakage", "?")
+        last_status = info.get("last_status", "") or ""
+        note = (info.get("last_note", "") or "").strip().replace("\n", " ")[:80]
+        lines.append(f"· `{slug}` — 연속 {cb}회 · {last_status}{(': ' + note) if note else ''}")
+    if len(pending) > len(shown):
+        lines.append(f"  …외 {len(pending) - len(shown)}건")
+    lines.append("대시보드 `/triage/broken` 에서 확인하세요.")
+    content = "\n".join(lines)
+    if dry:
+        print(f"  🧪 owner-broken-alert dry — {len(pending)}건 (실발송·마킹 X)")
+        return
+    try:
+        send_dm(tok, str(owner), content)
+        mark_broken_alerted(pending)
+        print(f"  ❗ owner-broken-alert 발송 — {len(pending)}건 (owner DM)")
+    except Exception as e:  # noqa: BLE001
+        print(f"  ⚠ owner-broken-alert 발송 실패 (다음 tick 재시도): {e!r}", file=sys.stderr)
+
+
 def main(argv: list[str]) -> int:
     p = argparse.ArgumentParser(description="발송창 flush (ADR 0006)")
     p.add_argument("--dry-run", action="store_true", help="발송 안 하고 출력만")
@@ -388,6 +431,12 @@ def main(argv: list[str]) -> int:
 
     with start_trace("deliver_due", attrs={"now_hhmm": now_hhmm, "today": today,
                                            "test_mode": bool(test_allowed)}):
+        # 운영 알림 — BROKEN 사이트 owner DM (due target 0건이어도 매 tick 실행). test 모드면
+        # owner 가 allow-list 에 있을 때만 실발송, 아니면 dry-print.
+        owner_id = owner_user_id()
+        owner_dry = args.dry_run or (test_mode_requested and f"dm:{owner_id}" not in test_allowed)
+        _alert_owner_broken(tok, owner_id, dry=owner_dry)
+
         if args.force_target:
             kind, _, tid = args.force_target.partition(":")
             targets = [{"target_kind": kind, "target_id": tid, "deliver_at": now_hhmm}]
