@@ -4,13 +4,11 @@
 
 <h2>🔗 Subs (활성 slug · 깨짐/FAILED 우선)</h2>
 
-<form hx-get="/subs"
-      hx-target="#subs-result"
-      hx-select="#subs-result"
-      hx-trigger="keyup changed delay:300ms from:find input[name=q], change, submit"
-      hx-push-url="true"
+<form method="get" action="/subs" data-subs-filters
       class="topbar" style="border:0;margin-bottom:0.5rem;gap:0.6rem;flex-wrap:wrap;">
-  <input type="search" name="q" value="{{ q or '' }}"
+  <button type="button" data-subs-search-submit title="검색" aria-label="검색"
+          style="width:2.4rem;padding-inline:0;margin:0;">🔍</button>
+  <input type="search" value="{{ q or '' }}" data-subs-search
          placeholder="slug · URL · user_id 검색"
          style="flex:1;min-width:14em;margin:0;">
   <label style="display:flex;align-items:center;gap:0.3rem;font-size:0.85rem;white-space:nowrap;">
@@ -26,7 +24,9 @@
 </form>
 
 <div id="subs-result">
-<p class="muted" style="font-size:0.85rem;margin:0 0 0.5rem 0;">{{ rows | length }}건 표시</p>
+<p class="muted" style="font-size:0.85rem;margin:0 0 0.5rem 0;">
+  <span data-subs-count>{{ rows | length }}</span>건 표시
+</p>
 
 {% if broken_only %}
 <p class="muted" style="font-size:0.8rem;margin:0 0 0.5rem 0;">
@@ -46,7 +46,7 @@
   </thead>
   <tbody id="subs-rows">
     {% for r in rows %}
-    <tr>
+    <tr data-subs-row data-search="{{ r.search_text }}">
       <td class="mono" style="max-width:28em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
         <a href="/subs/{{ r.slug | urlencode }}" title="{{ r.slug }}">{{ r.slug }}</a>
       </td>
@@ -82,6 +82,7 @@
     {% else %}
     <tr><td colspan="7" class="muted">검색 결과 없음.</td></tr>
     {% endfor %}
+    <tr data-subs-empty hidden><td colspan="7" class="muted">검색 결과 없음.</td></tr>
   </tbody>
 </table>
 </div>

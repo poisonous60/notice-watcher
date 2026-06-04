@@ -726,6 +726,7 @@ async def subs_list(request: Request, q: Optional[str] = None,
             sample_url = fp.get("url")
         if sample_url is None and state_url:  # lurking/구독자 0 — state 파일에서 URL 복구
             sample_url = state_url
+        search_text = " ".join([s, sample_url or "", *user_ids]).lower()
         rows.append({
             "slug": s,
             "n_subs": len(subs),
@@ -742,22 +743,14 @@ async def subs_list(request: Request, q: Optional[str] = None,
             "last_reprobe_at": last_reprobe_at,
             "sample_url": sample_url,
             "user_ids": user_ids,
+            "search_text": search_text,
         })
     # broken_only 뷰에선 reprobe_streak 큰 거 우선 (자가복구 한계 가까운 후보 위로).
     rows.sort(key=lambda r: (-r["broken"], -r["reprobe_streak"], not r["failed"], r["slug"]))
     if broken_only:
         rows = [r for r in rows if r["broken"] > 0]
-    if q:
-        ql = q.strip().lower()
-        def _match(r):
-            if ql in r["slug"].lower():
-                return True
-            if ql in (r.get("sample_url") or "").lower():
-                return True
-            if any(ql in u.lower() for u in r["user_ids"]):
-                return True
-            return False
-        rows = [r for r in rows if _match(r)]
+    # q is kept only as the initial client-side filter value. Server-side
+    # filtering would force a full /subs rebuild on every search edit.
     try:
         from bot.runtime_config import settings as _rc
         _v = getattr(_rc.poll, "reprobe_fail_streak_limit", 3)

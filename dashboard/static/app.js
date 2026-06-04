@@ -45,3 +45,61 @@
     toast(ok ? '✅ 복사됨. Claude 창에 Ctrl+V' : '⚠️ 복사 실패');
   });
 })();
+
+// /subs 검색은 이미 받은 테이블 행만 숨김/표시한다.
+(function () {
+  function applySubsFilter(root) {
+    const input = document.querySelector('[data-subs-search]');
+    const rows = Array.from(document.querySelectorAll('[data-subs-row]'));
+    const count = document.querySelector('[data-subs-count]');
+    const empty = document.querySelector('[data-subs-empty]');
+    if (!input || rows.length === 0) return;
+
+    const q = (input.value || '').trim().toLowerCase();
+    let visible = 0;
+    rows.forEach((row) => {
+      const haystack = row.dataset.search || '';
+      const matched = !q || haystack.includes(q);
+      row.hidden = !matched;
+      if (matched) visible += 1;
+    });
+    if (count) count.textContent = String(visible);
+    if (empty) empty.hidden = visible !== 0;
+  }
+
+  function bindSubsFilter(root) {
+    const scope = root || document;
+    const input = scope.querySelector ? scope.querySelector('[data-subs-search]') : null;
+    const form = scope.querySelector ? scope.querySelector('[data-subs-filters]') : null;
+    const searchButton = scope.querySelector ? scope.querySelector('[data-subs-search-submit]') : null;
+    if (!input || input.dataset.boundSubsSearch === '1') return;
+    input.dataset.boundSubsSearch = '1';
+
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        applySubsFilter(document);
+      }
+    });
+    if (searchButton) {
+      searchButton.addEventListener('click', () => applySubsFilter(document));
+    }
+
+    if (form) {
+      form.querySelectorAll('input[type="checkbox"]').forEach((checkbox) => {
+        checkbox.addEventListener('change', () => {
+          if (form.requestSubmit) form.requestSubmit();
+          else form.submit();
+        });
+      });
+    }
+    applySubsFilter(document);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => bindSubsFilter(document));
+  } else {
+    bindSubsFilter(document);
+  }
+  document.addEventListener('htmx:afterSwap', (ev) => bindSubsFilter(ev.target));
+})();

@@ -32,6 +32,7 @@ docs/운영 메모.md
 docs/공개 현황 사이트.md
 docs/2026-05-16-인프라-방어.md
 docs/중간발표/
+docs/최종발표/
 
 # session-local harness state
 .claude/scheduled_tasks.lock
