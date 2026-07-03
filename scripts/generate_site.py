@@ -33,6 +33,7 @@ KST = ZoneInfo("Asia/Seoul")
 # Line numbers can drift when code is refactored; treat them as best-effort
 # anchors, not contracts (see `docs/공개 사이트 figure 설계.md` §2c).
 GITHUB_BASE = "https://github.com/poisonous60/notice-watcher/blob/main"
+GITHUB_REPO_URL = GITHUB_BASE.removesuffix("/blob/main")
 
 LANE_COLORS = {
     "bot":        "#3d737f",   # bot asyncio (matches Figure 1/2 teal)
@@ -3802,6 +3803,20 @@ def render_html(
       font-size: 0.92rem;
       margin-top: 18px;
     }}
+    .repo-link {{
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--accent);
+      font-size: 0.9rem;
+      font-weight: 700;
+      text-decoration: none;
+    }}
+    .repo-link:hover {{ text-decoration: underline; }}
+    .repo-link:focus-visible {{
+      outline: 2px solid var(--accent);
+      outline-offset: 3px;
+    }}
     .metrics {{
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -4885,6 +4900,7 @@ def render_html(
     <h1>Notice Watcher</h1>
     <p class="meta">Generated {esc(generated_at.strftime("%Y-%m-%d %H:%M:%S %Z"))}</p>
   </header>
+  <p><a class="repo-link" href="{esc(GITHUB_REPO_URL)}" target="_blank" rel="noopener noreferrer">GitHub repository</a></p>
 
   <section aria-labelledby="overview">
     <h2 id="overview">Overview</h2>
