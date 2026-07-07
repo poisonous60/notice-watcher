@@ -7,6 +7,12 @@
 # stage 1/2 점검은 `python scripts/probe_smoke.py` 통째로 손-실행.
 #
 # `.git/hooks/pre-push` 는 git 추적 X — `scripts/setup-hooks.{sh,ps1}` 가 이 파일을 그 위치로 복사.
+#
+# stdout 이 pipe(non-tty)면 Windows Python 이 stdout 인코딩을 콘솔 대신 locale codepage(cp949)로 폴백 →
+# probe_smoke 요약의 em-dash(—)/arrow(→) 가 cp949 로 못 찍혀 UnicodeEncodeError 크래시.
+# 터미널 직접 push(tty)엔 안 뜨고, 에이전트/CI 처럼 hook 출력이 캡처(pipe)될 때만 재현. UTF-8 강제로 봉합.
+export PYTHONUTF8=1
+
 echo "[pre-push] vocab_lint"
 python scripts/vocab_lint.py
 status=$?
