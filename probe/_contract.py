@@ -133,7 +133,8 @@ _ARTIFACTS: dict[str, ArtifactContract] = {
             _ContractField("first_article_url", type_hint="str|null",
                            note="HTML 후보 중 '진짜 글 페이지' 같은 URL 1개 — pick_first_article_url 산출"),
             _ContractField("html_repeating_patterns", type_hint="list[dict]",
-                           note="같은 시그니처 자식 ≥5 인 반복 패턴 — selector / sample_url / href_pattern_guess / row_data_attrs / href_is_js / child_count"),
+                           note="같은 시그니처 자식 ≥3 인 반복 패턴 — selector / sample_url / href_pattern_guess / row_data_attrs / href_is_js / child_count. "
+                                "sibling_variants/merged_count = 같은 부모+태그의 다른 클래스 시그니처 그룹(odd/even·sticky 분열) 주석 (rowsig-bench 2026-07-13)"),
             _ContractField("css_component_classes", type_hint="list[dict]", required=False,
                            note="raw HTML 의 inline `<style>` rule 에서 추출한 component class 후보 (SPA hydration row 단서). "
                                 "각 dict={class, rule_count, co_classes[:3]}. utility/chrome/generic blocklist 적용 후 top 8. "

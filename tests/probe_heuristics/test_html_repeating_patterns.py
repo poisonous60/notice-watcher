@@ -57,10 +57,36 @@ def run() -> list[tuple[str, bool, str]]:
                       out[0]["href_pattern_guess"] == "https://x.com/news/{n}/",
                       f"got {out[0].get('href_pattern_guess')!r}"))
 
-    # 4. min_children 미달 — 4개만
-    html = '<ul>' + ''.join(f'<li class="x"><a href="/v/{i}">t</a></li>' for i in range(4)) + '</ul>'
-    out = html_repeating_patterns(html, "https://x.com")
+    # 4. min_children — 기본 3 (rowsig-bench 2026-07-13 로 5→3 완화): 2개는 탈락, 4개는 후보.
+    html2 = '<ul>' + ''.join(f'<li class="x"><a href="/v/{i}">t</a></li>' for i in range(2)) + '</ul>'
+    out = html_repeating_patterns(html2, "https://x.com")
     cases.append(("too_few_children", len(out) == 0, f"got {len(out)} candidates"))
+    html4 = '<ul>' + ''.join(f'<li class="x"><a href="/v/{i}">t</a></li>' for i in range(4)) + '</ul>'
+    out = html_repeating_patterns(html4, "https://x.com")
+    cases.append(("four_children_pass_default", len(out) == 1 and out[0]["child_count"] == 4,
+                  f"got {out!r}"))
+    out = html_repeating_patterns(html4, "https://x.com", min_children=5)
+    cases.append(("min_children_knob_respected", len(out) == 0, f"got {len(out)} candidates"))
+
+    # 4b. sibling_variants/merged_count — 같은 부모+태그의 클래스 변형 분열(tr.odd/tr.even) 주석.
+    html_oe = '<table><tbody>' + ''.join(
+        f'<tr class="{"odd" if i % 2 else "even"}"><td><a href="/post/{i}">t{i}</a></td></tr>'
+        for i in range(10)
+    ) + '</tbody></table>'
+    out = html_repeating_patterns(html_oe, "https://x.com/board")
+    oe = [c for c in out if c["selector"].endswith("tr.odd") or c["selector"].endswith("tr.even")]
+    cases.append(("odd_even_both_emitted", len(oe) == 2, f"got {[c['selector'] for c in out]!r}"))
+    if len(oe) == 2:
+        cases.append(("sibling_variants_cross_ref",
+                      oe[0]["sibling_variants"] and oe[1]["sibling_variants"]
+                      and oe[0]["merged_count"] == 10 and oe[1]["merged_count"] == 10,
+                      f"got {[(c['sibling_variants'], c['merged_count']) for c in oe]!r}"))
+    # 변형 없는 단일 시그니처 그룹은 None (스키마 노이즈 방지)
+    out_single = html_repeating_patterns(html4, "https://x.com")
+    cases.append(("no_variants_is_none",
+                  out_single and out_single[0]["sibling_variants"] is None
+                  and out_single[0]["merged_count"] is None,
+                  f"got {out_single!r}"))
 
     # 5. 빈 HTML
     cases.append(("empty_html", html_repeating_patterns("", "https://x.com") == [], ""))

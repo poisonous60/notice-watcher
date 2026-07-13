@@ -95,8 +95,14 @@ def _row_has_skeleton_descendant(row: "Tag", *, max_desc: int = 10) -> bool:
 
 
 @heuristic
-def html_repeating_patterns(html: str, base_url: str, *, min_children: int = 5) -> list[dict]:
-    """같은 부모 안에서 같은 시그니처(태그+클래스)를 갖는 자식이 N개 이상인 노드 후보."""
+def html_repeating_patterns(html: str, base_url: str, *, min_children: int = 3) -> list[dict]:
+    """같은 부모 안에서 같은 시그니처(태그+클래스)를 갖는 자식이 N개 이상인 노드 후보.
+
+    min_children 기본 3 — rowsig-bench(2026-07-13, 49사이트 실측)에서 5→3 완화가
+    top-15 miss 7→2 회수, 진실 top-7 밀려남 0, junk-in-top-7 순증 0 이라 내림.
+    sibling_variants/merged_count: 같은 부모+태그에 다른 클래스 시그니처 그룹(≥2개)이
+    있으면(tr.odd/tr.even, sticky 공지행 류) 그 변형 목록과 합산 개수를 주석으로 단다 —
+    그룹핑 자체는 완전일치 유지(퍼지 병합은 같은 실측에서 top-1 -2·회귀 8건이라 기각)."""
     if not html:
         return []
     soup = BeautifulSoup(html, "lxml")
@@ -116,6 +122,11 @@ def html_repeating_patterns(html: str, base_url: str, *, min_children: int = 5) 
         for c in children:
             sig = _signature(c)
             groups.setdefault(sig, []).append(c)
+        # 같은 태그·다른 클래스 형제 시그니처(멤버 ≥2) — odd/even·sticky 변형 주석용
+        variants_by_tag: dict[str, list[tuple[str, int]]] = {}
+        for sig, group in groups.items():
+            if len(group) >= 2:
+                variants_by_tag.setdefault(sig.split(".", 1)[0], []).append((sig, len(group)))
         for sig, group in groups.items():
             if len(group) < min_children:
                 continue
@@ -144,10 +155,15 @@ def html_repeating_patterns(html: str, base_url: str, *, min_children: int = 5) 
             sample_url = urljoin(base_url, real_hrefs[0]) if real_hrefs else None
             row_data_attrs = _row_data_attrs(group[0])
 
+            sibling_sigs = [(s, n) for s, n in variants_by_tag.get(sig.split(".", 1)[0], []) if s != sig]
             selector = _css_selector(parent) + " > " + sig
             candidates.append({
                 "selector": selector,
                 "child_count": len(group),
+                # 같은 행 목록이 클래스 변형으로 쪼개진 경우(tr.odd/even, 공지 sticky) —
+                # row_selector 는 공통부나 comma-union 으로 잡으라는 증거.
+                "sibling_variants": [s for s, _ in sibling_sigs] or None,
+                "merged_count": (len(group) + sum(n for _, n in sibling_sigs)) if sibling_sigs else None,
                 "first_text": first_text,
                 "href_common_prefix": common_prefix,
                 "href_pattern_guess": url_pattern,
