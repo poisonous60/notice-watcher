@@ -264,6 +264,9 @@ def run() -> list[tuple[str, bool, str]]:
                 "examples_dir": (wd / "examples").exists(),
                 "manifest": (wd / "examples" / "manifest.json").exists(),
                 "failure_packet": (wd / "failure_packet.json").exists(),
+                "fetch_page": (wd / "fetch_page.py").exists(),
+                "fetch_launcher": (wd / ("run_fetch.bat" if sys.platform == "win32"
+                                         else "run_fetch.sh")).exists(),
             }
             cases.append(_check(
                 "workdir_files_present",
@@ -320,6 +323,31 @@ def run() -> list[tuple[str, bool, str]]:
                     os.access(launcher, os.X_OK),
                     f"mode={oct(launcher.stat().st_mode) if launcher.exists() else 'missing'}",
                 ))
+            cases.append(_check(
+                "workdir_agents_mentions_live_fetch",
+                ("run_fetch" in agents_text and "5 fetches" in agents_text),
+                "agent tmpdir instructions should advertise the LIVE FETCH tool + budget",
+            ))
+            # fetch budget gate — fetch_count.txt=5 심으면 6번째 호출은 rc=3 거부 (네트워크 불필요).
+            (wd / "fetch_count.txt").write_text("5", encoding="utf-8")
+            fetch_proc = subprocess.run(
+                [sys.executable, str(wd / "fetch_page.py"), "https://example.com"],
+                cwd=wd,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=10,
+            )
+            try:
+                fetch_out = json.loads((fetch_proc.stdout or "").strip().splitlines()[-1])
+            except (json.JSONDecodeError, IndexError):
+                fetch_out = {}
+            cases.append(_check(
+                "fetch_budget_refuses_6th",
+                (fetch_proc.returncode == 3 and fetch_out.get("ok") is False
+                 and "budget" in str(fetch_out.get("error", ""))),
+                f"rc={fetch_proc.returncode} out={fetch_out!r}",
+            ))
             candidate = wd / "candidate.json"
             candidate.write_text(json.dumps({"site": "https://example.com/"}), encoding="utf-8")
             env = os.environ.copy()

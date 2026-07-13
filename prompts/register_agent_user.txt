@@ -13,10 +13,11 @@ HARD RULES (match AGENTS.md):
 
 - READ ONLY files in your cwd (this tmpdir). NO paths outside.
 - WRITE ONLY to ./candidate.json.
+- Live network ONLY via ./run_fetch.sh (max 5, see AGENTS.md LIVE FETCH).
 - Max 2 validate cycles.
 - Final output = single JSON object. No prose. Do not echo the full config;
   for success, use {"ok":true,"candidate_path":"./candidate.json","config":{},...}.
-- Aim for ≤4 tool calls total (read / write / validate / optional retry).
+- Aim for ≤4 tool calls total (≤8 if you use ./run_fetch — see AGENTS.md).
 - No `headless: false` in config.
 
 YOUR JOB: produce ./candidate.json that passes

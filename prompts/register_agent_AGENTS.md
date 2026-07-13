@@ -23,8 +23,10 @@ All inputs you need are already staged here:
 - `examples/manifest.json` — why each example was picked
 - `config_writer_rules.txt` — the full ruleset for config authoring
 - `validate_config.py` — validator wrapper
+- `fetch_page.py` — live page fetcher (budget-limited — see LIVE FETCH)
 - `python_path.txt` — python interpreter path used by the parent process
 - `run_validator.sh` / `run_validator.bat` — validator launcher using that python
+- `run_fetch.sh` / `run_fetch.bat` — fetch launcher using that python
 
 ## WORKFLOW
 
@@ -40,16 +42,19 @@ All inputs you need are already staged here:
    because of such an infra failure.
 4. Read 1-2 most relevant `examples/*.json`. Optionally skim
    `config_writer_rules.txt` only if uncertain about a field.
-5. Before writing a config, perform SELF-VETO below. If it applies, STOP and
+5. If digest evidence is contradictory or the article sample looks like the
+   wrong page, use LIVE FETCH (below) — at most 1-2 fetches before your first
+   candidate.
+6. Before writing a config, perform SELF-VETO below. If it applies, STOP and
    emit final JSON with `ok:false` and the matching `stop_reason`.
-6. Write your candidate to `./candidate.json` (this tmpdir).
-7. Run validator using the staged launcher:
+7. Write your candidate to `./candidate.json` (this tmpdir).
+8. Run validator using the staged launcher:
        ./run_validator.sh ./candidate.json     # Linux
        .\run_validator.bat ./candidate.json    # Windows
    Read JSON result.
-8. If `ok=true` → STOP, emit final.
-9. If failed: edit candidate.json once, re-run validator.
-10. After **2 validate attempts** (1 initial + 1 retry): STOP regardless.
+9. If `ok=true` → STOP, emit final.
+10. If failed: edit candidate.json once, re-run validator.
+11. After **2 validate attempts** (1 initial + 1 retry): STOP regardless.
    Emit final with the last attempt and `stop_reason: max_cycles`.
 
 ## SELF-VETO (no config for non-board pages)
@@ -115,14 +120,44 @@ validator feedback.
   the same probe-grounded config once with top-level `disable_stealth: true`.
   Do not use `headless:false`.
 
+## LIVE FETCH (budget-limited)
+
+The digest snapshots can be stale or mis-picked (probe sometimes samples the
+wrong "first article"). When — and only when — digest evidence contradicts
+itself or the validator result, you may fetch a live page:
+
+    ./run_fetch.sh <url>              # static (httpx, Chrome headers)  — Linux
+    .\run_fetch.bat <url>             # Windows
+    ./run_fetch.sh <url> --render     # rendered DOM (stealth playwright) — only
+                                      # if digest says static HTML is an empty shell
+
+Output: one JSON line with `path` → compressed HTML written to
+`./fetched_<n>.html` in this tmpdir. Read it with `sed` slices, not whole-file
+`cat`. The compression is the same one used for the digest snapshots, so
+evidence stays comparable.
+
+- Hard budget: **5 fetches per session**, script-enforced (the 6th call is
+  refused with rc=3). Failed attempts also count.
+- Each fetch spends your wall clock (static ~2-5s, `--render` ~5-15s). Prefer
+  static; `--render` only on empty-shell evidence.
+- NOT a first resort. Do not fetch before reading `digest.json`. Do not use it
+  to "explore" the site. Legitimate triggers: `article_sample` looks like a
+  list/menu page instead of an article; the validator says a selector matched
+  nothing although digest HTML shows it; you need the real
+  `first_article_url` page to pick `article.content` selectors; an API
+  candidate's response shape must be confirmed before betting `httpx_json` on it.
+- Selectors must still appear verbatim in fetched or digest HTML — fetching
+  does not license invented selectors.
+
 ## TOKEN DISCIPLINE
 
 - Don't `cat` the same file twice.
 - Don't read all examples — pick 1-2 from manifest scores.
 - Don't dump huge JSON to stdout for inspection — read into your reasoning
   silently.
-- Aim for **≤ 4 tool calls total** (read inputs / write candidate / validate /
-  optional retry).
+- Aim for **≤ 4 tool calls total** when not fetching (read inputs / write
+  candidate / validate / optional retry). Each live fetch adds 2 (run +
+  sed-read). Never exceed **8 tool calls total**.
 
 ## FINAL OUTPUT — strict JSON
 
@@ -165,7 +200,11 @@ where you shouldn't.
 ## HARD RULES
 
 - TMPDIR ONLY. No repo paths. No directory traversal.
-- WRITE ONLY to `./candidate.json` in this tmpdir.
+- WRITE ONLY to `./candidate.json` in this tmpdir (the staged tools write
+  their own files — that is fine).
+- Live network ONLY via `./run_fetch.sh` / `.\run_fetch.bat`. NO hand-rolled
+  `python -c` requests/urllib, curl, wget, Invoke-WebRequest.
+- Max 5 live fetches (script-enforced).
 - NO git, gh, push, commit, hg, svn.
 - Max 2 validate cycles.
 - Output strictly JSON. No prose outside the final JSON.

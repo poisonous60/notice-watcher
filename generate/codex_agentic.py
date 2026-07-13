@@ -75,6 +75,7 @@ SCHEMA_PATH = REPO_ROOT / "schemas" / "register_agentic_result.json"
 PROMPT_USER_PATH = REPO_ROOT / "prompts" / "register_agent_user.txt"
 PROMPT_AGENTS_PATH = REPO_ROOT / "prompts" / "register_agent_AGENTS.md"
 VALIDATE_WRAPPER_PATH = REPO_ROOT / "scripts" / "validate_config.py"
+FETCH_WRAPPER_PATH = REPO_ROOT / "scripts" / "fetch_page.py"
 _AUDIT_POPEN = subprocess.Popen
 
 
@@ -640,6 +641,9 @@ def _setup_workdir(digest: dict, slug: str, url: str, repo: Path,
     # validate wrapper — agent runs it. Copy so agent doesn't need to touch repo.
     if VALIDATE_WRAPPER_PATH.is_file():
         shutil.copy2(VALIDATE_WRAPPER_PATH, workdir / "validate_config.py")
+    # live fetch wrapper — budget-limited page fetcher (AGENTS.md "LIVE FETCH").
+    if FETCH_WRAPPER_PATH.is_file():
+        shutil.copy2(FETCH_WRAPPER_PATH, workdir / "fetch_page.py")
     (workdir / "validator_attempt_log.py").write_text(
         VALIDATOR_ATTEMPT_LOGGER, encoding="utf-8"
     )
@@ -658,6 +662,12 @@ def _setup_workdir(digest: dict, slug: str, url: str, repo: Path,
             "exit /b %VALIDATOR_RC%\r\n",
             encoding="utf-8",
         )
+        (workdir / "run_fetch.bat").write_text(
+            "@echo off\r\n"
+            f"\"{py}\" \"%~dp0fetch_page.py\" %*\r\n"
+            "exit /b %ERRORLEVEL%\r\n",
+            encoding="utf-8",
+        )
     else:
         sh_path = workdir / "run_validator.sh"
         sh_path.write_text(
@@ -671,6 +681,13 @@ def _setup_workdir(digest: dict, slug: str, url: str, repo: Path,
             encoding="utf-8",
         )
         sh_path.chmod(0o755)
+        fetch_sh = workdir / "run_fetch.sh"
+        fetch_sh.write_text(
+            '#!/bin/sh\n'
+            f'exec "{py}" "$(dirname "$0")/fetch_page.py" "$@"\n',
+            encoding="utf-8",
+        )
+        fetch_sh.chmod(0o755)
     return workdir
 
 
