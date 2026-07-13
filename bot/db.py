@@ -80,6 +80,9 @@ CREATE TABLE IF NOT EXISTS deliveries (
     post_id   TEXT NOT NULL,
     target_id TEXT NOT NULL,
     sent_at   TEXT NOT NULL,
+    -- 'sent' = 실제 발송 | 'filtered' = 필터 탈락 (처리 완료 표시 — 재필터/재과금 방지).
+    -- 두 kind 모두 was_delivered·prune_posts 가드엔 "처리됨"으로 취급, 발송 통계엔 'sent' 만.
+    kind      TEXT NOT NULL DEFAULT 'sent',
     PRIMARY KEY (slug, post_id, target_id)
 );
 
@@ -378,6 +381,15 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE announcements ADD COLUMN recipient_targets TEXT")
     # deliveries 의 target_id 기준 lookup/삭제 인덱스 (옛 DB 에 추가).
     conn.execute("CREATE INDEX IF NOT EXISTS idx_deliveries_target ON deliveries(target_id, slug)")
+    # deliveries.kind — 필터 탈락 글도 "처리됨"으로 기록해 매일 재필터(LLM 재과금) 방지 (옛 DB 에 추가).
+    # 기존 행은 전부 실발송이므로 DEFAULT 'sent' 백필.
+    del_cols = {r[1] for r in conn.execute("PRAGMA table_info(deliveries)").fetchall()}
+    if "kind" not in del_cols:
+        try:
+            conn.execute("ALTER TABLE deliveries ADD COLUMN kind TEXT NOT NULL DEFAULT 'sent'")
+        except sqlite3.OperationalError as e:
+            if "duplicate column" not in str(e).lower():
+                raise
     # 봇 재시작으로 인한 잡 재실행 횟수 추적 (옛 DB 에 추가).
     # reset_running_to_pending 이 running 잡을 pending 으로 되돌릴 때마다 +1.
     # worker 는 attempts>0 인 잡 시작 시 ack 에 재시작 안내 메시지를 띄움.
@@ -775,7 +787,7 @@ def counts(conn: sqlite3.Connection) -> dict:
     n_subs = conn.execute("SELECT COUNT(*) FROM subscriptions").fetchone()[0]
     n_slugs = conn.execute("SELECT COUNT(DISTINCT slug) FROM subscriptions").fetchone()[0]
     n_pending = conn.execute("SELECT COUNT(*) FROM pending").fetchone()[0]
-    n_deliv = conn.execute("SELECT COUNT(*) FROM deliveries").fetchone()[0]
+    n_deliv = conn.execute("SELECT COUNT(*) FROM deliveries WHERE kind='sent'").fetchone()[0]
     return {"subscriptions": n_subs, "slugs": n_slugs, "pending": n_pending, "deliveries": n_deliv}
 
 
@@ -926,11 +938,13 @@ def was_delivered(conn: sqlite3.Connection, slug: str, post_id: str, target_id: 
     ).fetchone() is not None
 
 
-def mark_delivered(conn: sqlite3.Connection, slug: str, post_id: str, target_id: str) -> None:
+def mark_delivered(conn: sqlite3.Connection, slug: str, post_id: str, target_id: str,
+                   kind: str = "sent") -> None:
+    """kind='sent' 실발송 | 'filtered' 필터 탈락 처리 완료 (재필터 방지 — 발송 통계 미집계)."""
     def _do():
         conn.execute(
-            "INSERT OR IGNORE INTO deliveries(slug,post_id,target_id,sent_at) VALUES(?,?,?,?)",
-            (slug, str(post_id), target_id, _now_iso()),
+            "INSERT OR IGNORE INTO deliveries(slug,post_id,target_id,sent_at,kind) VALUES(?,?,?,?,?)",
+            (slug, str(post_id), target_id, _now_iso(), kind),
         )
         conn.commit()
     _retry(_do)
@@ -942,19 +956,19 @@ def deliveries_for_target(conn: sqlite3.Connection, target_id: str, *,
     if slug is None:
         return conn.execute(
             "SELECT slug, post_id, target_id, sent_at FROM deliveries "
-            "WHERE target_id=? ORDER BY sent_at DESC LIMIT ?",
+            "WHERE target_id=? AND kind='sent' ORDER BY sent_at DESC LIMIT ?",
             (target_id, limit),
         ).fetchall()
     return conn.execute(
         "SELECT slug, post_id, target_id, sent_at FROM deliveries "
-        "WHERE target_id=? AND slug=? ORDER BY sent_at DESC LIMIT ?",
+        "WHERE target_id=? AND slug=? AND kind='sent' ORDER BY sent_at DESC LIMIT ?",
         (target_id, slug, limit),
     ).fetchall()
 
 
 def deliveries_count_for_target(conn: sqlite3.Connection, target_id: str) -> int:
     return int(conn.execute(
-        "SELECT COUNT(*) FROM deliveries WHERE target_id=?", (target_id,)
+        "SELECT COUNT(*) FROM deliveries WHERE target_id=? AND kind='sent'", (target_id,)
     ).fetchone()[0])
 
 
@@ -1601,7 +1615,7 @@ def list_users(conn: sqlite3.Connection) -> list[dict]:
     deliv_last: dict[str, str] = {}
     for r in conn.execute(
         "SELECT target_id, COUNT(*) AS n, MAX(sent_at) AS last_sent "
-        "FROM deliveries GROUP BY target_id"
+        "FROM deliveries WHERE kind='sent' GROUP BY target_id"
     ).fetchall():
         deliv_count[r["target_id"]] = int(r["n"])
         deliv_last[r["target_id"]] = r["last_sent"]

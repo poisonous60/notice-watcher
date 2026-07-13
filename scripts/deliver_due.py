@@ -232,6 +232,12 @@ def _flush_target_inner(conn, tok: Optional[str], target: dict, *, today_kst: st
                 post_d["summary"] = summary
                 owed.append(post_d)
                 n_slug_owed += 1
+            elif not dry_run:
+                # 필터 탈락도 이 target 에 대해선 "처리 완료" — 기록 안 하면 was_delivered 를
+                # 매일 통과해 같은 글을 영구 재필터(LLM 재과금)하고, prune_posts 미수신 가드가
+                # GC 도 막는다. kind='filtered' 라 발송 통계/이력엔 안 잡힘. 발송 성공 여부와
+                # 무관한 판정이므로 send 전에 즉시 마킹.
+                db.mark_delivered(conn, slug, pid, target_id, kind="filtered")
         # owed=0 + notify_empty=1 인 slug 만 status notice 후보. owed>0 면 digest 가 곧 정상 알림이므로 status 제외.
         if n_slug_owed == 0 and any(int(s["notify_empty"]) for s in slug_subs):
             if is_broken(slug):

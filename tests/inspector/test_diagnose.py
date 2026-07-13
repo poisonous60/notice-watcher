@@ -123,7 +123,7 @@ def run() -> list[tuple[str, bool, str]]:
 
         # 7b) deliveries 가 있으면 never_delivered 안 뜸
         conn = _setup_conn()
-        conn.execute("INSERT INTO deliveries VALUES (?,?,?,?)",
+        conn.execute("INSERT INTO deliveries(slug,post_id,target_id,sent_at) VALUES (?,?,?,?)",
                      (slug7, "post_1", "channel_42", _iso(now)))
         conn.commit()
         findings = inspector.diagnose(

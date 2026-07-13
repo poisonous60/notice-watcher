@@ -273,8 +273,9 @@ def diagnose(conn: sqlite3.Connection, paths: InspectorPaths, *,
             continue
         if created > cutoff:
             continue
+        # kind='sent' 만 — filtered 행만 쌓인 구독은 "발송 0건 = 필터 과도" 경고가 계속 뜨는 게 맞음.
         n = conn.execute(
-            "SELECT COUNT(*) FROM deliveries WHERE slug=? AND target_id=?",
+            "SELECT COUNT(*) FROM deliveries WHERE slug=? AND target_id=? AND kind='sent'",
             (slug, sub.get("target_id")),
         ).fetchone()[0]
         if int(n) == 0:

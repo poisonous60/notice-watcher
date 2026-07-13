@@ -237,6 +237,49 @@ def run() -> list[tuple[str, bool, str]]:
                        and "❗" in contents5[0] and "s_brk" in contents5[0]
                        and "5회" in contents5[0],
                       f"n={n5} status={status5} sent={sent!r}"))
+
+        # ----- 14. 필터 탈락 → kind='filtered' 마킹: 재실행해도 재필터 X, 발송 통계 미집계 -----
+        # (탈락 글이 deliveries 에 안 남아 매일 재필터(LLM 재과금)되던 누수의 회귀 테스트.)
+        sent.clear()
+        filter_calls: list[str] = []
+        dd.filter_pass = lambda c, fp, p, s, slug=None: (filter_calls.append(str(p["post_id"])), False)[1]
+        conn11 = _conn()
+        conn11.execute(
+            "INSERT INTO subscriptions(user_id,slug,url,filter_prompt,schedule,target_kind,target_id,notify_empty,created_at) "
+            "VALUES('u1','s1','u','F','realtime','dm','u1',0,'2000-01-01T00:00:00+00:00')")
+        db.ensure_setting(conn11, target_kind="dm", target_id="u1")
+        conn11.commit()
+        db.upsert_post(conn11, "s1", _post("pr1"))
+        n6, _ = dd.flush_target(conn11, "tok", {"target_kind": "dm", "target_id": "u1"},
+                                 today_kst="2026-05-20", dry_run=False)
+        calls_first = len(filter_calls)
+        dd.flush_target(conn11, "tok", {"target_kind": "dm", "target_id": "u1"},
+                        today_kst="2026-05-21", dry_run=False)
+        calls_second = len(filter_calls)
+        row = conn11.execute(
+            "SELECT kind FROM deliveries WHERE slug='s1' AND post_id='pr1' AND target_id='u1'"
+        ).fetchone()
+        stats_clean = (db.counts(conn11)["deliveries"] == 0
+                       and db.deliveries_for_target(conn11, "u1") == []
+                       and db.deliveries_count_for_target(conn11, "u1") == 0)
+        cases.append(("filtered_reject_marked_not_refiltered",
+                      n6 == 0 and calls_first == 1 and calls_second == 1
+                      and row is not None and row[0] == "filtered" and stats_clean,
+                      f"n={n6} calls={calls_first}/{calls_second} row={row and row[0]!r} stats_clean={stats_clean}"))
+
+        # ----- 15. prune — kind='filtered' 마킹된 오래된 글도 미수신 가드 안 걸리고 GC -----
+        conn12 = _conn()
+        old_t2 = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+        conn12.execute(
+            "INSERT INTO posts(slug,post_id,title,url,published_at,category,content_html,summary,collected_at) "
+            "VALUES('s1','pfil','T','u','2026-04-01',NULL,'<p>x</p>',NULL,?)", (old_t2,))
+        conn12.execute(
+            "INSERT INTO subscriptions(user_id,slug,url,filter_prompt,schedule,target_kind,target_id,notify_empty,created_at) "
+            "VALUES('u1','s1','u','F','realtime','dm','u1',0,?)", (old_t2,))
+        conn12.commit()
+        db.mark_delivered(conn12, "s1", "pfil", "u1", kind="filtered")
+        pruned_filtered = db.prune_posts(conn12, keep_days=7)
+        cases.append(("prune_deletes_filtered_marked", pruned_filtered == 1, f"pruned={pruned_filtered}"))
     finally:
         dd.summarize_post, dd.filter_pass, dd.deliver, dd.client_for = orig
 
